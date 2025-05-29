@@ -1,0 +1,264 @@
+//
+//  AppConfig.swift
+//  TinfoilChat
+//
+//  Created on 04/10/24.
+//  Copyright © 2024 Tinfoil. All rights reserved.
+
+import Foundation
+
+/// Model configuration for parsing from config json
+struct ModelConfig: Codable {
+    let id: String
+    let displayName: String
+    let iconName: String
+    let description: String
+    let fullName: String
+    let githubRepo: String
+    let enclaveURL: String
+    let modelId: String
+    let isFree: Bool
+    let githubReleaseURL: String
+}
+
+/// Remote configuration structure
+struct RemoteConfig: Codable {
+    let models: [ModelConfig]
+    let defaultModel: String
+    let apiKey: String
+    let chatConfig: ChatConfig
+    
+    struct ChatConfig: Codable {
+        let maxMessagesPerRequest: Int
+        let systemPrompt: String
+    }
+}
+
+/// Model type structure to replace enum for dynamic configuration
+struct ModelType: Identifiable, Codable, Hashable, Equatable {
+    let id: String
+    private let config: ModelConfig
+    
+    init(id: String, config: ModelConfig) {
+        self.id = id
+        self.config = config
+    }
+    
+    // Display name for UI
+    var displayName: String { config.displayName }
+    
+    // Icon name (from local assets)
+    var iconName: String { config.iconName }
+    
+    // Model description
+    var description: String { config.description }
+    
+    // Full model name
+    var fullName: String { config.fullName }
+    
+    // Additional properties
+    var modelNameSimple: String { displayName }
+    var modelName: String { config.modelId }
+    var image: String { "\(Constants.UI.modelIconPath)\(iconName)\(Constants.UI.modelIconExtension)" }
+    var enclave: String { config.enclaveURL }
+    var endpoint: String { "\(Constants.API.endpointProtocol)\(enclave)\(Constants.API.chatCompletionsEndpoint)" }
+    var repoName: String { config.githubRepo }
+    var name: String { fullName }
+    var githubReleaseURL: String { config.githubReleaseURL }
+    
+    // Add property to check if model is free
+    var isFree: Bool { config.isFree }
+    
+    // For Hashable conformance
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+    
+    // For Equatable conformance
+    static func == (lhs: ModelType, rhs: ModelType) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
+/// Application-wide configuration settings
+@MainActor
+class AppConfig: ObservableObject {
+    static let shared = AppConfig()
+    
+    @Published private(set) var config: RemoteConfig?
+    private let configURL = Constants.Config.configURL
+    private let mockConfigURL = Bundle.main.url(forResource: Constants.Config.mockConfigFileName, withExtension: Constants.Config.mockConfigFileExtension)!
+    
+    // Add initialization state tracking
+    @Published private(set) var isInitialized = false
+    @Published private(set) var initializationError: Error?
+    
+    // Current model selection - initialized with empty ID and set after config loads
+    @Published var currentModel: ModelType?
+    
+    // Available models from config
+    @Published private(set) var availableModels: [ModelType] = []
+    
+    // Premium API key flag
+    @Published private(set) var isPremiumKeyRequired = false
+    
+    // Network monitor
+    @Published private(set) var networkMonitor = NetworkMonitor()
+    
+    private init() {
+        
+        // Load remote configuration
+        Task {
+            await loadRemoteConfig()
+        }
+    }
+    
+    
+    func loadRemoteConfig() async {
+        do {
+            guard networkMonitor.isConnected else {
+                initializationError = NSError(
+                    domain: Constants.Config.ErrorDomain.domain,
+                    code: Constants.Config.ErrorDomain.configNotFoundCode,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "No internet connection",
+                        NSLocalizedRecoverySuggestionErrorKey: "Please check your internet connection and try again."
+                    ]
+                )
+                return
+            }
+            
+            let (data, _) = try await URLSession.shared.data(from: configURL)
+            let remoteConfig = try JSONDecoder().decode(RemoteConfig.self, from: data)
+            
+            self.config = remoteConfig
+            updateAvailableModels()
+            
+            // Confirm current model is still valid or reset to default
+            if let currentModel = currentModel,
+               !availableModels.contains(currentModel),
+               let defaultId = config?.defaultModel,
+               let defaultConfig = config?.models.first(where: { $0.id == defaultId }) {
+                self.currentModel = ModelType(id: defaultId, config: defaultConfig)
+            }
+            
+            // Clear any previous error
+            initializationError = nil
+            // Set initialization as complete
+            isInitialized = true
+        } catch {
+            print("Error loading remote config: \(error)")
+            initializationError = error
+        }
+    }
+    
+    private func loadMockConfig() {
+        do {
+            // Try loading from mock_config.json in the bundle
+            guard let mockConfigURL = Bundle.main.url(forResource: Constants.Config.mockConfigFileName, withExtension: Constants.Config.mockConfigFileExtension) else {
+                let error = NSError(
+                    domain: Constants.Config.ErrorDomain.domain,
+                    code: Constants.Config.ErrorDomain.configNotFoundCode,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: Constants.Config.ErrorDomain.configNotFoundDescription,
+                        NSLocalizedRecoverySuggestionErrorKey: Constants.Config.ErrorDomain.configNotFoundRecoverySuggestion
+                    ]
+                )
+                initializationError = error
+                return
+            }
+            
+            let data = try Data(contentsOf: mockConfigURL)
+            config = try JSONDecoder().decode(RemoteConfig.self, from: data)
+            
+            // Update available models from config
+            updateAvailableModels()
+            
+            // Set initial model from config
+            if let defaultModelId = config?.defaultModel,
+               let defaultConfig = config?.models.first(where: { $0.id == defaultModelId }) {
+                currentModel = ModelType(id: defaultModelId, config: defaultConfig)
+            }
+            
+            isInitialized = true
+        } catch {
+            print("Error loading mock config: \(error)")
+            initializationError = error
+        }
+    }
+    
+    // Update available models from config
+    private func updateAvailableModels() {
+        guard let modelConfigs = config?.models else { return }
+        availableModels = modelConfigs.map { ModelType(id: $0.id, config: $0) }
+    }
+    
+    // MARK: - Public interface
+    
+    // MARK: - Clerk configuration
+   
+    var clerkPublishableKey: String {
+        Constants.Clerk.publishableKey
+    }
+    
+    // MARK: - Model configuration
+    
+    func getModelConfig(_ type: ModelType) -> ModelConfig? {
+        return config?.models.first { $0.id == type.id }
+    }
+    
+    var githubRepo: String {
+        getModelConfig(currentModel!)!.githubRepo
+    }
+    
+    var enclaveURL: String {
+        getModelConfig(currentModel!)!.enclaveURL
+    }
+    
+    var apiKey: String {
+        config!.apiKey
+    }
+    
+    /// Get API key, fetching from server if needed for premium models
+    func getApiKey(forModel model: ModelType, isAuthenticated: Bool, hasSubscription: Bool) async -> String {
+        // Check if model is free
+        guard !model.isFree else {
+            // Return default API key for free models
+            return config?.apiKey ?? "tinfoil-default-api-key"
+        }
+        
+        // Premium model, check authentication status
+        guard isAuthenticated && hasSubscription else {
+            return ""
+        }
+        
+        // Fetch premium API key
+        return await APIKeyManager.shared.getApiKey()
+    }
+    
+    var maxMessagesPerRequest: Int {
+        config!.chatConfig.maxMessagesPerRequest
+    }
+    
+    var systemPrompt: String {
+        config!.chatConfig.systemPrompt
+    }
+    
+    /// Get model types in the order defined in the config file
+    var orderedModelTypes: [ModelType] {
+        availableModels
+    }
+    
+    /// Get filtered model types based on authentication status
+    func filteredModelTypes(isAuthenticated: Bool, hasActiveSubscription: Bool) -> [ModelType] {
+        guard let modelConfigs = config?.models else { return [] }
+        
+        if isAuthenticated && hasActiveSubscription {
+            // Return all models if user is authenticated with active subscription
+            return availableModels
+        } else {
+            // Return only free models if user is not authenticated or doesn't have an active subscription
+            return modelConfigs.filter { $0.isFree }.map { ModelType(id: $0.id, config: $0) }
+        }
+    }
+} 

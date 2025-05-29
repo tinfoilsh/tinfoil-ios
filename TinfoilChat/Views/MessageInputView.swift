@@ -1,0 +1,282 @@
+import SwiftUI
+import UIKit
+
+/// Input area for typing messages, including model verification status and send button
+struct MessageInputView: View {
+    @Binding var messageText: String
+    @ObservedObject var viewModel: TinfoilChat.ChatViewModel
+    @Environment(\.colorScheme) var colorScheme
+    @EnvironmentObject private var authManager: AuthManager
+    @State private var showErrorPopover = false
+    @State private var textHeight: CGFloat = 48 // Updated default height to match minimum
+    
+    private var isDarkMode: Bool { colorScheme == .dark }
+    
+    // Check for subscription status
+    private var hasPremiumAccess: Bool {
+        authManager.isAuthenticated && authManager.hasActiveSubscription
+    }
+    
+    // Check only for authentication status
+    private var isUserAuthenticated: Bool {
+        authManager.isAuthenticated
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Rate limit warning for non-authenticated users only
+            if !isUserAuthenticated {
+                rateLimit
+            }
+            
+            // Text input area
+            CustomTextEditor(text: $messageText, 
+                             textHeight: $textHeight, 
+                             isRateLimited: viewModel.isRateLimited,
+                             placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "Ask Tin..." : "Reply to Tin...")
+                .frame(height: textHeight)
+                .padding(.horizontal)
+                .disabled(viewModel.isRateLimited)
+            
+            // Bottom row with shield and send button
+            HStack {
+                // Shield status indicator
+                Button(action: {
+                    viewModel.showVerifier()
+                }) {
+                    HStack {
+                        Image(systemName: viewModel.isVerified && viewModel.verificationError == nil ? "lock.fill" : 
+                                          viewModel.isVerifying ? "shield" : "exclamationmark.shield.fill")
+                            .foregroundColor(viewModel.isVerified && viewModel.verificationError == nil ? .green : 
+                                            viewModel.isVerifying ? .orange : .red)
+                            .font(.caption)
+                        if let error = viewModel.verificationError {
+                            HStack(spacing: 4) {
+                                Text("Verification failed")
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                                Button(action: {
+                                    showErrorPopover.toggle()
+                                }) {
+                                    Image(systemName: "info.circle")
+                                        .font(.caption)
+                                        .foregroundColor(.red)
+                                }
+                                .alert(isPresented: $showErrorPopover) {
+                                    Alert(
+                                        title: Text("Verification Error"),
+                                        message: Text(error),
+                                        dismissButton: .default(Text("OK"))
+                                    )
+                                }
+                            }
+                        } else {
+                            Text(viewModel.verificationStatusMessage)
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
+                    }
+                }
+                .padding(.leading)
+                
+                Spacer()
+                
+                // Send button
+                Button(action: sendOrCancelMessage) {
+                    Image(systemName: viewModel.isLoading ? "stop.fill" : "arrow.up.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundColor(isDarkMode ? .white : .primary)
+                }
+                .disabled((messageText.isEmpty && !viewModel.isLoading) || 
+                          viewModel.isRateLimited)
+                .opacity(viewModel.isRateLimited ? 0.5 : 1.0)
+                .padding(.trailing, 24)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+    
+    // Rate limit info bar
+    private var rateLimit: some View {
+        VStack(spacing: 0) {
+            if viewModel.isRateLimited {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                        .padding(.leading, 12)
+                    Text("Message limit reached. Sign in to continue.")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                    Spacer()
+                }
+                .padding(.horizontal, 0)
+                .padding(.vertical, 6)
+                .background(Color.orange.opacity(0.2))
+            } else {
+                HStack {
+                    Image(systemName: "message")
+                        .foregroundColor(.gray)
+                        .padding(.leading, 12)
+                    Text("\(viewModel.messagesRemaining) messages remaining.")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                    Spacer()
+                }
+                .padding(.horizontal, 0)
+                .padding(.vertical, 6)
+                .background(Color.gray.opacity(0.1))
+            }
+        }
+        .cornerRadius(0)
+    }
+    
+    /// Handles the send button action - either sends a message or cancels generation
+    private func sendOrCancelMessage() {
+        if viewModel.isLoading {
+            viewModel.cancelGeneration()
+        } else if !messageText.isEmpty && !viewModel.isRateLimited {
+            viewModel.sendMessage(text: messageText)
+            messageText = ""
+            textHeight = 48 // Reset height when message is sent
+        }
+    }
+}
+
+/// Custom UIViewRepresentable for a properly managed text editor
+struct CustomTextEditor: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var textHeight: CGFloat
+    var isRateLimited: Bool
+    var placeholderText: String
+    
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.delegate = context.coordinator
+        textView.font = UIFont.preferredFont(forTextStyle: .body)
+        textView.backgroundColor = .clear
+        textView.isScrollEnabled = true
+        textView.isEditable = !isRateLimited
+        textView.isSelectable = true
+        textView.alwaysBounceVertical = false
+        textView.textContainerInset = UIEdgeInsets(top: 16, left: 2, bottom: 8, right: 5) // Reduced left padding
+        textView.textContainer.lineFragmentPadding = 0
+        textView.tintColor = UIColor.systemBlue // Set cursor and selection color to blue
+        
+        // Initialize with placeholder or actual text
+        if text.isEmpty {
+            textView.text = placeholderText
+            textView.textColor = .lightGray
+        } else {
+            textView.text = text
+            textView.textColor = UIColor { traitCollection in
+                return traitCollection.userInterfaceStyle == .dark ? .white : .black
+            }
+        }
+        
+        return textView
+    }
+    
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        // Check if text field is currently being edited
+        let isCurrentlyEditing = context.coordinator.isEditing
+        
+        // Only show placeholder if text is empty AND not currently being edited
+        if text.isEmpty && !isCurrentlyEditing && uiView.textColor != .lightGray {
+            // Text was cleared and we're not editing, show placeholder
+            uiView.text = placeholderText
+            uiView.textColor = .lightGray
+        } else if text.isEmpty && isCurrentlyEditing {
+            // Empty text but still editing, ensure we don't show placeholder
+            if uiView.textColor == .lightGray {
+                uiView.text = ""
+                uiView.textColor = UIColor { traitCollection in
+                    return traitCollection.userInterfaceStyle == .dark ? .white : .black
+                }
+            }
+        } else if !text.isEmpty && uiView.textColor == .lightGray {
+            // New text arrived, remove placeholder
+            uiView.text = text
+            uiView.textColor = UIColor { traitCollection in
+                return traitCollection.userInterfaceStyle == .dark ? .white : .black
+            }
+        } else if !text.isEmpty && uiView.text != text && uiView.textColor != .lightGray {
+            // Text changed but not placeholder related
+            uiView.text = text
+        }
+        
+        // Update editable status
+        uiView.isEditable = !isRateLimited
+        
+        // Calculate the new height
+        let size = uiView.sizeThatFits(CGSize(width: uiView.frame.width, height: CGFloat.greatestFiniteMagnitude))
+        let newHeight = min(120, max(48, size.height)) // Increased minimum height to accommodate more top padding
+        
+        // Only update height if it changed
+        if textHeight != newHeight {
+            textHeight = newHeight
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, UITextViewDelegate {
+        var parent: CustomTextEditor
+        var isEditing = false
+        
+        init(_ parent: CustomTextEditor) {
+            self.parent = parent
+        }
+        
+        func textViewDidChange(_ textView: UITextView) {
+            // Only update if the text is not the placeholder
+            if textView.textColor != .lightGray {
+                parent.text = textView.text
+                
+                // Calculate and update the height
+                let size = textView.sizeThatFits(CGSize(width: textView.frame.width, height: CGFloat.greatestFiniteMagnitude))
+                let newHeight = min(120, max(48, size.height)) // Increased minimum height
+                
+                if parent.textHeight != newHeight {
+                    parent.textHeight = newHeight
+                }
+            }
+        }
+        
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            isEditing = true
+            // Clear placeholder when editing begins
+            if textView.textColor == .lightGray {
+                textView.text = ""
+                textView.textColor = UIColor { traitCollection in
+                    return traitCollection.userInterfaceStyle == .dark ? .white : .black
+                }
+            }
+        }
+        
+        func textViewDidEndEditing(_ textView: UITextView) {
+            isEditing = false
+            // Add placeholder if needed when editing ends
+            if textView.text.isEmpty {
+                textView.text = parent.placeholderText
+                textView.textColor = .lightGray
+            }
+        }
+        
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            // Check if the text will be empty after this change
+            let currentText = textView.text as NSString
+            let newText = currentText.replacingCharacters(in: range, with: text)
+            
+            // If text is becoming empty but we're still editing, don't show placeholder
+            if newText.isEmpty && isEditing {
+                // Let the deletion happen, but don't show placeholder yet
+                // The placeholder will be shown in textViewDidEndEditing when focus is lost
+                return true
+            }
+            
+            return true
+        }
+    }
+} 
