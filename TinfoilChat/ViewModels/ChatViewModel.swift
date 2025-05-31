@@ -10,6 +10,7 @@ import Combine
 import SwiftUI
 import TinfoilAI
 import OpenAI
+import AVFoundation
 
 @MainActor
 class ChatViewModel: ObservableObject {
@@ -35,6 +36,15 @@ class ChatViewModel: ObservableObject {
     // Rate limiting properties
     @Published var isRateLimited: Bool = false
     @Published var messagesRemaining: Int = Constants.RateLimits.freeUserMaxMessages
+    
+    // Speech-to-text properties
+    @Published var isRecording: Bool = false
+    @Published var transcribedText: String = ""
+    
+    // Audio recording properties
+    private var audioRecorder: AVAudioRecorder?
+    private var audioSession: AVAudioSession = AVAudioSession.sharedInstance()
+    private var recordingURL: URL?
     
     // Private properties
     private var client: OpenAI?
@@ -506,6 +516,149 @@ class ChatViewModel: ObservableObject {
     func dismissVerifier() {
         self.showVerifierSheet = false
         self.verifierView = nil
+    }
+    
+    // MARK: - Speech-to-Text Methods
+    
+    /// Starts speech-to-text recording
+    func startSpeechToText() {
+        Task {
+            do {
+                // Request microphone permission
+                let permissionGranted = await requestMicrophonePermission()
+                guard permissionGranted else {
+                    print("ChatViewModel: Microphone permission denied")
+                    return
+                }
+                
+                await MainActor.run {
+                    self.isRecording = true
+                }
+                
+                // Setup audio session
+                try audioSession.setCategory(.playAndRecord, mode: .default)
+                try audioSession.setActive(true)
+                
+                // Create recording URL
+                let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                recordingURL = documentsPath.appendingPathComponent("recording_\(Date().timeIntervalSince1970).m4a")
+                
+                // Audio recording settings
+                let settings: [String: Any] = [
+                    AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                    AVSampleRateKey: 44100.0,
+                    AVNumberOfChannelsKey: 1,
+                    AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+                ]
+                
+                // Create and start recorder
+                if let url = recordingURL {
+                    audioRecorder = try AVAudioRecorder(url: url, settings: settings)
+                    audioRecorder?.record()
+                    print("ChatViewModel: Started audio recording to \(url.lastPathComponent)")
+                }
+                
+            } catch {
+                print("ChatViewModel: Failed to start recording: \(error)")
+                await MainActor.run {
+                    self.isRecording = false
+                }
+            }
+        }
+    }
+    
+    /// Stops speech-to-text recording and processes the audio
+    func stopSpeechToText() {
+        isRecording = false
+        
+        // Stop recording
+        audioRecorder?.stop()
+        
+        // Deactivate audio session
+        try? audioSession.setActive(false)
+        
+        // Process the recorded audio
+        if let recordingURL = recordingURL {
+            convertAudioToMP3AndProcess(sourceURL: recordingURL)
+        } else {
+            print("ChatViewModel: No recording URL available")
+        }
+    }
+    
+    /// Requests microphone permission
+    private func requestMicrophonePermission() async -> Bool {
+        return await withCheckedContinuation { continuation in
+            audioSession.requestRecordPermission { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+    }
+    
+    /// Converts recorded audio to MP3 format and processes it
+    private func convertAudioToMP3AndProcess(sourceURL: URL) {
+        Task {
+            do {
+                // For now, we'll read the M4A file directly as audio data
+                // In a real implementation, you might want to convert to MP3 format
+                let audioData = try Data(contentsOf: sourceURL)
+                
+                print("ChatViewModel: Successfully read \(audioData.count) bytes of audio data")
+                
+                // Process the actual audio data
+                processSpeechToTextWithAudio(audioData: audioData)
+                
+                // Clean up the temporary file
+                try FileManager.default.removeItem(at: sourceURL)
+                
+            } catch {
+                print("ChatViewModel: Failed to read audio file: \(error)")
+                await MainActor.run {
+                    // Handle error - could publish error state
+                    print("ChatViewModel: Audio processing error: \(error)")
+                }
+            }
+        }
+    }
+    
+    /// Processes the recorded audio data for speech-to-text conversion using TinfoilAI client
+    /// - Parameter audioData: The recorded audio data to be transcribed
+    func processSpeechToTextWithAudio(audioData: Data) {
+        // TODO: Replace with actual tinfoilai client speech-to-text API call
+        // This should use the existing TinfoilAI client instance
+        
+        print("ChatViewModel: Processing \(audioData.count) bytes of recorded audio data...")
+        
+        // Simulate API processing delay
+        Task {
+            do {
+                guard let client = client else {
+                    throw NSError(domain: "TinfoilChat", code: 1,
+                                userInfo: [NSLocalizedDescriptionKey: "TinfoilAI client not available"])
+                }
+                
+                // TODO: Use actual TinfoilAI speech-to-text endpoint
+                // Example: let transcription = try await client.speechToText(audioData: audioData)
+                
+                // Simulate processing delay
+                try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
+                
+                // Simulate successful transcription response with real audio data info
+                let simulatedTranscription = "This is a test transcription from \(audioData.count) bytes of recorded audio"
+                
+                await MainActor.run {
+                    print("ChatViewModel: Transcription completed: \(simulatedTranscription)")
+                    
+                    // Set the transcribed text that MessageInputView can observe
+                    self.transcribedText = simulatedTranscription
+                }
+                
+            } catch {
+                await MainActor.run {
+                    print("ChatViewModel: Speech-to-text error: \(error)")
+                    // Handle error - could publish error state
+                }
+            }
+        }
     }
     
     // MARK: - Private Methods
