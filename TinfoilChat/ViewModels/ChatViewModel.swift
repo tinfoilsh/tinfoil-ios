@@ -70,6 +70,11 @@ class ChatViewModel: ObservableObject {
         return authManager?.isAuthenticated ?? false
     }
     
+    // Computed property to check if speech-to-text is available
+    var hasSpeechToTextAccess: Bool {
+        return authManager?.isAuthenticated ?? false
+    }
+    
     // Get current user ID from auth manager
     private var currentUserId: String? {
         guard let authManager = authManager,
@@ -520,7 +525,7 @@ class ChatViewModel: ObservableObject {
     
     // MARK: - Speech-to-Text Methods
     
-    /// Starts speech-to-text recording
+    /// Starts speech-to-text recording with microphone permission handling
     func startSpeechToText() {
         Task {
             do {
@@ -579,7 +584,7 @@ class ChatViewModel: ObservableObject {
         
         // Process the recorded audio
         if let recordingURL = recordingURL {
-            convertAudioToMP3AndProcess(sourceURL: recordingURL)
+            processRecordedAudio(sourceURL: recordingURL)
         } else {
             print("ChatViewModel: No recording URL available")
         }
@@ -594,68 +599,93 @@ class ChatViewModel: ObservableObject {
         }
     }
     
-    /// Converts recorded audio to MP3 format and processes it
-    private func convertAudioToMP3AndProcess(sourceURL: URL) {
+    /// Processes recorded audio file and sends to TinfoilAI for transcription
+    private func processRecordedAudio(sourceURL: URL) {
         Task {
             do {
-                // For now, we'll read the M4A file directly as audio data
-                // In a real implementation, you might want to convert to MP3 format
                 let audioData = try Data(contentsOf: sourceURL)
+                print("ChatViewModel: Read \(audioData.count) bytes of M4A audio data")
                 
-                print("ChatViewModel: Successfully read \(audioData.count) bytes of audio data")
-                
-                // Process the actual audio data
+                // Process the audio data
                 processSpeechToTextWithAudio(audioData: audioData)
                 
                 // Clean up the temporary file
                 try FileManager.default.removeItem(at: sourceURL)
                 
             } catch {
-                print("ChatViewModel: Failed to read audio file: \(error)")
+                print("ChatViewModel: Failed to process audio file: \(error)")
                 await MainActor.run {
-                    // Handle error - could publish error state
-                    print("ChatViewModel: Audio processing error: \(error)")
+                    self.transcribedText = "Audio processing failed. Please try again."
                 }
             }
         }
     }
     
-    /// Processes the recorded audio data for speech-to-text conversion using TinfoilAI client
+    /// Processes recorded audio data for speech-to-text conversion using TinfoilAI
     /// - Parameter audioData: The recorded audio data to be transcribed
     func processSpeechToTextWithAudio(audioData: Data) {
-        // TODO: Replace with actual tinfoilai client speech-to-text API call
-        // This should use the existing TinfoilAI client instance
-        
         print("ChatViewModel: Processing \(audioData.count) bytes of recorded audio data...")
         
-        // Simulate API processing delay
         Task {
             do {
-                guard let client = client else {
-                    throw NSError(domain: "TinfoilChat", code: 1,
-                                userInfo: [NSLocalizedDescriptionKey: "TinfoilAI client not available"])
+                // Check authentication and get API key
+                let isAuthenticated = authManager?.isAuthenticated ?? false
+                let hasSubscription = authManager?.hasActiveSubscription ?? false
+                
+                let apiKey = await AppConfig.shared.getApiKey(
+                    forModel: currentModel,
+                    isAuthenticated: isAuthenticated,
+                    hasSubscription: hasSubscription
+                )
+                
+                guard !apiKey.isEmpty else {
+                    throw NSError(domain: "TinfoilChat", code: 401,
+                                userInfo: [NSLocalizedDescriptionKey: "Speech-to-text requires authentication. Please sign in to use this feature."])
                 }
                 
-                // TODO: Use actual TinfoilAI speech-to-text endpoint
-                // Example: let transcription = try await client.speechToText(audioData: audioData)
+                // Create TinfoilAI client configured for audio processing
+                let audioClient = try await TinfoilAI.create(
+                    apiKey: apiKey,
+                    githubRepo: "tinfoilsh/confidential-audio-processing",
+                    enclaveURL: "audio-processing.model.tinfoil.sh"
+                )
                 
-                // Simulate processing delay
-                try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
+                // Create transcription query
+                let transcriptionQuery = AudioTranscriptionQuery(
+                    file: audioData,
+                    fileType: .m4a,
+                    model: "whisper-large-v3-turbo"
+                )
                 
-                // Simulate successful transcription response with real audio data info
-                let simulatedTranscription = "This is a test transcription from \(audioData.count) bytes of recorded audio"
+                // Get transcription from TinfoilAI
+                let transcription = try await audioClient.audioTranscriptions(query: transcriptionQuery)
+                
+                print("ChatViewModel: Transcription: \(transcription)")
                 
                 await MainActor.run {
-                    print("ChatViewModel: Transcription completed: \(simulatedTranscription)")
+                    let transcribedText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     
-                    // Set the transcribed text that MessageInputView can observe
-                    self.transcribedText = simulatedTranscription
+                    if !transcribedText.isEmpty {
+                        print("ChatViewModel: Transcription completed: \(transcribedText)")
+                        
+                        // Auto-send the transcribed message
+                        self.sendMessage(text: transcribedText)
+                    } else {
+                        print("ChatViewModel: Empty transcription received")
+                    }
                 }
                 
             } catch {
                 await MainActor.run {
                     print("ChatViewModel: Speech-to-text error: \(error)")
-                    // Handle error - could publish error state
+                    
+                    // Set user-friendly error message
+                    let errorMessage = error.localizedDescription
+                    if errorMessage.contains("401") || errorMessage.contains("authentication") {
+                        self.transcribedText = "Speech-to-text requires authentication. Please sign in."
+                    } else {
+                        self.transcribedText = "Speech recognition failed. Please try again."
+                    }
                 }
             }
         }

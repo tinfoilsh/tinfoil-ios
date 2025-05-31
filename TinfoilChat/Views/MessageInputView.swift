@@ -28,7 +28,7 @@ struct MessageInputView: View {
     
     // Determine which button to show
     private var shouldShowMicrophone: Bool {
-        messageText.isEmpty && !viewModel.isLoading
+        messageText.isEmpty && !viewModel.isLoading && viewModel.hasSpeechToTextAccess
     }
     
     var body: some View {
@@ -119,9 +119,17 @@ struct MessageInputView: View {
         }
         .onChange(of: viewModel.transcribedText) { oldValue, newValue in
             if !newValue.isEmpty && newValue != oldValue {
-                messageText = newValue
-                textHeight = 48 // Reset height when text is added
-                // Clear the transcribed text to prevent it from being set again
+                // Check if it's an error message (don't auto-send these)
+                if newValue.contains("requires authentication") || newValue.contains("failed") {
+                    // Show error message in text field for user to see
+                    messageText = newValue
+                    textHeight = 48
+                } else {
+                    // For successful transcriptions, the message is auto-sent by the ViewModel
+                    // We don't need to do anything here since sendMessage is called directly
+                }
+                
+                // Clear the transcribed text to prevent it from being processed again
                 viewModel.transcribedText = ""
             }
         }
