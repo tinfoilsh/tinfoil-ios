@@ -106,16 +106,21 @@ class ChatViewModel: ObservableObject {
         // Store auth manager reference
         self.authManager = authManager
         
-        // If user is authenticated, load saved chats from UserDefaults if available
+        // Always create a new chat when the app is loaded initially
         if let auth = authManager, auth.isAuthenticated {
+            // Load saved chats from UserDefaults but don't select them
             let savedChats = Chat.loadFromDefaults(userId: currentUserId)
-            if !savedChats.isEmpty {
-                chats = savedChats
-                // Select the first chat and load its initial page
-                selectChat(chats.first!) // Force unwrap okay here as we checked !isEmpty
-            } else {
-                createNewChat() // Creates an empty chat, selectChat is called within
-            }
+            chats = savedChats
+            
+            // Create a new chat directly and set it as current
+            let newChat = Chat.create(
+                modelType: currentModel,
+                language: nil,
+                userId: currentUserId
+            )
+            chats.insert(newChat, at: 0)
+            currentChat = newChat
+            saveChats()
         } else {
             // For non-authenticated users, just create a single chat without saving
             let newChat = Chat.create(modelType: currentModel)
@@ -833,14 +838,8 @@ class ChatViewModel: ObservableObject {
             let savedChats = Chat.loadFromDefaults(userId: currentUserId)
             if !savedChats.isEmpty {
                 chats = savedChats
-                if let currentChatId = currentChat?.id, 
-                   let existingChat = chats.first(where: { $0.id == currentChatId }) {
-                    // Keep current chat if it exists in saved chats
-                    selectChat(existingChat)
-                } else {
-                    // Otherwise select first chat
-                    selectChat(chats.first!)
-                }
+                // Create a new chat instead of selecting from saved chats
+                createNewChat()
             }
         }
     }
@@ -868,7 +867,8 @@ class ChatViewModel: ObservableObject {
             let savedChats = Chat.loadFromDefaults(userId: userId)
             if !savedChats.isEmpty {
                 chats = savedChats
-                selectChat(chats.first!) // Select first chat
+                // Create a new chat instead of selecting the first saved one
+                createNewChat()
             } else {
                 createNewChat() // Create new chat if no saved chats exist
             }
