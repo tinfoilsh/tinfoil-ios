@@ -28,7 +28,9 @@ struct MessageInputView: View {
     
     // Determine which button to show
     private var shouldShowMicrophone: Bool {
-        messageText.isEmpty && !viewModel.isLoading && viewModel.hasSpeechToTextAccess
+        // TODO: make audio recording work
+        // messageText.isEmpty && !viewModel.isLoading && viewModel.hasSpeechToTextAccess
+        false
     }
     
     var body: some View {
