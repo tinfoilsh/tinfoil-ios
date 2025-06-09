@@ -216,6 +216,9 @@ class ChatViewModel: ObservableObject {
         // Select the new chat
         selectChat(newChat)
         saveChats()
+        
+        // Recreate the secure client for the new chat session
+        setupTinfoilClient()
     }
     
     /// Selects a chat as the current chat
@@ -799,7 +802,6 @@ class ChatViewModel: ObservableObject {
         
         // Reinitialize the Tinfoil client for the new model
         setupTinfoilClient()
-
 
         // Notify of successful model change with haptic feedback
         Chat.triggerSuccessFeedback()
