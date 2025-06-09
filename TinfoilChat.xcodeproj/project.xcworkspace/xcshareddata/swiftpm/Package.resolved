@@ -1,5 +1,5 @@
 {
-  "originHash" : "f26f87526b237690a2de958bb8804f57d46c64d636c5cfcdda13e72535352b73",
+  "originHash" : "d51997653b25768dcdde12b81cc95c618cfc13d925aad578f1e4da2c7f4fc317",
   "pins" : [
     {
       "identity" : "clerk-ios",
@@ -43,7 +43,7 @@
       "location" : "https://github.com/MacPaw/OpenAI.git",
       "state" : {
         "branch" : "main",
-        "revision" : "08eb64ee09ea99d846d797fe37ba4af779142206"
+        "revision" : "eafa1557f8fd7c82ef02c75cbc72f051698fca44"
       }
     },
     {
@@ -76,7 +76,7 @@
     {
       "identity" : "swift-http-types",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-http-types.git",
+      "location" : "https://github.com/apple/swift-http-types",
       "state" : {
         "revision" : "a0a57e949a8903563aba4615869310c0ebf14c03",
         "version" : "1.4.0"
@@ -103,10 +103,10 @@
     {
       "identity" : "tinfoil-swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/tinfoilsh/tinfoil-swift",
+      "location" : "https://github.com/tinfoilsh/tinfoil-swift.git",
       "state" : {
         "branch" : "main",
-        "revision" : "36890fdc86b8be249539467c3c7509f44d8eb733"
+        "revision" : "0b76e7cfac5af0470d226c6ed338967c8ab7e97c"
       }
     }
   ],
