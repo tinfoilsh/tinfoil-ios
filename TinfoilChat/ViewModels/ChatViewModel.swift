@@ -133,6 +133,29 @@ class ChatViewModel: ObservableObject {
         
         // Initialize Tinfoil client and verify enclave
         setupTinfoilClient()
+        
+        // Setup app lifecycle observers
+        setupAppLifecycleObservers()
+    }
+    
+    deinit {
+        // Remove app lifecycle observers
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    /// Setup observers for app lifecycle events
+    private func setupAppLifecycleObservers() {
+        // Listen for app becoming active (returning from background)
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            // Add a small delay to allow auth state to stabilize, then retry client setup if needed
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self?.retryClientSetup()
+            }
+        }
     }
     
     private func setupTinfoilClient() {
@@ -198,6 +221,17 @@ class ChatViewModel: ObservableObject {
                 print("Tinfoil: setup Error: \(error)")
             }
         }
+    }
+    
+    /// Public method to retry client setup (called when returning from background)
+    func retryClientSetup() {
+        // Only retry if we don't have a working client or if verification failed
+        guard client == nil || !isVerified || verificationError != nil else {
+            return
+        }
+        
+        print("Tinfoil: Retrying client setup...")
+        setupTinfoilClient()
     }
     
     // MARK: - Public Methods
@@ -880,3 +914,4 @@ class ChatViewModel: ObservableObject {
         updateRateLimitStatus()
     }
 }
+

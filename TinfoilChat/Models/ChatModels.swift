@@ -312,14 +312,17 @@ class APIKeyManager {
         }
         
         do {
-            // Wait for Clerk to be loaded
-            // Try multiple times with a small delay
-            for _ in 0..<5 {
-                if let session = await Clerk.shared.session {
-                    // Get auth token from Clerk
-                    guard let tokenResource = session.lastActiveToken else {
-                        return ""
-                    }
+            // Try to load Clerk if it's not loaded
+            let isLoaded = await Clerk.shared.isLoaded
+            if !isLoaded {
+                try await Clerk.shared.load()
+            }
+            
+            // Try a few times with a small delay for the session to be available
+            for attempt in 1...3 {
+                let session = await Clerk.shared.session
+                if let session = session,
+                   let tokenResource = session.lastActiveToken {
                     
                     // Create URL request with auth header
                     var request = URLRequest(url: URL(string: apiKeyEndpoint)!)
@@ -346,11 +349,13 @@ class APIKeyManager {
                     return ""
                 }
                 
-                // Wait a bit before trying again
-                try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                // Wait a bit before trying again (only for first 2 attempts)
+                if attempt < 3 {
+                    try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                }
             }
             
-            print("Clerk session not available after multiple attempts")
+            print("Clerk session not available after 3 attempts")
             return ""
         } catch {
             print("Error fetching API key: \(error)")
