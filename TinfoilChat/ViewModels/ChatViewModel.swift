@@ -10,6 +10,7 @@ import Combine
 import SwiftUI
 import TinfoilAI
 import OpenAI
+import AVFoundation
 
 @MainActor
 class ChatViewModel: ObservableObject {
@@ -36,6 +37,15 @@ class ChatViewModel: ObservableObject {
     @Published var isRateLimited: Bool = false
     @Published var messagesRemaining: Int = Constants.RateLimits.freeUserMaxMessages
     
+    // Speech-to-text properties
+    @Published var isRecording: Bool = false
+    @Published var transcribedText: String = ""
+    
+    // Audio recording properties
+    private var audioRecorder: AVAudioRecorder?
+    private var audioSession: AVAudioSession = AVAudioSession.sharedInstance()
+    private var recordingURL: URL?
+    
     // Private properties
     private var client: OpenAI?
     private var currentTask: Task<Void, Error>?
@@ -57,6 +67,11 @@ class ChatViewModel: ObservableObject {
     // Computed property to check if user has access to chat features
     // This is used for chat history and multiple chats
     var hasChatAccess: Bool {
+        return authManager?.isAuthenticated ?? false
+    }
+    
+    // Computed property to check if speech-to-text is available
+    var hasSpeechToTextAccess: Bool {
         return authManager?.isAuthenticated ?? false
     }
     
@@ -91,16 +106,21 @@ class ChatViewModel: ObservableObject {
         // Store auth manager reference
         self.authManager = authManager
         
-        // If user is authenticated, load saved chats from UserDefaults if available
+        // Always create a new chat when the app is loaded initially
         if let auth = authManager, auth.isAuthenticated {
+            // Load saved chats from UserDefaults but don't select them
             let savedChats = Chat.loadFromDefaults(userId: currentUserId)
-            if !savedChats.isEmpty {
-                chats = savedChats
-                // Select the first chat and load its initial page
-                selectChat(chats.first!) // Force unwrap okay here as we checked !isEmpty
-            } else {
-                createNewChat() // Creates an empty chat, selectChat is called within
-            }
+            chats = savedChats
+            
+            // Create a new chat directly and set it as current
+            let newChat = Chat.create(
+                modelType: currentModel,
+                language: nil,
+                userId: currentUserId
+            )
+            chats.insert(newChat, at: 0)
+            currentChat = newChat
+            saveChats()
         } else {
             // For non-authenticated users, just create a single chat without saving
             let newChat = Chat.create(modelType: currentModel)
@@ -196,6 +216,9 @@ class ChatViewModel: ObservableObject {
         // Select the new chat
         selectChat(newChat)
         saveChats()
+        
+        // Recreate the secure client for the new chat session
+        setupTinfoilClient()
     }
     
     /// Selects a chat as the current chat
@@ -508,6 +531,174 @@ class ChatViewModel: ObservableObject {
         self.verifierView = nil
     }
     
+    // MARK: - Speech-to-Text Methods
+    
+    /// Starts speech-to-text recording with microphone permission handling
+    func startSpeechToText() {
+        Task {
+            do {
+                // Request microphone permission
+                let permissionGranted = await requestMicrophonePermission()
+                guard permissionGranted else {
+                    print("ChatViewModel: Microphone permission denied")
+                    return
+                }
+                
+                await MainActor.run {
+                    self.isRecording = true
+                }
+                
+                // Setup audio session
+                try audioSession.setCategory(.playAndRecord, mode: .default)
+                try audioSession.setActive(true)
+                
+                // Create recording URL
+                let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                recordingURL = documentsPath.appendingPathComponent("recording_\(Date().timeIntervalSince1970).m4a")
+                
+                // Audio recording settings
+                let settings: [String: Any] = [
+                    AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                    AVSampleRateKey: 44100.0,
+                    AVNumberOfChannelsKey: 1,
+                    AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+                ]
+                
+                // Create and start recorder
+                if let url = recordingURL {
+                    audioRecorder = try AVAudioRecorder(url: url, settings: settings)
+                    audioRecorder?.record()
+                    print("ChatViewModel: Started audio recording to \(url.lastPathComponent)")
+                }
+                
+            } catch {
+                print("ChatViewModel: Failed to start recording: \(error)")
+                await MainActor.run {
+                    self.isRecording = false
+                }
+            }
+        }
+    }
+    
+    /// Stops speech-to-text recording and processes the audio
+    func stopSpeechToText() {
+        isRecording = false
+        
+        // Stop recording
+        audioRecorder?.stop()
+        
+        // Deactivate audio session
+        try? audioSession.setActive(false)
+        
+        // Process the recorded audio
+        if let recordingURL = recordingURL {
+            processRecordedAudio(sourceURL: recordingURL)
+        } else {
+            print("ChatViewModel: No recording URL available")
+        }
+    }
+    
+    /// Requests microphone permission
+    private func requestMicrophonePermission() async -> Bool {
+        return await withCheckedContinuation { continuation in
+            audioSession.requestRecordPermission { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+    }
+    
+    /// Processes recorded audio file and sends to TinfoilAI for transcription
+    private func processRecordedAudio(sourceURL: URL) {
+        Task {
+            do {
+                let audioData = try Data(contentsOf: sourceURL)
+                print("ChatViewModel: Read \(audioData.count) bytes of M4A audio data")
+                
+                // Process the audio data
+                processSpeechToTextWithAudio(audioData: audioData)
+                
+                // Clean up the temporary file
+                try FileManager.default.removeItem(at: sourceURL)
+                
+            } catch {
+                print("ChatViewModel: Failed to process audio file: \(error)")
+                await MainActor.run {
+                    self.transcribedText = "Audio processing failed. Please try again."
+                }
+            }
+        }
+    }
+    
+    /// Processes recorded audio data for speech-to-text conversion using TinfoilAI
+    /// - Parameter audioData: The recorded audio data to be transcribed
+    func processSpeechToTextWithAudio(audioData: Data) {
+        print("ChatViewModel: Processing \(audioData.count) bytes of recorded audio data...")
+        
+        Task {
+            do {
+                // Check authentication and get API key
+                let isAuthenticated = authManager?.isAuthenticated ?? false
+                let hasSubscription = authManager?.hasActiveSubscription ?? false
+                
+                let apiKey = await AppConfig.shared.getApiKey(
+                    forModel: currentModel,
+                    isAuthenticated: isAuthenticated,
+                    hasSubscription: hasSubscription
+                )
+                
+                guard !apiKey.isEmpty else {
+                    throw NSError(domain: "TinfoilChat", code: 401,
+                                userInfo: [NSLocalizedDescriptionKey: "Speech-to-text requires authentication. Please sign in to use this feature."])
+                }
+                
+                // Create TinfoilAI client configured for audio processing
+                let audioClient = try await TinfoilAI.create(
+                    apiKey: apiKey,
+                    githubRepo: "tinfoilsh/confidential-audio-processing",
+                    enclaveURL: "audio-processing.model.tinfoil.sh"
+                )
+                
+                // Create transcription query
+                let transcriptionQuery = AudioTranscriptionQuery(
+                    file: audioData,
+                    fileType: .m4a,
+                    model: "whisper-large-v3-turbo"
+                )
+                
+                // Get transcription from TinfoilAI
+                let transcription = try await audioClient.audioTranscriptions(query: transcriptionQuery)
+                
+                print("ChatViewModel: Transcription: \(transcription)")
+                
+                await MainActor.run {
+                    let transcribedText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    
+                    if !transcribedText.isEmpty {
+                        print("ChatViewModel: Transcription completed: \(transcribedText)")
+                        
+                        // Auto-send the transcribed message
+                        self.sendMessage(text: transcribedText)
+                    } else {
+                        print("ChatViewModel: Empty transcription received")
+                    }
+                }
+                
+            } catch {
+                await MainActor.run {
+                    print("ChatViewModel: Speech-to-text error: \(error)")
+                    
+                    // Set user-friendly error message
+                    let errorMessage = error.localizedDescription
+                    if errorMessage.contains("401") || errorMessage.contains("authentication") {
+                        self.transcribedText = "Speech-to-text requires authentication. Please sign in."
+                    } else {
+                        self.transcribedText = "Speech recognition failed. Please try again."
+                    }
+                }
+            }
+        }
+    }
+    
     // MARK: - Private Methods
     
     /// Adds a message to the current chat
@@ -612,7 +803,6 @@ class ChatViewModel: ObservableObject {
         // Reinitialize the Tinfoil client for the new model
         setupTinfoilClient()
 
-
         // Notify of successful model change with haptic feedback
         Chat.triggerSuccessFeedback()
     }
@@ -650,14 +840,8 @@ class ChatViewModel: ObservableObject {
             let savedChats = Chat.loadFromDefaults(userId: currentUserId)
             if !savedChats.isEmpty {
                 chats = savedChats
-                if let currentChatId = currentChat?.id, 
-                   let existingChat = chats.first(where: { $0.id == currentChatId }) {
-                    // Keep current chat if it exists in saved chats
-                    selectChat(existingChat)
-                } else {
-                    // Otherwise select first chat
-                    selectChat(chats.first!)
-                }
+                // Create a new chat instead of selecting from saved chats
+                createNewChat()
             }
         }
     }
@@ -685,7 +869,8 @@ class ChatViewModel: ObservableObject {
             let savedChats = Chat.loadFromDefaults(userId: userId)
             if !savedChats.isEmpty {
                 chats = savedChats
-                selectChat(chats.first!) // Select first chat
+                // Create a new chat instead of selecting the first saved one
+                createNewChat()
             } else {
                 createNewChat() // Create new chat if no saved chats exist
             }

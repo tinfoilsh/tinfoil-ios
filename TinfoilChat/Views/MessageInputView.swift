@@ -9,6 +9,10 @@ struct MessageInputView: View {
     @EnvironmentObject private var authManager: AuthManager
     @State private var showErrorPopover = false
     @State private var textHeight: CGFloat = 48 // Updated default height to match minimum
+    @ObservedObject private var settings = SettingsManager.shared
+    
+    // Haptic feedback generator
+    private let softHaptic = UIImpactFeedbackGenerator(style: .soft)
     
     private var isDarkMode: Bool { colorScheme == .dark }
     
@@ -20,6 +24,13 @@ struct MessageInputView: View {
     // Check only for authentication status
     private var isUserAuthenticated: Bool {
         authManager.isAuthenticated
+    }
+    
+    // Determine which button to show
+    private var shouldShowMicrophone: Bool {
+        // TODO: make audio recording work
+        // messageText.isEmpty && !viewModel.isLoading && viewModel.hasSpeechToTextAccess
+        false
     }
     
     var body: some View {
@@ -81,18 +92,59 @@ struct MessageInputView: View {
                 
                 Spacer()
                 
-                // Send button
-                Button(action: sendOrCancelMessage) {
-                    Image(systemName: viewModel.isLoading ? "stop.fill" : "arrow.up.circle.fill")
-                        .font(.system(size: 32))
-                        .foregroundColor(isDarkMode ? .white : .primary)
+                // Send/Microphone button
+                Button(action: handleButtonPress) {
+                    ZStack {
+                        Circle()
+                            .fill(shouldShowMicrophone ? 
+                                  (viewModel.isRecording ? Color.red : (isDarkMode ? Color.white : Color.primary)) :
+                                  (isDarkMode ? Color.white : Color.primary))
+                            .frame(width: 32, height: 32)
+                        
+                        Image(systemName: shouldShowMicrophone ? 
+                              (viewModel.isRecording ? "mic.fill" : "mic") : 
+                              (viewModel.isLoading ? "stop.fill" : "arrow.up"))
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(shouldShowMicrophone ? 
+                                           (viewModel.isRecording ? .white : (isDarkMode ? .black : .white)) :
+                                           (isDarkMode ? .black : .white))
+                    }
                 }
-                .disabled((messageText.isEmpty && !viewModel.isLoading) || 
-                          viewModel.isRateLimited)
+                .disabled(viewModel.isRateLimited)
                 .opacity(viewModel.isRateLimited ? 0.5 : 1.0)
                 .padding(.trailing, 24)
             }
             .padding(.vertical, 4)
+        }
+        .onAppear {
+            softHaptic.prepare()
+        }
+        .onChange(of: viewModel.transcribedText) { oldValue, newValue in
+            if !newValue.isEmpty && newValue != oldValue {
+                // Check if it's an error message (don't auto-send these)
+                if newValue.contains("requires authentication") || newValue.contains("failed") {
+                    // Show error message in text field for user to see
+                    messageText = newValue
+                    textHeight = 48
+                } else {
+                    // For successful transcriptions, the message is auto-sent by the ViewModel
+                    // We don't need to do anything here since sendMessage is called directly
+                }
+                
+                // Clear the transcribed text to prevent it from being processed again
+                viewModel.transcribedText = ""
+            }
+        }
+        .onChange(of: viewModel.messages.last?.content) { oldContent, newContent in
+            if settings.hapticFeedbackEnabled,
+               let old = oldContent,
+               let new = newContent,
+               old != new {
+                let addedContent = String(new.dropFirst(old.count))
+                if addedContent.count > 1 {
+                    softHaptic.impactOccurred(intensity: 0.3)
+                }
+            }
         }
     }
     
@@ -138,6 +190,18 @@ struct MessageInputView: View {
             viewModel.sendMessage(text: messageText)
             messageText = ""
             textHeight = 48 // Reset height when message is sent
+        }
+    }
+    
+    private func handleButtonPress() {
+        if shouldShowMicrophone {
+            if viewModel.isRecording {
+                viewModel.stopSpeechToText()
+            } else {
+                viewModel.startSpeechToText()
+            }
+        } else {
+            sendOrCancelMessage()
         }
     }
 }

@@ -24,6 +24,10 @@ struct ChatContainer: View {
     @State private var scrollProxy: ScrollViewProxy?
     @State private var dragOffset: CGFloat = 0
     @State private var showAuthView = false
+    @State private var lastBackgroundTime: Date?
+    
+    private let backgroundTimeThreshold: TimeInterval = 60 // 1 minute in seconds
+    
     var body: some View {
         NavigationView {
             mainContent
@@ -33,6 +37,14 @@ struct ChatContainer: View {
         .environmentObject(viewModel)
         .onAppear {
             setupNavigationBarAppearance()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            // App is going to background, record the time
+            lastBackgroundTime = Date()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            // App is coming to foreground, check if we should create a new chat
+            checkAndCreateNewChatIfNeeded()
         }
         .sheet(isPresented: $viewModel.showVerifierSheet) {
             if let verifierView = viewModel.verifierView {
@@ -190,6 +202,27 @@ struct ChatContainer: View {
             }
         }
         .animation(.easeInOut, value: isSidebarOpen)
+    }
+    
+    // MARK: - Helper Methods
+    
+    /// Checks if enough time has passed since the app went to background and creates a new chat if needed
+    private func checkAndCreateNewChatIfNeeded() {
+        guard let lastBackgroundTime = lastBackgroundTime else { return }
+        let currentTime = Date()
+        let timeSinceBackground = currentTime.timeIntervalSince(lastBackgroundTime)
+        
+        // Only create a new chat if:
+        // 1. Enough time has passed (> 1 minute)
+        // 2. There are existing messages in the current chat
+        // 3. User is authenticated (to avoid issues with unauthenticated state)
+        if timeSinceBackground > backgroundTimeThreshold && 
+           !viewModel.messages.isEmpty && 
+           authManager.isAuthenticated {
+            let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
+            viewModel.createNewChat(language: language, modelType: settings.defaultModel)
+            messageText = ""
+        }
     }
     
     // MARK: - Actions
