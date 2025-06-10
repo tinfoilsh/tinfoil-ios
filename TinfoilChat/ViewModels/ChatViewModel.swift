@@ -231,6 +231,11 @@ class ChatViewModel: ObservableObject {
         }
         
         print("Tinfoil: Retrying client setup...")
+        
+        // Clear cached API key to force refresh from server
+        // This is important when returning from background as the JWT token may have expired
+        APIKeyManager.shared.clearApiKey()
+        
         setupTinfoilClient()
     }
     
