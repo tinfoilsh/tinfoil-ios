@@ -159,7 +159,8 @@ class ChatViewModel: ObservableObject {
     }
     
     private func setupTinfoilClient() {
-        // Set verification status to "in progress" at the start
+        // Clear any previous verification error and set status to "in progress"
+        self.verificationError = nil
         self.isVerifying = true
         
         Task {
@@ -225,16 +226,15 @@ class ChatViewModel: ObservableObject {
     
     /// Public method to retry client setup (called when returning from background)
     func retryClientSetup() {
-        // Only retry if we don't have a working client or if verification failed
-        guard client == nil || !isVerified || verificationError != nil else {
+        // Only retry if we don't have a working client or if verification actually failed
+        // Don't recreate the client unnecessarily as it causes temporary verification failures
+        guard client == nil || (!isVerified && !isVerifying && verificationError != nil) else {
+            // Client exists and is either verified or still verifying - no need to recreate
+            print("Tinfoil: Client exists and is verified/verifying, skipping retry")
             return
         }
         
         print("Tinfoil: Retrying client setup...")
-        
-        // Clear cached API key to force refresh from server
-        // This is important when returning from background as the JWT token may have expired
-        APIKeyManager.shared.clearApiKey()
         
         setupTinfoilClient()
     }
