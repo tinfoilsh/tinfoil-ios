@@ -464,7 +464,6 @@ struct ModularAuthenticationView: View {
       queue: .main
     ) { [authManager, clerk] _ in
       Task { @MainActor in
-        print("Checking auth state after URL received")
         if clerk.user != nil {
           await authManager.initializeAuthState()
           self.dismiss()

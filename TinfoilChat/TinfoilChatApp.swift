@@ -43,9 +43,7 @@ struct TinfoilChatApp: App {
                                 authManager.setClerk(clerk)
                                 
                                 do {
-                                    print("Tinfoil: Loading Clerk...")
                                     try await clerk.load()
-                                    print("Tinfoil: Clerk loaded successfully")
                                     
                                     // Initialize authentication state
                                     await authManager.initializeAuthState()
@@ -64,7 +62,6 @@ struct TinfoilChatApp: App {
                                     print("Tinfoil: Failed to load Clerk: \(error)")
                                 }
                             
-                                print("Tinfoil: Clerk already configured")
                             }
                         }
                 } else if let error = appConfig.initializationError {
@@ -89,7 +86,6 @@ struct TinfoilChatApp: App {
                             }
                         }
                         .onAppear {
-                            print("Tinfoil: AppConfig initialization error: \(error)")
                         }
                     }
                 } else {

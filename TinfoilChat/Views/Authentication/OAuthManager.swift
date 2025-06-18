@@ -28,12 +28,10 @@ class OAuthManager {
     loadingStateCallback(true)
     
     do {
-      print("Starting OAuth flow with provider: \(provider)")
       try await Task.sleep(nanoseconds: 100_000_000) // Small delay to ensure UI updates
       
       // Use SignIn.authenticateWithRedirect for OAuth providers
       try await SignIn.authenticateWithRedirect(strategy: .oauth(provider: provider))
-      print("OAuth redirect initiated")
       
       // Keep the loading indicator visible for a bit longer
       // This helps prevent UI flicker during the redirect process
@@ -64,7 +62,6 @@ class OAuthManager {
       do {
         try await clerk.load()
         if await clerk.user != nil {
-          print("User detected in background task, updating auth state")
           
           // Update auth state
           await authManager.initializeAuthState()

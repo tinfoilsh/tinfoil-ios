@@ -45,7 +45,6 @@ struct ChatSidebar: View {
                 .onDisappear {
                     // Refresh the UI when the auth view is dismissed
                     if authManager.isAuthenticated {
-                        print("Authentication view dismissed, user is authenticated")
                     }
                 }
         }
@@ -53,11 +52,9 @@ struct ChatSidebar: View {
             SettingsView()
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
-            print("Auth state changed in ChatSidebar: isAuthenticated = \(isAuthenticated)")
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CheckAuthState"))) { _ in
             Task {
-                print("Received CheckAuthState notification in ChatSidebar")
                 if clerk.user != nil && !authManager.isAuthenticated {
                     await authManager.initializeAuthState()
                 }

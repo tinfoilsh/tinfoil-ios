@@ -201,10 +201,8 @@ class ChatViewModel: ObservableObject {
                             
                             if passed {
                                 self.verificationError = nil
-                                print("Tinfoil: Non-blocking verification successful for model: \(self.currentModel.displayName)")
                             } else {
                                 self.verificationError = "Enclave verification failed. The connection may not be secure."
-                                print("Tinfoil: Non-blocking verification failed for model: \(self.currentModel.displayName)")
                             }
                         }
                     }
@@ -219,7 +217,6 @@ class ChatViewModel: ObservableObject {
                 self.isVerifying = false
                 self.isVerified = false
                 self.verificationError = error.localizedDescription
-                print("Tinfoil: setup Error: \(error)")
             }
         }
     }
@@ -230,11 +227,9 @@ class ChatViewModel: ObservableObject {
         // Don't recreate the client unnecessarily as it causes temporary verification failures
         guard client == nil || (!isVerified && !isVerifying && verificationError != nil) else {
             // Client exists and is either verified or still verifying - no need to recreate
-            print("Tinfoil: Client exists and is verified/verifying, skipping retry")
             return
         }
         
-        print("Tinfoil: Retrying client setup...")
         
         setupTinfoilClient()
     }
@@ -468,7 +463,6 @@ class ChatViewModel: ObservableObject {
                     }
                 }
             } catch {
-                print("Tinfoil: Error in chat stream: \(error)")
                 // Handle error
                 await MainActor.run {
                     self.isLoading = false
@@ -579,7 +573,6 @@ class ChatViewModel: ObservableObject {
                 // Request microphone permission
                 let permissionGranted = await requestMicrophonePermission()
                 guard permissionGranted else {
-                    print("ChatViewModel: Microphone permission denied")
                     return
                 }
                 
@@ -607,11 +600,9 @@ class ChatViewModel: ObservableObject {
                 if let url = recordingURL {
                     audioRecorder = try AVAudioRecorder(url: url, settings: settings)
                     audioRecorder?.record()
-                    print("ChatViewModel: Started audio recording to \(url.lastPathComponent)")
                 }
                 
             } catch {
-                print("ChatViewModel: Failed to start recording: \(error)")
                 await MainActor.run {
                     self.isRecording = false
                 }
@@ -633,7 +624,6 @@ class ChatViewModel: ObservableObject {
         if let recordingURL = recordingURL {
             processRecordedAudio(sourceURL: recordingURL)
         } else {
-            print("ChatViewModel: No recording URL available")
         }
     }
     
@@ -651,7 +641,6 @@ class ChatViewModel: ObservableObject {
         Task {
             do {
                 let audioData = try Data(contentsOf: sourceURL)
-                print("ChatViewModel: Read \(audioData.count) bytes of M4A audio data")
                 
                 // Process the audio data
                 processSpeechToTextWithAudio(audioData: audioData)
@@ -660,7 +649,6 @@ class ChatViewModel: ObservableObject {
                 try FileManager.default.removeItem(at: sourceURL)
                 
             } catch {
-                print("ChatViewModel: Failed to process audio file: \(error)")
                 await MainActor.run {
                     self.transcribedText = "Audio processing failed. Please try again."
                 }
@@ -671,7 +659,6 @@ class ChatViewModel: ObservableObject {
     /// Processes recorded audio data for speech-to-text conversion using TinfoilAI
     /// - Parameter audioData: The recorded audio data to be transcribed
     func processSpeechToTextWithAudio(audioData: Data) {
-        print("ChatViewModel: Processing \(audioData.count) bytes of recorded audio data...")
         
         Task {
             do {
@@ -707,24 +694,20 @@ class ChatViewModel: ObservableObject {
                 // Get transcription from TinfoilAI
                 let transcription = try await audioClient.audioTranscriptions(query: transcriptionQuery)
                 
-                print("ChatViewModel: Transcription: \(transcription)")
                 
                 await MainActor.run {
                     let transcribedText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     
                     if !transcribedText.isEmpty {
-                        print("ChatViewModel: Transcription completed: \(transcribedText)")
                         
                         // Auto-send the transcribed message
                         self.sendMessage(text: transcribedText)
                     } else {
-                        print("ChatViewModel: Empty transcription received")
                     }
                 }
                 
             } catch {
                 await MainActor.run {
-                    print("ChatViewModel: Speech-to-text error: \(error)")
                     
                     // Set user-friendly error message
                     let errorMessage = error.localizedDescription
@@ -871,7 +854,6 @@ class ChatViewModel: ObservableObject {
         if isAuthenticated {
             isRateLimited = false
             RateLimitManager.shared.resetCounter()
-            print("Tinfoil: Rate limiting disabled for authenticated user")
         }
         
         // If user upgraded to premium, load saved chats if any

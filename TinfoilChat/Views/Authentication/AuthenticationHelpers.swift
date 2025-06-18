@@ -67,7 +67,6 @@ func userProfileImage(imageURL: URL?) -> some View {
 func handleAuthError(_ error: Error) -> String {
   let nsError = error as NSError
   print("Auth error: \(nsError.localizedDescription)")
-  print("Error details: \(nsError)")
   
   if nsError.domain == NSURLErrorDomain {
     switch nsError.code {

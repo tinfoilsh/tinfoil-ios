@@ -41,8 +41,6 @@ struct ContentView: View {
                 isAuthenticated: authManager.isAuthenticated,
                 hasActiveSubscription: authManager.hasActiveSubscription
             )
-            
-            print("ContentView: Auth status - isAuthenticated: \(authManager.isAuthenticated), hasSubscription: \(authManager.hasActiveSubscription)")
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
             // Update available models when auth status changes
@@ -50,8 +48,6 @@ struct ContentView: View {
                 isAuthenticated: isAuthenticated,
                 hasActiveSubscription: authManager.hasActiveSubscription
             )
-            
-            print("ContentView: Auth status changed - isAuthenticated: \(isAuthenticated)")
         }
         .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
             // Update available models when subscription status changes
@@ -59,8 +55,6 @@ struct ContentView: View {
                 isAuthenticated: authManager.isAuthenticated,
                 hasActiveSubscription: hasSubscription
             )
-            
-            print("ContentView: Subscription status changed - hasSubscription: \(hasSubscription)")
         }
     }
 }

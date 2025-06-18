@@ -32,7 +32,6 @@ class AuthManager: ObservableObject {
         // Try to load cached auth state from UserDefaults
         loadCachedAuthState()
         
-        print("AuthManager initialized with authentication status: \(isAuthenticated)")
     }
     
     func setChatViewModel(_ viewModel: ChatViewModel) {
@@ -43,13 +42,11 @@ class AuthManager: ObservableObject {
         if let userData = UserDefaults.standard.data(forKey: userDataKey),
            let decodedUserData = try? JSONSerialization.jsonObject(with: userData) as? [String: Any] {
             localUserData = decodedUserData
-            print("AuthManager: Loaded cached user data")
         }
         
         isAuthenticated = UserDefaults.standard.bool(forKey: authStateKey)
         hasActiveSubscription = UserDefaults.standard.bool(forKey: subscriptionKey)
         
-        print("AuthManager: Loaded cached auth state - isAuthenticated: \(isAuthenticated), hasSubscription: \(hasActiveSubscription)")
     }
     
     private func saveAuthState() {
@@ -59,13 +56,11 @@ class AuthManager: ObservableObject {
         if let userData = localUserData {
             if let encodedData = try? JSONSerialization.data(withJSONObject: userData) {
                 UserDefaults.standard.set(encodedData, forKey: userDataKey)
-                print("AuthManager: Saved user data to UserDefaults")
             }
         } else {
             UserDefaults.standard.removeObject(forKey: userDataKey)
         }
         
-        print("AuthManager: Saved auth state - isAuthenticated: \(isAuthenticated), hasSubscription: \(hasActiveSubscription)")
     }
     
     func setClerk(_ clerk: Clerk) {
@@ -73,7 +68,6 @@ class AuthManager: ObservableObject {
         // Check if clerk is already loaded and has a user
         if clerk.user != nil {
             self.isAuthenticated = true
-            print("AuthManager: Clerk already authenticated")
             
             // Update user data immediately
             if let user = clerk.user {
@@ -82,7 +76,6 @@ class AuthManager: ObservableObject {
                 chatViewModel?.handleSignIn()
             }
         } else {
-            print("AuthManager: Clerk not yet authenticated or loaded")
         }
     }
     
@@ -109,16 +102,13 @@ class AuthManager: ObservableObject {
                 let cleanedStatus = statusString.replacingOccurrences(of: "\"", with: "")
                 hasActiveSubscription = cleanedStatus == "active"
                 
-                print("AuthManager: Subscription status - \(hasActiveSubscription ? "Active" : "Inactive")")
                 
                 // Store in localUserData
                 localUserData?["subscription_status"] = cleanedStatus
             } else {
-                print("AuthManager: No chat_subscription_status found in metadata")
                 hasActiveSubscription = false
             }
         } else {
-            print("AuthManager: No public metadata found")
             hasActiveSubscription = false
         }
         
@@ -132,7 +122,6 @@ class AuthManager: ObservableObject {
     }
     
     func initializeAuthState() async {
-        print("AuthManager: Starting auth state initialization")
         do {
             guard let clerk = self.clerk else {
                 print("Error: Clerk instance not set")
@@ -142,22 +131,17 @@ class AuthManager: ObservableObject {
             
             // Make sure Clerk is loaded
             if !clerk.isLoaded {
-                print("AuthManager: Clerk not loaded, loading Clerk")
                 try await clerk.load()
-                print("AuthManager: Clerk loaded successfully")
             } else {
-                print("AuthManager: Clerk already loaded")
             }
             
             // Update authentication status based on whether user is signed in
             let wasAuthenticated = isAuthenticated
             isAuthenticated = clerk.user != nil
-            print("AuthManager: Authentication status: \(isAuthenticated)")
             
             // Get user data if authenticated
             if isAuthenticated, let user = clerk.user {
                 updateUserData(from: user)
-                print("AuthManager: User data loaded")
             } else {
                 if wasAuthenticated {
                     // User was authenticated but isn't anymore
@@ -168,7 +152,6 @@ class AuthManager: ObservableObject {
             
             // Finish loading regardless of authentication state
             isLoading = false
-            print("AuthManager: Finished loading - isLoading set to false")
             
         } catch {
             print("Error initializing auth state: \(error)")
@@ -189,7 +172,6 @@ class AuthManager: ObservableObject {
         // Handle chat state for sign out
         chatViewModel?.handleSignOut()
         
-        print("AuthManager: Cleared auth state")
     }
     
     func signOut() async {
@@ -197,7 +179,6 @@ class AuthManager: ObservableObject {
             // If we have a Clerk instance, use it, otherwise fall back to Clerk.shared
             let clerk = self.clerk ?? Clerk.shared
             try await clerk.signOut()
-            print("AuthManager: Successfully signed out")
             
             clearAuthState()
             
@@ -214,14 +195,11 @@ class AuthManager: ObservableObject {
         }
         
         do {
-            print("AuthManager: Forcing reload of Clerk user data")
             try await clerk.load()
             
             if let user = clerk.user {
-                print("AuthManager: Successfully reloaded user data for \(user.id)")
                 updateUserData(from: user)
             } else {
-                print("AuthManager: No user found after reload")
                 clearAuthState()
             }
         } catch {
@@ -242,7 +220,6 @@ class AuthManager: ObservableObject {
             
             // Delete the user's account
             try await user.delete()
-            print("AuthManager: Successfully deleted user account")
             
             // Clear local state
             clearAuthState()
