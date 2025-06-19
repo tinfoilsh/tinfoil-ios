@@ -512,30 +512,185 @@ struct WelcomeView: View {
     let authManager: AuthManager?
     
     var body: some View {
-        VStack(spacing: 24) {
-            // Show personalized greeting if user is signed in
-            if let authManager = authManager,
-               authManager.isAuthenticated,
-               let firstName = authManager.localUserData?["name"] as? String,
-               !firstName.isEmpty {
-                Text("Hello, \(firstName)!")
-                    .font(.title)
-                    .fontWeight(.semibold)
-                    .multilineTextAlignment(.center)
-            } else {
-                Text("How can I assist you?")
-                    .font(.title)
-                    .fontWeight(.semibold)
+        TabbedWelcomeView(isDarkMode: isDarkMode, authManager: authManager)
+    }
+}
+
+/// A tabbed welcome view that allows model selection
+struct TabbedWelcomeView: View {
+    let isDarkMode: Bool
+    let authManager: AuthManager?
+    @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
+    @State private var selectedModelId: String = ""
+    
+    private var availableModels: [ModelType] {
+        return AppConfig.shared.availableModels
+    }
+    
+    private var canUseModel: (ModelType) -> Bool {
+        { model in
+            let isAuthenticated = authManager?.isAuthenticated ?? false
+            let hasSubscription = authManager?.hasActiveSubscription ?? false
+            return model.isFree || (isAuthenticated && hasSubscription)
+        }
+    }
+    
+    var body: some View {
+        VStack(spacing: 32) {
+            // Greeting section
+            VStack(spacing: 16) {
+                if let authManager = authManager,
+                   authManager.isAuthenticated,
+                   let firstName = authManager.localUserData?["name"] as? String,
+                   !firstName.isEmpty {
+                    Text("Hello, \(firstName)!")
+                        .font(.title)
+                        .fontWeight(.semibold)
+                        .multilineTextAlignment(.center)
+                } else {
+                    Text("How can I assist you?")
+                        .font(.title)
+                        .fontWeight(.semibold)
+                        .multilineTextAlignment(.center)
+                }
+                
+                Text("This conversation is completely private, nobody can see your messages - not even Tinfoil.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
             }
             
-            Text("This conversation is completely private, nobody can see your messages - not even Tinfoil.")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
+            // Model selection tabs
+            VStack(spacing: 16) {
+                Text("Choose your model")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(.primary)
+                
+                HStack {
+                    Spacer()
+                    HStack(spacing: 16) {
+                        ForEach(availableModels) { model in
+                            ModelTab(
+                                model: model,
+                                isSelected: selectedModelId == model.id,
+                                isDarkMode: isDarkMode,
+                                isEnabled: canUseModel(model),
+                                showPricingLabel: !(authManager?.isAuthenticated == true && authManager?.hasActiveSubscription == true)
+                            ) {
+                                selectModel(model)
+                            }
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 12)
+            }
         }
         .padding(.horizontal, 32)
         .padding(.vertical, 24)
+        .onAppear {
+            selectedModelId = viewModel.currentModel.id
+        }
+        .onChange(of: viewModel.currentModel) { _, newModel in
+            selectedModelId = newModel.id
+        }
+    }
+    
+    private func selectModel(_ model: ModelType) {
+        guard model.id != viewModel.currentModel.id && canUseModel(model) else { return }
+        selectedModelId = model.id
+        viewModel.changeModel(to: model)
+    }
+}
+
+/// Individual model tab component
+struct ModelTab: View {
+    let model: ModelType
+    let isSelected: Bool
+    let isDarkMode: Bool
+    let isEnabled: Bool
+    let showPricingLabel: Bool
+    let onTap: () -> Void
+    
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 4) {
+                // Model icon
+                Image(model.iconName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 20, height: 20)
+                    .opacity(isEnabled ? 1.0 : 0.4)
+                
+                // Model name
+                Text(model.displayName)
+                    .font(.system(size: 9, weight: .medium))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .opacity(isEnabled ? 1.0 : 0.4)
+                
+                // Free/Premium indicator (only shown for non-premium users)
+                if showPricingLabel {
+                    Text(model.isFree ? "Free" : "Premium")
+                        .font(.system(size: 7, weight: .medium))
+                        .foregroundColor(isEnabled ? (model.isFree ? .green : .orange) : .gray)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(isEnabled ? 
+                                      (model.isFree ? Color.green : Color.orange).opacity(0.1) :
+                                      Color.gray.opacity(0.1))
+                        )
+                }
+            }
+            .foregroundColor(isEnabled ? (isSelected ? .primary : .secondary) : .gray)
+            .frame(width: 88, height: 72)
+            .background(
+                ZStack {
+                    // Base background
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                        .opacity(isEnabled ? 1.0 : 0.5)
+                    
+                    // Selected state background
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.blue.opacity(0.15))
+                    }
+                    
+                    // Subtle border for unselected enabled items
+                    if !isSelected && isEnabled {
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(Color.gray.opacity(0.2), lineWidth: 1)
+                    }
+                    
+                    // Selection indicator - small dot in top right
+                    if isSelected {
+                        VStack {
+                            HStack {
+                                Spacer()
+                                Circle()
+                                    .fill(Color.blue)
+                                    .frame(width: 10, height: 10)
+                                    .overlay(
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 6, weight: .bold))
+                                            .foregroundColor(.white)
+                                    )
+                            }
+                            Spacer()
+                        }
+                        .padding(4)
+                    }
+                }
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .scaleEffect(isSelected ? 1.02 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
+        .disabled(!isEnabled)
     }
 }
 
