@@ -9,7 +9,7 @@
 /* Begin PBXBuildFile section */
 		99095BBB2DC2BC1E009C8F44 /* Clerk in Frameworks */ = {isa = PBXBuildFile; productRef = 99095BBA2DC2BC1E009C8F44 /* Clerk */; };
 		9926F7B32DBD497A002E4B00 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 9926F7B22DBD497A002E4B00 /* MarkdownUI */; };
-		9957640E2DF6718100709DB1 /* TinfoilAI in Frameworks */ = {isa = PBXBuildFile; productRef = 9957640D2DF6718100709DB1 /* TinfoilAI */; };
+		993428632E21073100A5B575 /* TinfoilAI in Frameworks */ = {isa = PBXBuildFile; productRef = 993428622E21073100A5B575 /* TinfoilAI */; };
 		D4FD450D5DF249E2A37CA9CD /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 6E93C3925EE14CD689429CE8 /* Sentry */; };
 /* End PBXBuildFile section */
 
@@ -43,7 +43,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				9957640E2DF6718100709DB1 /* TinfoilAI in Frameworks */,
+				993428632E21073100A5B575 /* TinfoilAI in Frameworks */,
 				99095BBB2DC2BC1E009C8F44 /* Clerk in Frameworks */,
 				9926F7B32DBD497A002E4B00 /* MarkdownUI in Frameworks */,
 				D4FD450D5DF249E2A37CA9CD /* Sentry in Frameworks */,
@@ -57,6 +57,7 @@
 			isa = PBXGroup;
 			children = (
 				9909E5C02DBD460C0040357B /* TinfoilChat */,
+				993428612E21073100A5B575 /* Frameworks */,
 				9909E5BF2DBD460C0040357B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -67,6 +68,13 @@
 				9909E5BE2DBD460C0040357B /* TinfoilChat.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		993428612E21073100A5B575 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -93,7 +101,7 @@
 				9926F7B22DBD497A002E4B00 /* MarkdownUI */,
 				99095BBA2DC2BC1E009C8F44 /* Clerk */,
 				6E93C3925EE14CD689429CE8 /* Sentry */,
-				9957640D2DF6718100709DB1 /* TinfoilAI */,
+				993428622E21073100A5B575 /* TinfoilAI */,
 			);
 			productName = TinfoilChat;
 			productReference = 9909E5BE2DBD460C0040357B /* TinfoilChat.app */;
@@ -127,7 +135,7 @@
 				9926F7B12DBD497A002E4B00 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 				99095BB92DC2BC1E009C8F44 /* XCRemoteSwiftPackageReference "clerk-ios" */,
 				265076DEC67642B78D44265D /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
-				9957640C2DF6718100709DB1 /* XCRemoteSwiftPackageReference "tinfoil-swift" */,
+				995767E02E20EFF100709DB1 /* XCRemoteSwiftPackageReference "tinfoil-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9909E5BF2DBD460C0040357B /* Products */;
@@ -324,7 +332,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.3;
+				MARKETING_VERSION = 1.0.4;
 				PRODUCT_BUNDLE_IDENTIFIER = sh.tinfoil.TinfoilChat;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -365,7 +373,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.3;
+				MARKETING_VERSION = 1.0.4;
 				PRODUCT_BUNDLE_IDENTIFIER = sh.tinfoil.TinfoilChat;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -427,7 +435,7 @@
 				minimumVersion = 2.4.1;
 			};
 		};
-		9957640C2DF6718100709DB1 /* XCRemoteSwiftPackageReference "tinfoil-swift" */ = {
+		995767E02E20EFF100709DB1 /* XCRemoteSwiftPackageReference "tinfoil-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tinfoilsh/tinfoil-swift.git";
 			requirement = {
@@ -453,9 +461,9 @@
 			package = 9926F7B12DBD497A002E4B00 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
 			productName = MarkdownUI;
 		};
-		9957640D2DF6718100709DB1 /* TinfoilAI */ = {
+		993428622E21073100A5B575 /* TinfoilAI */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 9957640C2DF6718100709DB1 /* XCRemoteSwiftPackageReference "tinfoil-swift" */;
+			package = 995767E02E20EFF100709DB1 /* XCRemoteSwiftPackageReference "tinfoil-swift" */;
 			productName = TinfoilAI;
 		};
 /* End XCSwiftPackageProductDependency section */

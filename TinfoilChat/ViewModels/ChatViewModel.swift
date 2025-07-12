@@ -189,8 +189,6 @@ class ChatViewModel: ObservableObject {
                 // with non-blocking verification callback
                 client = try await TinfoilAI.create(
                     apiKey: apiKey,
-                    githubRepo: currentModel.repoName,
-                    enclaveURL: currentModel.enclave,
                     nonblockingVerification: { [weak self] passed in
                         Task { @MainActor in
                             guard let self = self else { return }
@@ -377,7 +375,7 @@ class ChatViewModel: ObservableObject {
                 var systemPrompt = AppConfig.shared.systemPrompt
                 
                 // Replace MODEL_NAME placeholder with current model name
-                systemPrompt = systemPrompt.replacingOccurrences(of: "<MODEL_NAME>", with: currentModel.fullName)
+                systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
                 
                 // Replace language placeholder
                 if let chat = currentChat, let language = chat.language {
@@ -679,9 +677,7 @@ class ChatViewModel: ObservableObject {
                 
                 // Create TinfoilAI client configured for audio processing
                 let audioClient = try await TinfoilAI.create(
-                    apiKey: apiKey,
-                    githubRepo: "tinfoilsh/confidential-audio-processing",
-                    enclaveURL: "audio-processing.model.tinfoil.sh"
+                    apiKey: apiKey
                 )
                 
                 // Create transcription query
