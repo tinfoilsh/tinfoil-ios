@@ -593,6 +593,11 @@ struct TabbedWelcomeView: View {
                 }
                 .padding(.vertical, 12)
             }
+            
+            // Subscription prompt for non-premium users
+            if !(authManager?.isAuthenticated == true && authManager?.hasActiveSubscription == true) {
+                subscriptionPrompt
+            }
         }
         .padding(.horizontal, 32)
         .padding(.vertical, 24)
@@ -602,6 +607,46 @@ struct TabbedWelcomeView: View {
         .onChange(of: viewModel.currentModel) { _, newModel in
             selectedModelId = newModel.id
         }
+    }
+    
+    // Subscription prompt view
+    private var subscriptionPrompt: some View {
+        VStack(spacing: 12) {
+            Text("Unlock Premium Models")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.primary)
+            
+            Text("Access our most advanced premium models with a subscription.")
+                .font(.system(size: 14))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(nil)
+            
+            Button(action: {
+                if let url = URL(string: "https://www.tinfoil.sh/pricing") {
+                    UIApplication.shared.open(url)
+                }
+            }) {
+                Text("View Pricing")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(Color.accentPrimary)
+                    .cornerRadius(8)
+            }
+        }
+        .padding(.vertical, 16)
+        .padding(.horizontal, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.accentPrimary.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.accentPrimary.opacity(0.2), lineWidth: 1)
+                )
+        )
+        .padding(.top, 8)
     }
     
     private func selectModel(_ model: ModelType) {
