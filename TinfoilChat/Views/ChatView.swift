@@ -532,6 +532,7 @@ struct TabbedWelcomeView: View {
     let authManager: AuthManager?
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
     @State private var selectedModelId: String = ""
+    @ObservedObject private var settings = SettingsManager.shared
     
     private var availableModels: [ModelType] {
         return AppConfig.shared.availableModels
@@ -550,13 +551,19 @@ struct TabbedWelcomeView: View {
             // Greeting section
             VStack(spacing: 16) {
                 if let authManager = authManager,
-                   authManager.isAuthenticated,
-                   let firstName = authManager.localUserData?["name"] as? String,
-                   !firstName.isEmpty {
-                    Text("Hello, \(firstName)!")
-                        .font(.title)
-                        .fontWeight(.semibold)
-                        .multilineTextAlignment(.center)
+                   authManager.isAuthenticated {
+                    let displayName = getDisplayName(authManager: authManager)
+                    if !displayName.isEmpty {
+                        Text("Hello, \(displayName)!")
+                            .font(.title)
+                            .fontWeight(.semibold)
+                            .multilineTextAlignment(.center)
+                    } else {
+                        Text("How can I assist you?")
+                            .font(.title)
+                            .fontWeight(.semibold)
+                            .multilineTextAlignment(.center)
+                    }
                 } else {
                     Text("How can I assist you?")
                         .font(.title)
@@ -653,6 +660,21 @@ struct TabbedWelcomeView: View {
         guard model.id != viewModel.currentModel.id && canUseModel(model) else { return }
         selectedModelId = model.id
         viewModel.changeModel(to: model)
+    }
+    
+    /// Gets the display name for the user - prioritizes nickname from settings, falls back to first name from auth
+    private func getDisplayName(authManager: AuthManager) -> String {
+        // First, check if user has set a nickname in settings
+        if settings.isPersonalizationEnabled && !settings.nickname.isEmpty {
+            return settings.nickname
+        }
+        
+        // Fall back to first name from auth data
+        if let firstName = authManager.localUserData?["name"] as? String, !firstName.isEmpty {
+            return firstName
+        }
+        
+        return ""
     }
 }
 
