@@ -24,6 +24,7 @@ struct ChatContainer: View {
     @State private var scrollProxy: ScrollViewProxy?
     @State private var dragOffset: CGFloat = 0
     @State private var showAuthView = false
+    @State private var showSettings = false
     @State private var lastBackgroundTime: Date?
     
     private let backgroundTimeThreshold: TimeInterval = 60 // 1 minute in seconds
@@ -54,6 +55,9 @@ struct ChatContainer: View {
         }
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
         }
     }
     
@@ -93,26 +97,25 @@ struct ChatContainer: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 ModelPicker(viewModel: viewModel)
             }
-            // Only show the new chat button for all authenticated users
-            if authManager.isAuthenticated {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: createNewChat) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(.white)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .strokeBorder(.white, lineWidth: 1)
-                                )
-                                .frame(width: 24, height: 24)
-                            
-                            Image(systemName: "plus")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.black)
-                        }
+            // Settings button
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: showSettingsView) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(.white)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .strokeBorder(.white, lineWidth: 1)
+                            )
+                            .frame(width: 24, height: 24)
+                        
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.black)
                     }
                 }
-            } else if !authManager.isAuthenticated {
+            }
+            if !authManager.isAuthenticated {
                 // Show sign in button for non-authenticated users
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: showAuthenticationView) {
@@ -237,6 +240,11 @@ struct ChatContainer: View {
     /// Shows the authentication view
     private func showAuthenticationView() {
         showAuthView = true
+    }
+    
+    /// Shows the settings view
+    private func showSettingsView() {
+        showSettings = true
     }
     
     /// Creates a new chat if the current chat has messages
