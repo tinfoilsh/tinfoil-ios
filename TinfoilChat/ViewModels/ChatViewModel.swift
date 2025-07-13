@@ -391,6 +391,15 @@ class ChatViewModel: ObservableObject {
                     systemPrompt = systemPrompt.replacingOccurrences(of: "{LANGUAGE}", with: "English")
                 }
                 
+                // Add personalization XML if enabled
+                let settingsManager = SettingsManager.shared
+                let personalizationXML = settingsManager.generateUserPreferencesXML()
+                if !personalizationXML.isEmpty {
+                    systemPrompt = systemPrompt.replacingOccurrences(of: "{USER_PREFERENCES}", with: personalizationXML)
+                } else {
+                    systemPrompt = systemPrompt.replacingOccurrences(of: "{USER_PREFERENCES}", with: "")
+                }
+                
                 // Build messages array inline
                 var messages: [ChatQuery.ChatCompletionMessageParam] = [
                     .system(.init(content: .textContent(systemPrompt)))
