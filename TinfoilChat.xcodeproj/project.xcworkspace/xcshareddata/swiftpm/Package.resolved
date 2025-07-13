@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/clerk/clerk-ios",
       "state" : {
-        "revision" : "03733c57176523748d22c9ee44872f74845da64e",
-        "version" : "0.55.0"
+        "revision" : "c03c9595b0c9626a14c79916ee8ea052c8fbb8d9",
+        "version" : "0.59.0"
       }
     },
     {
@@ -106,7 +106,7 @@
       "location" : "https://github.com/tinfoilsh/tinfoil-swift.git",
       "state" : {
         "branch" : "main",
-        "revision" : "0b76e7cfac5af0470d226c6ed338967c8ab7e97c"
+        "revision" : "9c461a1e8d14dadc7c98bb5d8fa5f5883c74e00b"
       }
     }
   ],

@@ -38,6 +38,7 @@ struct VerificationSectionState {
     var status: VerifierStatus
     var error: String?
     var digest: String?
+    var tlsCertificateFingerprint: String?
     var steps: [VerificationStep] = []
 }
 
