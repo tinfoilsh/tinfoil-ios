@@ -31,8 +31,21 @@ struct TinfoilChatApp: App {
                         .accentColor(Color.accentPrimary)
                         .onOpenURL { url in
                             // Handle URL redirects from authentication
-                            // Post notification to check auth state
-                            NotificationCenter.default.post(name: NSNotification.Name("CheckAuthState"), object: nil)
+                            // Immediately check auth state when app reopens from OAuth
+                            Task {
+                                do {
+                                    try await clerk.load()
+                                    if clerk.user != nil {
+                                        await authManager.initializeAuthState()
+                                        // Post immediate completion notification
+                                        NotificationCenter.default.post(name: NSNotification.Name("AuthenticationCompleted"), object: nil)
+                                        NotificationCenter.default.post(name: NSNotification.Name("CheckAuthState"), object: nil)
+                                    }
+                                } catch {
+                                    // Fallback to the slower checking method
+                                    NotificationCenter.default.post(name: NSNotification.Name("CheckAuthState"), object: nil)
+                                }
+                            }
                         }
                         .task {
                             // Configure Clerk only once

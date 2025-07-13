@@ -253,6 +253,8 @@ struct SignUpView: View {
                     await authManager.initializeAuthState()
                     
                     await MainActor.run {
+                        // Post notification to close sidebar and go to main chat view
+                        NotificationCenter.default.post(name: NSNotification.Name("AuthenticationCompleted"), object: nil)
                         onDismiss()
                     }
                 } else {
@@ -340,6 +342,8 @@ struct SignUpView: View {
             
             await MainActor.run {
                 isVerifyingCode = false
+                // Post notification to close sidebar and go to main chat view
+                NotificationCenter.default.post(name: NSNotification.Name("AuthenticationCompleted"), object: nil)
                 onDismiss()
             }
         } catch {
