@@ -24,7 +24,6 @@ struct ModelConfig: Codable {
 /// Remote configuration structure
 struct RemoteConfig: Codable {
     let models: [ModelConfig]
-    let defaultModel: String
     let apiKey: String
     let chatConfig: ChatConfig
     
@@ -93,8 +92,15 @@ class AppConfig: ObservableObject {
     @Published private(set) var isInitialized = false
     @Published private(set) var initializationError: Error?
     
-    // Current model selection - initialized with empty ID and set after config loads
-    @Published var currentModel: ModelType?
+    // Current model selection - persisted across app launches
+    @Published var currentModel: ModelType? {
+        didSet {
+            // Persist the selected model to UserDefaults whenever it changes
+            if let model = currentModel {
+                UserDefaults.standard.set(model.id, forKey: "lastSelectedModel")
+            }
+        }
+    }
     
     // Available models from config
     @Published private(set) var availableModels: [ModelType] = []
@@ -134,12 +140,16 @@ class AppConfig: ObservableObject {
             self.config = remoteConfig
             updateAvailableModels()
             
-            // Confirm current model is still valid or reset to default
+            // If no current model is set, try to load the last selected model
+            if currentModel == nil {
+                loadLastSelectedModel()
+            }
+            
+            // Confirm current model is still valid
             if let currentModel = currentModel,
-               !availableModels.contains(currentModel),
-               let defaultId = config?.defaultModel,
-               let defaultConfig = config?.models.first(where: { $0.id == defaultId }) {
-                self.currentModel = ModelType(id: defaultId, config: defaultConfig)
+               !availableModels.contains(currentModel) {
+                // Fall back to first available model if current is no longer valid
+                self.currentModel = availableModels.first
             }
             
             // Clear any previous error
@@ -174,11 +184,8 @@ class AppConfig: ObservableObject {
             // Update available models from config
             updateAvailableModels()
             
-            // Set initial model from config
-            if let defaultModelId = config?.defaultModel,
-               let defaultConfig = config?.models.first(where: { $0.id == defaultModelId }) {
-                currentModel = ModelType(id: defaultModelId, config: defaultConfig)
-            }
+            // Load last selected model or use first available
+            loadLastSelectedModel()
             
             isInitialized = true
         } catch {
@@ -191,6 +198,17 @@ class AppConfig: ObservableObject {
     private func updateAvailableModels() {
         guard let modelConfigs = config?.models else { return }
         availableModels = modelConfigs.map { ModelType(id: $0.id, config: $0) }
+    }
+    
+    // Load the last selected model from UserDefaults
+    private func loadLastSelectedModel() {
+        if let savedModelId = UserDefaults.standard.string(forKey: "lastSelectedModel"),
+           let modelConfig = config?.models.first(where: { $0.id == savedModelId }) {
+            currentModel = ModelType(id: savedModelId, config: modelConfig)
+        } else {
+            // Fall back to first available model
+            currentModel = availableModels.first
+        }
     }
     
     // MARK: - Public interface

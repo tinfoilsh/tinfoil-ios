@@ -220,7 +220,7 @@ struct ChatContainer: View {
            !viewModel.messages.isEmpty && 
            authManager.isAuthenticated {
             let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
-            viewModel.createNewChat(language: language, modelType: settings.defaultModel)
+            viewModel.createNewChat(language: language)
             messageText = ""
         }
     }
@@ -243,7 +243,7 @@ struct ChatContainer: View {
     private func createNewChat() {
         if !viewModel.messages.isEmpty {
             let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
-            viewModel.createNewChat(language: language, modelType: settings.defaultModel)
+            viewModel.createNewChat(language: language)
             messageText = ""
         }
     }
