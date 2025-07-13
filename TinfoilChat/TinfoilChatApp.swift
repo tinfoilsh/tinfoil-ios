@@ -28,6 +28,7 @@ struct TinfoilChatApp: App {
                     ContentView()
                         .environment(clerk)
                         .environmentObject(authManager)
+                        .accentColor(Color.accentPrimary)
                         .onOpenURL { url in
                             // Handle URL redirects from authentication
                             // Post notification to check auth state

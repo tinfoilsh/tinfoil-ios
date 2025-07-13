@@ -665,7 +665,7 @@ struct ModelTab: View {
                     // Selected state background
                     if isSelected {
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.blue.opacity(0.15))
+                            .fill(Color.accentPrimary.opacity(0.15))
                     }
                     
                     // Subtle border for unselected enabled items
@@ -680,7 +680,7 @@ struct ModelTab: View {
                             HStack {
                                 Spacer()
                                 Circle()
-                                    .fill(Color.blue)
+                                    .fill(Color.accentPrimary)
                                     .frame(width: 10, height: 10)
                                     .overlay(
                                         Image(systemName: "checkmark")
@@ -822,7 +822,7 @@ struct ModelPicker: View {
                                     
                                     if viewModel.currentModel == model {
                                         Image(systemName: "checkmark")
-                                            .foregroundColor(.blue)
+                                            .foregroundColor(Color.accentPrimary)
                                             .font(.system(size: 14, weight: .bold))
                                     }
                                 }

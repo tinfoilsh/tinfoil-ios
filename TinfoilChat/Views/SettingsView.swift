@@ -184,6 +184,7 @@ struct SettingsView: View {
                 List {
                     Section(header: Text("Preferences")) {
                         Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
+                            .tint(Color.accentPrimary)
                         
                         Picker("Default Language", selection: $settings.selectedLanguage) {
                             ForEach(languages, id: \.self) { language in
@@ -195,7 +196,7 @@ struct SettingsView: View {
                     
                     Section(header: Text("Personalization")) {
                         Toggle("Enable Personalization", isOn: $settings.isPersonalizationEnabled)
-                            .tint(.blue)
+                            .tint(Color.accentPrimary)
                         
                         if settings.isPersonalizationEnabled {
                             personalizationContent
@@ -233,7 +234,7 @@ struct SettingsView: View {
             .navigationViewStyle(StackNavigationViewStyle())
         }
         .background(Color(UIColor.systemGroupedBackground))
-        .accentColor(.primary)
+        .accentColor(Color.accentPrimary)
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()
         }
@@ -349,7 +350,7 @@ struct SettingsView: View {
                             .fontWeight(.medium)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background(Color.blue)
+                            .background(Color.accentPrimary)
                             .cornerRadius(8)
                     }
                     .buttonStyle(BorderlessButtonStyle())
@@ -442,7 +443,7 @@ struct TraitSelectionView: View {
                     .padding(.vertical, 4)
                     .background(
                         RoundedRectangle(cornerRadius: 16)
-                            .fill(selectedTraits.contains(trait) ? Color.blue : Color.gray.opacity(0.2))
+                            .fill(selectedTraits.contains(trait) ? Color.accentPrimary : Color.gray.opacity(0.2))
                     )
                     .foregroundColor(selectedTraits.contains(trait) ? .white : .primary)
                 }
