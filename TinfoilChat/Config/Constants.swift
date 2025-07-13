@@ -48,4 +48,10 @@ enum Constants {
         static let termsOfServiceURL = URL(string: "https://www.tinfoil.sh/terms")!
         static let privacyPolicyURL = URL(string: "https://www.tinfoil.sh/privacy")!
     }
+    
+    enum Proxy {
+        static let enclaveURL = "inference.tinfoil.sh"
+        static let githubRepo = "tinfoilsh/confidential-inference-proxy"
+        static let githubReleaseURL = "https://github.com/tinfoilsh/confidential-inference-proxy/releases"
+    }
 } 

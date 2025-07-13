@@ -26,6 +26,7 @@ class ChatViewModel: ObservableObject {
     @Published var isVerifying: Bool = false
     @Published var isVerified: Bool = false
     @Published var verificationError: String? = nil
+    private var hasRunInitialVerification: Bool = false
     
     // Model properties
     @Published var currentModel: ModelType
@@ -131,7 +132,7 @@ class ChatViewModel: ObservableObject {
             updateRateLimitStatus()
         }
         
-        // Initialize Tinfoil client and verify enclave
+        // Initialize Tinfoil client and verify proxy enclave only once
         setupTinfoilClient()
         
         // Setup app lifecycle observers
@@ -159,9 +160,10 @@ class ChatViewModel: ObservableObject {
     }
     
     private func setupTinfoilClient() {
-        // Clear any previous verification error and set status to "in progress"
-        self.verificationError = nil
-        self.isVerifying = true
+        if !hasRunInitialVerification {
+            self.verificationError = nil
+            self.isVerifying = true
+        }
         
         Task {
             do {
@@ -185,36 +187,44 @@ class ChatViewModel: ObservableObject {
                     )
                 }
                 
-                // Create a single Tinfoil client instance using the current model settings
-                // with non-blocking verification callback
-                client = try await TinfoilAI.create(
-                    apiKey: apiKey,
-                    nonblockingVerification: { [weak self] passed in
-                        Task { @MainActor in
-                            guard let self = self else { return }
-                            
-                            // Update verification state based on callback result
-                            self.isVerifying = false
-                            self.isVerified = passed
-                            
-                            if passed {
-                                self.verificationError = nil
-                            } else {
-                                self.verificationError = "Enclave verification failed. The connection may not be secure."
+                if !hasRunInitialVerification {
+                    client = try await TinfoilAI.create(
+                        apiKey: apiKey,
+                        nonblockingVerification: { [weak self] passed in
+                            Task { @MainActor in
+                                guard let self = self else { return }
+                                
+                                self.isVerifying = false
+                                self.isVerified = passed
+                                self.hasRunInitialVerification = true
+                                
+                                if passed {
+                                    self.verificationError = nil
+                                } else {
+                                    self.verificationError = "Enclave verification failed. The connection may not be secure."
+                                }
                             }
                         }
-                    }
-                )
+                    )
+                } else {
+                    client = try await TinfoilAI.create(
+                        apiKey: apiKey,
+                        nonblockingVerification: nil
+                    )
+                }
                 
-                // If we get here, verification was successful 
-                // Tinfoil verifies during init and throws error if it fails
-                self.isVerifying = false
-                self.isVerified = true
+                if !hasRunInitialVerification {
+                    self.isVerifying = false
+                    self.isVerified = true
+                    self.hasRunInitialVerification = true
+                }
 
             } catch {
-                self.isVerifying = false
-                self.isVerified = false
-                self.verificationError = error.localizedDescription
+                if !hasRunInitialVerification {
+                    self.isVerifying = false
+                    self.isVerified = false
+                    self.verificationError = error.localizedDescription
+                }
             }
         }
     }
@@ -248,9 +258,6 @@ class ChatViewModel: ObservableObject {
         // Select the new chat
         selectChat(newChat)
         saveChats()
-        
-        // Recreate the secure client for the new chat session
-        setupTinfoilClient()
     }
     
     /// Selects a chat as the current chat
@@ -810,17 +817,6 @@ class ChatViewModel: ObservableObject {
             updateChat(chat)
         }
         
-        // Clear the current client
-        self.client = nil
-        
-        // Reset verification state
-        self.isVerified = false
-        self.isVerifying = false
-        self.verificationError = nil
-        
-        // Reinitialize the Tinfoil client for the new model
-        setupTinfoilClient()
-
         // Notify of successful model change with haptic feedback
         Chat.triggerSuccessFeedback()
     }

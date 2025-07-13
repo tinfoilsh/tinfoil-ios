@@ -168,7 +168,7 @@ struct VerifierView: View {
                     measurements: verificationState.code.digest,
                     steps: verificationState.code.steps,
                     links: [
-                        ("GitHub Release", chatViewModel.currentModel.githubReleaseURL)
+                        ("GitHub Release", Constants.Proxy.githubReleaseURL)
                     ],
                     stepKey: VerificationStepConfig.codeIntegrity.key
                 )
@@ -180,7 +180,8 @@ struct VerifierView: View {
                     error: verificationState.runtime.error,
                     measurements: verificationState.runtime.digest,
                     steps: verificationState.runtime.steps,
-                    stepKey: VerificationStepConfig.remoteAttestation.key
+                    stepKey: VerificationStepConfig.remoteAttestation.key,
+                    tlsCertificateFingerprint: verificationState.runtime.tlsCertificateFingerprint
                 )
                 
                 ProcessStepView(
@@ -261,12 +262,6 @@ struct VerifierView: View {
             // Update the chatViewModel to show verification is in progress
             chatViewModel.isVerifying = true
             
-            // Set all ProcessStepViews to show they are being freshly verified
-            // We'll do this by posting a notification that all views can observe
-            NotificationCenter.default.post(
-                name: Notification.Name("StartingFreshVerification"),
-                object: nil
-            )
         }
 
         // Create verification callbacks to update UI as steps complete
@@ -337,19 +332,22 @@ struct VerifierView: View {
             }
         )
         
-        // Create a secure client instance
+        // Create a secure client instance using proxy constants
         let secureClient = SecureClient(
-            githubRepo: chatViewModel.currentModel.repoName,
-            enclaveURL: chatViewModel.currentModel.enclave,
+            githubRepo: Constants.Proxy.githubRepo,
+            enclaveURL: Constants.Proxy.enclaveURL,
             callbacks: callbacks
         )
         
         // Run the verification process
         do {
             // This will trigger callbacks as each step completes
-            let _ = try await secureClient.verify()
-            // Note: We don't need to handle the result directly here as the callbacks
-            // will update the UI as each step completes
+            let verificationResult = try await secureClient.verify()
+            
+            // Update UI with TLS certificate fingerprint from the final result
+            await MainActor.run {
+                self.verificationState.runtime.tlsCertificateFingerprint = verificationResult.publicKeyFP
+            }
         } catch {
             // Handle any unexpected errors not caught by callbacks
             await MainActor.run {
@@ -437,12 +435,11 @@ struct ProcessStepView: View {
     let links: [(text: String, url: String)]?
     let children: AnyView?
     let stepKey: String
+    let tlsCertificateFingerprint: String?
     
     @Environment(\.colorScheme) private var colorScheme
     @State private var isOpen: Bool = false
     
-    // Track if this is from initial state or from verify again
-    @State private var hasBeenVerified: Bool = false
     
     init(
         title: String,
@@ -453,6 +450,7 @@ struct ProcessStepView: View {
         steps: [VerificationStep],
         links: [(text: String, url: String)]? = nil,
         stepKey: String,
+        tlsCertificateFingerprint: String? = nil,
         @ViewBuilder children: () -> AnyView = { AnyView(EmptyView()) }
     ) {
         self.title = title
@@ -464,6 +462,7 @@ struct ProcessStepView: View {
         self.links = links
         self.children = children()
         self.stepKey = stepKey
+        self.tlsCertificateFingerprint = tlsCertificateFingerprint
     }
     
     var body: some View {
@@ -510,24 +509,6 @@ struct ProcessStepView: View {
         }
         // Animate layout changes for a "bouncy" expand/collapse.
         .animation(.spring(response: 0.5, dampingFraction: 0.7), value: isOpen)
-        .onAppear {
-            // Listen for fresh verification notifications
-            NotificationCenter.default.addObserver(
-                forName: Notification.Name("StartingFreshVerification"),
-                object: nil,
-                queue: .main
-            ) { _ in
-                hasBeenVerified = true
-            }
-        }
-        .onDisappear {
-            // Clean up notification observer
-            NotificationCenter.default.removeObserver(
-                self,
-                name: Notification.Name("StartingFreshVerification"),
-                object: nil
-            )
-        }
     }
     
     /// The expanded details, broken out for clarity.
@@ -567,8 +548,8 @@ struct ProcessStepView: View {
                     )
             }
             
-            // Only show measurements if they exist AND we've done a fresh verification
-            if let measurements = measurements, !measurements.isEmpty, hasBeenVerified {
+            // Show measurements if available
+            if let measurements = measurements, !measurements.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(stepKey == "CODE_INTEGRITY" ? 
                         "Source binary digest" : 
@@ -603,10 +584,16 @@ struct ProcessStepView: View {
                 }
             }
             
-            // Only show children (measurement diff) if we've done a fresh verification
-            if hasBeenVerified {
-                children
+            
+            // Show TLS certificate fingerprint for runtime attestation
+            if stepKey == "REMOTE_ATTESTATION",
+               let tlsFingerprint = tlsCertificateFingerprint,
+               !tlsFingerprint.isEmpty {
+                TLSCertificateFingerprintView(fingerprint: tlsFingerprint)
             }
+            
+            // Show additional children content
+            children
         }
         .padding()
         .background(
@@ -620,6 +607,71 @@ struct ProcessStepView: View {
                         radius: 2, x: 0, y: 1)
         )
         .padding(.top, 4)
+    }
+}
+
+// MARK: - TLSCertificateFingerprintView
+
+struct TLSCertificateFingerprintView: View {
+    let fingerprint: String
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var showCopiedToast = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("TLS Certificate Fingerprint").font(.headline)
+            Text("Fingerprint of the TLS certificate used by the enclave")
+                .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                .font(.subheadline)
+            
+            HStack {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(fingerprint)
+                        .font(.system(.subheadline, design: .monospaced))
+                        .padding(12)
+                }
+                
+                Button {
+                    UIPasteboard.general.string = fingerprint
+                    withAnimation {
+                        showCopiedToast = true
+                    }
+                    
+                    // Hide toast after 2 seconds
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        withAnimation {
+                            showCopiedToast = false
+                        }
+                    }
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .padding(.trailing, 8)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(colorScheme == .dark ? 
+                          Color(.systemGray5) : 
+                          Color(.systemFill))
+            )
+            .overlay(
+                showCopiedToast ? 
+                    Text("Copied!")
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.8))
+                        .foregroundColor(.white)
+                        .cornerRadius(4)
+                        .offset(y: -30)
+                        .transition(.opacity)
+                : nil
+            )
+        }
+        .padding(.top, 10)
     }
 }
 
