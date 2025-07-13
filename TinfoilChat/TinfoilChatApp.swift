@@ -25,29 +25,30 @@ struct TinfoilChatApp: App {
         WindowGroup {
             Group {
                 if appConfig.isInitialized {
-                    ContentView()
-                        .environment(clerk)
-                        .environmentObject(authManager)
-                        .accentColor(Color.accentPrimary)
-                        .onOpenURL { url in
-                            // Handle URL redirects from authentication
-                            // Immediately check auth state when app reopens from OAuth
-                            Task {
-                                do {
-                                    try await clerk.load()
-                                    if clerk.user != nil {
-                                        await authManager.initializeAuthState()
-                                        // Post immediate completion notification
-                                        NotificationCenter.default.post(name: NSNotification.Name("AuthenticationCompleted"), object: nil)
+                    if appConfig.isAppVersionSupported {
+                        ContentView()
+                            .environment(clerk)
+                            .environmentObject(authManager)
+                            .accentColor(Color.accentPrimary)
+                            .onOpenURL { url in
+                                // Handle URL redirects from authentication
+                                // Immediately check auth state when app reopens from OAuth
+                                Task {
+                                    do {
+                                        try await clerk.load()
+                                        if clerk.user != nil {
+                                            await authManager.initializeAuthState()
+                                            // Post immediate completion notification
+                                            NotificationCenter.default.post(name: NSNotification.Name("AuthenticationCompleted"), object: nil)
+                                            NotificationCenter.default.post(name: NSNotification.Name("CheckAuthState"), object: nil)
+                                        }
+                                    } catch {
+                                        // Fallback to the slower checking method
                                         NotificationCenter.default.post(name: NSNotification.Name("CheckAuthState"), object: nil)
                                     }
-                                } catch {
-                                    // Fallback to the slower checking method
-                                    NotificationCenter.default.post(name: NSNotification.Name("CheckAuthState"), object: nil)
                                 }
                             }
-                        }
-                        .task {
+                            .task {
                             // Configure Clerk only once
                             if !isClerkConfigured {
                                 clerk.configure(publishableKey: AppConfig.shared.clerkPublishableKey)
@@ -78,6 +79,9 @@ struct TinfoilChatApp: App {
                             
                             }
                         }
+                    } else {
+                        UpdateRequiredView()
+                    }
                 } else if let error = appConfig.initializationError {
                     if !appConfig.networkMonitor.isConnected {
                         NoInternetView {

@@ -23,6 +23,7 @@ struct RemoteConfig: Codable {
     let models: [ModelConfig]
     let apiKey: String
     let chatConfig: ChatConfig
+    let minSupportedVersion: String
     
     struct ChatConfig: Codable {
         let maxMessagesPerRequest: Int
@@ -108,6 +109,7 @@ class AppConfig: ObservableObject {
         
         // Load remote configuration
         Task {
+            // await loadMockConfig()
             await loadRemoteConfig()
         }
     }
@@ -246,6 +248,46 @@ class AppConfig: ObservableObject {
     
     var systemPrompt: String {
         config!.chatConfig.systemPrompt
+    }
+    
+    var minSupportedVersion: String {
+        config?.minSupportedVersion ?? "1.0.0"
+    }
+    
+    /// Current app version from bundle
+    var currentAppVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }
+    
+    /// Check if current app version is supported
+    var isAppVersionSupported: Bool {
+        return compareVersions(currentAppVersion, minSupportedVersion) != .orderedAscending
+    }
+    
+    /// Check if app update is required
+    var isUpdateRequired: Bool {
+        return !isAppVersionSupported
+    }
+    
+    /// Compare two version strings (e.g., "1.0.5" vs "1.0.3")
+    private func compareVersions(_ version1: String, _ version2: String) -> ComparisonResult {
+        let components1 = version1.split(separator: ".").compactMap { Int($0) }
+        let components2 = version2.split(separator: ".").compactMap { Int($0) }
+        
+        let maxLength = max(components1.count, components2.count)
+        
+        for i in 0..<maxLength {
+            let v1 = i < components1.count ? components1[i] : 0
+            let v2 = i < components2.count ? components2[i] : 0
+            
+            if v1 < v2 {
+                return .orderedAscending
+            } else if v1 > v2 {
+                return .orderedDescending
+            }
+        }
+        
+        return .orderedSame
     }
     
     /// Get model types in the order defined in the config file
