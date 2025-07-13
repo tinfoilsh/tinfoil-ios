@@ -574,22 +574,20 @@ struct TabbedWelcomeView: View {
                     .font(.system(size: 18, weight: .medium))
                     .foregroundColor(.primary)
                 
-                HStack {
-                    Spacer()
-                    HStack(spacing: 16) {
-                        ForEach(availableModels) { model in
-                            ModelTab(
-                                model: model,
-                                isSelected: selectedModelId == model.id,
-                                isDarkMode: isDarkMode,
-                                isEnabled: canUseModel(model),
-                                showPricingLabel: !(authManager?.isAuthenticated == true && authManager?.hasActiveSubscription == true)
-                            ) {
-                                selectModel(model)
-                            }
+                LazyVGrid(columns: [
+                    GridItem(.adaptive(minimum: 88, maximum: 120), spacing: 16)
+                ], spacing: 16) {
+                    ForEach(availableModels) { model in
+                        ModelTab(
+                            model: model,
+                            isSelected: selectedModelId == model.id,
+                            isDarkMode: isDarkMode,
+                            isEnabled: canUseModel(model),
+                            showPricingLabel: !(authManager?.isAuthenticated == true && authManager?.hasActiveSubscription == true)
+                        ) {
+                            selectModel(model)
                         }
                     }
-                    Spacer()
                 }
                 .padding(.vertical, 12)
             }
