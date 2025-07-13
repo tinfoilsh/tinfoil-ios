@@ -94,24 +94,26 @@ struct ChatContainer: View {
                     .scaledToFit()
                     .frame(height: 28)
             }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                ModelPicker(viewModel: viewModel)
-            }
-            // Settings button
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: showSettingsView) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(.white)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(.white, lineWidth: 1)
-                            )
-                            .frame(width: 24, height: 24)
-                        
-                        Image(systemName: "gearshape.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.black)
+            if authManager.isAuthenticated {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    ModelPicker(viewModel: viewModel)
+                }
+                // Settings button
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: showSettingsView) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(.white)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .strokeBorder(.white, lineWidth: 1)
+                                )
+                                .frame(width: 24, height: 24)
+                            
+                            Image(systemName: "gearshape.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.black)
+                        }
                     }
                 }
             }
