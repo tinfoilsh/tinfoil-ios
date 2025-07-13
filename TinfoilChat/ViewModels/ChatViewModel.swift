@@ -34,9 +34,6 @@ class ChatViewModel: ObservableObject {
     // View state for verifier
     @Published var verifierView: VerifierView?
     
-    // Rate limiting properties
-    @Published var isRateLimited: Bool = false
-    @Published var messagesRemaining: Int = Constants.RateLimits.freeUserMaxMessages
     
     // Speech-to-text properties
     @Published var isRecording: Bool = false
@@ -128,8 +125,6 @@ class ChatViewModel: ObservableObject {
             currentChat = newChat
             chats = [newChat]
             
-            // Update rate limit status
-            updateRateLimitStatus()
         }
         
         // Initialize Tinfoil client and verify proxy enclave only once
@@ -316,24 +311,6 @@ class ChatViewModel: ObservableObject {
     func sendMessage(text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
-        // Check rate limiting only for users who are not authenticated
-        let isAuthenticated = authManager?.isAuthenticated ?? false
-        if !isAuthenticated {
-            // Check if user has exceeded rate limit
-            let rateLimitManager = RateLimitManager.shared
-            if rateLimitManager.isRateLimited {
-                isRateLimited = true
-                return
-            }
-            
-            // Increment message count
-            if rateLimitManager.incrementAndCheckLimit() {
-                isRateLimited = true
-            }
-            
-            // Update messages remaining
-            updateRateLimitStatus()
-        }
         
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -769,21 +746,6 @@ class ChatViewModel: ObservableObject {
         }
     }
     
-    /// Updates rate limiting status for free users
-    private func updateRateLimitStatus() {
-        // If user is authenticated, they are not rate limited
-        let isAuthenticated = authManager?.isAuthenticated ?? false
-        if isAuthenticated {
-            isRateLimited = false
-            messagesRemaining = Constants.RateLimits.freeUserMaxMessages
-            return
-        }
-        
-        // Get status from rate limit manager for non-authenticated users
-        let rateLimitManager = RateLimitManager.shared
-        isRateLimited = rateLimitManager.isRateLimited
-        messagesRemaining = rateLimitManager.messagesRemaining
-    }
     
     // MARK: - Model Management
     
@@ -849,14 +811,6 @@ class ChatViewModel: ObservableObject {
             changeModel(to: firstModel)
         }
         
-        // Update rate limit status - this will reset rate limiting for authenticated users
-        updateRateLimitStatus()
-        
-        // If authenticated user just logged in, clear rate limiting state
-        if isAuthenticated {
-            isRateLimited = false
-            RateLimitManager.shared.resetCounter()
-        }
         
         // If user upgraded to premium, load saved chats if any
         if isAuthenticated && hasActiveSubscription && chats.count <= 1 {
@@ -882,8 +836,6 @@ class ChatViewModel: ObservableObject {
         currentChat = newChat
         chats = [newChat]
         
-        // Update rate limit status for non-authenticated state
-        updateRateLimitStatus()
     }
     
     /// Handle sign-in by loading user's saved chats
@@ -899,8 +851,6 @@ class ChatViewModel: ObservableObject {
             }
         }
         
-        // Update rate limit status for authenticated state
-        updateRateLimitStatus()
     }
 }
 
