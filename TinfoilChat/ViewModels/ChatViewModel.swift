@@ -162,16 +162,8 @@ class ChatViewModel: ObservableObject {
         
         Task {
             do {
-                // Get authentication status
-                let isAuthenticated = authManager?.isAuthenticated ?? false
-                let hasSubscription = authManager?.hasActiveSubscription ?? false
-                
-                // Get appropriate API key based on model and authentication status
-                let apiKey = await AppConfig.shared.getApiKey(
-                    forModel: currentModel,
-                    isAuthenticated: isAuthenticated,
-                    hasSubscription: hasSubscription
-                )
+                // Get the global API key
+                let apiKey = await AppConfig.shared.getApiKey()
                 
                 // Ensure we have a valid API key
                 guard !apiKey.isEmpty else {
@@ -657,11 +649,7 @@ class ChatViewModel: ObservableObject {
                 let isAuthenticated = authManager?.isAuthenticated ?? false
                 let hasSubscription = authManager?.hasActiveSubscription ?? false
                 
-                let apiKey = await AppConfig.shared.getApiKey(
-                    forModel: currentModel,
-                    isAuthenticated: isAuthenticated,
-                    hasSubscription: hasSubscription
-                )
+                let apiKey = await AppConfig.shared.getApiKey()
                 
                 guard !apiKey.isEmpty else {
                     throw NSError(domain: "TinfoilChat", code: 401,

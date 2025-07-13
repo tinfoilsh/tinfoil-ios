@@ -300,8 +300,12 @@ class APIKeyManager {
     
     private var apiKey: String?
     private let apiKeyEndpoint = "\(Constants.API.baseURL)/api/keys/chat"
+    private let userDefaultsKey = "tinfoil_premium_api_key"
     
-    private init() {}
+    private init() {
+        // Load cached API key from UserDefaults on init
+        self.apiKey = UserDefaults.standard.string(forKey: userDefaultsKey)
+    }
     
     /// Retrieves the API key for premium models
     /// - Returns: API key string or empty string if unavailable
@@ -341,8 +345,9 @@ class APIKeyManager {
                     // Parse response
                     if let responseDict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                        let key = responseDict["key"] as? String {
-                        // Cache key
+                        // Cache key in memory and UserDefaults
                         self.apiKey = key
+                        UserDefaults.standard.set(key, forKey: userDefaultsKey)
                         return key
                     }
                     
@@ -366,6 +371,7 @@ class APIKeyManager {
     /// Clears the cached API key
     func clearApiKey() {
         apiKey = nil
+        UserDefaults.standard.removeObject(forKey: userDefaultsKey)
     }
 }
 

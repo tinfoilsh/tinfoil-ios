@@ -225,20 +225,8 @@ class AppConfig: ObservableObject {
         config!.apiKey
     }
     
-    /// Get API key, fetching from server if needed for premium models
-    func getApiKey(forModel model: ModelType, isAuthenticated: Bool, hasSubscription: Bool) async -> String {
-        // Check if model is free
-        guard !model.isFree else {
-            // Return default API key for free models
-            return config?.apiKey ?? "tinfoil-default-api-key"
-        }
-        
-        // Premium model, check authentication status
-        guard isAuthenticated && hasSubscription else {
-            return ""
-        }
-        
-        // Fetch premium API key
+    /// Get the global API key
+    func getApiKey() async -> String {
         return await APIKeyManager.shared.getApiKey()
     }
     
