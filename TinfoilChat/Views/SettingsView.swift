@@ -25,25 +25,12 @@ class SettingsManager: ObservableObject {
         }
     }
     
-    @Published var defaultModel: ModelType {
-        didSet {
-            UserDefaults.standard.set(defaultModel.id, forKey: "defaultModel")
-        }
-    }
     
     private init() {
         // Initialize with stored values or defaults if not present
         self.hapticFeedbackEnabled = UserDefaults.standard.object(forKey: "hapticFeedbackEnabled") as? Bool ?? true
         self.selectedLanguage = UserDefaults.standard.string(forKey: "selectedLanguage") ?? "System"
         
-        // For the model, get the ID from UserDefaults or use a default
-        let savedModelId = UserDefaults.standard.string(forKey: "defaultModel") ?? ""
-        
-        // Find the ModelConfig for this ID
-        let modelConfigs = AppConfig.shared.config?.models ?? []
-        let config = modelConfigs.first(where: { $0.id == savedModelId }) ?? modelConfigs.first ?? ModelConfig(id: "", displayName: "Default", iconName: "defaultIcon", description: "", fullName: "", githubRepo: "", enclaveURL: "", modelId: "", isFree: true, githubReleaseURL: "")
-        
-        self.defaultModel = ModelType(id: config.id, config: config)
         
         // Ensure defaults are saved if they weren't present
         if UserDefaults.standard.object(forKey: "hapticFeedbackEnabled") == nil {
@@ -51,9 +38,6 @@ class SettingsManager: ObservableObject {
         }
         if UserDefaults.standard.string(forKey: "selectedLanguage") == nil {
             UserDefaults.standard.set("System", forKey: "selectedLanguage")
-        }
-        if UserDefaults.standard.string(forKey: "defaultModel") == nil && !savedModelId.isEmpty {
-            UserDefaults.standard.set(savedModelId, forKey: "defaultModel")
         }
     }
 }
@@ -64,7 +48,6 @@ struct SettingsView: View {
     @ObservedObject private var settings = SettingsManager.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAuthView = false
-    @State private var availableModels: [ModelType] = []
     
     init() {
         let appearance = UINavigationBarAppearance()
@@ -113,20 +96,6 @@ struct SettingsView: View {
                         }
                         .pickerStyle(.navigationLink)
                         
-                        Picker("Default Model", selection: $settings.defaultModel) {
-                            // Use the pre-loaded available models
-                            ForEach(availableModels) { model in
-                                HStack {
-                                    Image(model.iconName)
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(width: 20, height: 20)
-                                    Text(model.modelNameSimple)
-                                }
-                                .tag(model)
-                            }
-                        }
-                        .pickerStyle(.navigationLink)
                     }
                     
                     Section(header: Text("Legal")) {
@@ -156,12 +125,6 @@ struct SettingsView: View {
             }
             .navigationViewStyle(StackNavigationViewStyle())
         }
-        .onAppear {
-            // Load available models when view appears
-            Task {
-                await loadAvailableModels()
-            }
-        }
         .background(Color(UIColor.systemGroupedBackground))
         .accentColor(.primary)
         .sheet(isPresented: $showAuthView) {
@@ -169,14 +132,6 @@ struct SettingsView: View {
         }
     }
     
-    // Function to load available models safely
-    @MainActor
-    private func loadAvailableModels() async {
-        self.availableModels = AppConfig.shared.filteredModelTypes(
-            isAuthenticated: authManager.isAuthenticated,
-            hasActiveSubscription: authManager.hasActiveSubscription
-        )
-    }
     
     // Panel header matching the style from VerifierViewController
     private var panelHeader: some View {

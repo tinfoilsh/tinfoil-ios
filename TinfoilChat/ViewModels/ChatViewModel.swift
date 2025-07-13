@@ -101,7 +101,7 @@ class ChatViewModel: ObservableObject {
     }
     
     init(authManager: AuthManager? = nil) {
-        // Initialize with first available model if current model is not set
+        // Initialize with last selected model from AppConfig (which now persists)
         self.currentModel = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first!
         
         // Store auth manager reference
@@ -809,6 +809,7 @@ class ChatViewModel: ObservableObject {
         
         // Update model settings
         self.currentModel = modelType
+        // This will trigger the didSet in AppConfig which persists to UserDefaults
         AppConfig.shared.currentModel = modelType
         
         // Update the current chat's model if requested
