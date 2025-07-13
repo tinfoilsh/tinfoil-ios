@@ -7,10 +7,7 @@
             "iconName": "llama-icon",
             "description": "High-performance multilingual language model.",
             "fullName": "Llama 3.3 70B",
-            "githubRepo": "tinfoilsh/confidential-llama3-3-70b",
-            "enclaveURL": "llama3-3-70b.model.tinfoil.sh",
             "modelId": "llama3-3-70b",
-            "githubReleaseURL": "https://github.com/tinfoilsh/confidential-llama3-3-70b/releases",
             "parameters": "70 billion",
             "contextWindow": "64k tokens",
             "recommendedUse": "Ideal for assistant-style chat, multilingual tasks, and general text generation. Should be deployed as part of a system with additional safety guardrails.",
@@ -24,10 +21,7 @@
             "iconName": "deepseek-icon",
             "description": "High-performance reasoning model.",
             "fullName": "DeepSeek-R1-Distill-Llama-70B",
-            "githubRepo": "tinfoilsh/confidential-deepseek-r1-70b-prod",
-            "enclaveURL": "deepseek-r1-70b-p.model.tinfoil.sh",
             "modelId": "deepseek-r1-70b",
-            "githubReleaseURL": "https://github.com/tinfoilsh/confidential-deepseek-r1-70b-prod/releases",
             "parameters": "70.6 billion",
             "contextWindow": "64k tokens"
         },
@@ -38,10 +32,7 @@
             "iconName": "mistral-icon",
             "description": "Advanced multimodal model with long context window.",
             "fullName": "Mistral-Small-3-1-24B",
-            "githubRepo": "tinfoilsh/confidential-mistral-small-3-1",
-            "enclaveURL": "mistral-s-3-1-24b-p.model.tinfoil.sh",
             "modelId": "mistral-small-3-1-24b",
-            "githubReleaseURL": "https://github.com/tinfoilsh/confidential-mistral-small-3-1/releases",
             "parameters": "24 billion",
             "contextWindow": "128k tokens"
         }

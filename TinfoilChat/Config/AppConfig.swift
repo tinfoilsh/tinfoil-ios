@@ -14,11 +14,8 @@ struct ModelConfig: Codable {
     let iconName: String
     let description: String
     let fullName: String
-    let githubRepo: String
-    let enclaveURL: String
     let modelId: String
     let isFree: Bool
-    let githubReleaseURL: String
 }
 
 /// Remote configuration structure
@@ -59,11 +56,7 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
     var modelNameSimple: String { displayName }
     var modelName: String { config.modelId }
     var image: String { "\(Constants.UI.modelIconPath)\(iconName)\(Constants.UI.modelIconExtension)" }
-    var enclave: String { config.enclaveURL }
-    var endpoint: String { "\(Constants.API.endpointProtocol)\(enclave)\(Constants.API.chatCompletionsEndpoint)" }
-    var repoName: String { config.githubRepo }
     var name: String { fullName }
-    var githubReleaseURL: String { config.githubReleaseURL }
     
     // Add property to check if model is free
     var isFree: Bool { config.isFree }
@@ -225,13 +218,6 @@ class AppConfig: ObservableObject {
         return config?.models.first { $0.id == type.id }
     }
     
-    var githubRepo: String {
-        getModelConfig(currentModel!)!.githubRepo
-    }
-    
-    var enclaveURL: String {
-        getModelConfig(currentModel!)!.enclaveURL
-    }
     
     var apiKey: String {
         config!.apiKey
