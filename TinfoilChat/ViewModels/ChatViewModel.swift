@@ -369,6 +369,15 @@ class ChatViewModel: ObservableObject {
                     systemPrompt = systemPrompt.replacingOccurrences(of: "{USER_PREFERENCES}", with: "")
                 }
                 
+                // Add current date/time and timezone
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+                let currentDateTime = dateFormatter.string(from: Date())
+                let timezone = TimeZone.current.abbreviation() ?? TimeZone.current.identifier
+                
+                systemPrompt = systemPrompt.replacingOccurrences(of: "{CURRENT_DATETIME}", with: currentDateTime)
+                systemPrompt = systemPrompt.replacingOccurrences(of: "{TIMEZONE}", with: timezone)
+                
                 // Build messages array inline
                 var messages: [ChatQuery.ChatCompletionMessageParam] = [
                     .system(.init(content: .textContent(systemPrompt)))
