@@ -229,6 +229,15 @@ struct SettingsView: View {
                 }
                 .navigationBarHidden(true)
                 .listStyle(InsetGroupedListStyle())
+                .onTapGesture {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+                .simultaneousGesture(
+                    DragGesture()
+                        .onChanged { _ in
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
+                )
             }
             .navigationViewStyle(StackNavigationViewStyle())
         }
