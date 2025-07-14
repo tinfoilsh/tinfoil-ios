@@ -201,7 +201,6 @@ struct SettingsView: View {
                         if settings.isPersonalizationEnabled {
                             personalizationContent
                                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                                .listRowBackground(Color.clear)
                                 .buttonStyle(PlainButtonStyle())
                         }
                     }
@@ -230,6 +229,15 @@ struct SettingsView: View {
                 }
                 .navigationBarHidden(true)
                 .listStyle(InsetGroupedListStyle())
+                .onTapGesture {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+                .simultaneousGesture(
+                    DragGesture()
+                        .onChanged { _ in
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
+                )
             }
             .navigationViewStyle(StackNavigationViewStyle())
         }
@@ -254,7 +262,7 @@ struct SettingsView: View {
     private var personalizationContent: some View {
         Group {
             VStack(alignment: .leading, spacing: 8) {
-                Text("How should Tin call you?")
+                Text("What should Tin call you?")
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.primary)
@@ -266,7 +274,7 @@ struct SettingsView: View {
             }
             
             VStack(alignment: .leading, spacing: 8) {
-                Text("What do you do?")
+                Text("What's your occupation?")
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.primary)
