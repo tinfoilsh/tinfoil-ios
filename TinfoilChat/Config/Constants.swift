@@ -37,12 +37,6 @@ enum Constants {
         static let baseURL = "https://api.tinfoil.sh"
     }
     
-    enum RateLimits {
-        static let freeUserMaxMessages = 15
-        static let freeUserTimeWindowHours = 12
-        static let userDefaultsTimeKey = "lastResetTimestamp"
-        static let userDefaultsCountKey = "messageCount"
-    }
     
     enum Legal {
         static let termsOfServiceURL = URL(string: "https://www.tinfoil.sh/terms")!

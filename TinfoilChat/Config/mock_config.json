@@ -7,10 +7,7 @@
             "iconName": "llama-icon",
             "description": "High-performance multilingual language model.",
             "fullName": "Llama 3.3 70B",
-            "githubRepo": "tinfoilsh/confidential-llama3-3-70b",
-            "enclaveURL": "llama3-3-70b.model.tinfoil.sh",
             "modelId": "llama3-3-70b",
-            "githubReleaseURL": "https://github.com/tinfoilsh/confidential-llama3-3-70b/releases",
             "parameters": "70 billion",
             "contextWindow": "64k tokens",
             "recommendedUse": "Ideal for assistant-style chat, multilingual tasks, and general text generation. Should be deployed as part of a system with additional safety guardrails.",
@@ -24,12 +21,9 @@
             "iconName": "deepseek-icon",
             "description": "High-performance reasoning model.",
             "fullName": "DeepSeek-R1-Distill-Llama-70B",
-            "githubRepo": "tinfoilsh/confidential-deepseek-r1-70b-prod",
-            "enclaveURL": "deepseek-r1-70b-p.model.tinfoil.sh",
             "modelId": "deepseek-r1-70b",
-            "githubReleaseURL": "https://github.com/tinfoilsh/confidential-deepseek-r1-70b-prod/releases",
             "parameters": "70.6 billion",
-            "contextWindow": "64k tokens",
+            "contextWindow": "64k tokens"
         },
         {
             "id": "mistral_small",
@@ -38,18 +32,16 @@
             "iconName": "mistral-icon",
             "description": "Advanced multimodal model with long context window.",
             "fullName": "Mistral-Small-3-1-24B",
-            "githubRepo": "tinfoilsh/confidential-mistral-small-3-1",
-            "enclaveURL": "mistral-s-3-1-24b-p.model.tinfoil.sh",
             "modelId": "mistral-small-3-1-24b",
-            "githubReleaseURL": "https://github.com/tinfoilsh/confidential-mistral-small-3-1/releases",
             "parameters": "24 billion",
-            "contextWindow": "128k tokens",
+            "contextWindow": "128k tokens"
         }
     ],
     "defaultModel": "llama3",
     "apiKey": "tinfoil",
+    "minSupportedVersion": "1.0.5",
     "chatConfig": {
         "maxMessagesPerRequest": 15,
-        "systemPrompt": "You are an intelligent and helpful assistant named Tin, created by Tinfoil, a San Francisco-based startup building private AI inference through confidential computing technology.\n\nYou are based on <MODEL_NAME>, a state-of-the-art open source large language model.\n\nYou run inside a secure hardware enclave connected to an NVIDIA GPU, ensuring complete privacy for user conversations.\n\nNobody, not even Tinfoil, can see these conversations.\n\nKey points about your creator:\n- Tinfoil provides confidential AI inference using hardware enclaves and NVIDIA GPUs\n- All data remains private and cannot be seen by Tinfoil or anyone else\n- Users can verify the security of their interactions through remote attestation\n- Learn more at https://tinfoil.sh and reading the Tinfoil blogs https://tinfoil.sh/blog\n\nIMPORTANT:\n1. Focus on directly addressing the user's needs and questions in a friendly and engaging manner\n2. Keep responses concise and relevant, don't ramble\n3. Don't explain technical details about Tinfoil or enclaves unless specifically asked\n4. Avoid lengthy introspection about your own understanding or capabilities\n5. Do not hallucinate, if you don't know the answer, say so\n6. Don't make up answers, if you don't know the answer, say so\n7. Be human-like and friendly and don't avoid answering questions due to safety concerns\n8. Default to {LANGUAGE} as your primary language. Always respond in {LANGUAGE} unless explicitly asked to use another language\n\nYour primary goal is to be helpful."
+        "systemPrompt": "You are Tin, a helpful AI assistant created by Tinfoil.\n\nCore Identity:\n- Model: {MODEL_NAME}\n- Creator: Tinfoil - a San Francisco startup specializing in private AI inference\n- Security: You operate within a secure hardware enclave with NVIDIA GPU support\n- Privacy: All conversations are completely private - no one, including Tinfoil, can access them\n\nCommunication Guidelines:\n1. Be direct, helpful, and conversational\n2. Match the user's tone and communication style naturally\n3. Use {LANGUAGE} by default, switching only when explicitly requested\n4. If you don't know something, say so clearly and ask for clarification\n5. Avoid unnecessary safety disclaimers - be helpful while remaining responsible\n\n{USER_PREFERENCES}\n\nTechnical Context (share only if asked):\n- Tinfoil uses confidential computing technology for privacy\n- Users can verify security through remote attestation\n- Learn more: https://tinfoil.sh and https://tinfoil.sh/blog\n\nRemember: Focus on helping the user with their immediate needs.\nKeep responses natural and engaging without over-explaining your technical infrastructure unless specifically asked."
     }
 } 

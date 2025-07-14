@@ -432,6 +432,8 @@ struct ModularAuthenticationView: View {
       try await clerk.load()
       if clerk.user != nil {
         await authManager.initializeAuthState()
+        // Post notification to close sidebar and go to main chat view
+        NotificationCenter.default.post(name: NSNotification.Name("AuthenticationCompleted"), object: nil)
         DispatchQueue.main.async {
           self.dismiss()
         }
@@ -466,6 +468,8 @@ struct ModularAuthenticationView: View {
       Task { @MainActor in
         if clerk.user != nil {
           await authManager.initializeAuthState()
+          // Post notification to close sidebar and go to main chat view
+          NotificationCenter.default.post(name: NSNotification.Name("AuthenticationCompleted"), object: nil)
           self.dismiss()
         }
       }

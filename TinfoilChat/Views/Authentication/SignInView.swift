@@ -124,6 +124,8 @@ struct SignInView: View {
       try await clerk.load()
       await authManager.initializeAuthState()
       await MainActor.run {
+        // Post notification to close sidebar and go to main chat view
+        NotificationCenter.default.post(name: NSNotification.Name("AuthenticationCompleted"), object: nil)
         onDismiss()
       }
     } catch {

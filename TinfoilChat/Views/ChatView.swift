@@ -24,6 +24,7 @@ struct ChatContainer: View {
     @State private var scrollProxy: ScrollViewProxy?
     @State private var dragOffset: CGFloat = 0
     @State private var showAuthView = false
+    @State private var showSettings = false
     @State private var lastBackgroundTime: Date?
     
     private let backgroundTimeThreshold: TimeInterval = 60 // 1 minute in seconds
@@ -54,6 +55,9 @@ struct ChatContainer: View {
         }
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
         }
     }
     
@@ -90,13 +94,13 @@ struct ChatContainer: View {
                     .scaledToFit()
                     .frame(height: 28)
             }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                ModelPicker(viewModel: viewModel)
-            }
-            // Only show the new chat button for all authenticated users
             if authManager.isAuthenticated {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: createNewChat) {
+                    ModelPicker(viewModel: viewModel)
+                }
+                // Settings button
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: showSettingsView) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 6)
                                 .fill(.white)
@@ -106,13 +110,14 @@ struct ChatContainer: View {
                                 )
                                 .frame(width: 24, height: 24)
                             
-                            Image(systemName: "plus")
+                            Image(systemName: "gearshape.fill")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(.black)
                         }
                     }
                 }
-            } else if !authManager.isAuthenticated {
+            }
+            if !authManager.isAuthenticated {
                 // Show sign in button for non-authenticated users
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: showAuthenticationView) {
@@ -237,6 +242,11 @@ struct ChatContainer: View {
     /// Shows the authentication view
     private func showAuthenticationView() {
         showAuthView = true
+    }
+    
+    /// Shows the settings view
+    private func showSettingsView() {
+        showSettings = true
     }
     
     /// Creates a new chat if the current chat has messages
@@ -522,6 +532,7 @@ struct TabbedWelcomeView: View {
     let authManager: AuthManager?
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
     @State private var selectedModelId: String = ""
+    @ObservedObject private var settings = SettingsManager.shared
     
     private var availableModels: [ModelType] {
         return AppConfig.shared.availableModels
@@ -540,13 +551,19 @@ struct TabbedWelcomeView: View {
             // Greeting section
             VStack(spacing: 16) {
                 if let authManager = authManager,
-                   authManager.isAuthenticated,
-                   let firstName = authManager.localUserData?["name"] as? String,
-                   !firstName.isEmpty {
-                    Text("Hello, \(firstName)!")
-                        .font(.title)
-                        .fontWeight(.semibold)
-                        .multilineTextAlignment(.center)
+                   authManager.isAuthenticated {
+                    let displayName = getDisplayName(authManager: authManager)
+                    if !displayName.isEmpty {
+                        Text("Hello, \(displayName)!")
+                            .font(.title)
+                            .fontWeight(.semibold)
+                            .multilineTextAlignment(.center)
+                    } else {
+                        Text("How can I assist you?")
+                            .font(.title)
+                            .fontWeight(.semibold)
+                            .multilineTextAlignment(.center)
+                    }
                 } else {
                     Text("How can I assist you?")
                         .font(.title)
@@ -566,24 +583,27 @@ struct TabbedWelcomeView: View {
                     .font(.system(size: 18, weight: .medium))
                     .foregroundColor(.primary)
                 
-                HStack {
-                    Spacer()
-                    HStack(spacing: 16) {
-                        ForEach(availableModels) { model in
-                            ModelTab(
-                                model: model,
-                                isSelected: selectedModelId == model.id,
-                                isDarkMode: isDarkMode,
-                                isEnabled: canUseModel(model),
-                                showPricingLabel: !(authManager?.isAuthenticated == true && authManager?.hasActiveSubscription == true)
-                            ) {
-                                selectModel(model)
-                            }
+                LazyVGrid(columns: [
+                    GridItem(.adaptive(minimum: 88, maximum: 120), spacing: 16)
+                ], spacing: 16) {
+                    ForEach(availableModels) { model in
+                        ModelTab(
+                            model: model,
+                            isSelected: selectedModelId == model.id,
+                            isDarkMode: isDarkMode,
+                            isEnabled: canUseModel(model),
+                            showPricingLabel: !(authManager?.isAuthenticated == true && authManager?.hasActiveSubscription == true)
+                        ) {
+                            selectModel(model)
                         }
                     }
-                    Spacer()
                 }
                 .padding(.vertical, 12)
+            }
+            
+            // Subscription prompt for non-premium users
+            if !(authManager?.isAuthenticated == true && authManager?.hasActiveSubscription == true) {
+                subscriptionPrompt
             }
         }
         .padding(.horizontal, 32)
@@ -596,10 +616,65 @@ struct TabbedWelcomeView: View {
         }
     }
     
+    // Subscription prompt view
+    private var subscriptionPrompt: some View {
+        VStack(spacing: 12) {
+            Text("Unlock Premium Models")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.primary)
+            
+            Text("Access our most advanced premium models with a subscription.")
+                .font(.system(size: 14))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(nil)
+            
+            Button(action: {
+                if let url = URL(string: "https://www.tinfoil.sh/pricing") {
+                    UIApplication.shared.open(url)
+                }
+            }) {
+                Text("View Pricing")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(Color.accentPrimary)
+                    .cornerRadius(8)
+            }
+        }
+        .padding(.vertical, 16)
+        .padding(.horizontal, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.accentPrimary.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.accentPrimary.opacity(0.2), lineWidth: 1)
+                )
+        )
+        .padding(.top, 8)
+    }
+    
     private func selectModel(_ model: ModelType) {
         guard model.id != viewModel.currentModel.id && canUseModel(model) else { return }
         selectedModelId = model.id
         viewModel.changeModel(to: model)
+    }
+    
+    /// Gets the display name for the user - prioritizes nickname from settings, falls back to first name from auth
+    private func getDisplayName(authManager: AuthManager) -> String {
+        // First, check if user has set a nickname in settings
+        if settings.isPersonalizationEnabled && !settings.nickname.isEmpty {
+            return settings.nickname
+        }
+        
+        // Fall back to first name from auth data
+        if let firstName = authManager.localUserData?["name"] as? String, !firstName.isEmpty {
+            return firstName
+        }
+        
+        return ""
     }
 }
 
@@ -657,7 +732,7 @@ struct ModelTab: View {
                     // Selected state background
                     if isSelected {
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.blue.opacity(0.15))
+                            .fill(Color.accentPrimary.opacity(0.15))
                     }
                     
                     // Subtle border for unselected enabled items
@@ -672,7 +747,7 @@ struct ModelTab: View {
                             HStack {
                                 Spacer()
                                 Circle()
-                                    .fill(Color.blue)
+                                    .fill(Color.accentPrimary)
                                     .frame(width: 10, height: 10)
                                     .overlay(
                                         Image(systemName: "checkmark")
@@ -814,7 +889,7 @@ struct ModelPicker: View {
                                     
                                     if viewModel.currentModel == model {
                                         Image(systemName: "checkmark")
-                                            .foregroundColor(.blue)
+                                            .foregroundColor(Color.accentPrimary)
                                             .font(.system(size: 14, weight: .bold))
                                     }
                                 }

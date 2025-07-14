@@ -14,11 +14,8 @@ struct ModelConfig: Codable {
     let iconName: String
     let description: String
     let fullName: String
-    let githubRepo: String
-    let enclaveURL: String
     let modelId: String
     let isFree: Bool
-    let githubReleaseURL: String
 }
 
 /// Remote configuration structure
@@ -26,6 +23,7 @@ struct RemoteConfig: Codable {
     let models: [ModelConfig]
     let apiKey: String
     let chatConfig: ChatConfig
+    let minSupportedVersion: String
     
     struct ChatConfig: Codable {
         let maxMessagesPerRequest: Int
@@ -59,11 +57,7 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
     var modelNameSimple: String { displayName }
     var modelName: String { config.modelId }
     var image: String { "\(Constants.UI.modelIconPath)\(iconName)\(Constants.UI.modelIconExtension)" }
-    var enclave: String { config.enclaveURL }
-    var endpoint: String { "\(Constants.API.endpointProtocol)\(enclave)\(Constants.API.chatCompletionsEndpoint)" }
-    var repoName: String { config.githubRepo }
     var name: String { fullName }
-    var githubReleaseURL: String { config.githubReleaseURL }
     
     // Add property to check if model is free
     var isFree: Bool { config.isFree }
@@ -115,6 +109,7 @@ class AppConfig: ObservableObject {
         
         // Load remote configuration
         Task {
+            // await loadMockConfig()
             await loadRemoteConfig()
         }
     }
@@ -225,32 +220,13 @@ class AppConfig: ObservableObject {
         return config?.models.first { $0.id == type.id }
     }
     
-    var githubRepo: String {
-        getModelConfig(currentModel!)!.githubRepo
-    }
-    
-    var enclaveURL: String {
-        getModelConfig(currentModel!)!.enclaveURL
-    }
     
     var apiKey: String {
         config!.apiKey
     }
     
-    /// Get API key, fetching from server if needed for premium models
-    func getApiKey(forModel model: ModelType, isAuthenticated: Bool, hasSubscription: Bool) async -> String {
-        // Check if model is free
-        guard !model.isFree else {
-            // Return default API key for free models
-            return config?.apiKey ?? "tinfoil-default-api-key"
-        }
-        
-        // Premium model, check authentication status
-        guard isAuthenticated && hasSubscription else {
-            return ""
-        }
-        
-        // Fetch premium API key
+    /// Get the global API key
+    func getApiKey() async -> String {
         return await APIKeyManager.shared.getApiKey()
     }
     
@@ -260,6 +236,46 @@ class AppConfig: ObservableObject {
     
     var systemPrompt: String {
         config!.chatConfig.systemPrompt
+    }
+    
+    var minSupportedVersion: String {
+        config?.minSupportedVersion ?? "1.0.0"
+    }
+    
+    /// Current app version from bundle
+    var currentAppVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }
+    
+    /// Check if current app version is supported
+    var isAppVersionSupported: Bool {
+        return compareVersions(currentAppVersion, minSupportedVersion) != .orderedAscending
+    }
+    
+    /// Check if app update is required
+    var isUpdateRequired: Bool {
+        return !isAppVersionSupported
+    }
+    
+    /// Compare two version strings (e.g., "1.0.5" vs "1.0.3")
+    private func compareVersions(_ version1: String, _ version2: String) -> ComparisonResult {
+        let components1 = version1.split(separator: ".").compactMap { Int($0) }
+        let components2 = version2.split(separator: ".").compactMap { Int($0) }
+        
+        let maxLength = max(components1.count, components2.count)
+        
+        for i in 0..<maxLength {
+            let v1 = i < components1.count ? components1[i] : 0
+            let v2 = i < components2.count ? components2[i] : 0
+            
+            if v1 < v2 {
+                return .orderedAscending
+            } else if v1 > v2 {
+                return .orderedDescending
+            }
+        }
+        
+        return .orderedSame
     }
     
     /// Get model types in the order defined in the config file

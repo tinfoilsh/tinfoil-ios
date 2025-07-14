@@ -60,6 +60,12 @@ struct ChatSidebar: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("AuthenticationCompleted"))) { _ in
+            // Close sidebar to take user to main chat view after successful authentication
+            withAnimation {
+                isOpen = false
+            }
+        }
     }
     
     private var sidebarContent: some View {

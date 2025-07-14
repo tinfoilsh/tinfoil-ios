@@ -33,9 +33,8 @@ class OAuthManager {
       // Use SignIn.authenticateWithRedirect for OAuth providers
       try await SignIn.authenticateWithRedirect(strategy: .oauth(provider: provider))
       
-      // Keep the loading indicator visible for a bit longer
-      // This helps prevent UI flicker during the redirect process
-      try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+      // Brief delay to ensure redirect completes
+      try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
       
       // Start a background task that periodically checks auth state
       let authCheckTask = Task {
@@ -72,6 +71,11 @@ class OAuthManager {
               name: NSNotification.Name("DismissAuthView"),
               object: nil
             )
+            // Also post notification to close sidebar and go to main chat view
+            NotificationCenter.default.post(
+              name: NSNotification.Name("AuthenticationCompleted"),
+              object: nil
+            )
           }
           
           break // Exit the loop once authenticated
@@ -81,7 +85,7 @@ class OAuthManager {
       }
       
       do {
-        try await Task.sleep(nanoseconds: 2_000_000_000) // wait 2 seconds
+        try await Task.sleep(nanoseconds: 500_000_000) // wait 0.5 seconds
       } catch {
         break // Task was cancelled during sleep
       }

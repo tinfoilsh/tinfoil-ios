@@ -35,19 +35,12 @@ struct MessageInputView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Rate limit warning for non-authenticated users only
-            if !isUserAuthenticated {
-                rateLimit
-            }
-            
             // Text input area
             CustomTextEditor(text: $messageText, 
                              textHeight: $textHeight, 
-                             isRateLimited: viewModel.isRateLimited,
                              placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "Ask Tin..." : "Reply to Tin...")
                 .frame(height: textHeight)
                 .padding(.horizontal)
-                .disabled(viewModel.isRateLimited)
             
             // Bottom row with shield and send button
             HStack {
@@ -110,8 +103,6 @@ struct MessageInputView: View {
                                            (isDarkMode ? .black : .white))
                     }
                 }
-                .disabled(viewModel.isRateLimited)
-                .opacity(viewModel.isRateLimited ? 0.5 : 1.0)
                 .padding(.trailing, 24)
             }
             .padding(.vertical, 4)
@@ -148,45 +139,12 @@ struct MessageInputView: View {
         }
     }
     
-    // Rate limit info bar
-    private var rateLimit: some View {
-        VStack(spacing: 0) {
-            if viewModel.isRateLimited {
-                HStack {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
-                        .padding(.leading, 12)
-                    Text("Message limit reached. Sign in to continue.")
-                        .font(.caption)
-                        .foregroundColor(.orange)
-                    Spacer()
-                }
-                .padding(.horizontal, 0)
-                .padding(.vertical, 6)
-                .background(Color.orange.opacity(0.2))
-            } else {
-                HStack {
-                    Image(systemName: "message")
-                        .foregroundColor(.gray)
-                        .padding(.leading, 12)
-                    Text("\(viewModel.messagesRemaining) messages remaining.")
-                        .font(.caption)
-                        .foregroundColor(.gray)
-                    Spacer()
-                }
-                .padding(.horizontal, 0)
-                .padding(.vertical, 6)
-                .background(Color.gray.opacity(0.1))
-            }
-        }
-        .cornerRadius(0)
-    }
     
     /// Handles the send button action - either sends a message or cancels generation
     private func sendOrCancelMessage() {
         if viewModel.isLoading {
             viewModel.cancelGeneration()
-        } else if !messageText.isEmpty && !viewModel.isRateLimited {
+        } else if !messageText.isEmpty {
             viewModel.sendMessage(text: messageText)
             messageText = ""
             textHeight = 48 // Reset height when message is sent
@@ -210,7 +168,6 @@ struct MessageInputView: View {
 struct CustomTextEditor: UIViewRepresentable {
     @Binding var text: String
     @Binding var textHeight: CGFloat
-    var isRateLimited: Bool
     var placeholderText: String
     
     func makeUIView(context: Context) -> UITextView {
@@ -219,7 +176,7 @@ struct CustomTextEditor: UIViewRepresentable {
         textView.font = UIFont.preferredFont(forTextStyle: .body)
         textView.backgroundColor = .clear
         textView.isScrollEnabled = true
-        textView.isEditable = !isRateLimited
+        textView.isEditable = true
         textView.isSelectable = true
         textView.alwaysBounceVertical = false
         textView.textContainerInset = UIEdgeInsets(top: 16, left: 2, bottom: 8, right: 5) // Reduced left padding
@@ -269,7 +226,7 @@ struct CustomTextEditor: UIViewRepresentable {
         }
         
         // Update editable status
-        uiView.isEditable = !isRateLimited
+        uiView.isEditable = true
         
         // Calculate the new height
         let size = uiView.sizeThatFits(CGSize(width: uiView.frame.width, height: CGFloat.greatestFiniteMagnitude))
