@@ -82,10 +82,27 @@ struct ChatContainer: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button(action: toggleSidebar) {
-                    MenuToXButton(isX: isSidebarOpen)
-                        .frame(width: 24, height: 24)
-                        .foregroundColor(.white)
+                HStack(spacing: 8) {
+                    Button(action: toggleSidebar) {
+                        MenuToXButton(isX: isSidebarOpen)
+                            .frame(width: 24, height: 24)
+                            .foregroundColor(.white)
+                    }
+                    Button(action: showSettingsView) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(.white)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .strokeBorder(.white, lineWidth: 1)
+                                )
+                                .frame(width: 24, height: 24)
+                            
+                            Image(systemName: "gearshape.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.black)
+                        }
+                    }
                 }
             }
             ToolbarItem(placement: .principal) {
@@ -98,9 +115,9 @@ struct ChatContainer: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     ModelPicker(viewModel: viewModel)
                 }
-                // Settings button
+                // New chat button
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: showSettingsView) {
+                    Button(action: createNewChat) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 6)
                                 .fill(.white)
@@ -110,7 +127,7 @@ struct ChatContainer: View {
                                 )
                                 .frame(width: 24, height: 24)
                             
-                            Image(systemName: "gearshape.fill")
+                            Image(systemName: "plus")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(.black)
                         }
