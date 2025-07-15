@@ -127,9 +127,6 @@ class ChatViewModel: ObservableObject {
             
         }
         
-        // Initialize Tinfoil client and verify proxy enclave only once
-        setupTinfoilClient()
-        
         // Setup app lifecycle observers
         setupAppLifecycleObservers()
     }
@@ -162,17 +159,11 @@ class ChatViewModel: ObservableObject {
         
         Task {
             do {
-                // Get the global API key
-                let apiKey = await AppConfig.shared.getApiKey()
+                // Wait for AppConfig to be ready before getting API key
+                await AppConfig.shared.waitForInitialization()
                 
-                // Ensure we have a valid API key
-                guard !apiKey.isEmpty else {
-                    throw NSError(
-                        domain: "TinfoilChat", 
-                        code: 401,
-                        userInfo: [NSLocalizedDescriptionKey: "API key not available. Please check your subscription."]
-                    )
-                }
+                // Get the global API key (can be empty for free models)
+                let apiKey = await AppConfig.shared.getApiKey()
                 
                 if !hasRunInitialVerification {
                     client = try await TinfoilAI.create(
@@ -303,6 +294,10 @@ class ChatViewModel: ObservableObject {
     func sendMessage(text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
+        // Ensure client is initialized before sending message
+        if client == nil {
+            setupTinfoilClient()
+        }
         
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -796,6 +791,9 @@ class ChatViewModel: ObservableObject {
     func updateModelBasedOnAuthStatus(isAuthenticated: Bool, hasActiveSubscription: Bool) {
         // Clear any cached API key when auth status changes
         APIKeyManager.shared.clearApiKey()
+        
+        // Setup Tinfoil client with fresh credentials after auth state changes
+        setupTinfoilClient()
         
         // Get available models based on auth status
         let availableModels = AppConfig.shared.filteredModelTypes(
