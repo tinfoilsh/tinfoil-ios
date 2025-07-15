@@ -82,27 +82,10 @@ struct ChatContainer: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                HStack(spacing: 8) {
-                    Button(action: toggleSidebar) {
-                        MenuToXButton(isX: isSidebarOpen)
-                            .frame(width: 24, height: 24)
-                            .foregroundColor(.white)
-                    }
-                    Button(action: showSettingsView) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(.white)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .strokeBorder(.white, lineWidth: 1)
-                                )
-                                .frame(width: 24, height: 24)
-                            
-                            Image(systemName: "gearshape.fill")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.black)
-                        }
-                    }
+                Button(action: toggleSidebar) {
+                    MenuToXButton(isX: isSidebarOpen)
+                        .frame(width: 24, height: 24)
+                        .foregroundColor(.white)
                 }
             }
             ToolbarItem(placement: .principal) {
