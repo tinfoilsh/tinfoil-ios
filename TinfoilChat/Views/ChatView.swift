@@ -636,29 +636,15 @@ struct TabbedWelcomeView: View {
     // Subscription prompt view
     private var subscriptionPrompt: some View {
         VStack(spacing: 12) {
-            Text("Unlock Premium Models")
+            Text("Premium Models")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(.primary)
             
-            Text("Access our most advanced premium models with a subscription.")
+            Text("Sign in to access models included in your account plan.")
                 .font(.system(size: 14))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .lineLimit(nil)
-            
-            Button(action: {
-                if let url = URL(string: "https://www.tinfoil.sh/pricing") {
-                    UIApplication.shared.open(url)
-                }
-            }) {
-                Text("View Pricing")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .background(Color.accentPrimary)
-                    .cornerRadius(8)
-            }
         }
         .padding(.vertical, 16)
         .padding(.horizontal, 16)
