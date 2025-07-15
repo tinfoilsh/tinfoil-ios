@@ -225,6 +225,13 @@ class AppConfig: ObservableObject {
         config!.apiKey
     }
     
+    /// Wait for AppConfig to be fully initialized
+    func waitForInitialization() async {
+        while config == nil {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        }
+    }
+    
     /// Get the global API key
     func getApiKey() async -> String {
         return await APIKeyManager.shared.getApiKey()
