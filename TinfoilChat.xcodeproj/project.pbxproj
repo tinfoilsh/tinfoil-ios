@@ -10,6 +10,8 @@
 		99095BBB2DC2BC1E009C8F44 /* Clerk in Frameworks */ = {isa = PBXBuildFile; productRef = 99095BBA2DC2BC1E009C8F44 /* Clerk */; };
 		9926F7B32DBD497A002E4B00 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 9926F7B22DBD497A002E4B00 /* MarkdownUI */; };
 		993428632E21073100A5B575 /* TinfoilAI in Frameworks */ = {isa = PBXBuildFile; productRef = 993428622E21073100A5B575 /* TinfoilAI */; };
+		999769632E295C1A00A570DC /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 999769622E295C1A00A570DC /* RevenueCat */; };
+		999769652E295C1A00A570DC /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 999769642E295C1A00A570DC /* RevenueCatUI */; };
 		D4FD450D5DF249E2A37CA9CD /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 6E93C3925EE14CD689429CE8 /* Sentry */; };
 /* End PBXBuildFile section */
 
@@ -45,6 +47,8 @@
 			files = (
 				993428632E21073100A5B575 /* TinfoilAI in Frameworks */,
 				99095BBB2DC2BC1E009C8F44 /* Clerk in Frameworks */,
+				999769652E295C1A00A570DC /* RevenueCatUI in Frameworks */,
+				999769632E295C1A00A570DC /* RevenueCat in Frameworks */,
 				9926F7B32DBD497A002E4B00 /* MarkdownUI in Frameworks */,
 				D4FD450D5DF249E2A37CA9CD /* Sentry in Frameworks */,
 			);
@@ -102,6 +106,8 @@
 				99095BBA2DC2BC1E009C8F44 /* Clerk */,
 				6E93C3925EE14CD689429CE8 /* Sentry */,
 				993428622E21073100A5B575 /* TinfoilAI */,
+				999769622E295C1A00A570DC /* RevenueCat */,
+				999769642E295C1A00A570DC /* RevenueCatUI */,
 			);
 			productName = TinfoilChat;
 			productReference = 9909E5BE2DBD460C0040357B /* TinfoilChat.app */;
@@ -136,6 +142,7 @@
 				99095BB92DC2BC1E009C8F44 /* XCRemoteSwiftPackageReference "clerk-ios" */,
 				265076DEC67642B78D44265D /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				995767E02E20EFF100709DB1 /* XCRemoteSwiftPackageReference "tinfoil-swift" */,
+				999769612E295C1A00A570DC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9909E5BF2DBD460C0040357B /* Products */;
@@ -443,6 +450,14 @@
 				kind = branch;
 			};
 		};
+		999769612E295C1A00A570DC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.33.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -465,6 +480,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 995767E02E20EFF100709DB1 /* XCRemoteSwiftPackageReference "tinfoil-swift" */;
 			productName = TinfoilAI;
+		};
+		999769622E295C1A00A570DC /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 999769612E295C1A00A570DC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCat;
+		};
+		999769642E295C1A00A570DC /* RevenueCatUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 999769612E295C1A00A570DC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCatUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
