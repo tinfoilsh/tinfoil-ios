@@ -533,6 +533,7 @@ struct TabbedWelcomeView: View {
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
     @State private var selectedModelId: String = ""
     @ObservedObject private var settings = SettingsManager.shared
+    @StateObject private var revenueCat = RevenueCatManager.shared
     
     private var availableModels: [ModelType] {
         return AppConfig.shared.availableModels
@@ -618,28 +619,7 @@ struct TabbedWelcomeView: View {
     
     // Subscription prompt view
     private var subscriptionPrompt: some View {
-        VStack(spacing: 12) {
-            Text("Premium Models")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.primary)
-            
-            Text("Sign in to access models included in your account plan.")
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .lineLimit(nil)
-        }
-        .padding(.vertical, 16)
-        .padding(.horizontal, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.accentPrimary.opacity(0.08))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(Color.accentPrimary.opacity(0.2), lineWidth: 1)
-                )
-        )
-        .padding(.top, 8)
+        SubscriptionPromptView(authManager: authManager)
     }
     
     private func selectModel(_ model: ModelType) {
