@@ -12,11 +12,13 @@
 		993428632E21073100A5B575 /* TinfoilAI in Frameworks */ = {isa = PBXBuildFile; productRef = 993428622E21073100A5B575 /* TinfoilAI */; };
 		999769632E295C1A00A570DC /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 999769622E295C1A00A570DC /* RevenueCat */; };
 		999769652E295C1A00A570DC /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 999769642E295C1A00A570DC /* RevenueCatUI */; };
+		99976A572E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit in Resources */ = {isa = PBXBuildFile; fileRef = 99976A562E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit */; };
 		D4FD450D5DF249E2A37CA9CD /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 6E93C3925EE14CD689429CE8 /* Sentry */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		9909E5BE2DBD460C0040357B /* TinfoilChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TinfoilChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		99976A562E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = TinfoilChatStoreKitConfiguration.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -60,6 +62,7 @@
 		9909E5B52DBD460C0040357B = {
 			isa = PBXGroup;
 			children = (
+				99976A562E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit */,
 				9909E5C02DBD460C0040357B /* TinfoilChat */,
 				993428612E21073100A5B575 /* Frameworks */,
 				9909E5BF2DBD460C0040357B /* Products */,
@@ -159,6 +162,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				99976A572E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -329,7 +333,7 @@
 				INFOPLIST_FILE = TinfoilChat/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Tinfoil;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -346,10 +350,11 @@
 				REGISTER_APP_GROUPS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -370,7 +375,7 @@
 				INFOPLIST_FILE = TinfoilChat/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Tinfoil;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -387,10 +392,11 @@
 				REGISTER_APP_GROUPS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
