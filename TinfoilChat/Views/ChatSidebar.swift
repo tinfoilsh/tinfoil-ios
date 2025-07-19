@@ -24,7 +24,7 @@ struct ChatSidebar: View {
     var body: some View {
         sidebarContent
             .frame(width: 300)
-            .background(Color(UIColor.systemBackground))
+            .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
             .alert("Delete Chat", isPresented: .constant(deletingChatId != nil)) {
             Button("Cancel", role: .cancel) {
                 deletingChatId = nil
@@ -85,8 +85,12 @@ struct ChatSidebar: View {
                     }
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .foregroundColor(.primary)
+                    .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color.white)
+                    .foregroundColor(colorScheme == .dark ? .white : .black)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(colorScheme == .dark ? Color.clear : Color.gray.opacity(0.2), lineWidth: 1)
+                    )
                     .cornerRadius(8)
                 }
                 .padding([.horizontal, .top], 16)
@@ -111,7 +115,7 @@ struct ChatSidebar: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 16)
-            .background(Color(UIColor.systemBackground))
+            .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
             
             // Chat List - shows multiple chats for all authenticated users
             ScrollView {
@@ -159,8 +163,12 @@ struct ChatSidebar: View {
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .center)
-                .background(Color(UIColor.secondarySystemBackground))
-                .foregroundColor(.primary)
+                .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color.white)
+                .foregroundColor(colorScheme == .dark ? .white : .black)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(colorScheme == .dark ? Color.clear : Color.gray.opacity(0.2), lineWidth: 1)
+                )
                 .cornerRadius(8)
             }
             .padding(.horizontal, 16)
@@ -180,8 +188,12 @@ struct ChatSidebar: View {
                     }
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .foregroundColor(.primary)
+                    .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color.white)
+                    .foregroundColor(colorScheme == .dark ? .white : .black)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(colorScheme == .dark ? Color.clear : Color.gray.opacity(0.2), lineWidth: 1)
+                    )
                     .cornerRadius(8)
                 }
                 .padding(.horizontal, 16)
@@ -213,11 +225,11 @@ struct ChatSidebar: View {
                             Image(systemName: "person.circle.fill")
                                 .resizable()
                                 .frame(width: 28, height: 28)
-                                .foregroundColor(.primary)
+                                .foregroundColor(colorScheme == .dark ? .white : .black)
                         }
                         
                         Text("\(user.firstName ?? "") \(user.lastName ?? "")")
-                            .foregroundColor(.primary)
+                            .foregroundColor(colorScheme == .dark ? .white : .black)
                         
                         Spacer()
                     }
@@ -239,31 +251,35 @@ struct ChatSidebar: View {
                             Image(systemName: "person.circle.fill")
                                 .resizable()
                                 .frame(width: 28, height: 28)
-                                .foregroundColor(.primary)
+                                .foregroundColor(colorScheme == .dark ? .white : .black)
                         }
                         
                         Text((userData["name"] as? String) ?? "Account")
-                            .foregroundColor(.primary)
+                            .foregroundColor(colorScheme == .dark ? .white : .black)
                         
                         Spacer()
                     } else {
                         Image(systemName: "person.circle.fill")
                             .resizable()
                             .frame(width: 28, height: 28)
-                            .foregroundColor(.primary)
+                            .foregroundColor(colorScheme == .dark ? .white : .black)
                         
                         Text("Account")
-                            .foregroundColor(.primary)
+                            .foregroundColor(colorScheme == .dark ? .white : .black)
                         
                         Spacer()
                     }
                     
                     Image(systemName: "chevron.right")
-                        .foregroundColor(.gray)
+                        .foregroundColor(colorScheme == .dark ? .white : .black)
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(UIColor.secondarySystemBackground))
+                .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color.white)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(colorScheme == .dark ? Color.clear : Color.gray.opacity(0.2), lineWidth: 1)
+                )
                 .cornerRadius(8)
             }
             .padding(.horizontal, 16)
