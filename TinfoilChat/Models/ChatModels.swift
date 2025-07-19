@@ -509,11 +509,24 @@ class TextRankTitleGenerator {
     ///   - maxWords: Maximum number of words in the title
     /// - Returns: A generated title
     func generateTitle(from text: String, maxWords: Int = 6) -> String {
+        // For very short messages, just use the message itself as title (capitalized)
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedText.count <= 50 {
+            // Capitalize first letter and limit length
+            let title = trimmedText.prefix(50)
+            return title.prefix(1).uppercased() + title.dropFirst()
+        }
+        
         // 1. Extract sentences and tokenize
         let sentences = extractSentences(from: text)
         
         // Early return for empty text
         if sentences.isEmpty {
+            // If no keywords found, use first few words of original text
+            let words = trimmedText.split(separator: " ").prefix(maxWords)
+            if !words.isEmpty {
+                return words.map { String($0) }.joined(separator: " ")
+            }
             return "New Chat"
         }
         
@@ -521,7 +534,15 @@ class TextRankTitleGenerator {
         let keywords = extractKeywords(from: sentences, maxKeywords: 10)
         
         // 3. Generate title from keywords
-        return createTitle(from: keywords, maxWords: maxWords)
+        let title = createTitle(from: keywords, maxWords: maxWords)
+        
+        // If TextRank returns "New Chat", fall back to using first few words
+        if title == "New Chat" && !trimmedText.isEmpty {
+            let words = trimmedText.split(separator: " ").prefix(maxWords)
+            return words.map { String($0) }.joined(separator: " ")
+        }
+        
+        return title
     }
     
     // MARK: - Text Processing
