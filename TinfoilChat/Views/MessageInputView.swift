@@ -105,7 +105,7 @@ struct MessageInputView: View {
                 }
                 .padding(.trailing, 24)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 8)
         }
         .onAppear {
             softHaptic.prepare()
