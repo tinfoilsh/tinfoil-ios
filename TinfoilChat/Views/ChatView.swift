@@ -560,16 +560,10 @@ struct TabbedWelcomeView: View {
                             .fontWeight(.semibold)
                             .multilineTextAlignment(.center)
                     } else {
-                        Text("How can I assist you?")
-                            .font(.title)
-                            .fontWeight(.semibold)
-                            .multilineTextAlignment(.center)
+                        AnimatedConfidentialTitle()
                     }
                 } else {
-                    Text("How can I assist you?")
-                        .font(.title)
-                        .fontWeight(.semibold)
-                        .multilineTextAlignment(.center)
+                    AnimatedConfidentialTitle()
                 }
                 
                 Text("This conversation is completely private, nobody can see your messages — not even Tinfoil.")
