@@ -572,7 +572,7 @@ struct TabbedWelcomeView: View {
                         .multilineTextAlignment(.center)
                 }
                 
-                Text("This conversation is completely private, nobody can see your messages - not even Tinfoil.")
+                Text("This conversation is completely private, nobody can see your messages — not even Tinfoil.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -580,7 +580,7 @@ struct TabbedWelcomeView: View {
             
             // Model selection tabs
             VStack(spacing: 16) {
-                Text("Choose your model")
+                Text("Choose your AI model")
                     .font(.system(size: 18, weight: .medium))
                     .foregroundColor(.primary)
                 
