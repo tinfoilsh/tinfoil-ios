@@ -17,13 +17,20 @@ struct ContentView: View {
     var body: some View {
         Group {
             if authManager.isLoading {
-                VStack(spacing: 16) {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .white : .black))
-                        .scaleEffect(1.5)
+                ZStack {
+                    Color(hex: "111827")
+                        .ignoresSafeArea()
+                    VStack(spacing: 24) {
+                        Image("navbar-logo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 48)
+                        
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(1.2)
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(colorScheme == .dark ? Color(hex: "111827") : Color.white)
             } else {
                 // Use the ChatContainer from ChatView.swift
                 ChatContainer()
