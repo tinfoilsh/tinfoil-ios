@@ -533,7 +533,7 @@ struct TabbedWelcomeView: View {
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
     @State private var selectedModelId: String = ""
     @ObservedObject private var settings = SettingsManager.shared
-    @StateObject private var revenueCat = RevenueCatManager.shared
+    @ObservedObject private var revenueCat = RevenueCatManager.shared
     
     private var availableModels: [ModelType] {
         return AppConfig.shared.availableModels

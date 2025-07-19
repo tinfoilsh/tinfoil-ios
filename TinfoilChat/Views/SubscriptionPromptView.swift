@@ -12,7 +12,7 @@ import RevenueCat
 struct SubscriptionPromptView: View {
     let authManager: AuthManager?
     
-    @StateObject private var revenueCat = RevenueCatManager.shared
+    @ObservedObject private var revenueCat = RevenueCatManager.shared
     @State private var showAuthView = false
     @State private var showError = false
     @State private var errorMessage = ""
@@ -112,13 +112,17 @@ struct SubscriptionPromptView: View {
                         }
                         
                         HStack(spacing: 16) {
-                            Link("Terms of Use", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
-                                .font(.system(size: 11))
-                                .foregroundColor(.accentPrimary)
+                            if let termsURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/") {
+                                Link("Terms of Use", destination: termsURL)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.accentPrimary)
+                            }
                             
-                            Link("Privacy Policy", destination: URL(string: "https://tinfoil.sh/privacy")!)
-                                .font(.system(size: 11))
-                                .foregroundColor(.accentPrimary)
+                            if let privacyURL = URL(string: "https://tinfoil.sh/privacy") {
+                                Link("Privacy Policy", destination: privacyURL)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.accentPrimary)
+                            }
                         }
                         .padding(.top, 4)
                     }
