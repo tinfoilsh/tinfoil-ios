@@ -18,7 +18,6 @@ struct ChatSidebar: View {
     @State private var editingChatId: String? = nil
     @State private var editingTitle: String = ""
     @State private var deletingChatId: String? = nil
-    @State private var showSignUpOrSignIn: Bool = false
     @State private var showSettings: Bool = false
     
     var body: some View {
@@ -38,15 +37,6 @@ struct ChatSidebar: View {
                 }
                 deletingChatId = nil
             }
-        }
-        .sheet(isPresented: $showSignUpOrSignIn) {
-            AuthenticationView()
-                .environmentObject(authManager)
-                .onDisappear {
-                    // Refresh the UI when the auth view is dismissed
-                    if authManager.isAuthenticated {
-                    }
-                }
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
@@ -172,118 +162,7 @@ struct ChatSidebar: View {
                 .cornerRadius(8)
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 8)
-            
-            // Account section
-            if authManager.isAuthenticated {
-                accountView
-            } else {
-                // Sign up or Log In Button when not authenticated
-                Button(action: {
-                    showSignUpOrSignIn = true
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "person.badge.plus")
-                        Text("Sign up or Log In")
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color.white)
-                    .foregroundColor(colorScheme == .dark ? .white : .black)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(colorScheme == .dark ? Color.clear : Color.gray.opacity(0.2), lineWidth: 1)
-                    )
-                    .cornerRadius(8)
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
-            }
-        }
-    }
-    
-    private var accountView: some View {
-        VStack(spacing: 8) {
-            // Account button to open the full authentication view
-            Button(action: {
-                showSignUpOrSignIn = true
-            }) {
-                HStack {
-                    // Display user info if available
-                    if let user = clerk.user {
-                        if !user.imageUrl.isEmpty {
-                            AsyncImage(url: URL(string: user.imageUrl)) { image in
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                Image(systemName: "person.circle.fill")
-                            }
-                            .frame(width: 28, height: 28)
-                            .clipShape(Circle())
-                        } else {
-                            Image(systemName: "person.circle.fill")
-                                .resizable()
-                                .frame(width: 28, height: 28)
-                                .foregroundColor(colorScheme == .dark ? .white : .black)
-                        }
-                        
-                        Text("\(user.firstName ?? "") \(user.lastName ?? "")")
-                            .foregroundColor(colorScheme == .dark ? .white : .black)
-                        
-                        Spacer()
-                    }
-                    // If user is not in clerk but in local storage
-                    else if let userData = authManager.localUserData {
-                        if let imageUrlString = userData["imageUrl"] as? String, 
-                           !imageUrlString.isEmpty,
-                           let url = URL(string: imageUrlString) {
-                            AsyncImage(url: url) { image in
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                Image(systemName: "person.circle.fill")
-                            }
-                            .frame(width: 28, height: 28)
-                            .clipShape(Circle())
-                        } else {
-                            Image(systemName: "person.circle.fill")
-                                .resizable()
-                                .frame(width: 28, height: 28)
-                                .foregroundColor(colorScheme == .dark ? .white : .black)
-                        }
-                        
-                        Text((userData["name"] as? String) ?? "Account")
-                            .foregroundColor(colorScheme == .dark ? .white : .black)
-                        
-                        Spacer()
-                    } else {
-                        Image(systemName: "person.circle.fill")
-                            .resizable()
-                            .frame(width: 28, height: 28)
-                            .foregroundColor(colorScheme == .dark ? .white : .black)
-                        
-                        Text("Account")
-                            .foregroundColor(colorScheme == .dark ? .white : .black)
-                        
-                        Spacer()
-                    }
-                    
-                    Image(systemName: "chevron.right")
-                        .foregroundColor(colorScheme == .dark ? .white : .black)
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color.white)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(colorScheme == .dark ? Color.clear : Color.gray.opacity(0.2), lineWidth: 1)
-                )
-                .cornerRadius(8)
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
+            .padding(.bottom, 16)
         }
     }
     

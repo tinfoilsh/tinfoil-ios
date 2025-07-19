@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import Clerk
 
 // Settings Manager to handle persistence
 @MainActor
@@ -134,9 +135,11 @@ class SettingsManager: ObservableObject {
 struct SettingsView: View {
     @EnvironmentObject private var authManager: AuthManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(Clerk.self) private var clerk
     @ObservedObject private var settings = SettingsManager.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAuthView = false
+    @State private var showDeleteConfirmation = false
     
     init() {
         let appearance = UINavigationBarAppearance()
@@ -175,7 +178,162 @@ struct SettingsView: View {
             // Content
             NavigationView {
                 List {
-                    Section(header: Text("Preferences")) {
+                    // Account Section
+                    Section {
+                        if authManager.isAuthenticated {
+                            // User info row
+                            HStack {
+                                // Display user info if available
+                                if let user = clerk.user {
+                                    if !user.imageUrl.isEmpty {
+                                        AsyncImage(url: URL(string: user.imageUrl)) { image in
+                                            image
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                        } placeholder: {
+                                            Image(systemName: "person.circle.fill")
+                                        }
+                                        .frame(width: 40, height: 40)
+                                        .clipShape(Circle())
+                                    } else {
+                                        Image(systemName: "person.circle.fill")
+                                            .resizable()
+                                            .frame(width: 40, height: 40)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("\(user.firstName ?? "") \(user.lastName ?? "")")
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                        if let email = user.emailAddresses.first?.emailAddress {
+                                            Text(email)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                }
+                                // If user is not in clerk but in local storage
+                                else if let userData = authManager.localUserData {
+                                    if let imageUrlString = userData["imageUrl"] as? String, 
+                                       !imageUrlString.isEmpty,
+                                       let url = URL(string: imageUrlString) {
+                                        AsyncImage(url: url) { image in
+                                            image
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                        } placeholder: {
+                                            Image(systemName: "person.circle.fill")
+                                        }
+                                        .frame(width: 40, height: 40)
+                                        .clipShape(Circle())
+                                    } else {
+                                        Image(systemName: "person.circle.fill")
+                                            .resizable()
+                                            .frame(width: 40, height: 40)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text((userData["name"] as? String) ?? "User")
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                        if let email = userData["email"] as? String {
+                                            Text(email)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                } else {
+                                    Image(systemName: "person.circle.fill")
+                                        .resizable()
+                                        .frame(width: 40, height: 40)
+                                        .foregroundColor(.secondary)
+                                    
+                                    Text("Account")
+                                        .foregroundColor(.primary)
+                                }
+                                
+                                Spacer()
+                            }
+                            .padding(.vertical, 4)
+                            
+                            // Manage Subscription link - conditionally show based on subscription source
+                            if authManager.hasActiveSubscription {
+                                let subscriptionSource = clerk.user?.publicMetadata?["chat_subscription_source"] as? String
+                                
+                                if subscriptionSource == "ios_revenuecat" {
+                                    // In-app purchase - link to iOS subscription settings
+                                    Link(destination: URL(string: "https://apps.apple.com/account/subscriptions")!) {
+                                        HStack {
+                                            Text("Manage Subscription")
+                                            Spacer()
+                                            Image(systemName: "arrow.up.right.square")
+                                                .font(.caption)
+                                        }
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                } else {
+                                    // Web subscription - link to Tinfoil dashboard
+                                    Link(destination: URL(string: "https://www.tinfoil.sh/dashboard")!) {
+                                        HStack {
+                                            Text("Manage Subscription")
+                                            Spacer()
+                                            Image(systemName: "arrow.up.right.square")
+                                                .font(.caption)
+                                        }
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                }
+                            }
+                            
+                            // Sign Out button
+                            Button(action: {
+                                Task {
+                                    await authManager.signOut()
+                                    dismiss()
+                                }
+                            }) {
+                                HStack {
+                                    Text("Sign Out")
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            
+                            // Delete Account button
+                            Button(action: {
+                                showDeleteConfirmation = true
+                            }) {
+                                HStack {
+                                    Text("Delete Account")
+                                        .foregroundColor(.red)
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
+                            }
+                        } else {
+                            // Sign in button for non-authenticated users
+                            Button(action: {
+                                showAuthView = true
+                            }) {
+                                HStack {
+                                    Image(systemName: "person.badge.plus")
+                                    Text("Sign up or Log In")
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
+                            }
+                        }
+                    } header: {
+                        Text("Account")
+                    }
+                    
+                    Section {
                         Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
                             .tint(Color.accentPrimary)
                         
@@ -185,9 +343,11 @@ struct SettingsView: View {
                             }
                         }
                         .pickerStyle(.navigationLink)
+                    } header: {
+                        Text("Preferences")
                     }
                     
-                    Section(header: Text("Legal")) {
+                    Section {
                         Link(destination: Constants.Legal.termsOfServiceURL) {
                             HStack {
                                 Text("Terms of Service")
@@ -207,6 +367,8 @@ struct SettingsView: View {
                                     .foregroundColor(.blue)
                             }
                         }
+                    } header: {
+                        Text("Legal")
                     }
                 }
                 .navigationBarHidden(true)
@@ -227,6 +389,23 @@ struct SettingsView: View {
         .accentColor(Color.accentPrimary)
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()
+                .environmentObject(authManager)
+        }
+        .alert("Delete Account", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                Task {
+                    do {
+                        try await clerk.user?.delete()
+                        await authManager.signOut()
+                        dismiss()
+                    } catch {
+                        print("Delete account error: \(error)")
+                    }
+                }
+            }
+        } message: {
+            Text("Are you sure you want to delete your account? This action cannot be undone.")
         }
     }
     
