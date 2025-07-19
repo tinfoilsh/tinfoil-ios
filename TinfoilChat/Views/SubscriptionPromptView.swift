@@ -27,33 +27,37 @@ struct SubscriptionPromptView: View {
     
     var body: some View {
         VStack(spacing: 12) {
-            Text("Premium Models")
+            Text("Get Premium Models")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(.primary)
             
-            if !isAuthenticated {
-                // Not logged in - show subscribe button that prompts sign in
-                Text("Subscribe to get access to premium models.")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(nil)
-                
-                Button(action: {
-                    showAuthView = true
-                }) {
-                    Text("Subscribe")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 10)
-                        .background(Color.accentPrimary)
-                        .cornerRadius(8)
+            if hasSubscription {
+                // Has subscription - show premium benefits
+                VStack(spacing: 8) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.system(size: 14))
+                        Text("Premium Active")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.green)
+                    }
+                    
+                    Text("You have access to all premium models")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(nil)
+                    
+                    Button(action: restorePurchases) {
+                        Text("Manage Subscription")
+                            .font(.system(size: 12))
+                            .foregroundColor(.accentPrimary)
+                    }
+                    .padding(.top, 4)
                 }
-                .padding(.top, 8)
-                
-            } else if !hasSubscription {
-                // Logged in but no subscription - show subscribe button
+            } else {
+                // No subscription - show subscribe options
                 VStack(spacing: 8) {
                     if let package = revenueCat.offerings?.current?.availablePackages.first {
                         Text(package.storeProduct.localizedPriceString)
@@ -95,7 +99,13 @@ struct SubscriptionPromptView: View {
                         .padding(.top, 8)
                 } else {
                     VStack(spacing: 8) {
-                        Button(action: purchaseSubscription) {
+                        Button(action: {
+                            if !isAuthenticated {
+                                showAuthView = true
+                            } else {
+                                purchaseSubscription()
+                            }
+                        }) {
                             Text("Subscribe")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.white)
@@ -127,31 +137,6 @@ struct SubscriptionPromptView: View {
                         .padding(.top, 4)
                     }
                     .padding(.top, 8)
-                }
-            } else {
-                // Has subscription - show premium benefits
-                VStack(spacing: 8) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                            .font(.system(size: 14))
-                        Text("Premium Active")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.green)
-                    }
-                    
-                    Text("You have access to all premium models")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(nil)
-                    
-                    Button(action: restorePurchases) {
-                        Text("Manage Subscription")
-                            .font(.system(size: 12))
-                            .foregroundColor(.accentPrimary)
-                    }
-                    .padding(.top, 4)
                 }
             }
         }
