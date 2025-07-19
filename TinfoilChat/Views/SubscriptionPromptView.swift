@@ -177,6 +177,11 @@ struct SubscriptionPromptView: View {
                     await authManager.forceRefreshUserData()
                 }
             } catch {
+                // Don't show error popup if user cancelled the purchase
+                if let purchaseError = error as? PurchaseError,
+                   case .purchaseCancelled = purchaseError {
+                    return
+                }
                 errorMessage = error.localizedDescription
                 showError = true
             }
@@ -191,6 +196,12 @@ struct SubscriptionPromptView: View {
                 // Force refresh user data to get updated subscription status
                 if let authManager = authManager {
                     await authManager.forceRefreshUserData()
+                    
+                    // Check if subscription is active after refresh
+                    if !authManager.hasActiveSubscription {
+                        errorMessage = "No purchases found to restore"
+                        showError = true
+                    }
                 }
             } catch {
                 errorMessage = error.localizedDescription
