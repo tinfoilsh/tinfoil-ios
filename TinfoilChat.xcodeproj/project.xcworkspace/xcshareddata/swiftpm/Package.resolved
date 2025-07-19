@@ -1,5 +1,5 @@
 {
-  "originHash" : "d51997653b25768dcdde12b81cc95c618cfc13d925aad578f1e4da2c7f4fc317",
+  "originHash" : "a6c93414ea676617d27c360991d66542183e409577b0c79ca659b25752824a03",
   "pins" : [
     {
       "identity" : "clerk-ios",
@@ -44,6 +44,15 @@
       "state" : {
         "branch" : "main",
         "revision" : "eafa1557f8fd7c82ef02c75cbc72f051698fca44"
+      }
+    },
+    {
+      "identity" : "purchases-ios-spm",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/RevenueCat/purchases-ios-spm.git",
+      "state" : {
+        "revision" : "fa196fa767b15663ff8941a0a80e3ad67ad4d53f",
+        "version" : "5.33.0"
       }
     },
     {
@@ -103,10 +112,10 @@
     {
       "identity" : "tinfoil-swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/tinfoilsh/tinfoil-swift.git",
+      "location" : "https://github.com/tinfoilsh/tinfoil-swift",
       "state" : {
         "branch" : "main",
-        "revision" : "9c461a1e8d14dadc7c98bb5d8fa5f5883c74e00b"
+        "revision" : "3cf3a353999b543c0fc7d8f9b3652c4c6995e8a7"
       }
     }
   ],

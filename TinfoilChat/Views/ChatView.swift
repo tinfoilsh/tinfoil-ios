@@ -533,6 +533,7 @@ struct TabbedWelcomeView: View {
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
     @State private var selectedModelId: String = ""
     @ObservedObject private var settings = SettingsManager.shared
+    @ObservedObject private var revenueCat = RevenueCatManager.shared
     
     private var availableModels: [ModelType] {
         return AppConfig.shared.availableModels
@@ -583,22 +584,24 @@ struct TabbedWelcomeView: View {
                     .font(.system(size: 18, weight: .medium))
                     .foregroundColor(.primary)
                 
-                LazyVGrid(columns: [
-                    GridItem(.adaptive(minimum: 88, maximum: 120), spacing: 16)
-                ], spacing: 16) {
-                    ForEach(availableModels) { model in
-                        ModelTab(
-                            model: model,
-                            isSelected: selectedModelId == model.id,
-                            isDarkMode: isDarkMode,
-                            isEnabled: canUseModel(model),
-                            showPricingLabel: !(authManager?.isAuthenticated == true && authManager?.hasActiveSubscription == true)
-                        ) {
-                            selectModel(model)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        ForEach(availableModels) { model in
+                            ModelTab(
+                                model: model,
+                                isSelected: selectedModelId == model.id,
+                                isDarkMode: isDarkMode,
+                                isEnabled: canUseModel(model),
+                                showPricingLabel: !(authManager?.isAuthenticated == true && authManager?.hasActiveSubscription == true)
+                            ) {
+                                selectModel(model)
+                            }
                         }
                     }
+                    .padding(.horizontal, 32)
                 }
                 .padding(.vertical, 12)
+                .padding(.horizontal, -32)
             }
             
             // Subscription prompt for non-premium users
@@ -618,28 +621,7 @@ struct TabbedWelcomeView: View {
     
     // Subscription prompt view
     private var subscriptionPrompt: some View {
-        VStack(spacing: 12) {
-            Text("Premium Models")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.primary)
-            
-            Text("Sign in to access models included in your account plan.")
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .lineLimit(nil)
-        }
-        .padding(.vertical, 16)
-        .padding(.horizontal, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.accentPrimary.opacity(0.08))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(Color.accentPrimary.opacity(0.2), lineWidth: 1)
-                )
-        )
-        .padding(.top, 8)
+        SubscriptionPromptView(authManager: authManager)
     }
     
     private func selectModel(_ model: ModelType) {
@@ -681,7 +663,7 @@ struct ModelTab: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 20, height: 20)
-                    .opacity(isEnabled ? 1.0 : 0.4)
+                    .opacity(isEnabled ? 1.0 : 0.7)
                 
                 // Model name
                 Text(model.displayName)
@@ -689,7 +671,7 @@ struct ModelTab: View {
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                    .opacity(isEnabled ? 1.0 : 0.4)
+                    .opacity(isEnabled ? 1.0 : 0.7)
                 
                 // Free/Premium indicator (only shown for non-premium users)
                 if showPricingLabel {
@@ -713,7 +695,7 @@ struct ModelTab: View {
                     // Base background
                     RoundedRectangle(cornerRadius: 12)
                         .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
-                        .opacity(isEnabled ? 1.0 : 0.5)
+                        .opacity(isEnabled ? 1.0 : 0.7)
                     
                     // Selected state background
                     if isSelected {

@@ -8,6 +8,7 @@
 
 import SwiftUI
 import Sentry
+import RevenueCat
 
 import UIKit
 import Clerk
@@ -125,6 +126,9 @@ struct TinfoilChatApp: App {
 // MARK: - AppDelegate
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        // Configure RevenueCat
+        RevenueCatManager.shared.configure(apiKey: "appl_NsqQinGVxyvuivFgGKjKcIqHlsk")
+        
         // Configure Sentry
         SentrySDK.start { options in
             options.dsn = "https://6f1fb6f77a16359e4d05acd52bbb2b93@o4509288836694016.ingest.us.sentry.io/4509290148069376"
