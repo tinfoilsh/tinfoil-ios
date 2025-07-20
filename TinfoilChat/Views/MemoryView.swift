@@ -211,9 +211,15 @@ struct MemoryView: View {
     // Panel header matching the style from VerifierViewController
     private var panelHeader: some View {
         HStack {
-            Text("Memory")
-                .font(.title)
-                .fontWeight(.bold)
+            HStack(spacing: 12) {
+                Image(systemName: "brain.head.profile")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.primary)
+                Text("Memory")
+                    .font(.title)
+                    .fontWeight(.bold)
+            }
             Spacer()
             
             // Dismiss button with X icon
