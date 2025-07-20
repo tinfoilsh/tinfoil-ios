@@ -26,23 +26,20 @@ struct MemoryView: View {
             panelHeader
             
             // Content
-            NavigationView {
-                List {
-                    Section {
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Help Tin personalize your conversations")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .padding(.bottom, 8)
-                            
-                            personalizationContent
-                        }
-                        .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
-                        .listRowBackground(Color.clear)
-                    }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    Text("Help Tin personalize your conversations")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 24)
+                    
+                    personalizationContent
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 24)
                 }
-                .navigationBarHidden(true)
-                .listStyle(InsetGroupedListStyle())
+            }
+            .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
                 .onTapGesture {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
@@ -52,10 +49,8 @@ struct MemoryView: View {
                             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                         }
                 )
-            }
-            .navigationViewStyle(StackNavigationViewStyle())
         }
-        .background(Color(UIColor.systemGroupedBackground))
+        .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
         .accentColor(Color.accentPrimary)
         .overlay(
             saveConfirmationOverlay,
@@ -71,32 +66,63 @@ struct MemoryView: View {
     
     // Personalization content view
     private var personalizationContent: some View {
-        Group {
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(spacing: 24) {
+            // Nickname section
+            VStack(alignment: .leading, spacing: 12) {
                 Text("What should Tin call you?")
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.primary)
                 TextField("Nickname", text: $localNickname)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .textFieldStyle(.plain)
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(colorScheme == .dark ? Color(UIColor.systemGray5) : Color(UIColor.systemGray6))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
                     .onChange(of: localNickname) { _, newValue in
                         settings.nickname = newValue
                     }
             }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(colorScheme == .dark ? Color(hex: "1C1C1E") : Color(UIColor.systemGray6))
+            )
             
-            VStack(alignment: .leading, spacing: 8) {
+            // Profession section
+            VStack(alignment: .leading, spacing: 12) {
                 Text("What's your occupation?")
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.primary)
                 TextField("Profession", text: $localProfession)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .textFieldStyle(.plain)
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(colorScheme == .dark ? Color(UIColor.systemGray5) : Color(UIColor.systemGray6))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
                     .onChange(of: localProfession) { _, newValue in
                         settings.profession = newValue
                     }
             }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(colorScheme == .dark ? Color(hex: "1C1C1E") : Color(UIColor.systemGray6))
+            )
             
-            VStack(alignment: .leading, spacing: 8) {
+            // Traits section
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Conversational traits")
                     .font(.subheadline)
                     .fontWeight(.medium)
@@ -109,19 +135,39 @@ struct MemoryView: View {
                     settings.selectedTraits = newValue
                 }
             }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(colorScheme == .dark ? Color(hex: "1C1C1E") : Color(UIColor.systemGray6))
+            )
             
-            VStack(alignment: .leading, spacing: 8) {
+            // Additional context section
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Additional context")
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.primary)
                 TextField("Anything else Tin should know about you?", text: $localAdditionalContext, axis: .vertical)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .textFieldStyle(.plain)
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(colorScheme == .dark ? Color(UIColor.systemGray5) : Color(UIColor.systemGray6))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
                     .lineLimit(3...6)
                     .onChange(of: localAdditionalContext) { _, newValue in
                         settings.additionalContext = newValue
                     }
             }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(colorScheme == .dark ? Color(hex: "1C1C1E") : Color(UIColor.systemGray6))
+            )
             
             VStack(spacing: 0) {
                 // Non-interactive spacer
