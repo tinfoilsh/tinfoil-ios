@@ -140,6 +140,11 @@ struct SettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAuthView = false
     @State private var showDeleteConfirmation = false
+    @State private var showProfileEditor = false
+    @State private var editingFirstName = ""
+    @State private var editingLastName = ""
+    @State private var isUpdatingProfile = false
+    @State private var profileUpdateError: String? = nil
     
     init() {
         let appearance = UINavigationBarAppearance()
@@ -169,6 +174,7 @@ struct SettingsView: View {
             "Urdu", "Uzbek", "Vietnamese", "Welsh", "Yiddish"
         ].sorted()
     }
+    
     
     var body: some View {
         VStack(spacing: 0) {
@@ -258,11 +264,40 @@ struct SettingsView: View {
                             }
                             .padding(.vertical, 4)
                             
+                            // Edit Profile button
+                            Button(action: {
+                                if let user = clerk.user {
+                                    editingFirstName = user.firstName ?? ""
+                                    editingLastName = user.lastName ?? ""
+                                    showProfileEditor = true
+                                }
+                            }) {
+                                HStack {
+                                    Text("Edit Profile")
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .foregroundColor(.secondary)
+                                        .font(.caption)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            
                             // Manage Subscription link - conditionally show based on subscription source
                             if authManager.hasActiveSubscription {
-                                let subscriptionSource = clerk.user?.publicMetadata?["chat_subscription_source"] as? String
+                                // Get subscription source with more robust checking
+                                let isRevenueCat: Bool = {
+                                    if let metadata = clerk.user?.publicMetadata,
+                                       let source = metadata["chat_subscription_source"] {
+                                        let sourceString = "\(source)".replacingOccurrences(of: "\"", with: "")
+                                        return sourceString == "ios_revenuecat"
+                                    }
+                                    return false
+                                }()
                                 
-                                if subscriptionSource == "ios_revenuecat" {
+                                
+                                if isRevenueCat {
                                     // In-app purchase - link to iOS subscription settings
                                     Link(destination: URL(string: "https://apps.apple.com/account/subscriptions")!) {
                                         HStack {
@@ -323,11 +358,14 @@ struct SettingsView: View {
                             }) {
                                 HStack {
                                     Image(systemName: "person.badge.plus")
+                                        .foregroundColor(.primary)
                                     Text("Sign up or Log In")
+                                        .foregroundColor(.primary)
                                     Spacer()
                                 }
                                 .contentShape(Rectangle())
                             }
+                            .buttonStyle(PlainButtonStyle())
                         }
                     } header: {
                         Text("Account")
@@ -407,14 +445,37 @@ struct SettingsView: View {
         } message: {
             Text("Are you sure you want to delete your account? This action cannot be undone.")
         }
+        .sheet(isPresented: $showProfileEditor) {
+            ProfileEditorView(
+                firstName: $editingFirstName,
+                lastName: $editingLastName,
+                isUpdating: $isUpdatingProfile,
+                errorMessage: $profileUpdateError,
+                onSave: {
+                    Task {
+                        await updateProfile()
+                    }
+                },
+                onCancel: {
+                    showProfileEditor = false
+                }
+            )
+            .environment(clerk)
+        }
     }
     
     // Panel header matching the style from VerifierViewController
     private var panelHeader: some View {
         HStack {
-            Text("Settings")
-                .font(.title)
-                .fontWeight(.bold)
+            HStack(spacing: 12) {
+                Image(systemName: "gear")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.primary)
+                Text("Settings")
+                    .font(.title)
+                    .fontWeight(.bold)
+            }
             Spacer()
             
             // Dismiss button with X icon
@@ -439,6 +500,114 @@ struct SettingsView: View {
             , alignment: .bottom
         )
     }
+    
+    // Update user profile
+    private func updateProfile() async {
+        isUpdatingProfile = true
+        profileUpdateError = nil
+        
+        do {
+            // Update user profile
+            var updateParams = User.UpdateParams()
+            updateParams.firstName = editingFirstName
+            updateParams.lastName = editingLastName
+            try await clerk.user?.update(updateParams)
+            
+            // Refresh auth state
+            await authManager.initializeAuthState()
+            
+            showProfileEditor = false
+        } catch {
+            profileUpdateError = error.localizedDescription
+        }
+        
+        isUpdatingProfile = false
+    }
+}
+
+// Profile Editor View
+struct ProfileEditorView: View {
+    @Binding var firstName: String
+    @Binding var lastName: String
+    @Binding var isUpdating: Bool
+    @Binding var errorMessage: String?
+    let onSave: () -> Void
+    let onCancel: () -> Void
+    
+    @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var focusedField: Field?
+    
+    enum Field {
+        case firstName, lastName
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Button("Cancel") {
+                    onCancel()
+                }
+                .foregroundColor(.blue)
+                
+                Spacer()
+                
+                Text("Edit Profile")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                
+                Spacer()
+                
+                Button("Save") {
+                    onSave()
+                }
+                .foregroundColor(.blue)
+                .fontWeight(.semibold)
+                .disabled(isUpdating)
+            }
+            .padding()
+            .background(Color(UIColor.systemBackground))
+            .overlay(
+                Divider()
+                    .opacity(0.2)
+                , alignment: .bottom
+            )
+            
+            // Form
+            Form {
+                Section {
+                    TextField("First Name", text: $firstName)
+                        .textContentType(.givenName)
+                        .focused($focusedField, equals: .firstName)
+                        .disabled(isUpdating)
+                    
+                    TextField("Last Name", text: $lastName)
+                        .textContentType(.familyName)
+                        .focused($focusedField, equals: .lastName)
+                        .disabled(isUpdating)
+                } header: {
+                    Text("Name")
+                }
+                
+                if let error = errorMessage {
+                    Section {
+                        Text(error)
+                            .foregroundColor(.red)
+                            .font(.caption)
+                    }
+                }
+            }
+            
+            if isUpdating {
+                ProgressView()
+                    .padding()
+            }
+        }
+        .background(Color(UIColor.systemGroupedBackground))
+        .onAppear {
+            focusedField = .firstName
+        }
+    }
 }
 
 // Trait selection view for personality traits
@@ -447,21 +616,21 @@ struct TraitSelectionView: View {
     @Binding var selectedTraits: [String]
     
     var body: some View {
-        FlowLayout(spacing: 8) {
+        FlowLayout(spacing: 12) {
             ForEach(availableTraits, id: \.self) { trait in
                 Button(action: {
                     toggleTrait(trait)
                 }) {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 6) {
                         Image(systemName: selectedTraits.contains(trait) ? "checkmark" : "plus")
-                            .font(.footnote)
+                            .font(.subheadline)
                         Text(trait)
-                            .font(.footnote)
+                            .font(.subheadline)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
                     .background(
-                        RoundedRectangle(cornerRadius: 16)
+                        RoundedRectangle(cornerRadius: 20)
                             .fill(selectedTraits.contains(trait) ? Color.accentPrimary : Color.gray.opacity(0.2))
                     )
                     .foregroundColor(selectedTraits.contains(trait) ? .white : .primary)
