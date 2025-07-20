@@ -411,6 +411,8 @@ struct SettingsView: View {
                 }
                 .navigationBarHidden(true)
                 .listStyle(InsetGroupedListStyle())
+                .scrollContentBackground(.hidden)
+                .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
                 .onTapGesture {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
@@ -423,7 +425,7 @@ struct SettingsView: View {
             }
             .navigationViewStyle(StackNavigationViewStyle())
         }
-        .background(Color(UIColor.systemGroupedBackground))
+        .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
         .accentColor(Color.accentPrimary)
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()
@@ -603,7 +605,7 @@ struct ProfileEditorView: View {
                     .padding()
             }
         }
-        .background(Color(UIColor.systemGroupedBackground))
+        .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
         .onAppear {
             focusedField = .firstName
         }
