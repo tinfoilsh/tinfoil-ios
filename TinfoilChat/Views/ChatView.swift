@@ -605,22 +605,24 @@ struct TabbedWelcomeView: View {
                     .font(.system(size: 18, weight: .medium))
                     .foregroundColor(.primary)
                 
-                LazyVGrid(columns: [
-                    GridItem(.adaptive(minimum: 88, maximum: 120), spacing: 16)
-                ], spacing: 16) {
-                    ForEach(availableModels) { model in
-                        ModelTab(
-                            model: model,
-                            isSelected: selectedModelId == model.id,
-                            isDarkMode: isDarkMode,
-                            isEnabled: canUseModel(model),
-                            showPricingLabel: !(authManager?.isAuthenticated == true && authManager?.hasActiveSubscription == true)
-                        ) {
-                            selectModel(model)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        ForEach(availableModels) { model in
+                            ModelTab(
+                                model: model,
+                                isSelected: selectedModelId == model.id,
+                                isDarkMode: isDarkMode,
+                                isEnabled: canUseModel(model),
+                                showPricingLabel: !(authManager?.isAuthenticated == true && authManager?.hasActiveSubscription == true)
+                            ) {
+                                selectModel(model)
+                            }
                         }
                     }
+                    .padding(.horizontal, 32)
                 }
                 .padding(.vertical, 12)
+                .padding(.horizontal, -32)
             }
             
             // Subscription prompt for non-premium users

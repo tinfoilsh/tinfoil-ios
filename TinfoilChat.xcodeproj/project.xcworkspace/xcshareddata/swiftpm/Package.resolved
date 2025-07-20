@@ -1,5 +1,5 @@
 {
-  "originHash" : "00ec87fcdfd9eb3a38b3609b73876bb61882d628e39c921d2533ebd19893368e",
+  "originHash" : "a6c93414ea676617d27c360991d66542183e409577b0c79ca659b25752824a03",
   "pins" : [
     {
       "identity" : "clerk-ios",
@@ -112,10 +112,10 @@
     {
       "identity" : "tinfoil-swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/tinfoilsh/tinfoil-swift.git",
+      "location" : "https://github.com/tinfoilsh/tinfoil-swift",
       "state" : {
         "branch" : "main",
-        "revision" : "9c461a1e8d14dadc7c98bb5d8fa5f5883c74e00b"
+        "revision" : "3cf3a353999b543c0fc7d8f9b3652c4c6995e8a7"
       }
     }
   ],
