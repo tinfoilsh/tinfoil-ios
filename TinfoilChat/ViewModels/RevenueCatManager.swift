@@ -100,12 +100,8 @@ class RevenueCatManager: ObservableObject {
             // Give webhook a moment to process
             try await Task.sleep(nanoseconds: 2_000_000_000)
             
-        } catch let error as ErrorCode {
-            if error == .purchaseCancelledError {
-                throw PurchaseError.purchaseCancelled
-            } else {
-                throw PurchaseError.purchaseFailed(error.localizedDescription)
-            }
+        } catch {
+            throw PurchaseError.purchaseFailed(error.localizedDescription)
         }
     }
     

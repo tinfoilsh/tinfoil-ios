@@ -14,6 +14,7 @@ struct AnimatedConfidentialTitle: View {
     @State private var currentIndex = 0
     @State private var isLocked = false
     @State private var showLock = false
+    @State private var animationTimer: Timer?
     @ObservedObject private var settings = SettingsManager.shared
     
     private let fullText = "Confidential Chat"
@@ -39,10 +40,14 @@ struct AnimatedConfidentialTitle: View {
             hapticGenerator.prepare()
             startTypingAnimation()
         }
+        .onDisappear {
+            animationTimer?.invalidate()
+            animationTimer = nil
+        }
     }
     
     private func startTypingAnimation() {
-        Timer.scheduledTimer(withTimeInterval: typingSpeed, repeats: true) { timer in
+        animationTimer = Timer.scheduledTimer(withTimeInterval: typingSpeed, repeats: true) { timer in
             if currentIndex < fullText.count {
                 let index = fullText.index(fullText.startIndex, offsetBy: currentIndex)
                 displayedText.append(fullText[index])

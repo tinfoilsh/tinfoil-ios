@@ -511,7 +511,7 @@ class TextRankTitleGenerator {
     func generateTitle(from text: String, maxWords: Int = 6) -> String {
         // For very short messages, just use the message itself as title (capitalized)
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedText.count <= 50 {
+        if !trimmedText.isEmpty && trimmedText.count <= 50 {
             // Capitalize first letter and limit length
             let title = trimmedText.prefix(50)
             return title.prefix(1).uppercased() + title.dropFirst()
