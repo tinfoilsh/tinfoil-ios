@@ -38,7 +38,7 @@ struct MessageInputView: View {
             // Text input area
             CustomTextEditor(text: $messageText, 
                              textHeight: $textHeight, 
-                             placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "Ask Tin..." : "Reply to Tin...")
+                             placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message")
                 .frame(height: textHeight)
                 .padding(.horizontal)
             
@@ -105,7 +105,7 @@ struct MessageInputView: View {
                 }
                 .padding(.trailing, 24)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 8)
         }
         .onAppear {
             softHaptic.prepare()

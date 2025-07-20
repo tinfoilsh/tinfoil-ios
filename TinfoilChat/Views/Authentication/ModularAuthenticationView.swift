@@ -28,7 +28,7 @@ struct ModularAuthenticationView: View {
     GeometryReader { geometry in
       ZStack {
         // Background
-        Color(UIColor.systemBackground)
+        Color(UIColor.systemGroupedBackground)
           .edgesIgnoringSafeArea(.all)
         
         VStack(spacing: 0) {

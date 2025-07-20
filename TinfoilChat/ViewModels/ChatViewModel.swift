@@ -118,7 +118,6 @@ class ChatViewModel: ObservableObject {
             )
             chats.insert(newChat, at: 0)
             currentChat = newChat
-            saveChats()
         } else {
             // For non-authenticated users, just create a single chat without saving
             let newChat = Chat.create(modelType: currentModel)
@@ -235,7 +234,6 @@ class ChatViewModel: ObservableObject {
         chats.insert(newChat, at: 0)
         // Select the new chat
         selectChat(newChat)
-        saveChats()
     }
     
     /// Selects a chat as the current chat
@@ -734,7 +732,8 @@ class ChatViewModel: ObservableObject {
     private func saveChats() {
         // Save chats for all authenticated users
         if hasChatAccess {
-            Chat.saveToDefaults(chats, userId: currentUserId)
+            let nonEmptyChats = chats.filter { !$0.messages.isEmpty }
+            Chat.saveToDefaults(nonEmptyChats, userId: currentUserId)
         }
     }
     

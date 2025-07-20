@@ -25,6 +25,7 @@ struct ChatContainer: View {
     @State private var dragOffset: CGFloat = 0
     @State private var showAuthView = false
     @State private var showSettings = false
+    @State private var showMemory = false
     @State private var lastBackgroundTime: Date?
     
     private let backgroundTimeThreshold: TimeInterval = 60 // 1 minute in seconds
@@ -58,6 +59,9 @@ struct ChatContainer: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
+        }
+        .sheet(isPresented: $showMemory) {
+            MemoryView()
         }
     }
     
@@ -96,23 +100,41 @@ struct ChatContainer: View {
             }
             if authManager.isAuthenticated {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    ModelPicker(viewModel: viewModel)
-                }
-                // New chat button
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: createNewChat) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(.white)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .strokeBorder(.white, lineWidth: 1)
-                                )
-                                .frame(width: 24, height: 24)
-                            
-                            Image(systemName: "plus")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.black)
+                    HStack(spacing: 8) {
+                        ModelPicker(viewModel: viewModel)
+                        
+                        // Memory button
+                        Button(action: showMemoryView) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(.white)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .strokeBorder(.white, lineWidth: 1)
+                                    )
+                                    .frame(width: 24, height: 24)
+                                
+                                Image(systemName: "brain.head.profile")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.black)
+                            }
+                        }
+                        
+                        // New chat button
+                        Button(action: createNewChat) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(.white)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .strokeBorder(.white, lineWidth: 1)
+                                    )
+                                    .frame(width: 24, height: 24)
+                                
+                                Image(systemName: "plus")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.black)
+                            }
                         }
                     }
                 }
@@ -247,6 +269,11 @@ struct ChatContainer: View {
     /// Shows the settings view
     private func showSettingsView() {
         showSettings = true
+    }
+    
+    /// Shows the memory view
+    private func showMemoryView() {
+        showMemory = true
     }
     
     /// Creates a new chat if the current chat has messages
@@ -560,19 +587,13 @@ struct TabbedWelcomeView: View {
                             .fontWeight(.semibold)
                             .multilineTextAlignment(.center)
                     } else {
-                        Text("How can I assist you?")
-                            .font(.title)
-                            .fontWeight(.semibold)
-                            .multilineTextAlignment(.center)
+                        AnimatedConfidentialTitle()
                     }
                 } else {
-                    Text("How can I assist you?")
-                        .font(.title)
-                        .fontWeight(.semibold)
-                        .multilineTextAlignment(.center)
+                    AnimatedConfidentialTitle()
                 }
                 
-                Text("This conversation is completely private, nobody can see your messages - not even Tinfoil.")
+                Text("This conversation is completely private, nobody can see your messages — not even Tinfoil.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -580,7 +601,7 @@ struct TabbedWelcomeView: View {
             
             // Model selection tabs
             VStack(spacing: 16) {
-                Text("Choose your model")
+                Text("Choose your AI model")
                     .font(.system(size: 18, weight: .medium))
                     .foregroundColor(.primary)
                 

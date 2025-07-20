@@ -18,13 +18,12 @@ struct ChatSidebar: View {
     @State private var editingChatId: String? = nil
     @State private var editingTitle: String = ""
     @State private var deletingChatId: String? = nil
-    @State private var showSignUpOrSignIn: Bool = false
     @State private var showSettings: Bool = false
     
     var body: some View {
         sidebarContent
             .frame(width: 300)
-            .background(Color(UIColor.systemBackground))
+            .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
             .alert("Delete Chat", isPresented: .constant(deletingChatId != nil)) {
             Button("Cancel", role: .cancel) {
                 deletingChatId = nil
@@ -38,15 +37,6 @@ struct ChatSidebar: View {
                 }
                 deletingChatId = nil
             }
-        }
-        .sheet(isPresented: $showSignUpOrSignIn) {
-            AuthenticationView()
-                .environmentObject(authManager)
-                .onDisappear {
-                    // Refresh the UI when the auth view is dismissed
-                    if authManager.isAuthenticated {
-                    }
-                }
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
@@ -85,8 +75,12 @@ struct ChatSidebar: View {
                     }
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .foregroundColor(.primary)
+                    .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color.white)
+                    .foregroundColor(colorScheme == .dark ? .white : .black)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(colorScheme == .dark ? Color.clear : Color.gray.opacity(0.2), lineWidth: 1)
+                    )
                     .cornerRadius(8)
                 }
                 .padding([.horizontal, .top], 16)
@@ -111,7 +105,7 @@ struct ChatSidebar: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 16)
-            .background(Color(UIColor.systemBackground))
+            .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
             
             // Chat List - shows multiple chats for all authenticated users
             ScrollView {
@@ -159,115 +153,16 @@ struct ChatSidebar: View {
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .center)
-                .background(Color(UIColor.secondarySystemBackground))
-                .foregroundColor(.primary)
+                .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color.white)
+                .foregroundColor(colorScheme == .dark ? .white : .black)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(colorScheme == .dark ? Color.clear : Color.gray.opacity(0.2), lineWidth: 1)
+                )
                 .cornerRadius(8)
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 8)
-            
-            // Account section
-            if authManager.isAuthenticated {
-                accountView
-            } else {
-                // Sign up or Log In Button when not authenticated
-                Button(action: {
-                    showSignUpOrSignIn = true
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "person.badge.plus")
-                        Text("Sign up or Log In")
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .foregroundColor(.primary)
-                    .cornerRadius(8)
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
-            }
-        }
-    }
-    
-    private var accountView: some View {
-        VStack(spacing: 8) {
-            // Account button to open the full authentication view
-            Button(action: {
-                showSignUpOrSignIn = true
-            }) {
-                HStack {
-                    // Display user info if available
-                    if let user = clerk.user {
-                        if !user.imageUrl.isEmpty {
-                            AsyncImage(url: URL(string: user.imageUrl)) { image in
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                Image(systemName: "person.circle.fill")
-                            }
-                            .frame(width: 28, height: 28)
-                            .clipShape(Circle())
-                        } else {
-                            Image(systemName: "person.circle.fill")
-                                .resizable()
-                                .frame(width: 28, height: 28)
-                                .foregroundColor(.primary)
-                        }
-                        
-                        Text("\(user.firstName ?? "") \(user.lastName ?? "")")
-                            .foregroundColor(.primary)
-                        
-                        Spacer()
-                    }
-                    // If user is not in clerk but in local storage
-                    else if let userData = authManager.localUserData {
-                        if let imageUrlString = userData["imageUrl"] as? String, 
-                           !imageUrlString.isEmpty,
-                           let url = URL(string: imageUrlString) {
-                            AsyncImage(url: url) { image in
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                Image(systemName: "person.circle.fill")
-                            }
-                            .frame(width: 28, height: 28)
-                            .clipShape(Circle())
-                        } else {
-                            Image(systemName: "person.circle.fill")
-                                .resizable()
-                                .frame(width: 28, height: 28)
-                                .foregroundColor(.primary)
-                        }
-                        
-                        Text((userData["name"] as? String) ?? "Account")
-                            .foregroundColor(.primary)
-                        
-                        Spacer()
-                    } else {
-                        Image(systemName: "person.circle.fill")
-                            .resizable()
-                            .frame(width: 28, height: 28)
-                            .foregroundColor(.primary)
-                        
-                        Text("Account")
-                            .foregroundColor(.primary)
-                        
-                        Spacer()
-                    }
-                    
-                    Image(systemName: "chevron.right")
-                        .foregroundColor(.gray)
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(UIColor.secondarySystemBackground))
-                .cornerRadius(8)
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
+            .padding(.bottom, 16)
         }
     }
     

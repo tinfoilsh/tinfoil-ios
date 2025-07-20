@@ -109,12 +109,17 @@ struct TinfoilChatApp: App {
                     }
                 } else {
                     ZStack {
-                        (colorScheme == .dark ? Color(hex: "111827") : Color.white)
+                        Color(hex: "111827")
                             .ignoresSafeArea()
-                        VStack(spacing: 16) {
+                        VStack(spacing: 24) {
+                            Image("navbar-logo")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 48)
+                            
                             ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .white : .black))
-                                .scaleEffect(1.5)
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(1.2)
                         }
                     }
                 }

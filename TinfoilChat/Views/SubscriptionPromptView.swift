@@ -31,32 +31,7 @@ struct SubscriptionPromptView: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(.primary)
             
-            if hasSubscription {
-                // Has subscription - show premium benefits
-                VStack(spacing: 8) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                            .font(.system(size: 14))
-                        Text("Premium Active")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.green)
-                    }
-                    
-                    Text("You have access to all premium models")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(nil)
-                    
-                    Button(action: restorePurchases) {
-                        Text("Manage Subscription")
-                            .font(.system(size: 12))
-                            .foregroundColor(.accentPrimary)
-                    }
-                    .padding(.top, 4)
-                }
-            } else {
+            if !hasSubscription {
                 // No subscription - show subscribe options
                 VStack(spacing: 8) {
                     if let package = revenueCat.offerings?.current?.availablePackages.first {
@@ -115,18 +90,26 @@ struct SubscriptionPromptView: View {
                                 .cornerRadius(8)
                         }
                         
-                        Button(action: restorePurchases) {
-                            Text("Restore Purchases")
-                                .font(.system(size: 12))
-                                .foregroundColor(.accentPrimary)
-                        }
-                        
-                        HStack(spacing: 16) {
+                        HStack(spacing: 4) {
+                            Button(action: restorePurchases) {
+                                Text("Restore Purchases")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.accentPrimary)
+                            }
+                            
+                            Text("·")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                            
                             if let termsURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/") {
                                 Link("Terms of Use", destination: termsURL)
                                     .font(.system(size: 11))
                                     .foregroundColor(.accentPrimary)
                             }
+                            
+                            Text("·")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
                             
                             if let privacyURL = URL(string: "https://tinfoil.sh/privacy") {
                                 Link("Privacy Policy", destination: privacyURL)
@@ -177,11 +160,6 @@ struct SubscriptionPromptView: View {
                     await authManager.forceRefreshUserData()
                 }
             } catch {
-                // Don't show error popup if user cancelled the purchase
-                if let purchaseError = error as? PurchaseError,
-                   case .purchaseCancelled = purchaseError {
-                    return
-                }
                 errorMessage = error.localizedDescription
                 showError = true
             }
@@ -196,12 +174,6 @@ struct SubscriptionPromptView: View {
                 // Force refresh user data to get updated subscription status
                 if let authManager = authManager {
                     await authManager.forceRefreshUserData()
-                    
-                    // Check if subscription is active after refresh
-                    if !authManager.hasActiveSubscription {
-                        errorMessage = "No purchases found to restore"
-                        showError = true
-                    }
                 }
             } catch {
                 errorMessage = error.localizedDescription

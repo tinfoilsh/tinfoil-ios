@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import Clerk
 
 // Settings Manager to handle persistence
 @MainActor
@@ -134,16 +135,16 @@ class SettingsManager: ObservableObject {
 struct SettingsView: View {
     @EnvironmentObject private var authManager: AuthManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(Clerk.self) private var clerk
     @ObservedObject private var settings = SettingsManager.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAuthView = false
-    @State private var showSaveConfirmation = false
-    
-    // Local state for form fields
-    @State private var localNickname = ""
-    @State private var localProfession = ""
-    @State private var localTraits: [String] = []
-    @State private var localAdditionalContext = ""
+    @State private var showDeleteConfirmation = false
+    @State private var showProfileEditor = false
+    @State private var editingFirstName = ""
+    @State private var editingLastName = ""
+    @State private var isUpdatingProfile = false
+    @State private var profileUpdateError: String? = nil
     
     init() {
         let appearance = UINavigationBarAppearance()
@@ -174,6 +175,7 @@ struct SettingsView: View {
         ].sorted()
     }
     
+    
     var body: some View {
         VStack(spacing: 0) {
             // Custom header based on VerifierViewController
@@ -182,7 +184,194 @@ struct SettingsView: View {
             // Content
             NavigationView {
                 List {
-                    Section(header: Text("Preferences")) {
+                    // Account Section
+                    Section {
+                        if authManager.isAuthenticated {
+                            // User info row
+                            HStack {
+                                // Display user info if available
+                                if let user = clerk.user {
+                                    if !user.imageUrl.isEmpty {
+                                        AsyncImage(url: URL(string: user.imageUrl)) { image in
+                                            image
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                        } placeholder: {
+                                            Image(systemName: "person.circle.fill")
+                                        }
+                                        .frame(width: 40, height: 40)
+                                        .clipShape(Circle())
+                                    } else {
+                                        Image(systemName: "person.circle.fill")
+                                            .resizable()
+                                            .frame(width: 40, height: 40)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("\(user.firstName ?? "") \(user.lastName ?? "")")
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                        if let email = user.emailAddresses.first?.emailAddress {
+                                            Text(email)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                }
+                                // If user is not in clerk but in local storage
+                                else if let userData = authManager.localUserData {
+                                    if let imageUrlString = userData["imageUrl"] as? String, 
+                                       !imageUrlString.isEmpty,
+                                       let url = URL(string: imageUrlString) {
+                                        AsyncImage(url: url) { image in
+                                            image
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                        } placeholder: {
+                                            Image(systemName: "person.circle.fill")
+                                        }
+                                        .frame(width: 40, height: 40)
+                                        .clipShape(Circle())
+                                    } else {
+                                        Image(systemName: "person.circle.fill")
+                                            .resizable()
+                                            .frame(width: 40, height: 40)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text((userData["name"] as? String) ?? "User")
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                        if let email = userData["email"] as? String {
+                                            Text(email)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                } else {
+                                    Image(systemName: "person.circle.fill")
+                                        .resizable()
+                                        .frame(width: 40, height: 40)
+                                        .foregroundColor(.secondary)
+                                    
+                                    Text("Account")
+                                        .foregroundColor(.primary)
+                                }
+                                
+                                Spacer()
+                            }
+                            .padding(.vertical, 4)
+                            
+                            // Edit Profile button
+                            Button(action: {
+                                if let user = clerk.user {
+                                    editingFirstName = user.firstName ?? ""
+                                    editingLastName = user.lastName ?? ""
+                                    showProfileEditor = true
+                                }
+                            }) {
+                                HStack {
+                                    Text("Edit Profile")
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .foregroundColor(.secondary)
+                                        .font(.caption)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            
+                            // Manage Subscription link - conditionally show based on subscription source
+                            if authManager.hasActiveSubscription {
+                                // Get subscription source with more robust checking
+                                let isRevenueCat: Bool = {
+                                    if let metadata = clerk.user?.publicMetadata,
+                                       let source = metadata["chat_subscription_source"] {
+                                        let sourceString = "\(source)".replacingOccurrences(of: "\"", with: "")
+                                        return sourceString == "ios_revenuecat"
+                                    }
+                                    return false
+                                }()
+                                
+                                
+                                if isRevenueCat {
+                                    // In-app purchase - link to iOS subscription settings
+                                    Link(destination: URL(string: "https://apps.apple.com/account/subscriptions")!) {
+                                        HStack {
+                                            Text("Manage Subscription")
+                                            Spacer()
+                                            Image(systemName: "arrow.up.right.square")
+                                                .font(.caption)
+                                        }
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                } else {
+                                    // Web subscription - link to Tinfoil dashboard
+                                    Link(destination: URL(string: "https://www.tinfoil.sh/dashboard")!) {
+                                        HStack {
+                                            Text("Manage Subscription")
+                                            Spacer()
+                                            Image(systemName: "arrow.up.right.square")
+                                                .font(.caption)
+                                        }
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                }
+                            }
+                            
+                            // Sign Out button
+                            Button(action: {
+                                Task {
+                                    await authManager.signOut()
+                                    dismiss()
+                                }
+                            }) {
+                                HStack {
+                                    Text("Sign Out")
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            
+                            // Delete Account button
+                            Button(action: {
+                                showDeleteConfirmation = true
+                            }) {
+                                HStack {
+                                    Text("Delete Account")
+                                        .foregroundColor(.red)
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
+                            }
+                        } else {
+                            // Sign in button for non-authenticated users
+                            Button(action: {
+                                showAuthView = true
+                            }) {
+                                HStack {
+                                    Image(systemName: "person.badge.plus")
+                                        .foregroundColor(.primary)
+                                    Text("Sign up or Log In")
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    } header: {
+                        Text("Account")
+                    }
+                    
+                    Section {
                         Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
                             .tint(Color.accentPrimary)
                         
@@ -192,20 +381,11 @@ struct SettingsView: View {
                             }
                         }
                         .pickerStyle(.navigationLink)
+                    } header: {
+                        Text("Preferences")
                     }
                     
-                    Section(header: Text("Personalization")) {
-                        Toggle("Enable Personalization", isOn: $settings.isPersonalizationEnabled)
-                            .tint(Color.accentPrimary)
-                        
-                        if settings.isPersonalizationEnabled {
-                            personalizationContent
-                                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                                .buttonStyle(PlainButtonStyle())
-                        }
-                    }
-                    
-                    Section(header: Text("Legal")) {
+                    Section {
                         Link(destination: Constants.Legal.termsOfServiceURL) {
                             HStack {
                                 Text("Terms of Service")
@@ -225,10 +405,14 @@ struct SettingsView: View {
                                     .foregroundColor(.blue)
                             }
                         }
+                    } header: {
+                        Text("Legal")
                     }
                 }
                 .navigationBarHidden(true)
                 .listStyle(InsetGroupedListStyle())
+                .scrollContentBackground(.hidden)
+                .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
                 .onTapGesture {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
@@ -241,165 +425,59 @@ struct SettingsView: View {
             }
             .navigationViewStyle(StackNavigationViewStyle())
         }
-        .background(Color(UIColor.systemGroupedBackground))
+        .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
         .accentColor(Color.accentPrimary)
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()
+                .environmentObject(authManager)
         }
-        .overlay(
-            saveConfirmationOverlay,
-            alignment: .top
-        )
-        .onAppear {
-            localNickname = settings.nickname
-            localProfession = settings.profession
-            localTraits = settings.selectedTraits
-            localAdditionalContext = settings.additionalContext
-        }
-    }
-    
-    // Personalization content view
-    private var personalizationContent: some View {
-        Group {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("What should Tin call you?")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundColor(.primary)
-                TextField("Nickname", text: $localNickname)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onChange(of: localNickname) { newValue in
-                        settings.nickname = newValue
+        .alert("Delete Account", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                Task {
+                    do {
+                        try await clerk.user?.delete()
+                        await authManager.signOut()
+                        dismiss()
+                    } catch {
+                        print("Delete account error: \(error)")
                     }
-            }
-            
-            VStack(alignment: .leading, spacing: 8) {
-                Text("What's your occupation?")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundColor(.primary)
-                TextField("Profession", text: $localProfession)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onChange(of: localProfession) { newValue in
-                        settings.profession = newValue
-                    }
-            }
-            
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Conversational traits")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundColor(.primary)
-                TraitSelectionView(
-                    availableTraits: settings.availableTraits,
-                    selectedTraits: $localTraits
-                )
-                .onChange(of: localTraits) { newValue in
-                    settings.selectedTraits = newValue
                 }
             }
-            
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Additional context")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundColor(.primary)
-                TextField("Anything else Tin should know about you?", text: $localAdditionalContext, axis: .vertical)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .lineLimit(3...6)
-                    .onChange(of: localAdditionalContext) { newValue in
-                        settings.additionalContext = newValue
-                    }
-            }
-            
-            VStack(spacing: 0) {
-                // Non-interactive spacer
-                Rectangle()
-                    .fill(Color.clear)
-                    .frame(height: 16)
-                
-                // Button container with explicit boundaries
-                HStack(spacing: 16) {
-                    // Reset button
-                    Button(action: {
-                        settings.resetPersonalization()
-                        localNickname = ""
-                        localProfession = ""
-                        localTraits = []
-                        localAdditionalContext = ""
-                    }) {
-                        Text("Reset")
-                            .foregroundColor(.white)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(Color.red)
-                            .cornerRadius(8)
-                    }
-                    .buttonStyle(BorderlessButtonStyle())
-                    
-                    // Save button
-                    Button(action: {
-                        // Dismiss keyboard first
-                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        
-                        // Show confirmation after a brief delay
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            showSaveConfirmation = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                                showSaveConfirmation = false
-                            }
-                        }
-                    }) {
-                        Text("Save")
-                            .foregroundColor(.white)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(Color.accentPrimary)
-                            .cornerRadius(8)
-                    }
-                    .buttonStyle(BorderlessButtonStyle())
-                }
-                .background(Color.clear)
-                .contentShape(Rectangle())
-            }
+        } message: {
+            Text("Are you sure you want to delete your account? This action cannot be undone.")
         }
-    }
-    
-    // Save confirmation overlay
-    private var saveConfirmationOverlay: some View {
-        Group {
-            if showSaveConfirmation {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                    Text("Settings saved")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
+        .sheet(isPresented: $showProfileEditor) {
+            ProfileEditorView(
+                firstName: $editingFirstName,
+                lastName: $editingLastName,
+                isUpdating: $isUpdatingProfile,
+                errorMessage: $profileUpdateError,
+                onSave: {
+                    Task {
+                        await updateProfile()
+                    }
+                },
+                onCancel: {
+                    showProfileEditor = false
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(UIColor.systemBackground))
-                        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
-                )
-                .padding(.top, 80)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showSaveConfirmation)
-            }
+            )
+            .environment(clerk)
         }
     }
     
     // Panel header matching the style from VerifierViewController
     private var panelHeader: some View {
         HStack {
-            Text("Settings")
-                .font(.title)
-                .fontWeight(.bold)
+            HStack(spacing: 12) {
+                Image(systemName: "gear")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.primary)
+                Text("Settings")
+                    .font(.title)
+                    .fontWeight(.bold)
+            }
             Spacer()
             
             // Dismiss button with X icon
@@ -424,6 +502,114 @@ struct SettingsView: View {
             , alignment: .bottom
         )
     }
+    
+    // Update user profile
+    private func updateProfile() async {
+        isUpdatingProfile = true
+        profileUpdateError = nil
+        
+        do {
+            // Update user profile
+            var updateParams = User.UpdateParams()
+            updateParams.firstName = editingFirstName
+            updateParams.lastName = editingLastName
+            try await clerk.user?.update(updateParams)
+            
+            // Refresh auth state
+            await authManager.initializeAuthState()
+            
+            showProfileEditor = false
+        } catch {
+            profileUpdateError = error.localizedDescription
+        }
+        
+        isUpdatingProfile = false
+    }
+}
+
+// Profile Editor View
+struct ProfileEditorView: View {
+    @Binding var firstName: String
+    @Binding var lastName: String
+    @Binding var isUpdating: Bool
+    @Binding var errorMessage: String?
+    let onSave: () -> Void
+    let onCancel: () -> Void
+    
+    @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var focusedField: Field?
+    
+    enum Field {
+        case firstName, lastName
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Button("Cancel") {
+                    onCancel()
+                }
+                .foregroundColor(.blue)
+                
+                Spacer()
+                
+                Text("Edit Profile")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                
+                Spacer()
+                
+                Button("Save") {
+                    onSave()
+                }
+                .foregroundColor(.blue)
+                .fontWeight(.semibold)
+                .disabled(isUpdating)
+            }
+            .padding()
+            .background(Color(UIColor.systemBackground))
+            .overlay(
+                Divider()
+                    .opacity(0.2)
+                , alignment: .bottom
+            )
+            
+            // Form
+            Form {
+                Section {
+                    TextField("First Name", text: $firstName)
+                        .textContentType(.givenName)
+                        .focused($focusedField, equals: .firstName)
+                        .disabled(isUpdating)
+                    
+                    TextField("Last Name", text: $lastName)
+                        .textContentType(.familyName)
+                        .focused($focusedField, equals: .lastName)
+                        .disabled(isUpdating)
+                } header: {
+                    Text("Name")
+                }
+                
+                if let error = errorMessage {
+                    Section {
+                        Text(error)
+                            .foregroundColor(.red)
+                            .font(.caption)
+                    }
+                }
+            }
+            
+            if isUpdating {
+                ProgressView()
+                    .padding()
+            }
+        }
+        .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+        .onAppear {
+            focusedField = .firstName
+        }
+    }
 }
 
 // Trait selection view for personality traits
@@ -432,21 +618,21 @@ struct TraitSelectionView: View {
     @Binding var selectedTraits: [String]
     
     var body: some View {
-        FlowLayout(spacing: 8) {
+        FlowLayout(spacing: 12) {
             ForEach(availableTraits, id: \.self) { trait in
                 Button(action: {
                     toggleTrait(trait)
                 }) {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 6) {
                         Image(systemName: selectedTraits.contains(trait) ? "checkmark" : "plus")
-                            .font(.footnote)
+                            .font(.subheadline)
                         Text(trait)
-                            .font(.footnote)
+                            .font(.subheadline)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
                     .background(
-                        RoundedRectangle(cornerRadius: 16)
+                        RoundedRectangle(cornerRadius: 20)
                             .fill(selectedTraits.contains(trait) ? Color.accentPrimary : Color.gray.opacity(0.2))
                     )
                     .foregroundColor(selectedTraits.contains(trait) ? .white : .primary)
