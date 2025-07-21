@@ -20,6 +20,31 @@ struct ChatSidebar: View {
     @State private var deletingChatId: String? = nil
     @State private var showSettings: Bool = false
     
+    // Helper function to format relative time
+    private func relativeTimeString(from date: Date) -> String {
+        let now = Date()
+        let difference = now.timeIntervalSince(date)
+        
+        if difference < 60 { // Less than 1 minute
+            return "Just now"
+        } else if difference < 3600 { // Less than 1 hour
+            let minutes = Int(difference / 60)
+            return "\(minutes)m ago"
+        } else if difference < 86400 { // Less than 1 day
+            let hours = Int(difference / 3600)
+            return "\(hours)h ago"
+        } else if difference < 604800 { // Less than 1 week
+            let days = Int(difference / 86400)
+            return "\(days)d ago"
+        } else if difference < 2592000 { // Less than 30 days
+            let weeks = Int(difference / 604800)
+            return "\(weeks)w ago"
+        } else {
+            let months = Int(difference / 2592000)
+            return "\(months)mo ago"
+        }
+    }
+    
     var body: some View {
         sidebarContent
             .frame(width: 300)
@@ -109,38 +134,30 @@ struct ChatSidebar: View {
             
             // Chat List - shows multiple chats for all authenticated users
             ScrollView {
-                LazyVStack(spacing: 0) {
+                LazyVStack(spacing: 12) {
                     ForEach(Array(viewModel.chats.enumerated()), id: \.element.id) { index, chat in
-                        VStack(spacing: 0) {
-                            ChatListItem(
-                                chat: chat,
-                                isSelected: viewModel.currentChat?.id == chat.id,
-                                isEditing: editingChatId == chat.id,
-                                editingTitle: $editingTitle,
-                                onSelect: {
-                                    viewModel.selectChat(chat)
-                                },
-                                onEdit: { 
-                                    if editingChatId == chat.id {
-                                        // Save the edit
-                                        viewModel.updateChatTitle(chat.id, newTitle: editingTitle)
-                                        editingChatId = nil
-                                    } else {
-                                        // Start editing
-                                        startEditing(chat)
-                                    }
-                                },
-                                onDelete: { confirmDelete(chat) },
-                                showEditDelete: authManager.isAuthenticated
-                            )
-                            
-                            if index < viewModel.chats.count - 1 {
-                                Divider()
-                                    .background(Color.gray.opacity(0.2))
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                            }
-                        }
+                        ChatListItem(
+                            chat: chat,
+                            isSelected: viewModel.currentChat?.id == chat.id,
+                            isEditing: editingChatId == chat.id,
+                            editingTitle: $editingTitle,
+                            timeString: relativeTimeString(from: chat.createdAt),
+                            onSelect: {
+                                viewModel.selectChat(chat)
+                            },
+                            onEdit: { 
+                                if editingChatId == chat.id {
+                                    // Save the edit
+                                    viewModel.updateChatTitle(chat.id, newTitle: editingTitle)
+                                    editingChatId = nil
+                                } else {
+                                    // Start editing
+                                    startEditing(chat)
+                                }
+                            },
+                            onDelete: { confirmDelete(chat) },
+                            showEditDelete: authManager.isAuthenticated
+                        )
                     }
                 }
                 .padding(.horizontal, 16)
@@ -191,6 +208,7 @@ struct ChatListItem: View {
     let isSelected: Bool
     let isEditing: Bool
     @Binding var editingTitle: String
+    let timeString: String
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -198,54 +216,69 @@ struct ChatListItem: View {
     
     var body: some View {
         Button(action: onSelect) {
-            HStack {
-                if isEditing {
-                    TextField("Chat Title", text: $editingTitle)
-                        .textFieldStyle(PlainTextFieldStyle())
-                        .foregroundColor(.primary)
-                        .onSubmit {
-                            onEdit()
-                        }
-                    
-                    // Save and Cancel buttons for editing mode
-                    HStack(spacing: 12) {
-                        Button(action: onEdit) {
-                            Image(systemName: "checkmark")
-                                .foregroundColor(.primary)
-                        }
-                        Button(action: { editingTitle = chat.title; onEdit() }) {
-                            Image(systemName: "xmark")
-                                .foregroundColor(.primary)
-                        }
-                    }
-                } else {
-                    Text(chat.title)
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    
-                    if isSelected && showEditDelete {
-                        // Edit and Delete buttons
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    if isEditing {
+                        TextField("Chat Title", text: $editingTitle)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .foregroundColor(.primary)
+                            .onSubmit {
+                                onEdit()
+                            }
+                        
+                        // Save and Cancel buttons for editing mode
                         HStack(spacing: 12) {
                             Button(action: onEdit) {
-                                Image(systemName: "square.and.pencil")
-                                    .foregroundColor(.gray)
+                                Image(systemName: "checkmark")
+                                    .foregroundColor(.primary)
                             }
-                            Button(action: onDelete) {
-                                Image(systemName: "trash")
-                                    .foregroundColor(.gray)
+                            Button(action: { editingTitle = chat.title; onEdit() }) {
+                                Image(systemName: "xmark")
+                                    .foregroundColor(.primary)
+                            }
+                        }
+                    } else {
+                        Text(chat.title)
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        
+                        if isSelected && showEditDelete {
+                            // Edit and Delete buttons
+                            HStack(spacing: 12) {
+                                Button(action: onEdit) {
+                                    Image(systemName: "square.and.pencil")
+                                        .foregroundColor(.gray)
+                                }
+                                Button(action: onDelete) {
+                                    Image(systemName: "trash")
+                                        .foregroundColor(.gray)
+                                }
                             }
                         }
                     }
                 }
+                
+                // Timestamp inside the cell
+                if !isEditing {
+                    Text(timeString)
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
             }
             .padding()
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
-        .background(isSelected ? Color(UIColor.secondarySystemBackground) : Color.clear)
-        .cornerRadius(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isSelected ? Color(UIColor.secondarySystemBackground) : Color(UIColor.secondarySystemBackground).opacity(0.3))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.gray.opacity(0.1), lineWidth: 1)
+        )
     }
 }
 
