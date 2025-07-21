@@ -356,11 +356,6 @@ class ChatViewModel: ObservableObject {
     func sendMessage(text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
-        // Ensure client is initialized before sending message
-        if client == nil {
-            setupTinfoilClient()
-        }
-        
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         
@@ -396,9 +391,22 @@ class ChatViewModel: ObservableObject {
         // Create and start a new task for the streaming request
         currentTask = Task {
             do {
+                // Wait for client initialization if needed
+                if client == nil {
+                    setupTinfoilClient()
+                    
+                    // Wait for client to be available with timeout
+                    let maxWaitTime = 30.0 // 30 seconds timeout
+                    let startTime = Date()
+                    
+                    while client == nil && Date().timeIntervalSince(startTime) < maxWaitTime {
+                        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                    }
+                }
+                
                 guard let client = client else {
                     throw NSError(domain: "TinfoilChat", code: 1,
-                                userInfo: [NSLocalizedDescriptionKey: "TinfoilAI client not available"])
+                                userInfo: [NSLocalizedDescriptionKey: "TinfoilAI client not available after initialization"])
                 }
                 
                 // Create the stream with proper parameters
