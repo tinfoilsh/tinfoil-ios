@@ -154,9 +154,32 @@ struct SubscriptionPromptView: View {
                 let clerkUserId = authManager?.localUserData?["id"] as? String
                 try await revenueCat.purchaseSubscription(clerkUserId: clerkUserId)
                 
-                // Force refresh user data to get updated subscription status
+                // Wait a moment for webhook to process
+                try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                
+                // Try to refresh user data up to 3 times to get updated subscription status
                 if let authManager = authManager {
-                    await authManager.forceRefreshUserData()
+                    var subscriptionActive = false
+                    
+                    for attempt in 1...3 {
+                        await authManager.forceRefreshUserData()
+                        
+                        // Check if subscription is now active
+                        if authManager.hasActiveSubscription {
+                            subscriptionActive = true
+                            break
+                        }
+                        
+                        // Wait before next attempt (except on last attempt)
+                        if attempt < 3 {
+                            try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                        }
+                    }
+                    
+                    if !subscriptionActive {
+                        errorMessage = "Subscription purchased successfully, but it may take a moment to activate. Please restart the app if needed."
+                        showError = true
+                    }
                 }
             } catch {
                 errorMessage = error.localizedDescription
