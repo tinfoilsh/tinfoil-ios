@@ -109,32 +109,42 @@ struct ChatSidebar: View {
             
             // Chat List - shows multiple chats for all authenticated users
             ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(viewModel.chats) { chat in
-                        ChatListItem(
-                            chat: chat,
-                            isSelected: viewModel.currentChat?.id == chat.id,
-                            isEditing: editingChatId == chat.id,
-                            editingTitle: $editingTitle,
-                            onSelect: {
-                                viewModel.selectChat(chat)
-                            },
-                            onEdit: { 
-                                if editingChatId == chat.id {
-                                    // Save the edit
-                                    viewModel.updateChatTitle(chat.id, newTitle: editingTitle)
-                                    editingChatId = nil
-                                } else {
-                                    // Start editing
-                                    startEditing(chat)
-                                }
-                            },
-                            onDelete: { confirmDelete(chat) },
-                            showEditDelete: authManager.isAuthenticated
-                        )
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(viewModel.chats.enumerated()), id: \.element.id) { index, chat in
+                        VStack(spacing: 0) {
+                            ChatListItem(
+                                chat: chat,
+                                isSelected: viewModel.currentChat?.id == chat.id,
+                                isEditing: editingChatId == chat.id,
+                                editingTitle: $editingTitle,
+                                onSelect: {
+                                    viewModel.selectChat(chat)
+                                },
+                                onEdit: { 
+                                    if editingChatId == chat.id {
+                                        // Save the edit
+                                        viewModel.updateChatTitle(chat.id, newTitle: editingTitle)
+                                        editingChatId = nil
+                                    } else {
+                                        // Start editing
+                                        startEditing(chat)
+                                    }
+                                },
+                                onDelete: { confirmDelete(chat) },
+                                showEditDelete: authManager.isAuthenticated
+                            )
+                            
+                            if index < viewModel.chats.count - 1 {
+                                Divider()
+                                    .background(Color.gray.opacity(0.2))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
+                .padding(.top, 8)
             }
             
             Spacer()

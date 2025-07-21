@@ -8,6 +8,116 @@
 
 import SwiftUI
 
+// Trait selection view for personality traits
+struct TraitSelectionView: View {
+    let availableTraits: [String]
+    @Binding var selectedTraits: [String]
+    
+    var body: some View {
+        FlowLayout(spacing: 12) {
+            ForEach(availableTraits, id: \.self) { trait in
+                Button(action: {
+                    toggleTrait(trait)
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: selectedTraits.contains(trait) ? "checkmark" : "plus")
+                            .font(.subheadline)
+                        Text(trait)
+                            .font(.subheadline)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(selectedTraits.contains(trait) ? Color.accentPrimary : Color.gray.opacity(0.2))
+                    )
+                    .foregroundColor(selectedTraits.contains(trait) ? .white : .primary)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+    }
+    
+    private func toggleTrait(_ trait: String) {
+        if selectedTraits.contains(trait) {
+            selectedTraits.removeAll { $0 == trait }
+        } else {
+            selectedTraits.append(trait)
+        }
+    }
+}
+
+// Custom FlowLayout for flexible tag arrangement
+struct FlowLayout: Layout {
+    let spacing: CGFloat
+    
+    init(spacing: CGFloat = 8) {
+        self.spacing = spacing
+    }
+    
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = FlowResult(
+            in: proposal.replacingUnspecifiedDimensions().width,
+            subviews: subviews,
+            spacing: spacing
+        )
+        return result.bounds
+    }
+    
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = FlowResult(
+            in: bounds.width,
+            subviews: subviews,
+            spacing: spacing
+        )
+        for (index, subview) in subviews.enumerated() {
+            let position = CGPoint(
+                x: bounds.minX + result.positions[index].x,
+                y: bounds.minY + result.positions[index].y
+            )
+            subview.place(at: position, proposal: ProposedViewSize(result.sizes[index]))
+        }
+    }
+}
+
+struct FlowResult {
+    let bounds: CGSize
+    let positions: [CGPoint]
+    let sizes: [CGSize]
+    
+    init(in maxWidth: CGFloat, subviews: LayoutSubviews, spacing: CGFloat) {
+        var sizes: [CGSize] = []
+        var positions: [CGPoint] = []
+        
+        var currentRowY: CGFloat = 0
+        var currentRowX: CGFloat = 0
+        var currentRowHeight: CGFloat = 0
+        
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            
+            if currentRowX + size.width > maxWidth && currentRowX > 0 {
+                currentRowY += currentRowHeight + spacing
+                currentRowX = 0
+                currentRowHeight = 0
+            }
+            
+            positions.append(CGPoint(x: currentRowX, y: currentRowY))
+            sizes.append(size)
+            
+            currentRowX += size.width + spacing
+            currentRowHeight = max(currentRowHeight, size.height)
+        }
+        
+        self.positions = positions
+        self.sizes = sizes
+        self.bounds = CGSize(
+            width: maxWidth,
+            height: currentRowY + currentRowHeight
+        )
+    }
+}
+
 struct MemoryView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var settings = SettingsManager.shared

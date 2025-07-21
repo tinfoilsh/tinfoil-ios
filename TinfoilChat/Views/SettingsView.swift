@@ -8,6 +8,7 @@
 
 import SwiftUI
 import Clerk
+import UIKit
 
 // Settings Manager to handle persistence
 @MainActor
@@ -145,15 +146,8 @@ struct SettingsView: View {
     @State private var editingLastName = ""
     @State private var isUpdatingProfile = false
     @State private var profileUpdateError: String? = nil
-    
-    init() {
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithDefaultBackground()
-        
-        UINavigationBar.appearance().standardAppearance = appearance
-        UINavigationBar.appearance().compactAppearance = appearance
-        UINavigationBar.appearance().scrollEdgeAppearance = appearance
-    }
+    @State private var showLanguagePicker = false
+    @State private var showSignOutConfirmation = false
     
     // Complete list of languages based on ISO 639-1
     var languages: [String] {
@@ -175,261 +169,250 @@ struct SettingsView: View {
         ].sorted()
     }
     
-    
     var body: some View {
-        VStack(spacing: 0) {
-            // Custom header based on VerifierViewController
-            panelHeader
-            
-            // Content
-            NavigationView {
-                List {
-                    // Account Section
-                    Section {
-                        if authManager.isAuthenticated {
-                            // User info row
-                            HStack {
-                                // Display user info if available
-                                if let user = clerk.user {
-                                    if !user.imageUrl.isEmpty {
-                                        AsyncImage(url: URL(string: user.imageUrl)) { image in
-                                            image
-                                                .resizable()
-                                                .aspectRatio(contentMode: .fill)
-                                        } placeholder: {
+        NavigationStack {
+            ZStack {
+                // Background
+                (colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+                    .ignoresSafeArea()
+                
+                VStack(spacing: 0) {
+                    // Custom header
+                    HStack {
+                        HStack(spacing: 12) {
+                            Image(systemName: "gear")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.primary)
+                            Text("Settings")
+                                .font(.title)
+                                .fontWeight(.bold)
+                        }
+                        Spacer()
+                        
+                        Button(action: { dismiss() }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(Color(.systemGray))
+                                .padding(8)
+                                .background(Color(.systemGray6))
+                                .clipShape(Circle())
+                        }
+                        .accessibilityLabel("Close settings")
+                    }
+                    .padding()
+                    .background(Color(UIColor.systemBackground))
+                    .overlay(
+                        Divider().opacity(0.2),
+                        alignment: .bottom
+                    )
+                    
+                    // Main content
+                    Form {
+                        // Account Section
+                        Section {
+                            if authManager.isAuthenticated {
+                                // User info row
+                                HStack {
+                                    // Avatar
+                                    Group {
+                                        if let user = clerk.user, !user.imageUrl.isEmpty {
+                                            AsyncImage(url: URL(string: user.imageUrl)) { image in
+                                                image.resizable().aspectRatio(contentMode: .fill)
+                                            } placeholder: {
+                                                Image(systemName: "person.circle.fill")
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        } else if let userData = authManager.localUserData,
+                                                  let imageUrlString = userData["imageUrl"] as? String,
+                                                  !imageUrlString.isEmpty,
+                                                  let url = URL(string: imageUrlString) {
+                                            AsyncImage(url: url) { image in
+                                                image.resizable().aspectRatio(contentMode: .fill)
+                                            } placeholder: {
+                                                Image(systemName: "person.circle.fill")
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        } else {
                                             Image(systemName: "person.circle.fill")
-                                        }
-                                        .frame(width: 40, height: 40)
-                                        .clipShape(Circle())
-                                    } else {
-                                        Image(systemName: "person.circle.fill")
-                                            .resizable()
-                                            .frame(width: 40, height: 40)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("\(user.firstName ?? "") \(user.lastName ?? "")")
-                                            .font(.body)
-                                            .foregroundColor(.primary)
-                                        if let email = user.emailAddresses.first?.emailAddress {
-                                            Text(email)
-                                                .font(.caption)
+                                                .resizable()
                                                 .foregroundColor(.secondary)
                                         }
                                     }
-                                }
-                                // If user is not in clerk but in local storage
-                                else if let userData = authManager.localUserData {
-                                    if let imageUrlString = userData["imageUrl"] as? String, 
-                                       !imageUrlString.isEmpty,
-                                       let url = URL(string: imageUrlString) {
-                                        AsyncImage(url: url) { image in
-                                            image
-                                                .resizable()
-                                                .aspectRatio(contentMode: .fill)
-                                        } placeholder: {
-                                            Image(systemName: "person.circle.fill")
-                                        }
-                                        .frame(width: 40, height: 40)
-                                        .clipShape(Circle())
-                                    } else {
-                                        Image(systemName: "person.circle.fill")
-                                            .resizable()
-                                            .frame(width: 40, height: 40)
-                                            .foregroundColor(.secondary)
-                                    }
+                                    .frame(width: 40, height: 40)
+                                    .clipShape(Circle())
                                     
+                                    // User info
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text((userData["name"] as? String) ?? "User")
-                                            .font(.body)
-                                            .foregroundColor(.primary)
-                                        if let email = userData["email"] as? String {
-                                            Text(email)
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
+                                        if let user = clerk.user {
+                                            Text("\(user.firstName ?? "") \(user.lastName ?? "")")
+                                                .font(.body)
+                                                .foregroundColor(.primary)
+                                            if let email = user.emailAddresses.first?.emailAddress {
+                                                Text(email)
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        } else if let userData = authManager.localUserData {
+                                            Text((userData["name"] as? String) ?? "User")
+                                                .font(.body)
+                                                .foregroundColor(.primary)
+                                            if let email = userData["email"] as? String {
+                                                Text(email)
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
                                         }
                                     }
-                                } else {
-                                    Image(systemName: "person.circle.fill")
-                                        .resizable()
-                                        .frame(width: 40, height: 40)
-                                        .foregroundColor(.secondary)
                                     
-                                    Text("Account")
-                                        .foregroundColor(.primary)
+                                    Spacer()
+                                }
+                                .padding(.vertical, 4)
+                                
+                                // Edit Profile
+                                Button(action: {
+                                    if let user = clerk.user {
+                                        editingFirstName = user.firstName ?? ""
+                                        editingLastName = user.lastName ?? ""
+                                        showProfileEditor = true
+                                    }
+                                }) {
+                                    HStack {
+                                        Label("Edit Profile", systemImage: "person.fill")
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption2)
+                                            .foregroundColor(Color(UIColor.quaternaryLabel))
+                                    }
                                 }
                                 
-                                Spacer()
-                            }
-                            .padding(.vertical, 4)
-                            
-                            // Edit Profile button
-                            Button(action: {
-                                if let user = clerk.user {
-                                    editingFirstName = user.firstName ?? ""
-                                    editingLastName = user.lastName ?? ""
-                                    showProfileEditor = true
+                                // Manage Subscription
+                                if authManager.hasActiveSubscription {
+                                    let isRevenueCat = checkIfRevenueCat()
+                                    Button(action: {
+                                        let url = isRevenueCat
+                                            ? URL(string: "https://apps.apple.com/account/subscriptions")!
+                                            : URL(string: "https://www.tinfoil.sh/dashboard")!
+                                        UIApplication.shared.open(url)
+                                    }) {
+                                        HStack {
+                                            Label("Manage Subscription", systemImage: "creditcard")
+                                                .foregroundColor(.primary)
+                                            Spacer()
+                                            Image(systemName: "arrow.up.forward.square")
+                                                .font(.caption2)
+                                                .foregroundColor(Color(UIColor.quaternaryLabel))
+                                        }
+                                    }
                                 }
-                            }) {
+                                
+                                // Sign Out
+                                Button(action: {
+                                    showSignOutConfirmation = true
+                                }) {
+                                    HStack {
+                                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                    }
+                                }
+                                
+                                // Delete Account
+                                Button(action: {
+                                    showDeleteConfirmation = true
+                                }) {
+                                    HStack {
+                                        Label("Delete Account", systemImage: "trash")
+                                            .foregroundColor(.red)
+                                        Spacer()
+                                    }
+                                }
+                            } else {
+                                // Sign in button
+                                Button(action: {
+                                    showAuthView = true
+                                }) {
+                                    HStack {
+                                        Label("Sign up or Log In", systemImage: "person.badge.plus")
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                    }
+                                }
+                            }
+                        } header: {
+                            Text("Account")
+                        }
+                        
+                        // Preferences Section
+                        Section {
+                            Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
+                            
+                            NavigationLink(destination: LanguagePickerView(
+                                selectedLanguage: $settings.selectedLanguage,
+                                languages: languages
+                            )) {
                                 HStack {
-                                    Text("Edit Profile")
-                                        .foregroundColor(.primary)
+                                    Text("Default Language")
                                     Spacer()
-                                    Image(systemName: "chevron.right")
+                                    Text(settings.selectedLanguage)
                                         .foregroundColor(.secondary)
-                                        .font(.caption)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            
-                            // Manage Subscription link - conditionally show based on subscription source
-                            if authManager.hasActiveSubscription {
-                                // Get subscription source with more robust checking
-                                let isRevenueCat: Bool = {
-                                    if let metadata = clerk.user?.publicMetadata,
-                                       let source = metadata["chat_subscription_source"] {
-                                        let sourceString = "\(source)".replacingOccurrences(of: "\"", with: "")
-                                        return sourceString == "ios_revenuecat"
-                                    }
-                                    return false
-                                }()
-                                
-                                
-                                if isRevenueCat {
-                                    // In-app purchase - link to iOS subscription settings
-                                    Link(destination: URL(string: "https://apps.apple.com/account/subscriptions")!) {
-                                        HStack {
-                                            Text("Manage Subscription")
-                                            Spacer()
-                                            Image(systemName: "arrow.up.right.square")
-                                                .font(.caption)
-                                        }
-                                        .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                } else {
-                                    // Web subscription - link to Tinfoil dashboard
-                                    Link(destination: URL(string: "https://www.tinfoil.sh/dashboard")!) {
-                                        HStack {
-                                            Text("Manage Subscription")
-                                            Spacer()
-                                            Image(systemName: "arrow.up.right.square")
-                                                .font(.caption)
-                                        }
-                                        .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
                                 }
                             }
-                            
-                            // Sign Out button
-                            Button(action: {
-                                Task {
-                                    await authManager.signOut()
-                                    dismiss()
-                                }
-                            }) {
-                                HStack {
-                                    Text("Sign Out")
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            
-                            // Delete Account button
-                            Button(action: {
-                                showDeleteConfirmation = true
-                            }) {
-                                HStack {
-                                    Text("Delete Account")
-                                        .foregroundColor(.red)
-                                    Spacer()
-                                }
-                                .contentShape(Rectangle())
-                            }
-                        } else {
-                            // Sign in button for non-authenticated users
-                            Button(action: {
-                                showAuthView = true
-                            }) {
-                                HStack {
-                                    Image(systemName: "person.badge.plus")
-                                        .foregroundColor(.primary)
-                                    Text("Sign up or Log In")
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                        }
-                    } header: {
-                        Text("Account")
-                    }
-                    
-                    Section {
-                        Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
-                            .tint(Color.accentPrimary)
-                        
-                        Picker("Default Language", selection: $settings.selectedLanguage) {
-                            ForEach(languages, id: \.self) { language in
-                                Text(language).tag(language)
-                            }
-                        }
-                        .pickerStyle(.navigationLink)
-                    } header: {
-                        Text("Preferences")
-                    }
-                    
-                    Section {
-                        Link(destination: Constants.Legal.termsOfServiceURL) {
-                            HStack {
-                                Text("Terms of Service")
-                                    .foregroundColor(.primary)
-                                Spacer()
-                                Image(systemName: "arrow.up.right.square")
-                                    .foregroundColor(.blue)
-                            }
+                        } header: {
+                            Text("Preferences")
                         }
                         
-                        Link(destination: Constants.Legal.privacyPolicyURL) {
-                            HStack {
-                                Text("Privacy Policy")
-                                    .foregroundColor(.primary)
-                                Spacer()
-                                Image(systemName: "arrow.up.right.square")
-                                    .foregroundColor(.blue)
+                        // Legal Section
+                        Section {
+                            Button(action: {
+                                UIApplication.shared.open(Constants.Legal.termsOfServiceURL)
+                            }) {
+                                HStack {
+                                    Label("Terms of Service", systemImage: "doc.text")
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    Image(systemName: "arrow.up.forward.square")
+                                        .font(.footnote)
+                                        .foregroundColor(Color(UIColor.tertiaryLabel))
+                                }
                             }
+                            
+                            Button(action: {
+                                UIApplication.shared.open(Constants.Legal.privacyPolicyURL)
+                            }) {
+                                HStack {
+                                    Label("Privacy Policy", systemImage: "hand.raised")
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    Image(systemName: "arrow.up.forward.square")
+                                        .font(.footnote)
+                                        .foregroundColor(Color(UIColor.tertiaryLabel))
+                                }
+                            }
+                        } header: {
+                            Text("Legal")
                         }
-                    } header: {
-                        Text("Legal")
                     }
+                    .scrollContentBackground(.hidden)
                 }
-                .navigationBarHidden(true)
-                .listStyle(InsetGroupedListStyle())
-                .scrollContentBackground(.hidden)
-                .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
-                .onTapGesture {
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                }
-                .simultaneousGesture(
-                    DragGesture()
-                        .onChanged { _ in
-                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        }
-                )
             }
-            .navigationViewStyle(StackNavigationViewStyle())
+            .navigationBarHidden(true)
         }
-        .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
-        .accentColor(Color.accentPrimary)
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()
                 .environmentObject(authManager)
+        }
+        .alert("Sign Out", isPresented: $showSignOutConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Sign Out", role: .destructive) {
+                Task {
+                    await authManager.signOut()
+                    dismiss()
+                }
+            }
+        } message: {
+            Text("Are you sure you want to sign out?")
         }
         .alert("Delete Account", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
@@ -466,64 +449,60 @@ struct SettingsView: View {
         }
     }
     
-    // Panel header matching the style from VerifierViewController
-    private var panelHeader: some View {
-        HStack {
-            HStack(spacing: 12) {
-                Image(systemName: "gear")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.primary)
-                Text("Settings")
-                    .font(.title)
-                    .fontWeight(.bold)
-            }
-            Spacer()
-            
-            // Dismiss button with X icon
-            Button(action: {
-                dismiss()
-            }) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(Color(.systemGray))
-                    .padding(8)
-                    .background(Color(.systemGray6))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(PlainButtonStyle())
-            .accessibilityLabel("Close settings screen")
+    private func checkIfRevenueCat() -> Bool {
+        if let metadata = clerk.user?.publicMetadata,
+           let source = metadata["chat_subscription_source"] {
+            let sourceString = "\(source)".replacingOccurrences(of: "\"", with: "")
+            return sourceString == "ios_revenuecat"
         }
-        .padding()
-        .background(Color(UIColor.systemBackground))
-        .overlay(
-            Divider()
-                .opacity(0.2)
-            , alignment: .bottom
-        )
+        return false
     }
     
-    // Update user profile
     private func updateProfile() async {
         isUpdatingProfile = true
         profileUpdateError = nil
         
         do {
-            // Update user profile
             var updateParams = User.UpdateParams()
             updateParams.firstName = editingFirstName
             updateParams.lastName = editingLastName
             try await clerk.user?.update(updateParams)
             
-            // Refresh auth state
             await authManager.initializeAuthState()
-            
             showProfileEditor = false
         } catch {
             profileUpdateError = error.localizedDescription
         }
         
         isUpdatingProfile = false
+    }
+}
+
+// Language Picker View
+struct LanguagePickerView: View {
+    @Binding var selectedLanguage: String
+    let languages: [String]
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        List(languages, id: \.self) { language in
+            Button(action: {
+                selectedLanguage = language
+                dismiss()
+            }) {
+                HStack {
+                    Text(language)
+                    Spacer()
+                    if selectedLanguage == language {
+                        Image(systemName: "checkmark")
+                            .foregroundColor(.accentColor)
+                    }
+                }
+            }
+            .foregroundColor(.primary)
+        }
+        .navigationTitle("Default Language")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -544,38 +523,7 @@ struct ProfileEditorView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                Button("Cancel") {
-                    onCancel()
-                }
-                .foregroundColor(.blue)
-                
-                Spacer()
-                
-                Text("Edit Profile")
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                
-                Spacer()
-                
-                Button("Save") {
-                    onSave()
-                }
-                .foregroundColor(.blue)
-                .fontWeight(.semibold)
-                .disabled(isUpdating)
-            }
-            .padding()
-            .background(Color(UIColor.systemBackground))
-            .overlay(
-                Divider()
-                    .opacity(0.2)
-                , alignment: .bottom
-            )
-            
-            // Form
+        NavigationStack {
             Form {
                 Section {
                     TextField("First Name", text: $firstName)
@@ -599,125 +547,32 @@ struct ProfileEditorView: View {
                     }
                 }
             }
-            
-            if isUpdating {
-                ProgressView()
-                    .padding()
+            .navigationTitle("Edit Profile")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        onCancel()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") {
+                        onSave()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(isUpdating)
+                }
+            }
+            .overlay {
+                if isUpdating {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black.opacity(0.3))
+                }
             }
         }
-        .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
         .onAppear {
             focusedField = .firstName
         }
-    }
-}
-
-// Trait selection view for personality traits
-struct TraitSelectionView: View {
-    let availableTraits: [String]
-    @Binding var selectedTraits: [String]
-    
-    var body: some View {
-        FlowLayout(spacing: 12) {
-            ForEach(availableTraits, id: \.self) { trait in
-                Button(action: {
-                    toggleTrait(trait)
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: selectedTraits.contains(trait) ? "checkmark" : "plus")
-                            .font(.subheadline)
-                        Text(trait)
-                            .font(.subheadline)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(selectedTraits.contains(trait) ? Color.accentPrimary : Color.gray.opacity(0.2))
-                    )
-                    .foregroundColor(selectedTraits.contains(trait) ? .white : .primary)
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
-        }
-    }
-    
-    private func toggleTrait(_ trait: String) {
-        if selectedTraits.contains(trait) {
-            selectedTraits.removeAll { $0 == trait }
-        } else {
-            selectedTraits.append(trait)
-        }
-    }
-}
-
-// Custom FlowLayout for flexible tag arrangement
-struct FlowLayout: Layout {
-    let spacing: CGFloat
-    
-    init(spacing: CGFloat = 8) {
-        self.spacing = spacing
-    }
-    
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let result = FlowResult(
-            in: proposal.replacingUnspecifiedDimensions().width,
-            subviews: subviews,
-            spacing: spacing
-        )
-        return result.bounds
-    }
-    
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let result = FlowResult(
-            in: bounds.width,
-            subviews: subviews,
-            spacing: spacing
-        )
-        for (index, subview) in subviews.enumerated() {
-            let position = CGPoint(
-                x: bounds.minX + result.positions[index].x,
-                y: bounds.minY + result.positions[index].y
-            )
-            subview.place(at: position, proposal: ProposedViewSize(result.sizes[index]))
-        }
-    }
-}
-
-struct FlowResult {
-    let bounds: CGSize
-    let positions: [CGPoint]
-    let sizes: [CGSize]
-    
-    init(in maxWidth: CGFloat, subviews: LayoutSubviews, spacing: CGFloat) {
-        var sizes: [CGSize] = []
-        var positions: [CGPoint] = []
-        
-        var currentRowY: CGFloat = 0
-        var currentRowX: CGFloat = 0
-        var currentRowHeight: CGFloat = 0
-        
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            
-            if currentRowX + size.width > maxWidth && currentRowX > 0 {
-                currentRowY += currentRowHeight + spacing
-                currentRowX = 0
-                currentRowHeight = 0
-            }
-            
-            positions.append(CGPoint(x: currentRowX, y: currentRowY))
-            sizes.append(size)
-            
-            currentRowX += size.width + spacing
-            currentRowHeight = max(currentRowHeight, size.height)
-        }
-        
-        self.positions = positions
-        self.sizes = sizes
-        self.bounds = CGSize(
-            width: maxWidth,
-            height: currentRowY + currentRowHeight
-        )
     }
 }
