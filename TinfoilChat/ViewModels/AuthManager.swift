@@ -187,23 +187,65 @@ class AuthManager: ObservableObject {
         }
     }
     
-    /// Forces a reload of the Clerk user data to refresh subscription status
-    func forceRefreshUserData() async {
-        guard let clerk = self.clerk else {
-            print("Error: Clerk instance not set")
-            return
-        }
+    /// Fetches subscription status directly from the API
+    func fetchSubscriptionStatus() async {
+        guard let clerk = clerk else { return }
+        guard let session = clerk.session else { return }
+        guard let token = session.lastActiveToken?.jwt else { return }
         
         do {
-            try await clerk.load()
+            let apiURL = "\(Constants.API.baseURL)/api/app/user-metadata"
             
-            if let user = clerk.user {
-                updateUserData(from: user)
-            } else {
-                clearAuthState()
+            guard let url = URL(string: apiURL) else { return }
+            
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else { return }
+            
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let publicMetadata = json["public_metadata"] as? [String: Any],
+               let chatStatus = publicMetadata["chat_subscription_status"] as? String {
+                
+                await MainActor.run {
+                    let wasActive = self.hasActiveSubscription
+                    self.hasActiveSubscription = (chatStatus == "active")
+                    
+                    // Update local user data
+                    if self.localUserData != nil {
+                        self.localUserData?["subscription_status"] = chatStatus
+                    }
+                    
+                    // Update UserDefaults
+                    if let userData = self.localUserData,
+                       let encodedData = try? JSONSerialization.data(withJSONObject: userData) {
+                        UserDefaults.standard.set(encodedData, forKey: userDataKey)
+                    }
+                    
+                    // Save subscription state
+                    UserDefaults.standard.set(self.hasActiveSubscription, forKey: self.subscriptionKey)
+                    
+                    // Post notification that subscription status was updated
+                    NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                    
+                    // If subscription became active, clear cached API key to force refetch
+                    if self.hasActiveSubscription && !wasActive {
+                        APIKeyManager.shared.clearApiKey()
+                        
+                        // Proactively fetch new API key
+                        Task {
+                            let _ = await APIKeyManager.shared.getApiKey()
+                        }
+                    }
+                }
             }
         } catch {
-            print("Error reloading user data: \(error)")
+            // Handle error silently - subscription status will remain unchanged
         }
     }
     

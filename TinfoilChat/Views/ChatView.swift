@@ -334,8 +334,10 @@ struct ChatScrollView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         if messages.isEmpty {
-                            WelcomeView(isDarkMode: isDarkMode, authManager: viewModel.authManager)
-                                .padding(.vertical, 16)
+                            if let authManager = viewModel.authManager {
+                                WelcomeView(isDarkMode: isDarkMode, authManager: authManager)
+                                    .padding(.vertical, 16)
+                            }
                         } else {
                             ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
                                 if index != 0 && index == archivedMessagesStartIndex {
@@ -546,7 +548,7 @@ struct ChatScrollView: View {
 /// A view that displays a welcome message when no chat messages are present.
 struct WelcomeView: View {
     let isDarkMode: Bool
-    let authManager: AuthManager?
+    @ObservedObject var authManager: AuthManager
     
     var body: some View {
         TabbedWelcomeView(isDarkMode: isDarkMode, authManager: authManager)
@@ -556,11 +558,12 @@ struct WelcomeView: View {
 /// A tabbed welcome view that allows model selection
 struct TabbedWelcomeView: View {
     let isDarkMode: Bool
-    let authManager: AuthManager?
+    @ObservedObject var authManager: AuthManager
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
     @State private var selectedModelId: String = ""
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var revenueCat = RevenueCatManager.shared
+    @State private var refreshID = UUID()
     
     private var availableModels: [ModelType] {
         return AppConfig.shared.availableModels
@@ -568,8 +571,8 @@ struct TabbedWelcomeView: View {
     
     private var canUseModel: (ModelType) -> Bool {
         { model in
-            let isAuthenticated = authManager?.isAuthenticated ?? false
-            let hasSubscription = authManager?.hasActiveSubscription ?? false
+            let isAuthenticated = authManager.isAuthenticated
+            let hasSubscription = authManager.hasActiveSubscription
             return model.isFree || (isAuthenticated && hasSubscription)
         }
     }
@@ -578,8 +581,7 @@ struct TabbedWelcomeView: View {
         VStack(spacing: 32) {
             // Greeting section
             VStack(spacing: 16) {
-                if let authManager = authManager,
-                   authManager.isAuthenticated {
+                if authManager.isAuthenticated {
                     let displayName = getDisplayName(authManager: authManager)
                     if !displayName.isEmpty {
                         Text("Hello, \(displayName)!")
@@ -613,7 +615,7 @@ struct TabbedWelcomeView: View {
                                 isSelected: selectedModelId == model.id,
                                 isDarkMode: isDarkMode,
                                 isEnabled: canUseModel(model),
-                                showPricingLabel: !(authManager?.isAuthenticated == true && authManager?.hasActiveSubscription == true)
+                                showPricingLabel: !(authManager.isAuthenticated && authManager.hasActiveSubscription)
                             ) {
                                 selectModel(model)
                             }
@@ -626,7 +628,7 @@ struct TabbedWelcomeView: View {
             }
             
             // Subscription prompt for non-premium users
-            if !(authManager?.isAuthenticated == true && authManager?.hasActiveSubscription == true) {
+            if !(authManager.isAuthenticated && authManager.hasActiveSubscription) {
                 subscriptionPrompt
             }
         }
@@ -638,6 +640,11 @@ struct TabbedWelcomeView: View {
         .onChange(of: viewModel.currentModel) { _, newModel in
             selectedModelId = newModel.id
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SubscriptionStatusUpdated"))) { _ in
+            // Refresh view when subscription status changes
+            refreshID = UUID()
+        }
+        .id(refreshID)
     }
     
     // Subscription prompt view

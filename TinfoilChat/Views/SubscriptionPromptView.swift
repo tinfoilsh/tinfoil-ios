@@ -10,28 +10,33 @@ import SwiftUI
 import RevenueCat
 
 struct SubscriptionPromptView: View {
-    let authManager: AuthManager?
+    @ObservedObject var authManager: AuthManager
+    @EnvironmentObject private var chatViewModel: TinfoilChat.ChatViewModel
     
     @ObservedObject private var revenueCat = RevenueCatManager.shared
     @State private var showAuthView = false
     @State private var showError = false
     @State private var errorMessage = ""
+    @State private var isVerifyingSubscription = false
     
     private var isAuthenticated: Bool {
-        authManager?.isAuthenticated ?? false
+        authManager.isAuthenticated
     }
     
     private var hasSubscription: Bool {
-        authManager?.hasActiveSubscription ?? false
+        authManager.hasActiveSubscription
     }
     
     var body: some View {
-        VStack(spacing: 12) {
-            Text("Get Premium Models")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.primary)
-            
-            if !hasSubscription {
+        // Don't show anything if user already has subscription
+        if hasSubscription {
+            EmptyView()
+        } else {
+            VStack(spacing: 12) {
+                Text("Get Premium Models")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.primary)
+                
                 // No subscription - show subscribe options
                 VStack(spacing: 8) {
                     if let package = revenueCat.offerings?.current?.availablePackages.first {
@@ -67,7 +72,7 @@ struct SubscriptionPromptView: View {
                     }
                 }
                 
-                if revenueCat.isLoading || revenueCat.isPurchasing {
+                if revenueCat.isLoading || revenueCat.isPurchasing || isVerifyingSubscription {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle())
                         .scaleEffect(0.8)
@@ -122,28 +127,31 @@ struct SubscriptionPromptView: View {
                     .padding(.top, 8)
                 }
             }
-        }
-        .padding(.vertical, 16)
-        .padding(.horizontal, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.accentPrimary.opacity(0.08))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(Color.accentPrimary.opacity(0.2), lineWidth: 1)
-                )
-        )
-        .padding(.top, 8)
-        .sheet(isPresented: $showAuthView) {
-            AuthenticationView()
-        }
-        .alert("Error", isPresented: $showError) {
-            Button("OK") { }
-        } message: {
-            Text(errorMessage)
-        }
-        .onAppear {
-            // Clerk user ID will be set when purchase is initiated
+            .padding(.vertical, 16)
+            .padding(.horizontal, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.accentPrimary.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(Color.accentPrimary.opacity(0.2), lineWidth: 1)
+                    )
+            )
+            .padding(.top, 8)
+            .sheet(isPresented: $showAuthView) {
+                AuthenticationView()
+            }
+            .alert("Error", isPresented: $showError) {
+                Button("OK") { }
+            } message: {
+                Text(errorMessage)
+            }
+            .onAppear {
+                // Clerk user ID will be set when purchase is initiated
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SubscriptionStatusUpdated"))) { _ in
+                // View will automatically update when subscription status changes
+            }
         }
     }
     
@@ -151,18 +159,24 @@ struct SubscriptionPromptView: View {
         Task {
             do {
                 // Get Clerk user ID and set it right before purchase
-                let clerkUserId = authManager?.localUserData?["id"] as? String
+                let clerkUserId = authManager.localUserData?["id"] as? String
+                
                 try await revenueCat.purchaseSubscription(clerkUserId: clerkUserId)
                 
+                // Set verification flag to keep spinner showing
+                await MainActor.run {
+                    isVerifyingSubscription = true
+                }
+                
+                // Keep showing spinner while we verify subscription
                 // Wait a moment for webhook to process
                 try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
                 
-                // Try to refresh user data up to 3 times to get updated subscription status
-                if let authManager = authManager {
+                // Try to refresh user data up to 5 times to get updated subscription status
                     var subscriptionActive = false
                     
-                    for attempt in 1...3 {
-                        await authManager.forceRefreshUserData()
+                    for attempt in 1...5 {
+                        await authManager.fetchSubscriptionStatus()
                         
                         // Check if subscription is now active
                         if authManager.hasActiveSubscription {
@@ -171,19 +185,29 @@ struct SubscriptionPromptView: View {
                         }
                         
                         // Wait before next attempt (except on last attempt)
-                        if attempt < 3 {
+                        if attempt < 5 {
                             try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
                         }
                     }
                     
                     if !subscriptionActive {
-                        errorMessage = "Subscription purchased successfully, but it may take a moment to activate. Please restart the app if needed."
-                        showError = true
+                        // Subscription verification failed after multiple attempts
+                        await MainActor.run {
+                            isVerifyingSubscription = false
+                        }
+                    } else {
+                        // The view will automatically update since authManager.hasActiveSubscription is @Published
+                        // Clear the verification flag
+                        await MainActor.run {
+                            isVerifyingSubscription = false
+                        }
                     }
-                }
             } catch {
                 errorMessage = error.localizedDescription
                 showError = true
+                await MainActor.run {
+                    isVerifyingSubscription = false
+                }
             }
         }
     }
@@ -194,8 +218,8 @@ struct SubscriptionPromptView: View {
                 try await revenueCat.restorePurchases()
                 
                 // Force refresh user data to get updated subscription status
-                if let authManager = authManager {
-                    await authManager.forceRefreshUserData()
+                if true {
+                    await authManager.fetchSubscriptionStatus()
                 }
             } catch {
                 errorMessage = error.localizedDescription
