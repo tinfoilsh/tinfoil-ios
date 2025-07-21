@@ -29,7 +29,7 @@ private struct VerificationStepConfig {
     
     static let codeIntegrity = Step(
         key: "CODE_INTEGRITY",
-        description: "Verifies that the source code published on GitHub was correctly built and the resulting binary was published to the Sigstore transparency log.",
+        description: "Verifies that the source code published publicly by Tinfoil on GitHub was correctly built through GitHub Actions and the resulting binary is available and immutable on the Sigstore transparency log.",
         defaultTitle: "Code Integrity Check",
         loadingTitle: "Checking Code Integrity...",
         successTitle: "Code Integrity Verified"
@@ -37,7 +37,7 @@ private struct VerificationStepConfig {
     
     static let remoteAttestation = Step(
         key: "REMOTE_ATTESTATION",
-        description: "Verifies that the remote secure enclave environment is set up correctly and receive the digest of the binary running in the enclave.",
+        description: "Verifies that the secure enclave environment is set up correctly. The response consists of a signed attestation by NVIDIA and AMD of the enclave environment and the digest of the binary (i.e., code) running inside it.",
         defaultTitle: "Enclave Runtime Attestation",
         loadingTitle: "Fetching Attestation Report...",
         successTitle: "Enclave Runtime Checked"
@@ -115,7 +115,7 @@ struct VerifierView: View {
             expandedContent
         }
         .padding(.top)
-        .background(colorScheme == .dark ? Color.black.opacity(0.8) : Color.white)
+        .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
     }
     
     // MARK: - Subviews
@@ -123,7 +123,7 @@ struct VerifierView: View {
     // Improved header with better styling
     private var panelHeader: some View {
         HStack {
-            Text("Enclave Verification")
+            Text("Verification Center")
                 .font(.title2)
                 .fontWeight(.bold)
                 .foregroundColor(colorScheme == .dark ? .white : .primary)
@@ -151,11 +151,47 @@ struct VerifierView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("""
-                     This automated verification tool confirms the model is running \
-                     in a secure enclave, keeping your conversations private.
+                     This automated verification tool lets you independently confirm that \
+                     the models are running in secure enclaves, ensuring your \
+                     conversations remain completely private.
                      """)
                     .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                     .padding(.horizontal)
+                
+                // Related Links section
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Related Links")
+                        .font(.headline)
+                        .padding(.horizontal)
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        Link(destination: URL(string: "https://docs.tinfoil.sh/verification/attestation-architecture")!) {
+                            HStack {
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.green)
+                                Text("Attestation Architecture")
+                                    .foregroundColor(.green)
+                                    .font(.subheadline)
+                                Spacer()
+                            }
+                        }
+                        
+                        Link(destination: URL(string: "https://docs.tinfoil.sh/resources/how-it-works")!) {
+                            HStack {
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.green)
+                                Text("How It Works")
+                                    .foregroundColor(.green)
+                                    .font(.subheadline)
+                                Spacer()
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+                .padding(.bottom, 8)
                 
                 verifyButtonSection
                 
@@ -222,11 +258,13 @@ struct VerifierView: View {
                 await verifyAll()
             }
         }) {
-            HStack {
+            HStack(spacing: 8) {
                 if isVerifying {
                     ProgressView()
                         .frame(width: 16, height: 16)
-                        .padding(.trailing, 4)
+                } else {
+                    Image(systemName: "checkmark.shield.fill")
+                        .font(.system(size: 16, weight: .medium))
                 }
                 Text(isVerifying ? "Verifying..." : "Verify Again")
                     .fontWeight(.medium)
@@ -394,32 +432,39 @@ struct VerificationStatusView: View {
         )
         
         // Enhanced status message with better visual styling
-        VStack {
-            if hasErrors {
-                Label("Verification failed. Please check above errors.", systemImage: "exclamationmark.triangle")
-                    .foregroundColor(.red)
-                    .font(.headline)
-            } else if allSuccess {
-                VStack(spacing: 8) {
-                    Label("All verifications succeeded! Your chat is confidential.", systemImage: "checkmark")
-                        .foregroundColor(.green)
+        VStack(spacing: 0) {
+            VStack {
+                if hasErrors {
+                    Label("Verification failed. Please check above errors.", systemImage: "exclamationmark.triangle")
+                        .foregroundColor(.red)
                         .font(.headline)
-                    if showDetailsLink {
-                        Button("View verification details") {
-                            // Scroll to details (stub)
+                } else if allSuccess {
+                    VStack(spacing: 8) {
+                        Label("All verifications succeeded! Your chat is secure and confidential.", systemImage: "checkmark")
+                            .foregroundColor(.green)
+                            .font(.headline)
+                        if showDetailsLink {
+                            Button("View verification details") {
+                                // Scroll to details (stub)
+                            }
+                            .foregroundColor(.blue)
+                            .font(.subheadline)
                         }
-                        .foregroundColor(.blue)
-                        .font(.subheadline)
                     }
+                } else {
+                    Label("Verification in progress. Checking code integrity and enclave environment.", systemImage: "clock")
+                        .foregroundColor(.blue)
+                        .font(.headline)
                 }
-            } else {
-                Label("Verification in progress. Checking code integrity and enclave environment.", systemImage: "clock")
-                    .foregroundColor(.blue)
-                    .font(.headline)
             }
+            .padding()
+            .frame(maxWidth: .infinity)
+            
+            Rectangle()
+                .fill(Color.white)
+                .frame(height: 1)
+                .opacity(0.3)
         }
-        .padding()
-        .frame(maxWidth: .infinity)
     }
 }
 
@@ -551,9 +596,40 @@ struct ProcessStepView: View {
             // Show measurements if available
             if let measurements = measurements, !measurements.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(stepKey == "CODE_INTEGRITY" ? 
-                        "Source binary digest" : 
-                        "Runtime binary digest").font(.headline)
+                    HStack(alignment: .center, spacing: 8) {
+                        Text(stepKey == "CODE_INTEGRITY" ? 
+                            "Source binary digest" : 
+                            "Runtime binary digest").font(.headline)
+                        
+                        // Show different icons based on step
+                        if stepKey == "CODE_INTEGRITY" {
+                            Image("git-icon")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 20, height: 20)
+                                .opacity(0.7)
+                        } else if stepKey == "REMOTE_ATTESTATION" {
+                            HStack(spacing: 4) {
+                                Image("cpu-icon")
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: 28, height: 14)
+                                    .opacity(0.7)
+                                Text("+")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                                    .opacity(0.7)
+                                Image("gpu-icon")
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: 28, height: 14)
+                                    .opacity(0.7)
+                            }
+                        }
+                        
+                        Spacer()
+                    }
+                    
                     Text(stepKey == "CODE_INTEGRITY" ? 
                         "Received from GitHub and Sigstore" : 
                         "Received from the enclave")
@@ -564,14 +640,13 @@ struct ProcessStepView: View {
                         Text(measurements)
                             .font(.system(.subheadline, design: .monospaced))
                             .padding(8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(colorScheme == .dark ? 
-                                          Color(.systemGray5) : 
-                                          Color(.systemFill))
-                            )
                     }
-                   
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(colorScheme == .dark ? 
+                                  Color(.systemGray5) : 
+                                  Color(.systemFill))
+                    )
                 }
             }
             
@@ -590,6 +665,27 @@ struct ProcessStepView: View {
                let tlsFingerprint = tlsCertificateFingerprint,
                !tlsFingerprint.isEmpty {
                 TLSCertificateFingerprintView(fingerprint: tlsFingerprint)
+            }
+            
+            // Show provider icons based on step type
+            if stepKey == "REMOTE_ATTESTATION" && status == .success {
+                ProviderIconsView(
+                    providers: [
+                        (name: "NVIDIA", icon: "nvidia-icon", url: "https://docs.nvidia.com/attestation/index.html"),
+                        (name: "AMD", icon: "amd-icon", url: "https://www.amd.com/en/developer/sev.html")
+                    ],
+                    title: "Runtime attested by:"
+                )
+                .padding(.top, 8)
+            } else if stepKey == "CODE_INTEGRITY" && status == .success {
+                ProviderIconsView(
+                    providers: [
+                        (name: "GitHub", icon: "github-icon", url: "https://github.com/\(Constants.Proxy.githubRepo)"),
+                        (name: "Sigstore", icon: "sigstore-icon", url: "https://search.sigstore.dev/")
+                    ],
+                    title: "Code integrity attested by:"
+                )
+                .padding(.top, 8)
             }
             
             // Show additional children content
@@ -619,7 +715,15 @@ struct TLSCertificateFingerprintView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("TLS Certificate Fingerprint").font(.headline)
+            HStack(alignment: .center, spacing: 8) {
+                Text("TLS Certificate Fingerprint").font(.headline)
+                Image("cert-icon")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 20, height: 20)
+                    .opacity(0.7)
+                Spacer()
+            }
             Text("Fingerprint of the TLS certificate used by the enclave")
                 .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                 .font(.subheadline)
@@ -702,7 +806,15 @@ struct MeasurementDiffView: View {
                 )
             
             VStack(alignment: .leading, spacing: 6) {
-                Text("Source binary digest").font(.headline)
+                HStack(alignment: .center, spacing: 8) {
+                    Text("Source binary digest").font(.headline)
+                    Image("git-icon")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 20, height: 20)
+                        .opacity(0.7)
+                    Spacer()
+                }
                 Text("Received from GitHub and Sigstore")
                     .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                     .font(.subheadline)
@@ -710,17 +822,36 @@ struct MeasurementDiffView: View {
                     Text(sourceMeasurements)
                         .font(.system(.subheadline, design: .monospaced))
                         .padding(8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(colorScheme == .dark ? 
-                                      Color(.systemGray5) : 
-                                      Color(.systemFill))
-                        )
                 }
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(colorScheme == .dark ? 
+                              Color(.systemGray5) : 
+                              Color(.systemFill))
+                )
             }
             
             VStack(alignment: .leading, spacing: 6) {
-                Text("Runtime binary digest").font(.headline)
+                HStack(alignment: .center, spacing: 8) {
+                    Text("Runtime binary digest").font(.headline)
+                    HStack(spacing: 4) {
+                        Image("cpu-icon")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 28, height: 14)
+                            .opacity(0.7)
+                        Text("+")
+                            .font(.system(size: 14))
+                            .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                            .opacity(0.7)
+                        Image("gpu-icon")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 28, height: 14)
+                            .opacity(0.7)
+                    }
+                    Spacer()
+                }
                 Text("Received from the enclave")
                     .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                     .font(.subheadline)
@@ -728,13 +859,13 @@ struct MeasurementDiffView: View {
                     Text(runtimeMeasurements)
                         .font(.system(.subheadline, design: .monospaced))
                         .padding(8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(colorScheme == .dark ? 
-                                      Color(.systemGray5) : 
-                                      Color(.systemFill))
-                        )
                 }
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(colorScheme == .dark ? 
+                              Color(.systemGray5) : 
+                              Color(.systemFill))
+                )
             }
         }
         .padding(.top, 10)
@@ -764,6 +895,47 @@ struct StatusIcon: View {
             Image(systemName: "clock.badge.questionmark")
                 .foregroundColor(.gray)
                 .font(.system(size: 18, weight: .medium))
+        }
+    }
+}
+
+// MARK: - ProviderIconsView
+
+/// View to display verification provider icons
+struct ProviderIconsView: View {
+    let providers: [(name: String, icon: String, url: String)]
+    let title: String
+    @Environment(\.colorScheme) private var colorScheme
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+            
+            HStack(spacing: 12) {
+                ForEach(providers, id: \.name) { provider in
+                    Link(destination: URL(string: provider.url)!) {
+                        VStack(spacing: 4) {
+                            Image(provider.icon)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: provider.name == "AMD" ? 50 : 60, height: provider.name == "AMD" ? 16 : 22)
+                            
+                            Text(provider.name)
+                                .font(.system(size: 10))
+                                .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                        }
+                        .frame(width: 80, height: 50)
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(colorScheme == .dark ? 
+                                      Color(hex: "1C1C1E") : 
+                                      Color(.systemGray6))
+                        )
+                    }
+                }
+            }
         }
     }
 } 
