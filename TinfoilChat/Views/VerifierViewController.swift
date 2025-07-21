@@ -76,15 +76,19 @@ struct VerifierView: View {
     // Color scheme for adapting to dark/light mode
     @Environment(\.colorScheme) private var colorScheme
     
-    init(initialVerificationState: Bool? = nil, initialError: String? = nil) {
+    init(initialVerificationState: Bool? = nil, 
+         initialError: String? = nil,
+         codeDigest: String? = nil,
+         runtimeDigest: String? = nil,
+         tlsCertFingerprint: String? = nil) {
         // Create an initial verification state based on chatViewModel's state
         let initialState: VerificationState
         
         if let isVerified = initialVerificationState {
             if isVerified {
                 initialState = VerificationState(
-                    code: VerificationSectionState(status: .success),
-                    runtime: VerificationSectionState(status: .success),
+                    code: VerificationSectionState(status: .success, error: nil, digest: codeDigest),
+                    runtime: VerificationSectionState(status: .success, error: nil, digest: runtimeDigest, tlsCertificateFingerprint: tlsCertFingerprint),
                     security: VerificationSectionState(status: .success)
                 )
             } else {

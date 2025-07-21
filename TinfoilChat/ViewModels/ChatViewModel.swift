@@ -28,6 +28,11 @@ class ChatViewModel: ObservableObject {
     @Published var verificationError: String? = nil
     private var hasRunInitialVerification: Bool = false
     
+    // Stored verification measurements
+    private var verificationCodeDigest: String?
+    private var verificationRuntimeDigest: String?
+    private var verificationTlsCertFingerprint: String?
+    
     // Model properties
     @Published var currentModel: ModelType
     
@@ -165,20 +170,20 @@ class ChatViewModel: ObservableObject {
                 let apiKey = await AppConfig.shared.getApiKey()
                 
                 if !hasRunInitialVerification {
+                    // Run explicit verification first to capture measurements
+                    await runExplicitVerification()
+                    
+                    // Then create the client with nonblocking verification as a double check
                     client = try await TinfoilAI.create(
                         apiKey: apiKey,
                         nonblockingVerification: { [weak self] passed in
                             Task { @MainActor in
                                 guard let self = self else { return }
                                 
-                                self.isVerifying = false
-                                self.isVerified = passed
-                                self.hasRunInitialVerification = true
-                                
-                                if passed {
-                                    self.verificationError = nil
-                                } else {
-                                    self.verificationError = "Enclave verification failed. The connection may not be secure."
+                                // Update verification state if there's a mismatch
+                                if !passed && self.isVerified {
+                                    self.isVerified = false
+                                    self.verificationError = "Client verification failed after explicit verification succeeded"
                                 }
                             }
                         }
@@ -189,19 +194,72 @@ class ChatViewModel: ObservableObject {
                         nonblockingVerification: nil
                     )
                 }
-                
-                if !hasRunInitialVerification {
-                    self.isVerifying = false
-                    self.isVerified = true
-                    self.hasRunInitialVerification = true
-                }
 
             } catch {
                 if !hasRunInitialVerification {
                     self.isVerifying = false
                     self.isVerified = false
                     self.verificationError = error.localizedDescription
+                    self.hasRunInitialVerification = true
                 }
+            }
+        }
+    }
+    
+    /// Runs explicit verification and stores measurements
+    private func runExplicitVerification() async {
+        // Create callbacks to capture verification results
+        let callbacks = VerificationCallbacks(
+            onCodeVerificationComplete: { [weak self] result in
+                if case .success = result.status {
+                    Task { @MainActor in
+                        self?.verificationCodeDigest = result.digest
+                    }
+                }
+            },
+            onRuntimeVerificationComplete: { [weak self] result in
+                if case .success = result.status {
+                    Task { @MainActor in
+                        self?.verificationRuntimeDigest = result.digest
+                    }
+                }
+            },
+            onSecurityCheckComplete: { [weak self] result in
+                Task { @MainActor in
+                    guard let self = self else { return }
+                    
+                    self.isVerifying = false
+                    self.hasRunInitialVerification = true
+                    
+                    if case .success = result.status {
+                        self.isVerified = true
+                        self.verificationError = nil
+                    } else if case .failure(let error) = result.status {
+                        self.isVerified = false
+                        self.verificationError = error.localizedDescription
+                    }
+                }
+            }
+        )
+        
+        // Create secure client and run verification
+        let secureClient = SecureClient(
+            githubRepo: Constants.Proxy.githubRepo,
+            enclaveURL: Constants.Proxy.enclaveURL,
+            callbacks: callbacks
+        )
+        
+        do {
+            let verificationResult = try await secureClient.verify()
+            await MainActor.run {
+                self.verificationTlsCertFingerprint = verificationResult.publicKeyFP
+            }
+        } catch {
+            await MainActor.run {
+                self.isVerifying = false
+                self.isVerified = false
+                self.verificationError = error.localizedDescription
+                self.hasRunInitialVerification = true
             }
         }
     }
@@ -535,10 +593,13 @@ class ChatViewModel: ObservableObject {
     
     /// Shows the verifier sheet with current verification state
     func showVerifier() {
-        // Create verifier view with current verification state
+        // Use stored measurements from initial verification
         verifierView = VerifierView(
-            initialVerificationState: isVerified ? true : nil,
-            initialError: verificationError
+            initialVerificationState: isVerified ? true : (verificationError != nil ? false : nil),
+            initialError: verificationError,
+            codeDigest: verificationCodeDigest,
+            runtimeDigest: verificationRuntimeDigest,
+            tlsCertFingerprint: verificationTlsCertFingerprint
         )
         showVerifierSheet = true
     }
