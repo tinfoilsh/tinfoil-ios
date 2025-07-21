@@ -379,6 +379,19 @@ struct SettingsView: View {
                             }
                             
                             Button(action: {
+                                UIApplication.shared.open(Constants.Legal.termsOfUseURL)
+                            }) {
+                                HStack {
+                                    Label("Terms of Use", systemImage: "doc.text.fill")
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    Image(systemName: "arrow.up.forward.square")
+                                        .font(.footnote)
+                                        .foregroundColor(Color(UIColor.tertiaryLabel))
+                                }
+                            }
+                            
+                            Button(action: {
                                 UIApplication.shared.open(Constants.Legal.privacyPolicyURL)
                             }) {
                                 HStack {
