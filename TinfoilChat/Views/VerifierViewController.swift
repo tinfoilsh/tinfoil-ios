@@ -923,13 +923,14 @@ struct ProviderIconsView: View {
                             Image(provider.icon)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
-                                .frame(width: provider.name == "AMD" ? 50 : 60, height: provider.name == "AMD" ? 16 : 22)
+                                .frame(width: provider.name == "AMD" ? 45 : 60, height: provider.name == "AMD" ? 14 : 22)
+                                .frame(height: 22, alignment: .center) // Fixed height container for all icons
                             
                             Text(provider.name)
                                 .font(.system(size: 10))
                                 .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                         }
-                        .frame(width: 80, height: 50)
+                        .frame(width: 80, height: 50, alignment: .bottom) // Align content to bottom
                         .padding(8)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
