@@ -3,12 +3,19 @@ import UIKit
 
 /// Input area for typing messages, including model verification status and send button
 struct MessageInputView: View {
+    // MARK: - Constants
+    fileprivate enum Layout {
+        static let defaultHeight: CGFloat = 80
+        static let minimumHeight: CGFloat = 80
+        static let maximumHeight: CGFloat = 180
+    }
+    
     @Binding var messageText: String
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject private var authManager: AuthManager
     @State private var showErrorPopover = false
-    @State private var textHeight: CGFloat = 48 // Updated default height to match minimum
+    @State private var textHeight: CGFloat = Layout.defaultHeight
     @ObservedObject private var settings = SettingsManager.shared
     
     // Haptic feedback generator
@@ -116,7 +123,7 @@ struct MessageInputView: View {
                 if newValue.contains("requires authentication") || newValue.contains("failed") {
                     // Show error message in text field for user to see
                     messageText = newValue
-                    textHeight = 48
+                    textHeight = Layout.defaultHeight
                 } else {
                     // For successful transcriptions, the message is auto-sent by the ViewModel
                     // We don't need to do anything here since sendMessage is called directly
@@ -147,7 +154,7 @@ struct MessageInputView: View {
         } else if !messageText.isEmpty {
             viewModel.sendMessage(text: messageText)
             messageText = ""
-            textHeight = 48 // Reset height when message is sent
+            textHeight = Layout.defaultHeight // Reset height when message is sent
         }
     }
     
@@ -230,7 +237,7 @@ struct CustomTextEditor: UIViewRepresentable {
         
         // Calculate the new height
         let size = uiView.sizeThatFits(CGSize(width: uiView.frame.width, height: CGFloat.greatestFiniteMagnitude))
-        let newHeight = min(120, max(48, size.height)) // Increased minimum height to accommodate more top padding
+        let newHeight = min(MessageInputView.Layout.maximumHeight, max(MessageInputView.Layout.minimumHeight, size.height))
         
         // Only update height if it changed
         if textHeight != newHeight {
@@ -257,7 +264,7 @@ struct CustomTextEditor: UIViewRepresentable {
                 
                 // Calculate and update the height
                 let size = textView.sizeThatFits(CGSize(width: textView.frame.width, height: CGFloat.greatestFiniteMagnitude))
-                let newHeight = min(120, max(48, size.height)) // Increased minimum height
+                let newHeight = min(MessageInputView.Layout.maximumHeight, max(MessageInputView.Layout.minimumHeight, size.height))
                 
                 if parent.textHeight != newHeight {
                     parent.textHeight = newHeight
