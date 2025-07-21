@@ -188,15 +188,15 @@ struct SubscriptionPromptView: View {
         
         switch unit {
         case .day:
-            return value == 1 ? "Daily subscription" : "\(value)-day subscription"
+            return value == 1 ? "Auto-renews daily unless canceled" : "Auto-renews every \(value) days unless canceled"
         case .week:
-            return value == 1 ? "Weekly subscription" : "\(value)-week subscription"
+            return value == 1 ? "Auto-renews weekly unless canceled" : "Auto-renews every \(value) weeks unless canceled"
         case .month:
-            return value == 1 ? "Monthly subscription • Auto-renews" : "\(value)-month subscription • Auto-renews"
+            return value == 1 ? "Auto-renews monthly unless canceled" : "Auto-renews every \(value) months unless canceled"
         case .year:
-            return value == 1 ? "Annual subscription • Auto-renews" : "\(value)-year subscription • Auto-renews"
+            return value == 1 ? "Auto-renews annually unless canceled" : "Auto-renews every \(value) years unless canceled"
         @unknown default:
-            return "Subscription • Auto-renews"
+            return "Auto-renews unless canceled"
         }
     }
 }
