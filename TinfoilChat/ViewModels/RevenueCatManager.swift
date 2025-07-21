@@ -121,6 +121,16 @@ class RevenueCatManager: ObservableObject {
         try await purchase(package)
     }
     
+    /// Purchase subscription with Clerk user ID
+    func purchaseSubscription(clerkUserId: String?) async throws {
+        // Set Clerk user ID if available
+        if let userId = clerkUserId {
+            setClerkUserId(userId)
+        }
+        
+        try await purchaseSubscription()
+    }
+    
     /// Restore purchases
     func restorePurchases() async throws {
         isPurchasing = true

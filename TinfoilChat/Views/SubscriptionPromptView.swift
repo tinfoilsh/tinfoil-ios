@@ -143,17 +143,16 @@ struct SubscriptionPromptView: View {
             Text(errorMessage)
         }
         .onAppear {
-            // Set the Clerk user ID when view appears
-            if let userId = authManager?.localUserData?["id"] as? String {
-                revenueCat.setClerkUserId(userId)
-            }
+            // Clerk user ID will be set when purchase is initiated
         }
     }
     
     private func purchaseSubscription() {
         Task {
             do {
-                try await revenueCat.purchaseSubscription()
+                // Get Clerk user ID and set it right before purchase
+                let clerkUserId = authManager?.localUserData?["id"] as? String
+                try await revenueCat.purchaseSubscription(clerkUserId: clerkUserId)
                 
                 // Force refresh user data to get updated subscription status
                 if let authManager = authManager {
