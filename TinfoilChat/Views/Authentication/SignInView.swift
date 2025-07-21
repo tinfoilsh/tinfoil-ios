@@ -21,6 +21,7 @@ struct SignInView: View {
   @State private var password = ""
   @State private var attemptedSubmit = false
   @State private var isEmailFormatInvalid = false
+  @State private var showForgotPassword = false
   
   private var emailIsEmpty: Bool {
     return email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -89,6 +90,15 @@ struct SignInView: View {
           .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
       }
       
+      Button(action: {
+        showForgotPassword = true
+      }) {
+        Text("Forgot Password?")
+          .font(.system(size: 15, weight: .medium))
+          .foregroundColor(.secondary)
+      }
+      .padding(.top, 8)
+      
       if isLoading {
         ProgressView()
           .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .white : .black))
@@ -110,6 +120,9 @@ struct SignInView: View {
     .contentShape(Rectangle())
     .onTapGesture {
       UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+    .sheet(isPresented: $showForgotPassword) {
+      ForgotPasswordView(isPresented: $showForgotPassword)
     }
   }
   
