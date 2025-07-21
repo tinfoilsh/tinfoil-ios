@@ -26,8 +26,18 @@ class KeychainHelper {
     func save(_ data: Data, for key: String, service: String? = nil) -> Bool {
         let service = service ?? Bundle.main.bundleIdentifier ?? "com.tinfoil.chat"
         
-        // Create query
-        let query: [String: Any] = [
+        // Create deletion query
+        let deleteQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ]
+        
+        // Delete any existing item
+        SecItemDelete(deleteQuery as CFDictionary)
+        
+        // Create add query
+        let addQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
@@ -35,11 +45,8 @@ class KeychainHelper {
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
         
-        // Delete any existing item
-        SecItemDelete(query as CFDictionary)
-        
         // Add new item
-        let status = SecItemAdd(query as CFDictionary, nil)
+        let status = SecItemAdd(addQuery as CFDictionary, nil)
         return status == errSecSuccess
     }
     
