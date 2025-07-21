@@ -210,31 +210,40 @@ class ChatViewModel: ObservableObject {
     private func runExplicitVerification() async {
         // Create callbacks to capture verification results
         let callbacks = VerificationCallbacks(
-            onCodeVerificationComplete: { [weak self] result in
-                if case .success = result.status {
-                    Task { @MainActor in
-                        self?.verificationCodeDigest = result.digest
-                    }
+            onVerificationStart: { [weak self] in
+                Task { @MainActor in
+                    self?.isVerifying = true
                 }
             },
-            onRuntimeVerificationComplete: { [weak self] result in
-                if case .success = result.status {
-                    Task { @MainActor in
-                        self?.verificationRuntimeDigest = result.digest
-                    }
-                }
-            },
-            onSecurityCheckComplete: { [weak self] result in
+            onVerificationComplete: { [weak self] result in
                 Task { @MainActor in
                     guard let self = self else { return }
                     
                     self.isVerifying = false
                     self.hasRunInitialVerification = true
                     
-                    if case .success = result.status {
+                    switch result {
+                    case .success(let groundTruth):
+                        // Store measurements from ground truth
+                        // Always try to format measurements, even if not in expected format
+                        
+                        // Handle code measurement - extract first register value
+                        if let codeMeasurement = groundTruth.codeMeasurement {
+                            self.verificationCodeDigest = codeMeasurement.registers.first ?? ""
+                        }
+                        
+                        // Handle enclave measurement - extract first register value
+                        if let enclaveMeasurement = groundTruth.enclaveMeasurement {
+                            self.verificationRuntimeDigest = enclaveMeasurement.registers.first ?? ""
+                        }
+                        
+                        // Store the public key (this is already a string)
+                        self.verificationTlsCertFingerprint = groundTruth.publicKeyFP
+                        
                         self.isVerified = true
                         self.verificationError = nil
-                    } else if case .failure(let error) = result.status {
+                        
+                    case .failure(let error):
                         self.isVerified = false
                         self.verificationError = error.localizedDescription
                     }
@@ -250,10 +259,7 @@ class ChatViewModel: ObservableObject {
         )
         
         do {
-            let verificationResult = try await secureClient.verify()
-            await MainActor.run {
-                self.verificationTlsCertFingerprint = verificationResult.publicKeyFP
-            }
+            _ = try await secureClient.verify()
         } catch {
             await MainActor.run {
                 self.isVerifying = false
