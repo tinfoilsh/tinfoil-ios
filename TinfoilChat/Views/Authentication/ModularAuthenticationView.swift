@@ -28,7 +28,7 @@ struct ModularAuthenticationView: View {
     GeometryReader { geometry in
       ZStack {
         // Background
-        Color(UIColor.systemGroupedBackground)
+        (colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
           .edgesIgnoringSafeArea(.all)
         
         VStack(spacing: 0) {
@@ -264,10 +264,7 @@ struct ModularAuthenticationView: View {
           Button(action: { dismiss() }) {
             Image(systemName: "xmark")
               .font(.system(size: 16, weight: .bold))
-              .foregroundColor(.gray)
-              .padding(8)
-              .background(Color.gray.opacity(0.15))
-              .clipShape(Circle())
+              .foregroundColor(Color(.systemGray))
           }
           .buttonStyle(PlainButtonStyle())
           .accessibilityLabel("Close authentication screen")
