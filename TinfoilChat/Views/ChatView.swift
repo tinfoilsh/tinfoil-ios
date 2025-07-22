@@ -19,7 +19,7 @@ struct ChatContainer: View {
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
     @StateObject private var settings = SettingsManager.shared
     
-    @State private var isSidebarOpen = false
+    @State private var isSidebarOpen = UIDevice.current.userInterfaceIdiom == .pad
     @State private var messageText = ""
     @State private var scrollProxy: ScrollViewProxy?
     @State private var dragOffset: CGFloat = 0
@@ -35,7 +35,7 @@ struct ChatContainer: View {
             mainContent
                 .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
         }
-        .navigationViewStyle(StackNavigationViewStyle())
+        .navigationViewStyle(.stack)
         .environmentObject(viewModel)
         .onAppear {
             setupNavigationBarAppearance()
@@ -337,6 +337,9 @@ struct ChatScrollView: View {
                             if let authManager = viewModel.authManager {
                                 WelcomeView(isDarkMode: isDarkMode, authManager: authManager)
                                     .padding(.vertical, 16)
+                                    .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 0)
+                                    .frame(maxWidth: 900)
+                                    .frame(maxWidth: .infinity)
                             }
                         } else {
                             ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
@@ -363,7 +366,9 @@ struct ChatScrollView: View {
                                 )
                                 .id(message.id)
                                 .padding(.vertical, 8)
-                                .padding(.horizontal, 8)
+                                .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 8)
+                                .frame(maxWidth: 900)
+                                .frame(maxWidth: .infinity)
                                 .opacity(index < archivedMessagesStartIndex ? 0.6 : 1.0)
                             }
                             
@@ -454,13 +459,22 @@ struct ChatScrollView: View {
             }
             
             // Message input view
-            MessageInputView(messageText: $messageText, viewModel: viewModel)
-                .background(
-                    RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
-                        .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
-                        .edgesIgnoringSafeArea(.bottom)
-                )
-                .environmentObject(viewModel.authManager ?? AuthManager())
+            HStack {
+                Spacer(minLength: 0)
+                MessageInputView(messageText: $messageText, viewModel: viewModel)
+                    .frame(maxWidth: 600)
+                    .background(
+                        RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
+                            .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                    )
+                    .environmentObject(viewModel.authManager ?? AuthManager())
+                Spacer(minLength: 0)
+            }
+            .background(
+                Color.clear
+                    .frame(height: 1)
+                    .edgesIgnoringSafeArea(.bottom)
+            )
             
         }
         .onAppear {
@@ -607,24 +621,26 @@ struct TabbedWelcomeView: View {
                     .font(.system(size: 18, weight: .medium))
                     .foregroundColor(.primary)
                 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
-                        ForEach(availableModels) { model in
-                            ModelTab(
-                                model: model,
-                                isSelected: selectedModelId == model.id,
-                                isDarkMode: isDarkMode,
-                                isEnabled: canUseModel(model),
-                                showPricingLabel: !(authManager.isAuthenticated && authManager.hasActiveSubscription)
-                            ) {
-                                selectModel(model)
+                GeometryReader { geometry in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 16) {
+                            ForEach(availableModels) { model in
+                                ModelTab(
+                                    model: model,
+                                    isSelected: selectedModelId == model.id,
+                                    isDarkMode: isDarkMode,
+                                    isEnabled: canUseModel(model),
+                                    showPricingLabel: !(authManager.isAuthenticated && authManager.hasActiveSubscription)
+                                ) {
+                                    selectModel(model)
+                                }
                             }
                         }
+                        .padding(.horizontal, max(32, (geometry.size.width - CGFloat(availableModels.count * 88 + (availableModels.count - 1) * 16)) / 2))
                     }
-                    .padding(.horizontal, 32)
                 }
+                .frame(height: 120)
                 .padding(.vertical, 12)
-                .padding(.horizontal, -32)
             }
             
             // Subscription prompt for non-premium users
