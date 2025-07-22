@@ -414,6 +414,7 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()
+                .environment(Clerk.shared)
                 .environmentObject(authManager)
         }
         .alert("Sign Out", isPresented: $showSignOutConfirmation) {

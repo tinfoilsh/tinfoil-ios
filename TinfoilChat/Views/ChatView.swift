@@ -8,6 +8,7 @@
 
 import SwiftUI
 import SafariServices
+import Clerk
 
 
 // MARK: - ChatContainer
@@ -56,6 +57,8 @@ struct ChatContainer: View {
         }
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()
+                .environment(Clerk.shared)
+                .environmentObject(authManager)
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
