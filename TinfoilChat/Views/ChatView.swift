@@ -85,15 +85,17 @@ struct ChatContainer: View {
         Group {
             if UIDevice.current.userInterfaceIdiom == .pad {
                 // iPad/Mac: Side-by-side layout
-                HStack(spacing: 0) {
-                    if isSidebarOpen {
-                        ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
-                            .frame(width: 300)
-                            .transition(.move(edge: .leading))
+                GeometryReader { geometry in
+                    HStack(spacing: 0) {
+                        if isSidebarOpen {
+                            ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
+                                .frame(width: 300)
+                                .transition(.move(edge: .leading))
+                        }
+                        
+                        chatArea
+                            .frame(width: isSidebarOpen ? geometry.size.width - 300 : geometry.size.width)
                     }
-                    
-                    chatArea
-                        .frame(maxWidth: .infinity)
                 }
                 .animation(.easeInOut(duration: 0.3), value: isSidebarOpen)
             } else {
@@ -389,8 +391,10 @@ struct ChatScrollView: View {
                                 .id(message.id)
                                 .padding(.vertical, 8)
                                 .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 8)
-                                .frame(maxWidth: 900)
-                                .frame(maxWidth: .infinity)
+                                .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
+                                    view.frame(maxWidth: 900)
+                                        .frame(maxWidth: .infinity)
+                                }
                                 .opacity(index < archivedMessagesStartIndex ? 0.6 : 1.0)
                             }
                             
@@ -481,22 +485,34 @@ struct ChatScrollView: View {
             }
             
             // Message input view
-            HStack {
-                Spacer(minLength: 0)
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                // iPhone: Full width input
                 MessageInputView(messageText: $messageText, viewModel: viewModel)
-                    .frame(maxWidth: 600)
                     .background(
                         RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
                             .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                            .edgesIgnoringSafeArea(.bottom)
                     )
                     .environmentObject(viewModel.authManager ?? AuthManager())
-                Spacer(minLength: 0)
+            } else {
+                // iPad/Mac: Centered input with max width
+                HStack {
+                    Spacer(minLength: 0)
+                    MessageInputView(messageText: $messageText, viewModel: viewModel)
+                        .frame(maxWidth: 600)
+                        .background(
+                            RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
+                                .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                        )
+                        .environmentObject(viewModel.authManager ?? AuthManager())
+                    Spacer(minLength: 0)
+                }
+                .background(
+                    Color.clear
+                        .frame(height: 1)
+                        .edgesIgnoringSafeArea(.bottom)
+                )
             }
-            .background(
-                Color.clear
-                    .frame(height: 1)
-                    .edgesIgnoringSafeArea(.bottom)
-            )
             
         }
         .onAppear {
@@ -849,6 +865,15 @@ struct RoundedCorner: Shape {
 extension View {
     func corners(_ corners: UIRectCorner) -> some View {
         clipShape(RoundedCorner(radius: 15, corners: corners))
+    }
+    
+    /// Conditionally apply a modifier
+    @ViewBuilder func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
+        }
     }
 }
 
