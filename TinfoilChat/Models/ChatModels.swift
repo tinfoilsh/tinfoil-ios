@@ -318,6 +318,7 @@ class APIKeyManager {
         do {
             // Try to load Clerk if it's not loaded
             let isLoaded = await Clerk.shared.isLoaded
+            
             if !isLoaded {
                 try await Clerk.shared.load()
             }
@@ -338,7 +339,6 @@ class APIKeyManager {
                     
                     guard let httpResponse = response as? HTTPURLResponse, 
                           httpResponse.statusCode == 200 else {
-                        print("API key fetch failed with status: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
                         return ""
                     }
                     
@@ -360,10 +360,8 @@ class APIKeyManager {
                 }
             }
             
-            print("Clerk session not available after 3 attempts")
             return ""
         } catch {
-            print("Error fetching API key: \(error)")
             return ""
         }
     }

@@ -394,6 +394,10 @@ struct ModularAuthenticationView: View {
   
   private func signInWithOAuth(provider: OAuthProvider) async {
     errorMessage = nil
+    
+    // Dismiss the modal immediately before starting OAuth flow
+    dismiss()
+    
     authCheckTask = await OAuthManager.signInWithOAuth(
       provider: provider,
       clerk: clerk,
@@ -410,6 +414,9 @@ struct ModularAuthenticationView: View {
   private func signInWithApple() async {
     errorMessage = nil
     isLoading = true
+    
+    // Dismiss the modal immediately before starting Apple sign-in flow
+    dismiss()
     
     do {
       // Use the Clerk SignInWithAppleHelper class to get your Apple credential
@@ -431,9 +438,6 @@ struct ModularAuthenticationView: View {
         await authManager.initializeAuthState()
         // Post notification to close sidebar and go to main chat view
         NotificationCenter.default.post(name: NSNotification.Name("AuthenticationCompleted"), object: nil)
-        DispatchQueue.main.async {
-          self.dismiss()
-        }
       }
     } catch {
       errorMessage = handleAuthError(error)

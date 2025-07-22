@@ -210,31 +210,40 @@ class ChatViewModel: ObservableObject {
     private func runExplicitVerification() async {
         // Create callbacks to capture verification results
         let callbacks = VerificationCallbacks(
-            onCodeVerificationComplete: { [weak self] result in
-                if case .success = result.status {
-                    Task { @MainActor in
-                        self?.verificationCodeDigest = result.digest
-                    }
+            onVerificationStart: { [weak self] in
+                Task { @MainActor in
+                    self?.isVerifying = true
                 }
             },
-            onRuntimeVerificationComplete: { [weak self] result in
-                if case .success = result.status {
-                    Task { @MainActor in
-                        self?.verificationRuntimeDigest = result.digest
-                    }
-                }
-            },
-            onSecurityCheckComplete: { [weak self] result in
+            onVerificationComplete: { [weak self] result in
                 Task { @MainActor in
                     guard let self = self else { return }
                     
                     self.isVerifying = false
                     self.hasRunInitialVerification = true
                     
-                    if case .success = result.status {
+                    switch result {
+                    case .success(let groundTruth):
+                        // Store measurements from ground truth
+                        // Always try to format measurements, even if not in expected format
+                        
+                        // Handle code measurement - extract first register value
+                        if let codeMeasurement = groundTruth.codeMeasurement {
+                            self.verificationCodeDigest = codeMeasurement.registers.first ?? ""
+                        }
+                        
+                        // Handle enclave measurement - extract first register value
+                        if let enclaveMeasurement = groundTruth.enclaveMeasurement {
+                            self.verificationRuntimeDigest = enclaveMeasurement.registers.first ?? ""
+                        }
+                        
+                        // Store the public key (this is already a string)
+                        self.verificationTlsCertFingerprint = groundTruth.publicKeyFP
+                        
                         self.isVerified = true
                         self.verificationError = nil
-                    } else if case .failure(let error) = result.status {
+                        
+                    case .failure(let error):
                         self.isVerified = false
                         self.verificationError = error.localizedDescription
                     }
@@ -250,10 +259,7 @@ class ChatViewModel: ObservableObject {
         )
         
         do {
-            let verificationResult = try await secureClient.verify()
-            await MainActor.run {
-                self.verificationTlsCertFingerprint = verificationResult.publicKeyFP
-            }
+            _ = try await secureClient.verify()
         } catch {
             await MainActor.run {
                 self.isVerifying = false
@@ -350,11 +356,6 @@ class ChatViewModel: ObservableObject {
     func sendMessage(text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
-        // Ensure client is initialized before sending message
-        if client == nil {
-            setupTinfoilClient()
-        }
-        
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         
@@ -390,9 +391,22 @@ class ChatViewModel: ObservableObject {
         // Create and start a new task for the streaming request
         currentTask = Task {
             do {
+                // Wait for client initialization if needed
+                if client == nil {
+                    setupTinfoilClient()
+                    
+                    // Wait for client to be available with timeout
+                    let maxWaitTime = 30.0 // 30 seconds timeout
+                    let startTime = Date()
+                    
+                    while client == nil && Date().timeIntervalSince(startTime) < maxWaitTime {
+                        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                    }
+                }
+                
                 guard let client = client else {
                     throw NSError(domain: "TinfoilChat", code: 1,
-                                userInfo: [NSLocalizedDescriptionKey: "TinfoilAI client not available"])
+                                userInfo: [NSLocalizedDescriptionKey: "TinfoilAI client not available after initialization"])
                 }
                 
                 // Create the stream with proper parameters

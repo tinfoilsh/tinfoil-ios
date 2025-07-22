@@ -10,28 +10,33 @@ import SwiftUI
 import RevenueCat
 
 struct SubscriptionPromptView: View {
-    let authManager: AuthManager?
+    @ObservedObject var authManager: AuthManager
+    @EnvironmentObject private var chatViewModel: TinfoilChat.ChatViewModel
     
     @ObservedObject private var revenueCat = RevenueCatManager.shared
     @State private var showAuthView = false
     @State private var showError = false
     @State private var errorMessage = ""
+    @State private var isVerifyingSubscription = false
     
     private var isAuthenticated: Bool {
-        authManager?.isAuthenticated ?? false
+        authManager.isAuthenticated
     }
     
     private var hasSubscription: Bool {
-        authManager?.hasActiveSubscription ?? false
+        authManager.hasActiveSubscription
     }
     
     var body: some View {
-        VStack(spacing: 12) {
-            Text("Get Premium Models")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.primary)
-            
-            if !hasSubscription {
+        // Don't show anything if user already has subscription
+        if hasSubscription {
+            EmptyView()
+        } else {
+            VStack(spacing: 12) {
+                Text("Get Premium Models")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.primary)
+                
                 // No subscription - show subscribe options
                 VStack(spacing: 8) {
                     if let package = revenueCat.offerings?.current?.availablePackages.first {
@@ -67,7 +72,7 @@ struct SubscriptionPromptView: View {
                     }
                 }
                 
-                if revenueCat.isLoading || revenueCat.isPurchasing {
+                if revenueCat.isLoading || revenueCat.isPurchasing || isVerifyingSubscription {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle())
                         .scaleEffect(0.8)
@@ -122,30 +127,30 @@ struct SubscriptionPromptView: View {
                     .padding(.top, 8)
                 }
             }
-        }
-        .padding(.vertical, 16)
-        .padding(.horizontal, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.accentPrimary.opacity(0.08))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(Color.accentPrimary.opacity(0.2), lineWidth: 1)
-                )
-        )
-        .padding(.top, 8)
-        .sheet(isPresented: $showAuthView) {
-            AuthenticationView()
-        }
-        .alert("Error", isPresented: $showError) {
-            Button("OK") { }
-        } message: {
-            Text(errorMessage)
-        }
-        .onAppear {
-            // Set the Clerk user ID when view appears
-            if let userId = authManager?.localUserData?["id"] as? String {
-                revenueCat.setClerkUserId(userId)
+            .padding(.vertical, 16)
+            .padding(.horizontal, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.accentPrimary.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(Color.accentPrimary.opacity(0.2), lineWidth: 1)
+                    )
+            )
+            .padding(.top, 8)
+            .sheet(isPresented: $showAuthView) {
+                AuthenticationView()
+            }
+            .alert("Error", isPresented: $showError) {
+                Button("OK") { }
+            } message: {
+                Text(errorMessage)
+            }
+            .onAppear {
+                // Clerk user ID will be set when purchase is initiated
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SubscriptionStatusUpdated"))) { _ in
+                // View will automatically update when subscription status changes
             }
         }
     }
@@ -153,15 +158,56 @@ struct SubscriptionPromptView: View {
     private func purchaseSubscription() {
         Task {
             do {
-                try await revenueCat.purchaseSubscription()
+                // Get Clerk user ID and set it right before purchase
+                let clerkUserId = authManager.localUserData?["id"] as? String
                 
-                // Force refresh user data to get updated subscription status
-                if let authManager = authManager {
-                    await authManager.forceRefreshUserData()
+                try await revenueCat.purchaseSubscription(clerkUserId: clerkUserId)
+                
+                // Set verification flag to keep spinner showing
+                await MainActor.run {
+                    isVerifyingSubscription = true
                 }
+                
+                // Keep showing spinner while we verify subscription
+                // Wait a moment for webhook to process
+                try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                
+                // Try to refresh user data up to 5 times to get updated subscription status
+                    var subscriptionActive = false
+                    
+                    for attempt in 1...5 {
+                        await authManager.fetchSubscriptionStatus()
+                        
+                        // Check if subscription is now active
+                        if authManager.hasActiveSubscription {
+                            subscriptionActive = true
+                            break
+                        }
+                        
+                        // Wait before next attempt (except on last attempt)
+                        if attempt < 5 {
+                            try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                        }
+                    }
+                    
+                    if !subscriptionActive {
+                        // Subscription verification failed after multiple attempts
+                        await MainActor.run {
+                            isVerifyingSubscription = false
+                        }
+                    } else {
+                        // The view will automatically update since authManager.hasActiveSubscription is @Published
+                        // Clear the verification flag
+                        await MainActor.run {
+                            isVerifyingSubscription = false
+                        }
+                    }
             } catch {
                 errorMessage = error.localizedDescription
                 showError = true
+                await MainActor.run {
+                    isVerifyingSubscription = false
+                }
             }
         }
     }
@@ -172,8 +218,8 @@ struct SubscriptionPromptView: View {
                 try await revenueCat.restorePurchases()
                 
                 // Force refresh user data to get updated subscription status
-                if let authManager = authManager {
-                    await authManager.forceRefreshUserData()
+                if true {
+                    await authManager.fetchSubscriptionStatus()
                 }
             } catch {
                 errorMessage = error.localizedDescription
@@ -188,15 +234,15 @@ struct SubscriptionPromptView: View {
         
         switch unit {
         case .day:
-            return value == 1 ? "Daily subscription" : "\(value)-day subscription"
+            return value == 1 ? "Auto-renews daily unless canceled" : "Auto-renews every \(value) days unless canceled"
         case .week:
-            return value == 1 ? "Weekly subscription" : "\(value)-week subscription"
+            return value == 1 ? "Auto-renews weekly unless canceled" : "Auto-renews every \(value) weeks unless canceled"
         case .month:
-            return value == 1 ? "Monthly subscription • Auto-renews" : "\(value)-month subscription • Auto-renews"
+            return value == 1 ? "Auto-renews monthly unless canceled" : "Auto-renews every \(value) months unless canceled"
         case .year:
-            return value == 1 ? "Annual subscription • Auto-renews" : "\(value)-year subscription • Auto-renews"
+            return value == 1 ? "Auto-renews annually unless canceled" : "Auto-renews every \(value) years unless canceled"
         @unknown default:
-            return "Subscription • Auto-renews"
+            return "Auto-renews unless canceled"
         }
     }
 }
