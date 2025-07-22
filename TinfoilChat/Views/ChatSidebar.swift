@@ -49,6 +49,22 @@ struct ChatSidebar: View {
         sidebarContent
             .frame(width: 300)
             .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
+            .overlay(
+                VStack(spacing: 0) {
+                    // Top border
+                    Rectangle()
+                        .fill(Color.white.opacity(0.2))
+                        .frame(height: 1)
+                    Spacer()
+                }
+            )
+            .overlay(
+                Rectangle()
+                    .fill(Color.white.opacity(0.2))
+                    .frame(width: 1)
+                    .frame(maxHeight: .infinity),
+                alignment: .trailing
+            )
             .alert("Delete Chat", isPresented: .constant(deletingChatId != nil)) {
             Button("Cancel", role: .cancel) {
                 deletingChatId = nil

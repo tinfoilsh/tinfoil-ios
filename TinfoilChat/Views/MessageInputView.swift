@@ -266,36 +266,29 @@ struct CustomTextEditor: UIViewRepresentable {
                 let isMac = ProcessInfo.processInfo.isiOSAppOnMac
                 
                 if isMac {
-                    // Get the current event to check for modifier keys
-                    if let event = UIApplication.shared.currentEvent,
-                       event.modifierFlags.contains(.shift) {
-                        // Shift+Enter: Allow line break
-                        return true
-                    } else {
-                        // Plain Enter: Send message if not empty
-                        let currentText = textView.text as NSString
-                        let newText = currentText.replacingCharacters(in: range, with: text)
-                        let trimmedText = newText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    // On Mac, Enter sends message (no way to detect Shift in UITextView)
+                    // Users can use Option+Enter for line breaks
+                    let currentText = textView.text ?? ""
+                    let trimmedText = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    
+                    if !trimmedText.isEmpty && !parent.viewModel.isLoading {
+                        // Send the message
+                        parent.viewModel.sendMessage(text: trimmedText)
                         
-                        if !trimmedText.isEmpty && !parent.viewModel.isLoading {
-                            // Send the message
-                            parent.viewModel.sendMessage(text: trimmedText)
-                            
-                            // Clear the text field
-                            textView.text = ""
-                            parent.text = ""
-                            parent.textHeight = MessageInputView.Layout.defaultHeight
-                            
-                            // Update placeholder
-                            textView.text = parent.placeholderText
-                            textView.textColor = .lightGray
-                            
-                            // Resign first responder to dismiss keyboard
-                            textView.resignFirstResponder()
-                        }
+                        // Clear the text field
+                        textView.text = ""
+                        parent.text = ""
+                        parent.textHeight = MessageInputView.Layout.defaultHeight
                         
-                        return false
+                        // Update placeholder
+                        textView.text = parent.placeholderText
+                        textView.textColor = .lightGray
+                        
+                        // Resign first responder to dismiss keyboard
+                        textView.resignFirstResponder()
                     }
+                    
+                    return false
                 }
             }
             

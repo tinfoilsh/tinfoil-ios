@@ -79,9 +79,27 @@ struct ChatContainer: View {
     
     /// The main content layout including chat area and sidebar
     private var mainContent: some View {
-        ZStack {
-            chatArea
-            sidebarLayer
+        Group {
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                // iPad/Mac: Side-by-side layout
+                HStack(spacing: 0) {
+                    if isSidebarOpen {
+                        ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
+                            .frame(width: 300)
+                            .transition(.move(edge: .leading))
+                    }
+                    
+                    chatArea
+                        .frame(maxWidth: .infinity)
+                }
+                .animation(.easeInOut(duration: 0.3), value: isSidebarOpen)
+            } else {
+                // iPhone: Overlay layout
+                ZStack {
+                    chatArea
+                    sidebarLayer
+                }
+            }
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -161,6 +179,7 @@ struct ChatContainer: View {
             }
         }
         .gesture(
+            UIDevice.current.userInterfaceIdiom == .phone ? 
             DragGesture()
                 .onChanged { gesture in
                     if isSidebarOpen {
@@ -187,7 +206,7 @@ struct ChatContainer: View {
                         }
                         dragOffset = 0
                     }
-                }
+                } : nil
         )
     }
     
