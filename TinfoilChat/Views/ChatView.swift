@@ -28,6 +28,7 @@ struct ChatContainer: View {
     @State private var showSettings = false
     @State private var showMemory = false
     @State private var lastBackgroundTime: Date?
+    @State private var shouldCreateNewChatAfterSubscription = false
     
     private let backgroundTimeThreshold: TimeInterval = 60 // 1 minute in seconds
     
@@ -65,6 +66,16 @@ struct ChatContainer: View {
         }
         .sheet(isPresented: $showMemory) {
             MemoryView()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SubscriptionStatusUpdated"))) { _ in
+            // Force refresh when subscription status changes
+            if authManager.hasActiveSubscription && shouldCreateNewChatAfterSubscription {
+                shouldCreateNewChatAfterSubscription = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
+                    viewModel.createNewChat(language: language)
+                }
+            }
         }
     }
     
@@ -684,6 +695,12 @@ struct TabbedWelcomeView: View {
             // Subscription prompt for non-premium users
             if !(authManager.isAuthenticated && authManager.hasActiveSubscription) {
                 subscriptionPrompt
+                    .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
+                        if hasSubscription {
+                            // Refresh the model tabs to show all models as available
+                            refreshID = UUID()
+                        }
+                    }
             }
         }
         .padding(.horizontal, 32)
@@ -703,7 +720,21 @@ struct TabbedWelcomeView: View {
     
     // Subscription prompt view
     private var subscriptionPrompt: some View {
-        SubscriptionPromptView(authManager: authManager)
+        SubscriptionPromptView(
+            authManager: authManager,
+            onSubscriptionSuccess: {
+                // Force UI refresh and create new chat
+                refreshID = UUID()
+                
+                // Create a new chat to show premium models
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    if !viewModel.messages.isEmpty {
+                        let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
+                        viewModel.createNewChat(language: language)
+                    }
+                }
+            }
+        )
     }
     
     private func selectModel(_ model: ModelType) {
@@ -882,6 +913,7 @@ struct ModelPicker: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @EnvironmentObject private var authManager: AuthManager
     @State private var showModelPicker = false
+    @State private var refreshID = UUID()
     
     var body: some View {
         Button(action: {
@@ -970,6 +1002,11 @@ struct ModelPicker: View {
             .frame(width: 320)
             .presentationCompactAdaptation(.popover)
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SubscriptionStatusUpdated"))) { _ in
+            // Force refresh model picker when subscription changes
+            refreshID = UUID()
+        }
+        .id(refreshID)
     }
 }
 

@@ -18,6 +18,9 @@ struct SubscriptionPromptView: View {
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var isVerifyingSubscription = false
+    @State private var subscriptionSuccessful = false
+    
+    var onSubscriptionSuccess: (() -> Void)?
     
     private var isAuthenticated: Bool {
         authManager.isAuthenticated
@@ -28,8 +31,8 @@ struct SubscriptionPromptView: View {
     }
     
     var body: some View {
-        // Don't show anything if user already has subscription
-        if hasSubscription {
+        // Don't show anything if user already has subscription or just subscribed
+        if hasSubscription || subscriptionSuccessful {
             EmptyView()
         } else {
             VStack(spacing: 12) {
@@ -196,10 +199,11 @@ struct SubscriptionPromptView: View {
                             isVerifyingSubscription = false
                         }
                     } else {
-                        // The view will automatically update since authManager.hasActiveSubscription is @Published
-                        // Clear the verification flag
+                        // Success! Clear the verification flag and notify parent
                         await MainActor.run {
                             isVerifyingSubscription = false
+                            subscriptionSuccessful = true
+                            onSubscriptionSuccess?()
                         }
                     }
             } catch {
