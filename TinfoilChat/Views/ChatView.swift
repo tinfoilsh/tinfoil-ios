@@ -641,7 +641,7 @@ struct TabbedWelcomeView: View {
     }
     
     var body: some View {
-        VStack(spacing: 32) {
+        VStack(spacing: 24) {
             // Greeting section
             VStack(spacing: 16) {
                 if authManager.isAuthenticated {
@@ -663,38 +663,38 @@ struct TabbedWelcomeView: View {
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
             }
+            .padding(.horizontal, 32)
             
             // Model selection tabs
-            VStack(spacing: 16) {
+            VStack(spacing: 2) {
                 Text("Choose your AI model")
                     .font(.system(size: 18, weight: .medium))
                     .foregroundColor(.primary)
+                    .padding(.horizontal, 32)
                 
-                GeometryReader { geometry in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
-                            ForEach(availableModels) { model in
-                                ModelTab(
-                                    model: model,
-                                    isSelected: selectedModelId == model.id,
-                                    isDarkMode: isDarkMode,
-                                    isEnabled: canUseModel(model),
-                                    showPricingLabel: !(authManager.isAuthenticated && authManager.hasActiveSubscription)
-                                ) {
-                                    selectModel(model)
-                                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        ForEach(availableModels) { model in
+                            ModelTab(
+                                model: model,
+                                isSelected: selectedModelId == model.id,
+                                isDarkMode: isDarkMode,
+                                isEnabled: canUseModel(model),
+                                showPricingLabel: !(authManager.isAuthenticated && authManager.hasActiveSubscription)
+                            ) {
+                                selectModel(model)
                             }
                         }
-                        .padding(.horizontal, max(32, (geometry.size.width - CGFloat(availableModels.count * 88 + (availableModels.count - 1) * 16)) / 2))
                     }
+                    .padding(.horizontal, 32)
                 }
-                .frame(height: 120)
-                .padding(.vertical, 12)
+                .frame(height: 100)
             }
             
             // Subscription prompt for non-premium users
             if !(authManager.isAuthenticated && authManager.hasActiveSubscription) {
                 subscriptionPrompt
+                    .padding(.horizontal, 32)
                     .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
                         if hasSubscription {
                             // Refresh the model tabs to show all models as available
@@ -703,7 +703,6 @@ struct TabbedWelcomeView: View {
                     }
             }
         }
-        .padding(.horizontal, 32)
         .padding(.vertical, 24)
         .onAppear {
             selectedModelId = viewModel.currentModel.id
