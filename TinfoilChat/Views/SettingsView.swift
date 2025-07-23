@@ -179,15 +179,9 @@ struct SettingsView: View {
                 VStack(spacing: 0) {
                     // Custom header
                     HStack {
-                        HStack(spacing: 12) {
-                            Image(systemName: "gear")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .foregroundColor(.primary)
-                            Text("Settings")
-                                .font(.title)
-                                .fontWeight(.bold)
-                        }
+                        Text("Settings")
+                            .font(.title)
+                            .fontWeight(.bold)
                         Spacer()
                         
                         Button(action: { dismiss() }) {
@@ -278,7 +272,7 @@ struct SettingsView: View {
                                     }
                                 }) {
                                     HStack {
-                                        Label("Edit Profile", systemImage: "person.fill")
+                                        Text("Edit Profile")
                                             .foregroundColor(.primary)
                                         Spacer()
                                         Image(systemName: "chevron.right")
@@ -297,7 +291,7 @@ struct SettingsView: View {
                                         UIApplication.shared.open(url)
                                     }) {
                                         HStack {
-                                            Label("Manage Subscription", systemImage: "creditcard")
+                                            Text("Manage Subscription")
                                                 .foregroundColor(.primary)
                                             Spacer()
                                             Image(systemName: "arrow.up.forward.square")
@@ -312,7 +306,7 @@ struct SettingsView: View {
                                     showSignOutConfirmation = true
                                 }) {
                                     HStack {
-                                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                                        Text("Sign Out")
                                             .foregroundColor(.primary)
                                         Spacer()
                                     }
@@ -323,7 +317,7 @@ struct SettingsView: View {
                                     showDeleteConfirmation = true
                                 }) {
                                     HStack {
-                                        Label("Delete Account", systemImage: "trash")
+                                        Text("Delete Account")
                                             .foregroundColor(.red)
                                         Spacer()
                                     }
@@ -334,7 +328,7 @@ struct SettingsView: View {
                                     showAuthView = true
                                 }) {
                                     HStack {
-                                        Label("Sign up or Log In", systemImage: "person.badge.plus")
+                                        Text("Sign up or Log In")
                                             .foregroundColor(.primary)
                                         Spacer()
                                     }
@@ -369,20 +363,7 @@ struct SettingsView: View {
                                 UIApplication.shared.open(Constants.Legal.termsOfServiceURL)
                             }) {
                                 HStack {
-                                    Label("Terms of Service", systemImage: "doc.text")
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                    Image(systemName: "arrow.up.forward.square")
-                                        .font(.footnote)
-                                        .foregroundColor(Color(UIColor.tertiaryLabel))
-                                }
-                            }
-                            
-                            Button(action: {
-                                UIApplication.shared.open(Constants.Legal.termsOfUseURL)
-                            }) {
-                                HStack {
-                                    Label("Terms of Use", systemImage: "doc.text.fill")
+                                    Text("Terms of Service")
                                         .foregroundColor(.primary)
                                     Spacer()
                                     Image(systemName: "arrow.up.forward.square")
@@ -395,7 +376,7 @@ struct SettingsView: View {
                                 UIApplication.shared.open(Constants.Legal.privacyPolicyURL)
                             }) {
                                 HStack {
-                                    Label("Privacy Policy", systemImage: "hand.raised")
+                                    Text("Privacy Policy")
                                         .foregroundColor(.primary)
                                     Spacer()
                                     Image(systemName: "arrow.up.forward.square")
