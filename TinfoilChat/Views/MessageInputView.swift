@@ -48,6 +48,7 @@ struct MessageInputView: View {
                              placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message")
                 .frame(height: textHeight)
                 .padding(.horizontal)
+                .environmentObject(viewModel)
             
             // Bottom row with shield and send button
             HStack {
@@ -176,6 +177,7 @@ struct CustomTextEditor: UIViewRepresentable {
     @Binding var text: String
     @Binding var textHeight: CGFloat
     var placeholderText: String
+    @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
     
     func makeUIView(context: Context) -> UITextView {
         let textView = UITextView()
@@ -257,6 +259,53 @@ struct CustomTextEditor: UIViewRepresentable {
             self.parent = parent
         }
         
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            // Check if Enter key was pressed (without Shift)
+            if text == "\n" {
+                // Check if this is running on Mac (iOS app on Mac)
+                let isMac = ProcessInfo.processInfo.isiOSAppOnMac
+                
+                if isMac {
+                    // On Mac, Enter sends message (no way to detect Shift in UITextView)
+                    // Users can use Option+Enter for line breaks
+                    let currentText = textView.text ?? ""
+                    let trimmedText = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    
+                    if !trimmedText.isEmpty && !parent.viewModel.isLoading {
+                        // Send the message
+                        parent.viewModel.sendMessage(text: trimmedText)
+                        
+                        // Clear the text field
+                        textView.text = ""
+                        parent.text = ""
+                        parent.textHeight = MessageInputView.Layout.defaultHeight
+                        
+                        // Update placeholder
+                        textView.text = parent.placeholderText
+                        textView.textColor = .lightGray
+                        
+                        // Resign first responder to dismiss keyboard
+                        textView.resignFirstResponder()
+                    }
+                    
+                    return false
+                }
+            }
+            
+            // Check if the text will be empty after this change
+            let currentText = textView.text as NSString
+            let newText = currentText.replacingCharacters(in: range, with: text)
+            
+            // If text is becoming empty but we're still editing, don't show placeholder
+            if newText.isEmpty && isEditing {
+                // Let the deletion happen, but don't show placeholder yet
+                // The placeholder will be shown in textViewDidEndEditing when focus is lost
+                return true
+            }
+            
+            return true
+        }
+        
         func textViewDidChange(_ textView: UITextView) {
             // Only update if the text is not the placeholder
             if textView.textColor != .lightGray {
@@ -290,21 +339,6 @@ struct CustomTextEditor: UIViewRepresentable {
                 textView.text = parent.placeholderText
                 textView.textColor = .lightGray
             }
-        }
-        
-        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-            // Check if the text will be empty after this change
-            let currentText = textView.text as NSString
-            let newText = currentText.replacingCharacters(in: range, with: text)
-            
-            // If text is becoming empty but we're still editing, don't show placeholder
-            if newText.isEmpty && isEditing {
-                // Let the deletion happen, but don't show placeholder yet
-                // The placeholder will be shown in textViewDidEndEditing when focus is lost
-                return true
-            }
-            
-            return true
         }
     }
 } 

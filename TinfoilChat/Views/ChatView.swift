@@ -8,6 +8,7 @@
 
 import SwiftUI
 import SafariServices
+import Clerk
 
 
 // MARK: - ChatContainer
@@ -19,7 +20,7 @@ struct ChatContainer: View {
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
     @StateObject private var settings = SettingsManager.shared
     
-    @State private var isSidebarOpen = false
+    @State private var isSidebarOpen = UIDevice.current.userInterfaceIdiom == .pad
     @State private var messageText = ""
     @State private var scrollProxy: ScrollViewProxy?
     @State private var dragOffset: CGFloat = 0
@@ -27,6 +28,7 @@ struct ChatContainer: View {
     @State private var showSettings = false
     @State private var showMemory = false
     @State private var lastBackgroundTime: Date?
+    @State private var shouldCreateNewChatAfterSubscription = false
     
     private let backgroundTimeThreshold: TimeInterval = 60 // 1 minute in seconds
     
@@ -35,7 +37,7 @@ struct ChatContainer: View {
             mainContent
                 .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
         }
-        .navigationViewStyle(StackNavigationViewStyle())
+        .navigationViewStyle(.stack)
         .environmentObject(viewModel)
         .onAppear {
             setupNavigationBarAppearance()
@@ -56,12 +58,24 @@ struct ChatContainer: View {
         }
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()
+                .environment(Clerk.shared)
+                .environmentObject(authManager)
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
         .sheet(isPresented: $showMemory) {
             MemoryView()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SubscriptionStatusUpdated"))) { _ in
+            // Force refresh when subscription status changes
+            if authManager.hasActiveSubscription && shouldCreateNewChatAfterSubscription {
+                shouldCreateNewChatAfterSubscription = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
+                    viewModel.createNewChat(language: language)
+                }
+            }
         }
     }
     
@@ -79,9 +93,29 @@ struct ChatContainer: View {
     
     /// The main content layout including chat area and sidebar
     private var mainContent: some View {
-        ZStack {
-            chatArea
-            sidebarLayer
+        Group {
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                // iPad/Mac: Side-by-side layout
+                GeometryReader { geometry in
+                    HStack(spacing: 0) {
+                        if isSidebarOpen {
+                            ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
+                                .frame(width: 300)
+                                .transition(.move(edge: .leading))
+                        }
+                        
+                        chatArea
+                            .frame(width: isSidebarOpen ? geometry.size.width - 300 : geometry.size.width)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.3), value: isSidebarOpen)
+            } else {
+                // iPhone: Overlay layout
+                ZStack {
+                    chatArea
+                    sidebarLayer
+                }
+            }
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -161,6 +195,7 @@ struct ChatContainer: View {
             }
         }
         .gesture(
+            UIDevice.current.userInterfaceIdiom == .phone ? 
             DragGesture()
                 .onChanged { gesture in
                     if isSidebarOpen {
@@ -187,7 +222,7 @@ struct ChatContainer: View {
                         }
                         dragOffset = 0
                     }
-                }
+                } : nil
         )
     }
     
@@ -337,6 +372,9 @@ struct ChatScrollView: View {
                             if let authManager = viewModel.authManager {
                                 WelcomeView(isDarkMode: isDarkMode, authManager: authManager)
                                     .padding(.vertical, 16)
+                                    .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 0)
+                                    .frame(maxWidth: 900)
+                                    .frame(maxWidth: .infinity)
                             }
                         } else {
                             ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
@@ -363,7 +401,11 @@ struct ChatScrollView: View {
                                 )
                                 .id(message.id)
                                 .padding(.vertical, 8)
-                                .padding(.horizontal, 8)
+                                .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 8)
+                                .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
+                                    view.frame(maxWidth: 900)
+                                        .frame(maxWidth: .infinity)
+                                }
                                 .opacity(index < archivedMessagesStartIndex ? 0.6 : 1.0)
                             }
                             
@@ -454,13 +496,34 @@ struct ChatScrollView: View {
             }
             
             // Message input view
-            MessageInputView(messageText: $messageText, viewModel: viewModel)
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                // iPhone: Full width input
+                MessageInputView(messageText: $messageText, viewModel: viewModel)
+                    .background(
+                        RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
+                            .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                            .edgesIgnoringSafeArea(.bottom)
+                    )
+                    .environmentObject(viewModel.authManager ?? AuthManager())
+            } else {
+                // iPad/Mac: Centered input with max width
+                HStack {
+                    Spacer(minLength: 0)
+                    MessageInputView(messageText: $messageText, viewModel: viewModel)
+                        .frame(maxWidth: 600)
+                        .background(
+                            RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
+                                .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                        )
+                        .environmentObject(viewModel.authManager ?? AuthManager())
+                    Spacer(minLength: 0)
+                }
                 .background(
-                    RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
-                        .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                    Color.clear
+                        .frame(height: 1)
                         .edgesIgnoringSafeArea(.bottom)
                 )
-                .environmentObject(viewModel.authManager ?? AuthManager())
+            }
             
         }
         .onAppear {
@@ -578,7 +641,7 @@ struct TabbedWelcomeView: View {
     }
     
     var body: some View {
-        VStack(spacing: 32) {
+        VStack(spacing: 24) {
             // Greeting section
             VStack(spacing: 16) {
                 if authManager.isAuthenticated {
@@ -600,12 +663,14 @@ struct TabbedWelcomeView: View {
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
             }
+            .padding(.horizontal, 32)
             
             // Model selection tabs
-            VStack(spacing: 16) {
+            VStack(spacing: 2) {
                 Text("Choose your AI model")
                     .font(.system(size: 18, weight: .medium))
                     .foregroundColor(.primary)
+                    .padding(.horizontal, 32)
                 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
@@ -623,16 +688,21 @@ struct TabbedWelcomeView: View {
                     }
                     .padding(.horizontal, 32)
                 }
-                .padding(.vertical, 12)
-                .padding(.horizontal, -32)
+                .frame(height: 100)
             }
             
             // Subscription prompt for non-premium users
             if !(authManager.isAuthenticated && authManager.hasActiveSubscription) {
                 subscriptionPrompt
+                    .padding(.horizontal, 32)
+                    .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
+                        if hasSubscription {
+                            // Refresh the model tabs to show all models as available
+                            refreshID = UUID()
+                        }
+                    }
             }
         }
-        .padding(.horizontal, 32)
         .padding(.vertical, 24)
         .onAppear {
             selectedModelId = viewModel.currentModel.id
@@ -649,7 +719,21 @@ struct TabbedWelcomeView: View {
     
     // Subscription prompt view
     private var subscriptionPrompt: some View {
-        SubscriptionPromptView(authManager: authManager)
+        SubscriptionPromptView(
+            authManager: authManager,
+            onSubscriptionSuccess: {
+                // Force UI refresh and create new chat
+                refreshID = UUID()
+                
+                // Create a new chat to show premium models
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    if !viewModel.messages.isEmpty {
+                        let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
+                        viewModel.createNewChat(language: language)
+                    }
+                }
+            }
+        )
     }
     
     private func selectModel(_ model: ModelType) {
@@ -812,6 +896,15 @@ extension View {
     func corners(_ corners: UIRectCorner) -> some View {
         clipShape(RoundedCorner(radius: 15, corners: corners))
     }
+    
+    /// Conditionally apply a modifier
+    @ViewBuilder func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
+        }
+    }
 }
 
 /// Model picker for selecting between different AI models
@@ -819,6 +912,7 @@ struct ModelPicker: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @EnvironmentObject private var authManager: AuthManager
     @State private var showModelPicker = false
+    @State private var refreshID = UUID()
     
     var body: some View {
         Button(action: {
@@ -907,6 +1001,11 @@ struct ModelPicker: View {
             .frame(width: 320)
             .presentationCompactAdaptation(.popover)
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SubscriptionStatusUpdated"))) { _ in
+            // Force refresh model picker when subscription changes
+            refreshID = UUID()
+        }
+        .id(refreshID)
     }
 }
 

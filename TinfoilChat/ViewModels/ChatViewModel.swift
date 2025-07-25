@@ -290,6 +290,11 @@ class ChatViewModel: ObservableObject {
         // Allow creating new chats for all authenticated users
         guard hasChatAccess else { return }
         
+        // Cancel any ongoing generation first
+        if isLoading {
+            cancelGeneration()
+        }
+        
         let newChat = Chat.create(
             modelType: modelType ?? currentModel,
             language: language,
@@ -302,6 +307,11 @@ class ChatViewModel: ObservableObject {
     
     /// Selects a chat as the current chat
     func selectChat(_ chat: Chat) {
+        // Cancel any ongoing generation first
+        if isLoading {
+            cancelGeneration()
+        }
+        
         // Find the most up-to-date version of the chat in the chats array
         let chatToSelect: Chat
         if let index = chats.firstIndex(where: { $0.id == chat.id }) {
@@ -384,6 +394,9 @@ class ChatViewModel: ObservableObject {
             chat.hasActiveStream = true
             updateChat(chat)
         }
+        
+        // Store the current chat ID to detect if it changes during streaming
+        let streamChatId = currentChat?.id
         
         // Cancel any existing task
         currentTask?.cancel()
@@ -475,7 +488,11 @@ class ChatViewModel: ObservableObject {
                     if let content = chunk.choices.first?.delta.content {
                         // Update UI on main thread
                         await MainActor.run {
-                            if var chat = self.currentChat {
+                            // Exit if the chat has changed
+                            guard self.currentChat?.id == streamChatId else { return }
+                            
+                            if var chat = self.currentChat,
+                               !chat.messages.isEmpty {
                                 // Check for think tag start
                                 if content.contains("<think>") {
                                     thinkStartTime = Date()
@@ -486,15 +503,19 @@ class ChatViewModel: ObservableObject {
                                 if hasThinkTag && content.contains("</think>") {
                                     if let startTime = thinkStartTime {
                                         let generationTime = Date().timeIntervalSince(startTime)
-                                        chat.messages[chat.messages.count - 1].generationTimeSeconds = generationTime
+                                        if let lastIndex = chat.messages.indices.last {
+                                            chat.messages[lastIndex].generationTimeSeconds = generationTime
+                                        }
                                     }
                                     hasThinkTag = false
                                     thinkStartTime = nil
                                 }
                                 
-                                // Append the new content
-                                chat.messages[chat.messages.count - 1].content += content
-                                self.updateChat(chat) // Saves the full chat
+                                // Append the new content safely
+                                if let lastIndex = chat.messages.indices.last {
+                                    chat.messages[lastIndex].content += content
+                                    self.updateChat(chat) // Saves the full chat
+                                }
                             }
                         }
                     }
