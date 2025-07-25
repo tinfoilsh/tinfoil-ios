@@ -279,6 +279,14 @@ class ChatViewModel: ObservableObject {
             return
         }
         
+        // Don't reset client while there's an active message being sent
+        guard !isLoading else {
+            // Retry after the current operation completes
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.retryClientSetup()
+            }
+            return
+        }
         
         setupTinfoilClient()
     }
@@ -419,7 +427,7 @@ class ChatViewModel: ObservableObject {
                 
                 guard let client = client else {
                     throw NSError(domain: "TinfoilChat", code: 1,
-                                userInfo: [NSLocalizedDescriptionKey: "TinfoilAI client not available after initialization"])
+                                userInfo: [NSLocalizedDescriptionKey: "Service temporarily unavailable. Please try again."])
                 }
                 
                 // Create the stream with proper parameters
@@ -553,11 +561,11 @@ class ChatViewModel: ObservableObject {
                     
                     if var chat = self.currentChat,
                        !chat.messages.isEmpty {
-                        // Update the last message in the full chat
-                        chat.messages[chat.messages.count - 1].content = "Error: The Internet connection appears to be offline."
-                        
                         // Format a more user-friendly error message based on the error type
                         let userFriendlyError = formatUserFriendlyError(error)
+                        
+                        // Update the last message in the full chat with the actual error
+                        chat.messages[chat.messages.count - 1].content = "Error: \(userFriendlyError)"
                         chat.messages[chat.messages.count - 1].streamError = userFriendlyError
                         
                         // Trigger error haptic feedback
