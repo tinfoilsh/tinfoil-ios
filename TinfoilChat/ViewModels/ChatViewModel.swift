@@ -751,10 +751,6 @@ class ChatViewModel: ObservableObject {
         
         Task {
             do {
-                // Check authentication and get API key
-                let isAuthenticated = authManager?.isAuthenticated ?? false
-                let hasSubscription = authManager?.hasActiveSubscription ?? false
-                
                 let apiKey = await AppConfig.shared.getApiKey()
                 
                 guard !apiKey.isEmpty else {

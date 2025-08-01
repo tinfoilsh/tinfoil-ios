@@ -9,6 +9,8 @@
 import SwiftUI
 import Clerk
 import UIKit
+import RevenueCat
+import RevenueCatUI
 
 // Settings Manager to handle persistence
 @MainActor
@@ -148,6 +150,7 @@ struct SettingsView: View {
     @State private var profileUpdateError: String? = nil
     @State private var showLanguagePicker = false
     @State private var showSignOutConfirmation = false
+    @State private var showPremiumModal = false
     
     // Complete list of languages based on ISO 639-1
     var languages: [String] {
@@ -281,25 +284,6 @@ struct SettingsView: View {
                                     }
                                 }
                                 
-                                // Manage Subscription
-                                if authManager.hasActiveSubscription {
-                                    let isRevenueCat = checkIfRevenueCat()
-                                    Button(action: {
-                                        let url = isRevenueCat
-                                            ? URL(string: "https://apps.apple.com/account/subscriptions")!
-                                            : URL(string: "https://www.tinfoil.sh/dashboard")!
-                                        UIApplication.shared.open(url)
-                                    }) {
-                                        HStack {
-                                            Text("Manage Subscription")
-                                                .foregroundColor(.primary)
-                                            Spacer()
-                                            Image(systemName: "arrow.up.forward.square")
-                                                .font(.caption2)
-                                                .foregroundColor(Color(UIColor.quaternaryLabel))
-                                        }
-                                    }
-                                }
                                 
                                 // Sign Out
                                 Button(action: {
@@ -355,6 +339,49 @@ struct SettingsView: View {
                             }
                         } header: {
                             Text("Preferences")
+                        }
+                        
+                        // Subscription Section
+                        Section {
+                            if authManager.hasActiveSubscription {
+                                // Manage Subscription
+                                let isRevenueCat = checkIfRevenueCat()
+                                Button(action: {
+                                    let url = isRevenueCat
+                                        ? URL(string: "https://apps.apple.com/account/subscriptions")!
+                                        : URL(string: "https://www.tinfoil.sh/dashboard")!
+                                    UIApplication.shared.open(url)
+                                }) {
+                                    HStack {
+                                        Text("Manage Subscription")
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                        Image(systemName: "arrow.up.forward.square")
+                                            .font(.caption2)
+                                            .foregroundColor(Color(UIColor.quaternaryLabel))
+                                    }
+                                }
+                            } else {
+                                // Subscribe to Premium
+                                Button(action: {
+                                    // Set clerk_user_id attribute right before showing paywall
+                                    if let clerkUserId = authManager.localUserData?["id"] as? String {
+                                        Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
+                                    }
+                                    showPremiumModal = true
+                                }) {
+                                    HStack {
+                                        Text("Subscribe to Premium")
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                        Text("Unlock all models")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                        } header: {
+                            Text("Subscription")
                         }
                         
                         // Legal Section
@@ -441,6 +468,19 @@ struct SettingsView: View {
                 }
             )
             .environment(clerk)
+        }
+        .sheet(isPresented: $showPremiumModal) {
+            PaywallView(displayCloseButton: true)
+                .onPurchaseCompleted { _ in
+                    showPremiumModal = false
+                    // The subscription status will update automatically via webhook
+                }
+                .onDisappear {
+                    // Check subscription status when paywall is dismissed
+                    Task {
+                        await authManager.fetchSubscriptionStatus()
+                    }
+                }
         }
     }
     
