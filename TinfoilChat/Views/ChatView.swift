@@ -9,6 +9,8 @@
 import SwiftUI
 import SafariServices
 import Clerk
+import RevenueCat
+import RevenueCatUI
 
 
 // MARK: - ChatContainer
@@ -29,6 +31,7 @@ struct ChatContainer: View {
     @State private var showMemory = false
     @State private var lastBackgroundTime: Date?
     @State private var shouldCreateNewChatAfterSubscription = false
+    @State private var showPremiumModal = false
     
     private let backgroundTimeThreshold: TimeInterval = 60 // 1 minute in seconds
     
@@ -66,6 +69,22 @@ struct ChatContainer: View {
         }
         .sheet(isPresented: $showMemory) {
             MemoryView()
+        }
+        .sheet(isPresented: $showPremiumModal) {
+            PaywallView(displayCloseButton: true)
+                .onPurchaseCompleted { _ in
+                    showPremiumModal = false
+                    shouldCreateNewChatAfterSubscription = true
+                }
+                .onDisappear {
+                    // Quick check when paywall is dismissed
+                    Task {
+                        await authManager.fetchSubscriptionStatus()
+                        if authManager.hasActiveSubscription {
+                            shouldCreateNewChatAfterSubscription = true
+                        }
+                    }
+                }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SubscriptionStatusUpdated"))) { _ in
             // Force refresh when subscription status changes
@@ -627,6 +646,8 @@ struct TabbedWelcomeView: View {
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var revenueCat = RevenueCatManager.shared
     @State private var refreshID = UUID()
+    @State private var showPremiumModal = false
+    @State private var isWaitingForSubscription = false
     
     private var availableModels: [ModelType] {
         return AppConfig.shared.availableModels
@@ -682,7 +703,15 @@ struct TabbedWelcomeView: View {
                                 isEnabled: canUseModel(model),
                                 showPricingLabel: !(authManager.isAuthenticated && authManager.hasActiveSubscription)
                             ) {
-                                selectModel(model)
+                                if !canUseModel(model) {
+                                    // Set clerk_user_id attribute right before showing paywall
+                                    if authManager.isAuthenticated, let clerkUserId = authManager.localUserData?["id"] as? String {
+                                        Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
+                                    }
+                                    showPremiumModal = true
+                                } else {
+                                    selectModel(model)
+                                }
                             }
                         }
                     }
@@ -691,16 +720,28 @@ struct TabbedWelcomeView: View {
                 .frame(height: 100)
             }
             
-            // Subscription prompt for non-premium users
-            if !(authManager.isAuthenticated && authManager.hasActiveSubscription) {
-                subscriptionPrompt
-                    .padding(.horizontal, 32)
-                    .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
-                        if hasSubscription {
-                            // Refresh the model tabs to show all models as available
-                            refreshID = UUID()
+            // Show loading view while waiting for subscription (where the subscription prompt used to be)
+            if isWaitingForSubscription && !(authManager.isAuthenticated && authManager.hasActiveSubscription) {
+                InlineSubscriptionLoadingView(
+                    authManager: authManager,
+                    onSuccess: {
+                        isWaitingForSubscription = false
+                        refreshID = UUID()
+                        
+                        // Create a new chat to show premium models
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            if !viewModel.messages.isEmpty {
+                                let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
+                                viewModel.createNewChat(language: language)
+                            }
                         }
+                    },
+                    onTimeout: {
+                        isWaitingForSubscription = false
                     }
+                )
+                .padding(.horizontal, 32)
+                .padding(.top, 8)
             }
         }
         .padding(.vertical, 24)
@@ -715,29 +756,34 @@ struct TabbedWelcomeView: View {
             refreshID = UUID()
         }
         .id(refreshID)
-    }
-    
-    // Subscription prompt view
-    private var subscriptionPrompt: some View {
-        SubscriptionPromptView(
-            authManager: authManager,
-            onSubscriptionSuccess: {
-                // Force UI refresh and create new chat
-                refreshID = UUID()
-                
-                // Create a new chat to show premium models
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if !viewModel.messages.isEmpty {
-                        let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
-                        viewModel.createNewChat(language: language)
+        .sheet(isPresented: $showPremiumModal) {
+            PaywallView(displayCloseButton: true)
+                .onPurchaseCompleted { _ in
+                    showPremiumModal = false
+                    isWaitingForSubscription = true
+                }
+                .onDisappear {
+                    // Quick check when paywall is dismissed
+                    Task {
+                        await authManager.fetchSubscriptionStatus()
                     }
                 }
-            }
-        )
+        }
     }
     
+    
     private func selectModel(_ model: ModelType) {
-        guard model.id != viewModel.currentModel.id && canUseModel(model) else { return }
+        guard model.id != viewModel.currentModel.id else { return }
+        
+        if !canUseModel(model) {
+            // Set clerk_user_id attribute right before showing paywall
+            if authManager.isAuthenticated, let clerkUserId = authManager.localUserData?["id"] as? String {
+                Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
+            }
+            showPremiumModal = true
+            return
+        }
+        
         selectedModelId = model.id
         viewModel.changeModel(to: model)
     }
@@ -845,7 +891,6 @@ struct ModelTab: View {
         .buttonStyle(PlainButtonStyle())
         .scaleEffect(isSelected ? 1.02 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
-        .disabled(!isEnabled)
     }
 }
 

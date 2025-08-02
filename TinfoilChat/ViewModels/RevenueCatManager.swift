@@ -72,6 +72,34 @@ class RevenueCatManager: ObservableObject {
         ])
     }
     
+    /// Log in user to RevenueCat
+    func loginUser(_ userId: String) async {
+        do {
+            print("RevenueCat: Logging in user with ID: \(userId)")
+            let (customerInfo, _) = try await Purchases.shared.logIn(userId)
+            await MainActor.run {
+                self.customerInfo = customerInfo
+            }
+            // Also set clerk_user_id as attribute
+            setClerkUserId(userId)
+            print("RevenueCat: User logged in successfully. Anonymous ID: \(customerInfo.originalAppUserId)")
+        } catch {
+            print("Failed to log in user to RevenueCat: \(error)")
+        }
+    }
+    
+    /// Log out user from RevenueCat
+    func logoutUser() async {
+        do {
+            let customerInfo = try await Purchases.shared.logOut()
+            await MainActor.run {
+                self.customerInfo = customerInfo
+            }
+        } catch {
+            print("Failed to log out user from RevenueCat: \(error)")
+        }
+    }
+    
     /// Fetch available offerings
     func fetchOfferings() async {
         isLoading = true
@@ -125,7 +153,7 @@ class RevenueCatManager: ObservableObject {
     func purchaseSubscription(clerkUserId: String?) async throws {
         // Set Clerk user ID if available
         if let userId = clerkUserId {
-            setClerkUserId(userId)
+            Purchases.shared.attribution.setAttributes(["clerk_user_id": userId])
         }
         
         try await purchaseSubscription()

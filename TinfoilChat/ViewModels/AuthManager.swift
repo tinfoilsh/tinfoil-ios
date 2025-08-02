@@ -142,10 +142,16 @@ class AuthManager: ObservableObject {
             // Get user data if authenticated
             if isAuthenticated, let user = clerk.user {
                 updateUserData(from: user)
+                
+                // Log in to RevenueCat with Clerk user ID
+                await RevenueCatManager.shared.loginUser(user.id)
             } else {
                 if wasAuthenticated {
                     // User was authenticated but isn't anymore
                     clearAuthState()
+                    
+                    // Log out from RevenueCat
+                    await RevenueCatManager.shared.logoutUser()
                 }
                 hasActiveSubscription = false
             }
