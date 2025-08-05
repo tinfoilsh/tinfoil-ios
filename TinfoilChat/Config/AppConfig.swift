@@ -292,14 +292,12 @@ class AppConfig: ObservableObject {
     
     /// Get filtered model types based on authentication status
     func filteredModelTypes(isAuthenticated: Bool, hasActiveSubscription: Bool) -> [ModelType] {
-        guard let modelConfigs = config?.models else { return [] }
-        
         if isAuthenticated && hasActiveSubscription {
-            // Return all models if user is authenticated with active subscription
-            return availableModels
+            // Return only premium models for premium users
+            return availableModels.filter { !$0.isFree }
         } else {
-            // Return only free models if user is not authenticated or doesn't have an active subscription
-            return modelConfigs.filter { $0.isFree }.map { ModelType(id: $0.id, config: $0) }
+            // Return all models for non-premium users (they'll see locks on premium ones)
+            return availableModels
         }
     }
 } 

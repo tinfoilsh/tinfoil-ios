@@ -650,7 +650,10 @@ struct TabbedWelcomeView: View {
     @State private var isWaitingForSubscription = false
     
     private var availableModels: [ModelType] {
-        return AppConfig.shared.availableModels
+        return AppConfig.shared.filteredModelTypes(
+            isAuthenticated: authManager.isAuthenticated,
+            hasActiveSubscription: authManager.hasActiveSubscription
+        )
     }
     
     private var canUseModel: (ModelType) -> Bool {
