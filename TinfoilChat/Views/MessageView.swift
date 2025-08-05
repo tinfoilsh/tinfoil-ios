@@ -76,7 +76,7 @@ struct MessageView: View {
                 }
             }
             .padding(.vertical, 8)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, message.role == .user ? 12 : 0)
             .background(message.role == .user ? (isDarkMode ? Color.gray.opacity(0.3) : Color(hex: "#111827")) : nil)
             .cornerRadius(16)
             .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
@@ -103,10 +103,6 @@ struct MessageView: View {
                 if showCopyFeedback {
                     copyFeedbackView
                 }
-            }
-            
-            if message.role == .assistant {
-                Spacer()
             }
         }
         .padding(.horizontal, 4)
@@ -212,8 +208,8 @@ struct MessageBubbleModifier: ViewModifier {
                     .frame(maxWidth: .infinity, alignment: .trailing)
             } else {
                 content
-                    // Assistant messages get full width
-                    .frame(maxWidth: max(60, UIScreen.main.bounds.width), alignment: .leading)
+                    // Assistant messages get nearly full width
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
