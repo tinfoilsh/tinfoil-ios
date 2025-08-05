@@ -33,7 +33,7 @@ struct ChatContainer: View {
     @State private var shouldCreateNewChatAfterSubscription = false
     @State private var showPremiumModal = false
     
-    private let backgroundTimeThreshold: TimeInterval = 60 // 1 minute in seconds
+    private let backgroundTimeThreshold: TimeInterval = 300 // 5 minutes in seconds
     
     var body: some View {
         NavigationView {
@@ -294,7 +294,7 @@ struct ChatContainer: View {
         let timeSinceBackground = currentTime.timeIntervalSince(lastBackgroundTime)
         
         // Only create a new chat if:
-        // 1. Enough time has passed (> 1 minute)
+        // 1. Enough time has passed (> 5 minutes)
         // 2. There are existing messages in the current chat
         // 3. User is authenticated (to avoid issues with unauthenticated state)
         if timeSinceBackground > backgroundTimeThreshold && 
