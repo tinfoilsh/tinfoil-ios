@@ -392,18 +392,15 @@ struct CollapsibleThinkingBox: View {
         .clipped()
         .onAppear {
             withAnimation(.spring()) {
-                // Initialize collapsed state based on streaming
-                isCollapsed = !isStreaming
+                // Initialize collapsed state - always start collapsed
+                isCollapsed = true
             }
         }
         // Set preference when thinking box expansion state changes
         .preference(key: ThinkingBoxExpansionPreferenceKey.self, value: !isCollapsed ? messageId : nil)
         .onChange(of: isStreaming) { oldValue, newValue in
-            if oldValue != newValue {
-                withAnimation(.spring()) {
-                    isCollapsed = !newValue // Auto-expand/collapse on streaming change
-                }
-            }
+            // Keep the box collapsed regardless of streaming state changes
+            // User can manually expand/collapse as needed
         }
         .onChange(of: isCollapsible) { oldValue, newValue in
             // If the box just became collapsible (streaming ended)
