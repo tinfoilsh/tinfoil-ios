@@ -60,6 +60,26 @@ class SettingsManager: ObservableObject {
         }
     }
     
+    // Max messages setting
+    @Published var maxMessages: Int {
+        didSet {
+            UserDefaults.standard.set(maxMessages, forKey: "maxPromptMessages")
+        }
+    }
+    
+    // Custom system prompt settings
+    @Published var isUsingCustomPrompt: Bool {
+        didSet {
+            UserDefaults.standard.set(isUsingCustomPrompt, forKey: "isUsingCustomPrompt")
+        }
+    }
+    
+    @Published var customSystemPrompt: String {
+        didSet {
+            UserDefaults.standard.set(customSystemPrompt, forKey: "customSystemPrompt")
+        }
+    }
+    
     // Available personality traits
     let availableTraits = [
         "witty", "encouraging", "formal", "casual", "analytical", "creative",
@@ -83,6 +103,19 @@ class SettingsManager: ObservableObject {
         } else {
             self.selectedTraits = []
         }
+        
+        // Initialize max messages setting
+        if let savedMaxMessages = UserDefaults.standard.object(forKey: "maxPromptMessages") as? Int {
+            self.maxMessages = savedMaxMessages
+        } else {
+            // Default to 15 if not set
+            self.maxMessages = 15
+            UserDefaults.standard.set(15, forKey: "maxPromptMessages")
+        }
+        
+        // Initialize custom system prompt settings
+        self.isUsingCustomPrompt = UserDefaults.standard.object(forKey: "isUsingCustomPrompt") as? Bool ?? false
+        self.customSystemPrompt = UserDefaults.standard.string(forKey: "customSystemPrompt") ?? ""
         
         // Ensure defaults are saved if they weren't present
         if UserDefaults.standard.object(forKey: "hapticFeedbackEnabled") == nil {
@@ -339,6 +372,76 @@ struct SettingsView: View {
                             }
                         } header: {
                             Text("Preferences")
+                        }
+                        
+                        // Chat Settings Section
+                        Section {
+                            // Messages in Context
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Messages in Context")
+                                        .font(.body)
+                                    Text("Maximum number of recent messages sent to the model (1-50). Longer contexts increase network usage and slow down responses.")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                HStack(spacing: 8) {
+                                    Button(action: {
+                                        if settings.maxMessages > 1 {
+                                            settings.maxMessages -= 1
+                                        }
+                                    }) {
+                                        Image(systemName: "minus.circle")
+                                            .foregroundColor(settings.maxMessages > 1 ? .accentColor : .gray)
+                                    }
+                                    .disabled(settings.maxMessages <= 1)
+                                    
+                                    Text("\(settings.maxMessages)")
+                                        .frame(minWidth: 30)
+                                        .font(.system(.body, design: .monospaced))
+                                    
+                                    Button(action: {
+                                        if settings.maxMessages < 50 {
+                                            settings.maxMessages += 1
+                                        }
+                                    }) {
+                                        Image(systemName: "plus.circle")
+                                            .foregroundColor(settings.maxMessages < 50 ? .accentColor : .gray)
+                                    }
+                                    .disabled(settings.maxMessages >= 50)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                            
+                            // Custom System Prompt
+                            NavigationLink(destination: CustomSystemPromptView(
+                                isUsingCustomPrompt: $settings.isUsingCustomPrompt,
+                                customSystemPrompt: $settings.customSystemPrompt
+                            )) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Custom System Prompt")
+                                            .font(.body)
+                                        Text("Override the default system prompt")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    HStack(spacing: 4) {
+                                        if settings.isUsingCustomPrompt {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .font(.caption)
+                                                .foregroundColor(.green)
+                                        }
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption2)
+                                            .foregroundColor(Color(UIColor.quaternaryLabel))
+                                    }
+                                }
+                            }
+                        } header: {
+                            Text("Chat Settings")
                         }
                         
                         // Subscription Section
@@ -608,6 +711,102 @@ struct ProfileEditorView: View {
         }
         .onAppear {
             focusedField = .firstName
+        }
+    }
+}
+
+// Custom System Prompt View
+struct CustomSystemPromptView: View {
+    @Binding var isUsingCustomPrompt: Bool
+    @Binding var customSystemPrompt: String
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var editingPrompt: String = ""
+    @State private var showRestoreConfirmation = false
+    
+    // Get default system prompt from AppConfig
+    private var defaultSystemPrompt: String {
+        AppConfig.shared.systemPrompt
+    }
+    
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Enable Custom System Prompt", isOn: $isUsingCustomPrompt)
+                    .tint(Color.green)
+            } header: {
+                Text("Status")
+            } footer: {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("When enabled, your custom prompt will override the default system prompt")
+                        .font(.caption)
+                    
+                    if isUsingCustomPrompt {
+                        Text("Tip: Use placeholders like {USER_PREFERENCES}, {LANGUAGE}, {CURRENT_DATETIME}, and {TIMEZONE} to tell the model about your preferences, timezone, and the current time and date.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 4)
+                    }
+                }
+            }
+            
+            if isUsingCustomPrompt {
+                Section {
+                    TextEditor(text: $editingPrompt)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minHeight: 200)
+                } header: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Custom Prompt")
+                        HStack {
+                            Button(action: {
+                                showRestoreConfirmation = true
+                            }) {
+                                Text("Restore default prompt")
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                            }
+                            Spacer()
+                            Button(action: {
+                                editingPrompt = ""
+                            }) {
+                                Text("Clear")
+                                    .font(.caption)
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Custom System Prompt")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("Cancel") {
+                    dismiss()
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Save") {
+                    customSystemPrompt = editingPrompt
+                    dismiss()
+                }
+                .fontWeight(.semibold)
+            }
+        }
+        .onAppear {
+            // Initialize with current custom prompt or default if empty
+            editingPrompt = customSystemPrompt.isEmpty ? defaultSystemPrompt : customSystemPrompt
+        }
+        .alert("Restore Default", isPresented: $showRestoreConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Restore", role: .destructive) {
+                editingPrompt = defaultSystemPrompt
+            }
+        } message: {
+            Text("Are you sure you want to restore the default system prompt? Your custom prompt will be replaced.")
         }
     }
 }

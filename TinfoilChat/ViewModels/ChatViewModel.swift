@@ -438,7 +438,15 @@ class ChatViewModel: ObservableObject {
                 let modelId = AppConfig.shared.getModelConfig(currentModel)?.modelId ?? ""
                 
                 // Add system message first with language preference
-                var systemPrompt = AppConfig.shared.systemPrompt
+                let settingsManager = SettingsManager.shared
+                var systemPrompt: String
+                
+                // Use custom prompt if enabled, otherwise use default
+                if settingsManager.isUsingCustomPrompt && !settingsManager.customSystemPrompt.isEmpty {
+                    systemPrompt = settingsManager.customSystemPrompt
+                } else {
+                    systemPrompt = AppConfig.shared.systemPrompt
+                }
                 
                 // Replace MODEL_NAME placeholder with current model name
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
@@ -451,7 +459,6 @@ class ChatViewModel: ObservableObject {
                 }
                 
                 // Add personalization XML if enabled
-                let settingsManager = SettingsManager.shared
                 let personalizationXML = settingsManager.generateUserPreferencesXML()
                 if !personalizationXML.isEmpty {
                     systemPrompt = systemPrompt.replacingOccurrences(of: "{USER_PREFERENCES}", with: personalizationXML)
@@ -474,7 +481,7 @@ class ChatViewModel: ObservableObject {
                 ]
                 
                 // Add conversation messages
-                let messagesForContext = Array(self.messages.suffix(AppConfig.shared.maxMessagesPerRequest))
+                let messagesForContext = Array(self.messages.suffix(settingsManager.maxMessages))
                 for message in messagesForContext {
                     if message.role == .user {
                         messages.append(.user(.init(content: .string(message.content))))

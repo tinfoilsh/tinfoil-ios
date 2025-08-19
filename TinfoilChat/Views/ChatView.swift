@@ -387,12 +387,12 @@ struct ChatScrollView: View {
     
     // Computed property for context messages
     private var contextMessages: ArraySlice<Message> {
-        messages.suffix(AppConfig.shared.maxMessagesPerRequest)
+        messages.suffix(SettingsManager.shared.maxMessages)
     }
     
     // Added property to track the index where archived messages start
     private var archivedMessagesStartIndex: Int {
-        max(0, messages.count - AppConfig.shared.maxMessagesPerRequest)
+        max(0, messages.count - SettingsManager.shared.maxMessages)
     }
     
     @State private var isScrolling = false
