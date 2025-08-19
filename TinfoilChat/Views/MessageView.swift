@@ -32,9 +32,10 @@ struct MessageView: View {
             }
             
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
-                // Show the loading dots for a fresh streaming assistant response
+                // Show the loading dots for a fresh streaming assistant response (but not if we have thoughts)
                 if message.role == .assistant &&
                     message.content.isEmpty &&
+                    message.thoughts == nil &&
                     viewModel.isLoading &&
                     message.id == viewModel.messages.last?.id {
                     LoadingDotsView(isDarkMode: isDarkMode)
@@ -42,7 +43,27 @@ struct MessageView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 
-                // If the message begins with the special think tag, parse and display it in a box
+                // If the message has thoughts (from either format), display them in a thinking box
+                else if message.thoughts != nil {
+                    VStack(alignment: .leading, spacing: 4) {
+                        CollapsibleThinkingBox(
+                            messageId: message.id,
+                            thinkingText: message.thoughts ?? "",
+                            isDarkMode: isDarkMode,
+                            isCollapsible: !message.isThinking,
+                            isStreaming: message.isThinking && viewModel.isLoading && message.id == viewModel.messages.last?.id,
+                            generationTimeSeconds: message.generationTimeSeconds
+                        )
+                        
+                        // Display regular content if present
+                        if !message.content.isEmpty {
+                            MarkdownText(content: message.content, isDarkMode: isDarkMode)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                
+                // Legacy support: if content still has <think> tags, parse and display
                 else if let parsed = parsedMessageContent {
                     VStack(alignment: .leading, spacing: 4) {
                         CollapsibleThinkingBox(
@@ -81,12 +102,25 @@ struct MessageView: View {
             .cornerRadius(16)
             .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
             .contextMenu {
-                if !message.content.isEmpty {
+                if !message.content.isEmpty || message.thoughts != nil {
                     Button(action: copyMessage) {
-                        Label("Copy", systemImage: "doc.on.doc")
+                        Label("Copy All", systemImage: "doc.on.doc")
                     }
                     
-                    if let parsed = parsedMessageContent {
+                    // Handle thoughts from Message model
+                    if let thoughts = message.thoughts {
+                        if !message.content.isEmpty {
+                            Button(action: { copyMessagePart(message.content) }) {
+                                Label("Copy Response", systemImage: "text.quote")
+                            }
+                        }
+                        
+                        Button(action: { copyMessagePart(thoughts) }) {
+                            Label("Copy Thinking", systemImage: "brain")
+                        }
+                    }
+                    // Legacy: handle parsed content
+                    else if let parsed = parsedMessageContent {
                         if !parsed.remainderText.isEmpty {
                             Button(action: { copyMessagePart(parsed.remainderText) }) {
                                 Label("Copy Response", systemImage: "text.quote")
@@ -123,7 +157,13 @@ struct MessageView: View {
     
     // Function to copy the entire message
     private func copyMessage() {
-        copyMessagePart(message.content)
+        // If message has thoughts, combine them with content
+        if let thoughts = message.thoughts {
+            let fullContent = thoughts + "\n\n" + message.content
+            copyMessagePart(fullContent)
+        } else {
+            copyMessagePart(message.content)
+        }
     }
     
     // Function to copy a specific part of the message
