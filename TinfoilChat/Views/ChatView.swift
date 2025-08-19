@@ -378,6 +378,7 @@ struct ChatScrollView: View {
     }
     
     @State private var isScrolling = false
+    @State private var didInitialScrollToBottom = false
     
     // MARK: - Body
     
@@ -386,7 +387,7 @@ struct ChatScrollView: View {
             // Messages ScrollView
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(spacing: 0) {
+                    LazyVStack(spacing: 0) {
                         if messages.isEmpty {
                             if let authManager = viewModel.authManager {
                                 WelcomeView(isDarkMode: isDarkMode, authManager: authManager)
@@ -428,26 +429,43 @@ struct ChatScrollView: View {
                                 .opacity(index < archivedMessagesStartIndex ? 0.6 : 1.0)
                             }
                             
-                            // Bottom anchor point without extra padding
-                            Color.clear
-                                .frame(height: 10)
-                                .id("bottom")
-                                .background(
-                                    GeometryReader { geometry -> Color in
-                                        let isCurrentlyAtBottom = isViewFullyVisible(geometry)
-                                        if isAtBottom != isCurrentlyAtBottom {
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                                isAtBottom = isCurrentlyAtBottom
-                                                if isCurrentlyAtBottom {
-                                                    userHasScrolled = false
-                                                }
-                                            }
-                                        }
-                                        return Color.clear
-                                    }
-                                )
                         }
                     }
+
+                    // Bottom anchor point placed outside the LazyVStack so it always exists
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom")
+                        .background(
+                            GeometryReader { geometry -> Color in
+                                let isCurrentlyAtBottom = isViewFullyVisible(geometry)
+                                if isAtBottom != isCurrentlyAtBottom {
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                        isAtBottom = isCurrentlyAtBottom
+                                        if isCurrentlyAtBottom {
+                                            userHasScrolled = false
+                                        }
+                                    }
+                                }
+                                return Color.clear
+                            }
+                        )
+                        .onAppear {
+                            // As a final guarantee, when the bottom anchor appears, force a scroll
+                            // after layout has settled so we are exactly at the end.
+                            if !didInitialScrollToBottom {
+                                didInitialScrollToBottom = true
+                                DispatchQueue.main.async {
+                                    let targetId: AnyHashable = messages.last?.id ?? "bottom"
+                                    scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                                    DispatchQueue.main.async {
+                                        withAnimation(.easeOut(duration: 0.2)) {
+                                            scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                 }
                 .ignoresSafeArea(.keyboard)
                 .simultaneousGesture(
@@ -469,33 +487,55 @@ struct ChatScrollView: View {
                 }
                 .onChange(of: messages) { _, newMessages in
                     // If this is a new message (not just an update to the last message)
+                    let targetId: AnyHashable = newMessages.last?.id ?? "bottom"
                     if newMessages.count > lastMessageCount {
                         lastMessageCount = newMessages.count
                         userHasScrolled = false // Reset scroll state for new messages
-                        withAnimation {
-                            scrollViewProxy?.scrollTo("bottom", anchor: .bottom)
+                        // Two-phase scroll on new items
+                        scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                            }
                         }
                     } else if !userHasScrolled {
                         // Only scroll if user hasn't manually scrolled up
-                        withAnimation {
-                            scrollViewProxy?.scrollTo("bottom", anchor: .bottom)
+                        scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                            }
                         }
                     }
                 }
                 .onAppear {
                     scrollViewProxy = proxy
                     lastMessageCount = messages.count
-                    proxy.scrollTo("bottom", anchor: .bottom)
+                    // Defer then perform a two-phase scroll to ensure accurate final position
+                    DispatchQueue.main.async {
+                        let targetId: AnyHashable = messages.last?.id ?? "bottom"
+                        // Instant jump first
+                        proxy.scrollTo(targetId, anchor: .bottom)
+                        // Then animated pass after one more runloop
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo(targetId, anchor: .bottom)
+                            }
+                        }
+                    }
                 }
                 .overlay(alignment: .bottom) {
                     if !isAtBottom && !messages.isEmpty && !isKeyboardVisible {
                         Button(action: {
+                            // Re-enable auto-follow for streaming updates
+                            userHasScrolled = false
+                            let targetId: AnyHashable = messages.last?.id ?? "bottom"
                             // First scroll without animation to override momentum
-                            proxy.scrollTo("bottom", anchor: .bottom)
+                            proxy.scrollTo(targetId, anchor: .bottom)
                             // Then immediately scroll again with animation for smooth finish
                             DispatchQueue.main.async {
                                 withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
-                                    proxy.scrollTo("bottom", anchor: .bottom)
+                                    proxy.scrollTo(targetId, anchor: .bottom)
                                 }
                             }
                         }) {
