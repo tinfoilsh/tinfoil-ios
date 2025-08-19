@@ -33,6 +33,9 @@ struct ChatContainer: View {
     @State private var shouldCreateNewChatAfterSubscription = false
     @State private var showPremiumModal = false
     
+    // Sidebar constants
+    private let sidebarWidth: CGFloat = 300
+    
     private let backgroundTimeThreshold: TimeInterval = 300 // 5 minutes in seconds
     
     var body: some View {
@@ -48,6 +51,10 @@ struct ChatContainer: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // App is going to background, record the time
             lastBackgroundTime = Date()
+            // Ensure any partial drag is reset to avoid a stuck overlay/sliver
+            withAnimation(.easeOut(duration: 0.2)) {
+                dragOffset = 0
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             // App is coming to foreground, check if we should create a new chat
@@ -119,12 +126,12 @@ struct ChatContainer: View {
                     HStack(spacing: 0) {
                         if isSidebarOpen {
                             ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
-                                .frame(width: 300)
+                                .frame(width: sidebarWidth)
                                 .transition(.move(edge: .leading))
                         }
                         
                         chatArea
-                            .frame(width: isSidebarOpen ? geometry.size.width - 300 : geometry.size.width)
+                            .frame(width: isSidebarOpen ? geometry.size.width - sidebarWidth : geometry.size.width)
                     }
                 }
                 .animation(.easeInOut(duration: 0.3), value: isSidebarOpen)
@@ -219,10 +226,10 @@ struct ChatContainer: View {
                 .onChanged { gesture in
                     if isSidebarOpen {
                         // When sidebar is open, allow dragging left (negative values)
-                        dragOffset = max(-300, min(0, gesture.translation.width))
+                        dragOffset = max(-sidebarWidth, min(0, gesture.translation.width))
                     } else {
                         // When sidebar is closed, allow dragging right (positive values)
-                        dragOffset = max(0, min(300, gesture.translation.width))
+                        dragOffset = max(0, min(sidebarWidth, gesture.translation.width))
                     }
                 }
                 .onEnded { gesture in
@@ -243,6 +250,12 @@ struct ChatContainer: View {
                     }
                 } : nil
         )
+        .onChange(of: isSidebarOpen) { _, isOpen in
+            if !isOpen {
+                // Snap any stray offset back to zero when we finish closing
+                dragOffset = 0
+            }
+        }
     }
     
     /// The scrollable chat message area
@@ -262,10 +275,15 @@ struct ChatContainer: View {
         ZStack {
             // Dim overlay
             Color.black
-                .opacity(isSidebarOpen ? 
-                    (0.4 + (dragOffset / 300 * 0.4)) : // When open, fade out as we drag left
-                    (dragOffset / 300 * 0.4)) // When closed, fade in as we drag right
+                .opacity({
+                    // Compute overlay opacity only when the sidebar is active or being dragged
+                    let base = 0.4
+                    let fraction = (dragOffset / sidebarWidth * 0.4)
+                    return isSidebarOpen ? (base + fraction) : max(0, fraction)
+                }())
                 .ignoresSafeArea()
+                // Prevent a transparent overlay from blocking taps when closed
+                .allowsHitTesting(isSidebarOpen || abs(dragOffset) > 0.1)
                 .onTapGesture {
                     withAnimation {
                         isSidebarOpen = false
@@ -275,10 +293,10 @@ struct ChatContainer: View {
             // Sidebar with slide transition
             HStack(spacing: 0) {
                 ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
-                    .frame(width: 300)
-                    .offset(x: isSidebarOpen ? 
-                        (0 + dragOffset) : // When open, allow dragging left
-                        (-300 + dragOffset)) // When closed, allow dragging right
+                    .frame(width: sidebarWidth)
+                    .offset(x: isSidebarOpen ?
+                            (0 + dragOffset) : // When open, allow dragging left
+                            (-(sidebarWidth + 1) + dragOffset)) // When closed, hide completely (extra 1pt for border)
                 Spacer()
             }
         }
