@@ -443,14 +443,6 @@ struct CollapsibleThinkingBox: View {
             // Keep the box collapsed regardless of streaming state changes
             // User can manually expand/collapse as needed
         }
-        .onChange(of: isCollapsible) { oldValue, newValue in
-            // If the box just became collapsible (streaming ended)
-            if newValue && !oldValue {
-                withAnimation(.spring()) {
-                    isCollapsed = true // Auto-collapse
-                }
-            }
-        }
     }
 }
 

@@ -559,6 +559,7 @@ struct ChatScrollView: View {
                         }
                     }
                 }
+                
                 .overlay(alignment: .bottom) {
                     if !isAtBottom && !messages.isEmpty && !isKeyboardVisible {
                         Button(action: {
