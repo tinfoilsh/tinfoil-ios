@@ -122,7 +122,6 @@ struct MemoryView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var settings = SettingsManager.shared
     @Environment(\.colorScheme) private var colorScheme
-    @State private var showSaveConfirmation = false
     
     // Local state for form fields
     @State private var localNickname = ""
@@ -162,10 +161,6 @@ struct MemoryView: View {
         }
         .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
         .accentColor(Color.accentPrimary)
-        .overlay(
-            saveConfirmationOverlay,
-            alignment: .top
-        )
         .onAppear {
             localNickname = settings.nickname
             localProfession = settings.profession
@@ -196,6 +191,7 @@ struct MemoryView: View {
                     )
                     .onChange(of: localNickname) { _, newValue in
                         settings.nickname = newValue
+                        settings.isPersonalizationEnabled = true
                     }
             }
             .padding(20)
@@ -223,6 +219,7 @@ struct MemoryView: View {
                     )
                     .onChange(of: localProfession) { _, newValue in
                         settings.profession = newValue
+                        settings.isPersonalizationEnabled = true
                     }
             }
             .padding(20)
@@ -243,6 +240,7 @@ struct MemoryView: View {
                 )
                 .onChange(of: localTraits) { _, newValue in
                     settings.selectedTraits = newValue
+                    settings.isPersonalizationEnabled = true
                 }
             }
             .padding(20)
@@ -271,6 +269,7 @@ struct MemoryView: View {
                     .lineLimit(3...6)
                     .onChange(of: localAdditionalContext) { _, newValue in
                         settings.additionalContext = newValue
+                        settings.isPersonalizationEnabled = true
                     }
             }
             .padding(20)
@@ -279,88 +278,24 @@ struct MemoryView: View {
                     .fill(colorScheme == .dark ? Color(hex: "1C1C1E") : Color(UIColor.systemGray6))
             )
             
-            VStack(spacing: 0) {
-                // Non-interactive spacer
-                Rectangle()
-                    .fill(Color.clear)
-                    .frame(height: 16)
-                
-                // Button container with explicit boundaries
-                HStack(spacing: 16) {
-                    // Reset button
-                    Button(action: {
-                        settings.resetPersonalization()
-                        localNickname = ""
-                        localProfession = ""
-                        localTraits = []
-                        localAdditionalContext = ""
-                    }) {
-                        Text("Reset")
-                            .foregroundColor(.white)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(Color.red)
-                            .cornerRadius(8)
-                    }
-                    .buttonStyle(BorderlessButtonStyle())
-                    
-                    // Save button
-                    Button(action: {
-                        // Dismiss keyboard first
-                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        
-                        // Always enable personalization when saving
-                        settings.isPersonalizationEnabled = true
-                        
-                        // Show confirmation after a brief delay
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            showSaveConfirmation = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                                showSaveConfirmation = false
-                            }
-                        }
-                    }) {
-                        Text("Save")
-                            .foregroundColor(.white)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(Color.accentPrimary)
-                            .cornerRadius(8)
-                    }
-                    .buttonStyle(BorderlessButtonStyle())
-                }
-                .background(Color.clear)
-                .contentShape(Rectangle())
+            // Reset button
+            Button(action: {
+                settings.resetPersonalization()
+                localNickname = ""
+                localProfession = ""
+                localTraits = []
+                localAdditionalContext = ""
+            }) {
+                Text("Reset All")
+                    .foregroundColor(.white)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.red)
+                    .cornerRadius(8)
             }
-        }
-    }
-    
-    // Save confirmation overlay
-    private var saveConfirmationOverlay: some View {
-        Group {
-            if showSaveConfirmation {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                    Text("Memory saved")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(UIColor.systemBackground))
-                        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
-                )
-                .padding(.top, 80)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showSaveConfirmation)
-            }
+            .buttonStyle(BorderlessButtonStyle())
         }
     }
     
