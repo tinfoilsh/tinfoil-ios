@@ -391,8 +391,13 @@ struct CollapsibleThinkingBox: View {
                             Text("for \(String(format: "%.1f", seconds))s")
                                 .font(.subheadline)
                                 .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
+                        } else if isStreaming {
+                            Text("Thinking")
+                                .font(.system(size: 16))
+                                .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
+                            InlineLoadingDotsView(isDarkMode: isDarkMode)
                         } else {
-                            Text("Thinking...")
+                            Text("Thinking")
                                 .font(.system(size: 16))
                                 .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                         }
@@ -561,6 +566,21 @@ struct LoadingDotsView: View {
             }
         }
         .foregroundColor(isDarkMode ? .white : .black)
+    }
+}
+
+struct InlineLoadingDotsView: View {
+    let isDarkMode: Bool
+    
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<3) { index in
+                Circle()
+                    .frame(width: 4, height: 4)
+                    .modifier(PulsingAnimation(delay: 0.2 * Double(index)))
+            }
+        }
+        .foregroundColor(isDarkMode ? .white.opacity(0.8) : Color.black.opacity(0.7))
     }
 }
 
