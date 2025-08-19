@@ -302,7 +302,7 @@ struct VerifierView: View {
             verificationState.security.status = .pending
             
             // Update the chatViewModel to show verification is in progress
-            chatViewModel.isVerifying = true
+            chatViewModel.verification.isVerifying = true
             
         }
 
@@ -344,9 +344,9 @@ struct VerifierView: View {
                         self.isVerifying = false
                         
                         // Update the chatViewModel's verification status
-                        self.chatViewModel.isVerified = true
-                        self.chatViewModel.isVerifying = false
-                        self.chatViewModel.verificationError = nil
+                        self.chatViewModel.verification.isVerified = true
+                        self.chatViewModel.verification.isVerifying = false
+                        self.chatViewModel.verification.error = nil
                         
                     case .failure(let error):
                         // All verifications fail on error
@@ -359,9 +359,9 @@ struct VerifierView: View {
                         self.isVerifying = false
                         
                         // Update the failed verification status in chatViewModel
-                        self.chatViewModel.isVerified = false
-                        self.chatViewModel.isVerifying = false
-                        self.chatViewModel.verificationError = error.localizedDescription
+                        self.chatViewModel.verification.isVerified = false
+                        self.chatViewModel.verification.isVerifying = false
+                        self.chatViewModel.verification.error = error.localizedDescription
                     }
                 }
             }
@@ -394,9 +394,9 @@ struct VerifierView: View {
                 isVerifying = false
                 
                 // Update the chatViewModel with the error
-                chatViewModel.isVerified = false
-                chatViewModel.isVerifying = false
-                chatViewModel.verificationError = error.localizedDescription
+                chatViewModel.verification.isVerified = false
+                chatViewModel.verification.isVerifying = false
+                chatViewModel.verification.error = error.localizedDescription
             }
         }
     }

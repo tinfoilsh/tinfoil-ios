@@ -384,6 +384,7 @@ struct ChatScrollView: View {
     
     // Haptic feedback generator
     private let softHaptic = UIImpactFeedbackGenerator(style: .soft)
+    @State private var lastHapticTime: Date = Date()
     
     // Computed property for context messages
     private var contextMessages: ArraySlice<Message> {
@@ -415,7 +416,8 @@ struct ChatScrollView: View {
                                     .frame(maxWidth: .infinity)
                             }
                         } else {
-                            ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+                            ForEach(messages.indices, id: \.self) { index in
+                                let message = messages[index]
                                 if index != 0 && index == archivedMessagesStartIndex {
                                     // Divider for archived messages
                                     HStack(spacing: 8) {
@@ -634,8 +636,11 @@ struct ChatScrollView: View {
                let new = newContent,
                old != new {
                 let addedContent = String(new.dropFirst(old.count))
-                if addedContent.count > 1 {
+                // Throttle haptic feedback to max once per 150ms to reduce CPU usage
+                let now = Date()
+                if addedContent.count > 1 && now.timeIntervalSince(lastHapticTime) > 0.15 {
                     softHaptic.impactOccurred(intensity: 0.3)
+                    lastHapticTime = now
                 }
             }
         }

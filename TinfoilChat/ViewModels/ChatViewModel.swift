@@ -24,11 +24,19 @@ class ChatViewModel: ObservableObject {
     /// When set to true, the input field should become first responder (focus keyboard)
     @Published var shouldFocusInput: Bool = false
     
-    // Verification properties
-    @Published var isVerifying: Bool = false
-    @Published var isVerified: Bool = false
-    @Published var verificationError: String? = nil
+    // Verification properties - consolidated to reduce update frequency
+    struct VerificationInfo {
+        var isVerifying: Bool = false
+        var isVerified: Bool = false
+        var error: String? = nil
+    }
+    @Published var verification = VerificationInfo()
     private var hasRunInitialVerification: Bool = false
+    
+    // Computed properties for backward compatibility
+    var isVerifying: Bool { verification.isVerifying }
+    var isVerified: Bool { verification.isVerified }
+    var verificationError: String? { verification.error }
     
     // Stored verification measurements
     private var verificationCodeDigest: String?
@@ -159,8 +167,8 @@ class ChatViewModel: ObservableObject {
     
     private func setupTinfoilClient() {
         if !hasRunInitialVerification {
-            self.verificationError = nil
-            self.isVerifying = true
+            self.verification.error = nil
+            self.verification.isVerifying = true
         }
         
         Task {
@@ -183,9 +191,9 @@ class ChatViewModel: ObservableObject {
                                 guard let self = self else { return }
                                 
                                 // Update verification state if there's a mismatch
-                                if !passed && self.isVerified {
-                                    self.isVerified = false
-                                    self.verificationError = "Client verification failed after explicit verification succeeded"
+                                if !passed && self.verification.isVerified {
+                                    self.verification.isVerified = false
+                                    self.verification.error = "Client verification failed after explicit verification succeeded"
                                 }
                             }
                         }
@@ -199,9 +207,9 @@ class ChatViewModel: ObservableObject {
 
             } catch {
                 if !hasRunInitialVerification {
-                    self.isVerifying = false
-                    self.isVerified = false
-                    self.verificationError = error.localizedDescription
+                    self.verification.isVerifying = false
+                    self.verification.isVerified = false
+                    self.verification.error = error.localizedDescription
                     self.hasRunInitialVerification = true
                 }
             }
@@ -214,14 +222,14 @@ class ChatViewModel: ObservableObject {
         let callbacks = VerificationCallbacks(
             onVerificationStart: { [weak self] in
                 Task { @MainActor in
-                    self?.isVerifying = true
+                    self?.verification.isVerifying = true
                 }
             },
             onVerificationComplete: { [weak self] result in
                 Task { @MainActor in
                     guard let self = self else { return }
                     
-                    self.isVerifying = false
+                    self.verification.isVerifying = false
                     self.hasRunInitialVerification = true
                     
                     switch result {
@@ -242,12 +250,12 @@ class ChatViewModel: ObservableObject {
                         // Store the public key (this is already a string)
                         self.verificationTlsCertFingerprint = groundTruth.publicKeyFP
                         
-                        self.isVerified = true
-                        self.verificationError = nil
+                        self.verification.isVerified = true
+                        self.verification.error = nil
                         
                     case .failure(let error):
-                        self.isVerified = false
-                        self.verificationError = error.localizedDescription
+                        self.verification.isVerified = false
+                        self.verification.error = error.localizedDescription
                     }
                 }
             }
@@ -264,9 +272,9 @@ class ChatViewModel: ObservableObject {
             _ = try await secureClient.verify()
         } catch {
             await MainActor.run {
-                self.isVerifying = false
-                self.isVerified = false
-                self.verificationError = error.localizedDescription
+                self.verification.isVerifying = false
+                self.verification.isVerified = false
+                self.verification.error = error.localizedDescription
                 self.hasRunInitialVerification = true
             }
         }
@@ -1001,7 +1009,7 @@ class ChatViewModel: ObservableObject {
             
             // Show warning if user is not authenticated or doesn't have subscription
             if !isAuthenticated || !hasSubscription {
-                self.verificationError = isAuthenticated 
+                self.verification.error = isAuthenticated 
                     ? "Premium model requires an active subscription." 
                     : "Premium model requires authentication."
                 
