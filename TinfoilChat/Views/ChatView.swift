@@ -467,6 +467,8 @@ struct ChatScrollView: View {
                             }
                         }
                 }
+                // Reset scroll state when switching chats
+                .id(viewModel.currentChat?.id ?? "no-chat")
                 .ignoresSafeArea(.keyboard)
                 .simultaneousGesture(
                     DragGesture()
@@ -504,6 +506,21 @@ struct ChatScrollView: View {
                         DispatchQueue.main.async {
                             withAnimation(.easeOut(duration: 0.2)) {
                                 scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+                // When the selected chat changes, reset state and jump to bottom
+                .onChange(of: viewModel.currentChat?.id) { _, _ in
+                    didInitialScrollToBottom = false
+                    userHasScrolled = false
+                    lastMessageCount = messages.count
+                    DispatchQueue.main.async {
+                        let targetId: AnyHashable = messages.last?.id ?? "bottom"
+                        proxy.scrollTo(targetId, anchor: .bottom)
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo(targetId, anchor: .bottom)
                             }
                         }
                     }
