@@ -24,6 +24,7 @@ struct MessageView: View {
     let isDarkMode: Bool
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
     @State private var showCopyFeedback = false
+    @State private var cachedParsedContent: (thinkingText: String, remainderText: String, contentHash: Int)? = nil
     
     var body: some View {
         HStack {
@@ -64,7 +65,7 @@ struct MessageView: View {
                 }
                 
                 // Legacy support: if content still has <think> tags, parse and display
-                else if let parsed = parsedMessageContent {
+                else if let parsed = getParsedMessageContent() {
                     VStack(alignment: .leading, spacing: 4) {
                         CollapsibleThinkingBox(
                             messageId: message.id,
@@ -120,7 +121,7 @@ struct MessageView: View {
                         }
                     }
                     // Legacy: handle parsed content
-                    else if let parsed = parsedMessageContent {
+                    else if let parsed = getParsedMessageContent() {
                         if !parsed.remainderText.isEmpty {
                             Button(action: { copyMessagePart(parsed.remainderText) }) {
                                 Label("Copy Response", systemImage: "text.quote")
@@ -204,25 +205,15 @@ struct MessageView: View {
         return text.replacingOccurrences(of: "<think>", with: "")
     }
     
-    /// If the message starts with "<think>", this computed property parses the text.
-    /// It returns a tuple where:
-    /// - thinkingText is the text between "<think>" and "</think>"
-    /// - remainderText is any text after "</think>"
-    ///
-    /// This parsing is specifically designed to handle DeepSeek model responses which use
-    /// special <think></think> tags to denote the model's internal reasoning process.
-    /// The parser handles both complete responses (with closing tag) and streaming
-    /// responses (where the closing tag might not have arrived yet).
-    ///
-    /// Example:
-    /// Input: "<think>Let me analyze this...</think>The answer is 42."
-    /// Output: (thinkingText: "Let me analyze this...", remainderText: "The answer is 42.")
-    private var parsedMessageContent: (thinkingText: String, remainderText: String)? {
+    /// Parse message content with <think> tags
+    private func getParsedMessageContent() -> (thinkingText: String, remainderText: String)? {
+        // Parse if content starts with <think>
         guard message.content.hasPrefix("<think>") else { return nil }
         
         let tagPrefix = "<think>"
         let tagSuffix = "</think>"
         let start = message.content.index(message.content.startIndex, offsetBy: tagPrefix.count)
+        
         if let endTagRange = message.content.range(of: tagSuffix, range: start..<message.content.endIndex) {
             let thinkingText = String(message.content[start..<endTagRange.lowerBound])
             let remainderText = String(message.content[endTagRange.upperBound...])
@@ -255,65 +246,74 @@ struct MessageBubbleModifier: ViewModifier {
     }
 }
 
-/// Creates a custom markdown theme based on dark mode setting
-private func createMarkdownTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
-    MarkdownUI.Theme.gitHub
-        .text {
-            FontFamily(.system(.default))
-            FontSize(.em(1.0))
-            ForegroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
-        }
-        .code {
-            FontFamilyVariant(.monospaced)
-            FontSize(.em(0.85))
-            BackgroundColor(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
-        }
-        .codeBlock { configuration in
-            SimpleCodeBlockView(
-                configuration: configuration,
-                isDarkMode: isDarkMode
-            )
-        }
-        .heading1 { configuration in
-            configuration.label
-                .markdownMargin(top: 20, bottom: 10)
-                .markdownTextStyle {
-                    FontWeight(.bold)
-                    FontSize(.em(1.75))
-                }
-        }
-        .heading2 { configuration in
-            configuration.label
-                .markdownMargin(top: 16, bottom: 8)
-                .markdownTextStyle {
-                    FontWeight(.semibold)
-                    FontSize(.em(1.5))
-                }
-        }
-        .heading3 { configuration in
-            configuration.label
-                .markdownMargin(top: 14, bottom: 8)
-                .markdownTextStyle {
-                    FontWeight(.semibold)
-                    FontSize(.em(1.25))
-                }
-        }
-        .blockquote { configuration in
-            configuration.label
-                .markdownTextStyle {
-                    FontStyle(.italic)
-                    ForegroundColor(.secondary)
-                }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 12)
-                .markdownMargin(top: 8, bottom: 8)
-                .background(Color.secondary.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
-        .listItem { configuration in
-            configuration.label
-                .markdownMargin(top: 4, bottom: 4)
-        }
+/// Cached markdown themes to avoid recreation on every render
+private struct MarkdownThemeCache {
+    static let darkTheme = createTheme(isDarkMode: true)
+    static let lightTheme = createTheme(isDarkMode: false)
+    
+    static func getTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
+        isDarkMode ? darkTheme : lightTheme
+    }
+    
+    private static func createTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
+        MarkdownUI.Theme.gitHub
+            .text {
+                FontFamily(.system(.default))
+                FontSize(.em(1.0))
+                ForegroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
+            }
+            .code {
+                FontFamilyVariant(.monospaced)
+                FontSize(.em(0.85))
+                BackgroundColor(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
+            }
+            .codeBlock { configuration in
+                SimpleCodeBlockView(
+                    configuration: configuration,
+                    isDarkMode: isDarkMode
+                )
+            }
+            .heading1 { configuration in
+                configuration.label
+                    .markdownMargin(top: 20, bottom: 10)
+                    .markdownTextStyle {
+                        FontWeight(.bold)
+                        FontSize(.em(1.75))
+                    }
+            }
+            .heading2 { configuration in
+                configuration.label
+                    .markdownMargin(top: 16, bottom: 8)
+                    .markdownTextStyle {
+                        FontWeight(.semibold)
+                        FontSize(.em(1.5))
+                    }
+            }
+            .heading3 { configuration in
+                configuration.label
+                    .markdownMargin(top: 14, bottom: 8)
+                    .markdownTextStyle {
+                        FontWeight(.semibold)
+                        FontSize(.em(1.25))
+                    }
+            }
+            .blockquote { configuration in
+                configuration.label
+                    .markdownTextStyle {
+                        FontStyle(.italic)
+                        ForegroundColor(.secondary)
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .markdownMargin(top: 8, bottom: 8)
+                    .background(Color.secondary.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .listItem { configuration in
+                configuration.label
+                    .markdownMargin(top: 4, bottom: 4)
+            }
+    }
 }
 
 /// A view that renders Markdown content using the MarkdownUI library.
@@ -330,7 +330,7 @@ struct MarkdownText: View {
 
     var body: some View {
         Markdown(content)
-            .markdownTheme(createMarkdownTheme(isDarkMode: isDarkMode))
+            .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
             .padding(.horizontal, horizontalPadding)
             .environment(\.colorScheme, isDarkMode ? .dark : .light)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -352,7 +352,7 @@ struct AdaptiveMarkdownText: View {
 
     var body: some View {
         Markdown(content)
-            .markdownTheme(createMarkdownTheme(isDarkMode: true)) // Always use dark theme for user messages
+            .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: true)) // Always use dark theme for user messages
             .padding(.horizontal, horizontalPadding)
             .environment(\.colorScheme, .dark)
             .fixedSize(horizontal: false, vertical: true)
