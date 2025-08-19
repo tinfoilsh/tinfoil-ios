@@ -2,8 +2,8 @@
 //  RevenueCatManager.swift
 //  TinfoilChat
 //
-//  Created on 07/11/24.
-//  Copyright © 2024 Tinfoil. All rights reserved.
+//  Created on 07/11/25.
+//  Copyright © 2025 Tinfoil. All rights reserved.
 //
 
 import SwiftUI
