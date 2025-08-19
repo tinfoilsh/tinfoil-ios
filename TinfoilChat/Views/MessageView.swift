@@ -418,9 +418,14 @@ struct CollapsibleThinkingBox: View {
             VStack(alignment: .leading, spacing: 0) {
                 Divider()
                 
-                NumberedThoughtLinesView(text: thinkingText, isDarkMode: isDarkMode)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
+                // Simple text view for thoughts
+                Text(thinkingText)
+                    .font(.system(size: 14))
+                    .foregroundColor(isDarkMode ? .white.opacity(0.9) : Color.black.opacity(0.8))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
             }
             .frame(height: isCollapsed ? 0 : nil)
             .opacity(isCollapsed ? 0 : 1)
@@ -446,105 +451,6 @@ struct CollapsibleThinkingBox: View {
     }
 }
 
-/// A custom view that displays each line of text with a numbered label
-/// and a vertical connector extending to subsequent lines. We treat
-/// double newlines (\n\n) as actual line breaks and convert single
-/// newlines (\n) into spaces so they don't split lines.
-struct NumberedThoughtLinesView: View {
-    let text: String
-    let isDarkMode: Bool
-    
-    @State private var heights: [Int: CGFloat] = [:]
-    @State private var totalHeight: CGFloat = 0
-
-    var body: some View {
-        let replaced = text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            // Convert single newlines to spaces, but preserve double newlines as paragraph breaks
-            // This regex pattern matches:
-            // ([^\n]) - any character that isn't a newline (captured as group 1)
-            // \n - a single newline
-            // (?!\n) - negative lookahead: not followed by another newline
-            // ([^\n]) - any character that isn't a newline (captured as group 2)
-            // The replacement "$1 $2" joins the two captured groups with a space
-            .replacingOccurrences(
-                of: #"([^\n])\n(?!\n)([^\n])"#, 
-                with: "$1 $2",
-                options: .regularExpression
-            )
-        
-        let lines = replaced.components(separatedBy: "\n\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        return VStack(alignment: .leading, spacing: 0) {
-            ForEach(lines.indices, id: \.self) { i in
-                HStack(alignment: .top, spacing: 8) {
-                    // Container for circle and line
-                    ZStack(alignment: .top) {
-                        // Vertical line for connection to next paragraph (if exists)
-                        if i < lines.count - 1 {
-                            Rectangle()
-                                .fill(isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2))
-                                .frame(width: 2)
-                                // Position the line to start from below the circle
-                                // and extend down but not all the way to the next circle
-                                .frame(height: max((heights[i] ?? 0) - 8, 0)) // Reduced height to prevent overlap
-                                .offset(y: 24) // Start below the circle
-                        }
-                        
-                        // Circle with number (positioned at the top)
-                        ZStack {
-                            Circle()
-                                .fill(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.1))
-                                .frame(width: 20, height: 20)
-                            
-                            Text("\(i+1)")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(isDarkMode ? .white : .black)
-                        }
-                    }
-                    .frame(width: 20)
-                    
-                    // Text content
-                    MarkdownText(content: lines[i], isDarkMode: isDarkMode, horizontalPadding: 0)
-                        .padding(.top, 2)
-                        .background(
-                            GeometryReader { geometry in
-                                Color.clear.onAppear {
-                                    if geometry.size.height.isFinite {
-                                        heights[i] = geometry.size.height
-                                        calculateTotalHeight()
-                                    }
-                                }.onChange(of: geometry.size.height) { oldValue, newValue in
-                                    // Update height when content changes and value is valid
-                                    if abs(oldValue - newValue) > 1 && newValue.isFinite {
-                                        heights[i] = newValue
-                                        calculateTotalHeight()
-                                    }
-                                }
-                            }
-                        )
-                }
-                // Add spacing between paragraphs
-                .padding(.bottom, i < lines.count - 1 ? 24 : 0)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
-    }
-    
-    // Calculate the total height of all paragraphs for positioning
-    private func calculateTotalHeight() {
-        var total: CGFloat = 0
-        for i in heights.keys.sorted() {
-            if let height = heights[i], height.isFinite {
-                total += height + (i < heights.count - 1 ? 16 : 0) // Add spacing between paragraphs
-            }
-        }
-        self.totalHeight = total
-    }
-}
 
 struct LoadingDotsView: View {    
     let isDarkMode: Bool
