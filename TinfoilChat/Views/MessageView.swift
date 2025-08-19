@@ -313,6 +313,12 @@ private struct MarkdownThemeCache {
                 configuration.label
                     .markdownMargin(top: 4, bottom: 4)
             }
+            .table { configuration in
+                ScrollView(.horizontal, showsIndicators: true) {
+                    configuration.label
+                        .markdownTableBorderStyle(.init(color: isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2)))
+                }
+            }
     }
 }
 
