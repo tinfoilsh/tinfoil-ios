@@ -210,6 +210,17 @@ struct CustomTextEditor: UIViewRepresentable {
         // Check if text field is currently being edited
         let isCurrentlyEditing = context.coordinator.isEditing
         
+        // If a new conversation was started, request focus to show the keyboard
+        if viewModel.shouldFocusInput {
+            if !uiView.isFirstResponder {
+                uiView.becomeFirstResponder()
+            }
+            // Reset the flag to avoid repeated focusing
+            DispatchQueue.main.async {
+                viewModel.shouldFocusInput = false
+            }
+        }
+
         // Only show placeholder if text is empty AND not currently being edited
         if text.isEmpty && !isCurrentlyEditing && uiView.textColor != .lightGray {
             // Text was cleared and we're not editing, show placeholder

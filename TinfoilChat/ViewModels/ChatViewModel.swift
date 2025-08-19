@@ -21,6 +21,8 @@ class ChatViewModel: ObservableObject {
     @Published var showVerifierSheet: Bool = false
     @Published var scrollTargetMessageId: String? = nil 
     @Published var scrollTargetOffset: CGFloat = 0 
+    /// When set to true, the input field should become first responder (focus keyboard)
+    @Published var shouldFocusInput: Bool = false
     
     // Verification properties
     @Published var isVerifying: Bool = false
@@ -311,6 +313,8 @@ class ChatViewModel: ObservableObject {
         chats.insert(newChat, at: 0)
         // Select the new chat
         selectChat(newChat)
+        // Request focus for the input when starting a new conversation
+        shouldFocusInput = true
     }
     
     /// Selects a chat as the current chat
