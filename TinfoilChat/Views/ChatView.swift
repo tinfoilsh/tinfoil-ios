@@ -416,8 +416,7 @@ struct ChatScrollView: View {
                                     .frame(maxWidth: .infinity)
                             }
                         } else {
-                            ForEach(messages.indices, id: \.self) { index in
-                                let message = messages[index]
+                            ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
                                 if index != 0 && index == archivedMessagesStartIndex {
                                     // Divider for archived messages
                                     HStack(spacing: 8) {
