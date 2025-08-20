@@ -106,7 +106,8 @@ class SettingsManager: ObservableObject {
         
         // Initialize max messages setting
         if let savedMaxMessages = UserDefaults.standard.object(forKey: "maxPromptMessages") as? Int {
-            self.maxMessages = savedMaxMessages
+            // Clamp the restored value to the allowed 1-50 range
+            self.maxMessages = min(max(savedMaxMessages, 1), 50)
         } else {
             // Default to 15 if not set
             self.maxMessages = 15
