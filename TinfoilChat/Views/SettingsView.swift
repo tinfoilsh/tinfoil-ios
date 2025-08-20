@@ -166,6 +166,7 @@ class SettingsManager: ObservableObject {
         profession = ""
         selectedTraits = []
         additionalContext = ""
+        isPersonalizationEnabled = false
     }
 }
 
