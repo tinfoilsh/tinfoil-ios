@@ -2,7 +2,7 @@
 //  InlineSubscriptionLoadingView.swift
 //  TinfoilChat
 //
-//  Copyright © 2024 Tinfoil. All rights reserved.
+//  Copyright © 2025 Tinfoil. All rights reserved.
 //
 
 import SwiftUI

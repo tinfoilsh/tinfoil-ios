@@ -2,8 +2,8 @@
 //  ChatView.swift
 //  TinfoilChat
 //
-//  Created on 04/10/24.
-//  Copyright © 2024 Tinfoil. All rights reserved.
+//  Created on 04/10/25.
+//  Copyright © 2025 Tinfoil. All rights reserved.
 
 
 import SwiftUI
@@ -33,6 +33,9 @@ struct ChatContainer: View {
     @State private var shouldCreateNewChatAfterSubscription = false
     @State private var showPremiumModal = false
     
+    // Sidebar constants
+    private let sidebarWidth: CGFloat = 300
+    
     private let backgroundTimeThreshold: TimeInterval = 300 // 5 minutes in seconds
     
     var body: some View {
@@ -48,6 +51,10 @@ struct ChatContainer: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // App is going to background, record the time
             lastBackgroundTime = Date()
+            // Ensure any partial drag is reset to avoid a stuck overlay/sliver
+            withAnimation(.easeOut(duration: 0.2)) {
+                dragOffset = 0
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             // App is coming to foreground, check if we should create a new chat
@@ -119,12 +126,12 @@ struct ChatContainer: View {
                     HStack(spacing: 0) {
                         if isSidebarOpen {
                             ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
-                                .frame(width: 300)
+                                .frame(width: sidebarWidth)
                                 .transition(.move(edge: .leading))
                         }
                         
                         chatArea
-                            .frame(width: isSidebarOpen ? geometry.size.width - 300 : geometry.size.width)
+                            .frame(width: isSidebarOpen ? geometry.size.width - sidebarWidth : geometry.size.width)
                     }
                 }
                 .animation(.easeInOut(duration: 0.3), value: isSidebarOpen)
@@ -219,10 +226,10 @@ struct ChatContainer: View {
                 .onChanged { gesture in
                     if isSidebarOpen {
                         // When sidebar is open, allow dragging left (negative values)
-                        dragOffset = max(-300, min(0, gesture.translation.width))
+                        dragOffset = max(-sidebarWidth, min(0, gesture.translation.width))
                     } else {
                         // When sidebar is closed, allow dragging right (positive values)
-                        dragOffset = max(0, min(300, gesture.translation.width))
+                        dragOffset = max(0, min(sidebarWidth, gesture.translation.width))
                     }
                 }
                 .onEnded { gesture in
@@ -243,6 +250,12 @@ struct ChatContainer: View {
                     }
                 } : nil
         )
+        .onChange(of: isSidebarOpen) { _, isOpen in
+            if !isOpen {
+                // Snap any stray offset back to zero when we finish closing
+                dragOffset = 0
+            }
+        }
     }
     
     /// The scrollable chat message area
@@ -262,10 +275,15 @@ struct ChatContainer: View {
         ZStack {
             // Dim overlay
             Color.black
-                .opacity(isSidebarOpen ? 
-                    (0.4 + (dragOffset / 300 * 0.4)) : // When open, fade out as we drag left
-                    (dragOffset / 300 * 0.4)) // When closed, fade in as we drag right
+                .opacity({
+                    // Compute overlay opacity only when the sidebar is active or being dragged
+                    let base = 0.4
+                    let fraction = (dragOffset / sidebarWidth * 0.4)
+                    return isSidebarOpen ? (base + fraction) : max(0, fraction)
+                }())
                 .ignoresSafeArea()
+                // Prevent a transparent overlay from blocking taps when closed
+                .allowsHitTesting(isSidebarOpen || abs(dragOffset) > 0.1)
                 .onTapGesture {
                     withAnimation {
                         isSidebarOpen = false
@@ -275,10 +293,10 @@ struct ChatContainer: View {
             // Sidebar with slide transition
             HStack(spacing: 0) {
                 ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
-                    .frame(width: 300)
-                    .offset(x: isSidebarOpen ? 
-                        (0 + dragOffset) : // When open, allow dragging left
-                        (-300 + dragOffset)) // When closed, allow dragging right
+                    .frame(width: sidebarWidth)
+                    .offset(x: isSidebarOpen ?
+                            (0 + dragOffset) : // When open, allow dragging left
+                            (-(sidebarWidth + 1) + dragOffset)) // When closed, hide completely (extra 1pt for border)
                 Spacer()
             }
         }
@@ -366,18 +384,20 @@ struct ChatScrollView: View {
     
     // Haptic feedback generator
     private let softHaptic = UIImpactFeedbackGenerator(style: .soft)
+    @State private var lastHapticTime: Date = Date()
     
     // Computed property for context messages
     private var contextMessages: ArraySlice<Message> {
-        messages.suffix(AppConfig.shared.maxMessagesPerRequest)
+        messages.suffix(SettingsManager.shared.maxMessages)
     }
     
     // Added property to track the index where archived messages start
     private var archivedMessagesStartIndex: Int {
-        max(0, messages.count - AppConfig.shared.maxMessagesPerRequest)
+        max(0, messages.count - SettingsManager.shared.maxMessages)
     }
     
     @State private var isScrolling = false
+    @State private var didInitialScrollToBottom = false
     
     // MARK: - Body
     
@@ -386,7 +406,7 @@ struct ChatScrollView: View {
             // Messages ScrollView
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(spacing: 0) {
+                    LazyVStack(spacing: 0) {
                         if messages.isEmpty {
                             if let authManager = viewModel.authManager {
                                 WelcomeView(isDarkMode: isDarkMode, authManager: authManager)
@@ -428,27 +448,46 @@ struct ChatScrollView: View {
                                 .opacity(index < archivedMessagesStartIndex ? 0.6 : 1.0)
                             }
                             
-                            // Bottom anchor point without extra padding
-                            Color.clear
-                                .frame(height: 10)
-                                .id("bottom")
-                                .background(
-                                    GeometryReader { geometry -> Color in
-                                        let isCurrentlyAtBottom = isViewFullyVisible(geometry)
-                                        if isAtBottom != isCurrentlyAtBottom {
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                                isAtBottom = isCurrentlyAtBottom
-                                                if isCurrentlyAtBottom {
-                                                    userHasScrolled = false
-                                                }
-                                            }
-                                        }
-                                        return Color.clear
-                                    }
-                                )
                         }
                     }
+
+                    // Bottom anchor point placed outside the LazyVStack so it always exists
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom")
+                        .background(
+                            GeometryReader { geometry -> Color in
+                                let isCurrentlyAtBottom = isViewFullyVisible(geometry)
+                                if isAtBottom != isCurrentlyAtBottom {
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                        isAtBottom = isCurrentlyAtBottom
+                                        if isCurrentlyAtBottom {
+                                            userHasScrolled = false
+                                        }
+                                    }
+                                }
+                                return Color.clear
+                            }
+                        )
+                        .onAppear {
+                            // As a final guarantee, when the bottom anchor appears, force a scroll
+                            // after layout has settled so we are exactly at the end.
+                            if !didInitialScrollToBottom {
+                                didInitialScrollToBottom = true
+                                DispatchQueue.main.async {
+                                    let targetId: AnyHashable = messages.last?.id ?? "bottom"
+                                    scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                                    DispatchQueue.main.async {
+                                        withAnimation(.easeOut(duration: 0.2)) {
+                                            scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                 }
+                // Reset scroll state when switching chats
+                .id(viewModel.currentChat?.id ?? "no-chat")
                 .ignoresSafeArea(.keyboard)
                 .simultaneousGesture(
                     DragGesture()
@@ -469,33 +508,71 @@ struct ChatScrollView: View {
                 }
                 .onChange(of: messages) { _, newMessages in
                     // If this is a new message (not just an update to the last message)
+                    let targetId: AnyHashable = newMessages.last?.id ?? "bottom"
                     if newMessages.count > lastMessageCount {
                         lastMessageCount = newMessages.count
                         userHasScrolled = false // Reset scroll state for new messages
-                        withAnimation {
-                            scrollViewProxy?.scrollTo("bottom", anchor: .bottom)
+                        // Two-phase scroll on new items
+                        scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                            }
                         }
                     } else if !userHasScrolled {
                         // Only scroll if user hasn't manually scrolled up
-                        withAnimation {
-                            scrollViewProxy?.scrollTo("bottom", anchor: .bottom)
+                        scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+                // When the selected chat changes, reset state and jump to bottom
+                .onChange(of: viewModel.currentChat?.id) { _, _ in
+                    didInitialScrollToBottom = false
+                    userHasScrolled = false
+                    lastMessageCount = messages.count
+                    DispatchQueue.main.async {
+                        let targetId: AnyHashable = messages.last?.id ?? "bottom"
+                        proxy.scrollTo(targetId, anchor: .bottom)
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo(targetId, anchor: .bottom)
+                            }
                         }
                     }
                 }
                 .onAppear {
                     scrollViewProxy = proxy
                     lastMessageCount = messages.count
-                    proxy.scrollTo("bottom", anchor: .bottom)
+                    // Defer then perform a two-phase scroll to ensure accurate final position
+                    DispatchQueue.main.async {
+                        let targetId: AnyHashable = messages.last?.id ?? "bottom"
+                        // Instant jump first
+                        proxy.scrollTo(targetId, anchor: .bottom)
+                        // Then animated pass after one more runloop
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo(targetId, anchor: .bottom)
+                            }
+                        }
+                    }
                 }
+                
                 .overlay(alignment: .bottom) {
                     if !isAtBottom && !messages.isEmpty && !isKeyboardVisible {
                         Button(action: {
+                            // Re-enable auto-follow for streaming updates
+                            userHasScrolled = false
+                            let targetId: AnyHashable = messages.last?.id ?? "bottom"
                             // First scroll without animation to override momentum
-                            proxy.scrollTo("bottom", anchor: .bottom)
+                            proxy.scrollTo(targetId, anchor: .bottom)
                             // Then immediately scroll again with animation for smooth finish
                             DispatchQueue.main.async {
                                 withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
-                                    proxy.scrollTo("bottom", anchor: .bottom)
+                                    proxy.scrollTo(targetId, anchor: .bottom)
                                 }
                             }
                         }) {
@@ -558,8 +635,11 @@ struct ChatScrollView: View {
                let new = newContent,
                old != new {
                 let addedContent = String(new.dropFirst(old.count))
-                if addedContent.count > 1 {
+                // Throttle haptic feedback to max once per 150ms to reduce CPU usage
+                let now = Date()
+                if addedContent.count > 1 && now.timeIntervalSince(lastHapticTime) > 0.15 {
                     softHaptic.impactOccurred(intensity: 0.3)
+                    lastHapticTime = now
                 }
             }
         }

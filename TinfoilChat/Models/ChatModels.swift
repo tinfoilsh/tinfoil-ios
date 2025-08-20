@@ -2,8 +2,8 @@
 //  ChatModels.swift
 //  TinfoilChat
 //
-//  Created on 04/10/24.
-//  Copyright © 2024 Tinfoil. All rights reserved.
+//  Created on 04/10/25.
+//  Copyright © 2025 Tinfoil. All rights reserved.
 
 
 import Foundation
@@ -188,16 +188,20 @@ struct Message: Identifiable, Codable, Equatable {
     let id: String
     let role: MessageRole
     var content: String
+    var thoughts: String? = nil
+    var isThinking: Bool = false
     var timestamp: Date
     var isCollapsed: Bool = false
     var isStreaming: Bool = false
     var streamError: String? = nil
     var generationTimeSeconds: Double? = nil
     
-    init(id: String = UUID().uuidString, role: MessageRole, content: String, timestamp: Date = Date(), isCollapsed: Bool = false, generationTimeSeconds: Double? = nil) {
+    init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = false, generationTimeSeconds: Double? = nil) {
         self.id = id
         self.role = role
         self.content = content
+        self.thoughts = thoughts
+        self.isThinking = isThinking
         self.timestamp = timestamp
         self.isCollapsed = isCollapsed
         self.generationTimeSeconds = generationTimeSeconds
@@ -206,7 +210,7 @@ struct Message: Identifiable, Codable, Equatable {
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, role, content, timestamp, isCollapsed, isStreaming, streamError, generationTimeSeconds
+        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, generationTimeSeconds
     }
     
     init(from decoder: Decoder) throws {
@@ -215,6 +219,8 @@ struct Message: Identifiable, Codable, Equatable {
         id = try container.decode(String.self, forKey: .id)
         role = try container.decode(MessageRole.self, forKey: .role)
         content = try container.decode(String.self, forKey: .content)
+        thoughts = try container.decodeIfPresent(String.self, forKey: .thoughts)
+        isThinking = try container.decodeIfPresent(Bool.self, forKey: .isThinking) ?? false
         timestamp = try container.decode(Date.self, forKey: .timestamp)
         isCollapsed = try container.decode(Bool.self, forKey: .isCollapsed)
         isStreaming = try container.decodeIfPresent(Bool.self, forKey: .isStreaming) ?? false
@@ -227,6 +233,8 @@ struct Message: Identifiable, Codable, Equatable {
         try container.encode(id, forKey: .id)
         try container.encode(role.rawValue, forKey: .role)
         try container.encode(content, forKey: .content)
+        try container.encodeIfPresent(thoughts, forKey: .thoughts)
+        try container.encode(isThinking, forKey: .isThinking)
         try container.encode(timestamp, forKey: .timestamp)
         try container.encode(isCollapsed, forKey: .isCollapsed)
         try container.encode(isStreaming, forKey: .isStreaming)

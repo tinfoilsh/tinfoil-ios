@@ -2,8 +2,8 @@
 //  UpdateRequiredView.swift
 //  TinfoilChat
 //
-//  Created on 04/10/24.
-//  Copyright © 2024 Tinfoil. All rights reserved.
+//  Created on 04/10/25.
+//  Copyright © 2025 Tinfoil. All rights reserved.
 
 import SwiftUI
 

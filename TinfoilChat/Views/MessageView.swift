@@ -2,8 +2,8 @@
 //  MessageView.swift
 //  TinfoilChat
 //
-//  Created on 04/10/24.
-//  Copyright © 2024 Tinfoil. All rights reserved.
+//  Created on 04/10/25.
+//  Copyright © 2025 Tinfoil. All rights reserved.
 //
 
 import SwiftUI
@@ -24,6 +24,7 @@ struct MessageView: View {
     let isDarkMode: Bool
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
     @State private var showCopyFeedback = false
+    @State private var cachedParsedContent: (thinkingText: String, remainderText: String, contentHash: Int)? = nil
     
     var body: some View {
         HStack {
@@ -32,9 +33,10 @@ struct MessageView: View {
             }
             
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
-                // Show the loading dots for a fresh streaming assistant response
+                // Show the loading dots for a fresh streaming assistant response (but not if we have thoughts)
                 if message.role == .assistant &&
                     message.content.isEmpty &&
+                    message.thoughts == nil &&
                     viewModel.isLoading &&
                     message.id == viewModel.messages.last?.id {
                     LoadingDotsView(isDarkMode: isDarkMode)
@@ -42,8 +44,28 @@ struct MessageView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 
-                // If the message begins with the special think tag, parse and display it in a box
-                else if let parsed = parsedMessageContent {
+                // If the message has thoughts (from either format), display them in a thinking box
+                else if message.thoughts != nil {
+                    VStack(alignment: .leading, spacing: 4) {
+                        CollapsibleThinkingBox(
+                            messageId: message.id,
+                            thinkingText: message.thoughts ?? "",
+                            isDarkMode: isDarkMode,
+                            isCollapsible: !message.isThinking,
+                            isStreaming: message.isThinking && viewModel.isLoading && message.id == viewModel.messages.last?.id,
+                            generationTimeSeconds: message.generationTimeSeconds
+                        )
+                        
+                        // Display regular content if present
+                        if !message.content.isEmpty {
+                            MarkdownText(content: message.content, isDarkMode: isDarkMode)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                
+                // Legacy support: if content still has <think> tags, parse and display
+                else if let parsed = getParsedMessageContent() {
                     VStack(alignment: .leading, spacing: 4) {
                         CollapsibleThinkingBox(
                             messageId: message.id,
@@ -81,12 +103,25 @@ struct MessageView: View {
             .cornerRadius(16)
             .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
             .contextMenu {
-                if !message.content.isEmpty {
+                if !message.content.isEmpty || message.thoughts != nil {
                     Button(action: copyMessage) {
-                        Label("Copy", systemImage: "doc.on.doc")
+                        Label("Copy All", systemImage: "doc.on.doc")
                     }
                     
-                    if let parsed = parsedMessageContent {
+                    // Handle thoughts from Message model
+                    if let thoughts = message.thoughts {
+                        if !message.content.isEmpty {
+                            Button(action: { copyMessagePart(message.content) }) {
+                                Label("Copy Response", systemImage: "text.quote")
+                            }
+                        }
+                        
+                        Button(action: { copyMessagePart(thoughts) }) {
+                            Label("Copy Thinking", systemImage: "brain")
+                        }
+                    }
+                    // Legacy: handle parsed content
+                    else if let parsed = getParsedMessageContent() {
                         if !parsed.remainderText.isEmpty {
                             Button(action: { copyMessagePart(parsed.remainderText) }) {
                                 Label("Copy Response", systemImage: "text.quote")
@@ -123,7 +158,13 @@ struct MessageView: View {
     
     // Function to copy the entire message
     private func copyMessage() {
-        copyMessagePart(message.content)
+        // If message has thoughts, combine them with content
+        if let thoughts = message.thoughts {
+            let fullContent = thoughts + "\n\n" + message.content
+            copyMessagePart(fullContent)
+        } else {
+            copyMessagePart(message.content)
+        }
     }
     
     // Function to copy a specific part of the message
@@ -164,25 +205,15 @@ struct MessageView: View {
         return text.replacingOccurrences(of: "<think>", with: "")
     }
     
-    /// If the message starts with "<think>", this computed property parses the text.
-    /// It returns a tuple where:
-    /// - thinkingText is the text between "<think>" and "</think>"
-    /// - remainderText is any text after "</think>"
-    ///
-    /// This parsing is specifically designed to handle DeepSeek model responses which use
-    /// special <think></think> tags to denote the model's internal reasoning process.
-    /// The parser handles both complete responses (with closing tag) and streaming
-    /// responses (where the closing tag might not have arrived yet).
-    ///
-    /// Example:
-    /// Input: "<think>Let me analyze this...</think>The answer is 42."
-    /// Output: (thinkingText: "Let me analyze this...", remainderText: "The answer is 42.")
-    private var parsedMessageContent: (thinkingText: String, remainderText: String)? {
+    /// Parse message content with <think> tags
+    private func getParsedMessageContent() -> (thinkingText: String, remainderText: String)? {
+        // Parse if content starts with <think>
         guard message.content.hasPrefix("<think>") else { return nil }
         
         let tagPrefix = "<think>"
         let tagSuffix = "</think>"
         let start = message.content.index(message.content.startIndex, offsetBy: tagPrefix.count)
+        
         if let endTagRange = message.content.range(of: tagSuffix, range: start..<message.content.endIndex) {
             let thinkingText = String(message.content[start..<endTagRange.lowerBound])
             let remainderText = String(message.content[endTagRange.upperBound...])
@@ -215,65 +246,80 @@ struct MessageBubbleModifier: ViewModifier {
     }
 }
 
-/// Creates a custom markdown theme based on dark mode setting
-private func createMarkdownTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
-    MarkdownUI.Theme.gitHub
-        .text {
-            FontFamily(.system(.default))
-            FontSize(.em(1.0))
-            ForegroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
-        }
-        .code {
-            FontFamilyVariant(.monospaced)
-            FontSize(.em(0.85))
-            BackgroundColor(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
-        }
-        .codeBlock { configuration in
-            SimpleCodeBlockView(
-                configuration: configuration,
-                isDarkMode: isDarkMode
-            )
-        }
-        .heading1 { configuration in
-            configuration.label
-                .markdownMargin(top: 20, bottom: 10)
-                .markdownTextStyle {
-                    FontWeight(.bold)
-                    FontSize(.em(1.75))
+/// Cached markdown themes to avoid recreation on every render
+private struct MarkdownThemeCache {
+    static let darkTheme = createTheme(isDarkMode: true)
+    static let lightTheme = createTheme(isDarkMode: false)
+    
+    static func getTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
+        isDarkMode ? darkTheme : lightTheme
+    }
+    
+    private static func createTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
+        MarkdownUI.Theme.gitHub
+            .text {
+                FontFamily(.system(.default))
+                FontSize(.em(1.0))
+                ForegroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
+            }
+            .code {
+                FontFamilyVariant(.monospaced)
+                FontSize(.em(0.85))
+                BackgroundColor(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
+            }
+            .codeBlock { configuration in
+                SimpleCodeBlockView(
+                    configuration: configuration,
+                    isDarkMode: isDarkMode
+                )
+            }
+            .heading1 { configuration in
+                configuration.label
+                    .markdownMargin(top: 20, bottom: 10)
+                    .markdownTextStyle {
+                        FontWeight(.bold)
+                        FontSize(.em(1.75))
+                    }
+            }
+            .heading2 { configuration in
+                configuration.label
+                    .markdownMargin(top: 16, bottom: 8)
+                    .markdownTextStyle {
+                        FontWeight(.semibold)
+                        FontSize(.em(1.5))
+                    }
+            }
+            .heading3 { configuration in
+                configuration.label
+                    .markdownMargin(top: 14, bottom: 8)
+                    .markdownTextStyle {
+                        FontWeight(.semibold)
+                        FontSize(.em(1.25))
+                    }
+            }
+            .blockquote { configuration in
+                configuration.label
+                    .markdownTextStyle {
+                        FontStyle(.italic)
+                        ForegroundColor(.secondary)
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .markdownMargin(top: 8, bottom: 8)
+                    .background(Color.secondary.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .listItem { configuration in
+                configuration.label
+                    .markdownMargin(top: 4, bottom: 4)
+            }
+            .table { configuration in
+                ScrollView(.horizontal, showsIndicators: true) {
+                    configuration.label
+                        .markdownTableBorderStyle(.init(color: isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2)))
                 }
-        }
-        .heading2 { configuration in
-            configuration.label
-                .markdownMargin(top: 16, bottom: 8)
-                .markdownTextStyle {
-                    FontWeight(.semibold)
-                    FontSize(.em(1.5))
-                }
-        }
-        .heading3 { configuration in
-            configuration.label
-                .markdownMargin(top: 14, bottom: 8)
-                .markdownTextStyle {
-                    FontWeight(.semibold)
-                    FontSize(.em(1.25))
-                }
-        }
-        .blockquote { configuration in
-            configuration.label
-                .markdownTextStyle {
-                    FontStyle(.italic)
-                    ForegroundColor(.secondary)
-                }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 12)
-                .markdownMargin(top: 8, bottom: 8)
-                .background(Color.secondary.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
-        .listItem { configuration in
-            configuration.label
-                .markdownMargin(top: 4, bottom: 4)
-        }
+            }
+    }
 }
 
 /// A view that renders Markdown content using the MarkdownUI library.
@@ -290,7 +336,7 @@ struct MarkdownText: View {
 
     var body: some View {
         Markdown(content)
-            .markdownTheme(createMarkdownTheme(isDarkMode: isDarkMode))
+            .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
             .padding(.horizontal, horizontalPadding)
             .environment(\.colorScheme, isDarkMode ? .dark : .light)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -312,7 +358,7 @@ struct AdaptiveMarkdownText: View {
 
     var body: some View {
         Markdown(content)
-            .markdownTheme(createMarkdownTheme(isDarkMode: true)) // Always use dark theme for user messages
+            .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: true)) // Always use dark theme for user messages
             .padding(.horizontal, horizontalPadding)
             .environment(\.colorScheme, .dark)
             .fixedSize(horizontal: false, vertical: true)
@@ -351,8 +397,13 @@ struct CollapsibleThinkingBox: View {
                             Text("for \(String(format: "%.1f", seconds))s")
                                 .font(.subheadline)
                                 .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
+                        } else if isStreaming {
+                            Text("Thinking")
+                                .font(.system(size: 16))
+                                .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
+                            InlineLoadingDotsView(isDarkMode: isDarkMode)
                         } else {
-                            Text("Thinking...")
+                            Text("Thinking")
                                 .font(.system(size: 16))
                                 .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                         }
@@ -373,9 +424,14 @@ struct CollapsibleThinkingBox: View {
             VStack(alignment: .leading, spacing: 0) {
                 Divider()
                 
-                NumberedThoughtLinesView(text: thinkingText, isDarkMode: isDarkMode)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
+                // Simple text view for thoughts
+                Text(thinkingText)
+                    .font(.system(size: 14))
+                    .foregroundColor(isDarkMode ? .white.opacity(0.9) : Color.black.opacity(0.8))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
             }
             .frame(height: isCollapsed ? 0 : nil)
             .opacity(isCollapsed ? 0 : 1)
@@ -398,116 +454,9 @@ struct CollapsibleThinkingBox: View {
             // Keep the box collapsed regardless of streaming state changes
             // User can manually expand/collapse as needed
         }
-        .onChange(of: isCollapsible) { oldValue, newValue in
-            // If the box just became collapsible (streaming ended)
-            if newValue && !oldValue {
-                withAnimation(.spring()) {
-                    isCollapsed = true // Auto-collapse
-                }
-            }
-        }
     }
 }
 
-/// A custom view that displays each line of text with a numbered label
-/// and a vertical connector extending to subsequent lines. We treat
-/// double newlines (\n\n) as actual line breaks and convert single
-/// newlines (\n) into spaces so they don't split lines.
-struct NumberedThoughtLinesView: View {
-    let text: String
-    let isDarkMode: Bool
-    
-    @State private var heights: [Int: CGFloat] = [:]
-    @State private var totalHeight: CGFloat = 0
-
-    var body: some View {
-        let replaced = text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            // Convert single newlines to spaces, but preserve double newlines as paragraph breaks
-            // This regex pattern matches:
-            // ([^\n]) - any character that isn't a newline (captured as group 1)
-            // \n - a single newline
-            // (?!\n) - negative lookahead: not followed by another newline
-            // ([^\n]) - any character that isn't a newline (captured as group 2)
-            // The replacement "$1 $2" joins the two captured groups with a space
-            .replacingOccurrences(
-                of: #"([^\n])\n(?!\n)([^\n])"#, 
-                with: "$1 $2",
-                options: .regularExpression
-            )
-        
-        let lines = replaced.components(separatedBy: "\n\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        return VStack(alignment: .leading, spacing: 0) {
-            ForEach(lines.indices, id: \.self) { i in
-                HStack(alignment: .top, spacing: 8) {
-                    // Container for circle and line
-                    ZStack(alignment: .top) {
-                        // Vertical line for connection to next paragraph (if exists)
-                        if i < lines.count - 1 {
-                            Rectangle()
-                                .fill(isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2))
-                                .frame(width: 2)
-                                // Position the line to start from below the circle
-                                // and extend down but not all the way to the next circle
-                                .frame(height: max((heights[i] ?? 0) - 8, 0)) // Reduced height to prevent overlap
-                                .offset(y: 24) // Start below the circle
-                        }
-                        
-                        // Circle with number (positioned at the top)
-                        ZStack {
-                            Circle()
-                                .fill(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.1))
-                                .frame(width: 20, height: 20)
-                            
-                            Text("\(i+1)")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(isDarkMode ? .white : .black)
-                        }
-                    }
-                    .frame(width: 20)
-                    
-                    // Text content
-                    MarkdownText(content: lines[i], isDarkMode: isDarkMode, horizontalPadding: 0)
-                        .padding(.top, 2)
-                        .background(
-                            GeometryReader { geometry in
-                                Color.clear.onAppear {
-                                    if geometry.size.height.isFinite {
-                                        heights[i] = geometry.size.height
-                                        calculateTotalHeight()
-                                    }
-                                }.onChange(of: geometry.size.height) { oldValue, newValue in
-                                    // Update height when content changes and value is valid
-                                    if abs(oldValue - newValue) > 1 && newValue.isFinite {
-                                        heights[i] = newValue
-                                        calculateTotalHeight()
-                                    }
-                                }
-                            }
-                        )
-                }
-                // Add spacing between paragraphs
-                .padding(.bottom, i < lines.count - 1 ? 24 : 0)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
-    }
-    
-    // Calculate the total height of all paragraphs for positioning
-    private func calculateTotalHeight() {
-        var total: CGFloat = 0
-        for i in heights.keys.sorted() {
-            if let height = heights[i], height.isFinite {
-                total += height + (i < heights.count - 1 ? 16 : 0) // Add spacing between paragraphs
-            }
-        }
-        self.totalHeight = total
-    }
-}
 
 struct LoadingDotsView: View {    
     let isDarkMode: Bool
@@ -521,6 +470,21 @@ struct LoadingDotsView: View {
             }
         }
         .foregroundColor(isDarkMode ? .white : .black)
+    }
+}
+
+struct InlineLoadingDotsView: View {
+    let isDarkMode: Bool
+    
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<3) { index in
+                Circle()
+                    .frame(width: 4, height: 4)
+                    .modifier(PulsingAnimation(delay: 0.2 * Double(index)))
+            }
+        }
+        .foregroundColor(isDarkMode ? .white.opacity(0.8) : Color.black.opacity(0.7))
     }
 }
 

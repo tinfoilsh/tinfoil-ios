@@ -2,8 +2,8 @@
 //  ChatViewModel.swift
 //  TinfoilChat
 //
-//  Created on 04/10/24.
-//  Copyright © 2024 Tinfoil. All rights reserved.
+//  Created on 04/10/25.
+//  Copyright © 2025 Tinfoil. All rights reserved.
 
 import Foundation
 import Combine
@@ -21,12 +21,22 @@ class ChatViewModel: ObservableObject {
     @Published var showVerifierSheet: Bool = false
     @Published var scrollTargetMessageId: String? = nil 
     @Published var scrollTargetOffset: CGFloat = 0 
+    /// When set to true, the input field should become first responder (focus keyboard)
+    @Published var shouldFocusInput: Bool = false
     
-    // Verification properties
-    @Published var isVerifying: Bool = false
-    @Published var isVerified: Bool = false
-    @Published var verificationError: String? = nil
+    // Verification properties - consolidated to reduce update frequency
+    struct VerificationInfo {
+        var isVerifying: Bool = false
+        var isVerified: Bool = false
+        var error: String? = nil
+    }
+    @Published var verification = VerificationInfo()
     private var hasRunInitialVerification: Bool = false
+    
+    // Computed properties for backward compatibility
+    var isVerifying: Bool { verification.isVerifying }
+    var isVerified: Bool { verification.isVerified }
+    var verificationError: String? { verification.error }
     
     // Stored verification measurements
     private var verificationCodeDigest: String?
@@ -157,8 +167,8 @@ class ChatViewModel: ObservableObject {
     
     private func setupTinfoilClient() {
         if !hasRunInitialVerification {
-            self.verificationError = nil
-            self.isVerifying = true
+            self.verification.error = nil
+            self.verification.isVerifying = true
         }
         
         Task {
@@ -181,9 +191,9 @@ class ChatViewModel: ObservableObject {
                                 guard let self = self else { return }
                                 
                                 // Update verification state if there's a mismatch
-                                if !passed && self.isVerified {
-                                    self.isVerified = false
-                                    self.verificationError = "Client verification failed after explicit verification succeeded"
+                                if !passed && self.verification.isVerified {
+                                    self.verification.isVerified = false
+                                    self.verification.error = "Client verification failed after explicit verification succeeded"
                                 }
                             }
                         }
@@ -197,9 +207,9 @@ class ChatViewModel: ObservableObject {
 
             } catch {
                 if !hasRunInitialVerification {
-                    self.isVerifying = false
-                    self.isVerified = false
-                    self.verificationError = error.localizedDescription
+                    self.verification.isVerifying = false
+                    self.verification.isVerified = false
+                    self.verification.error = error.localizedDescription
                     self.hasRunInitialVerification = true
                 }
             }
@@ -212,14 +222,14 @@ class ChatViewModel: ObservableObject {
         let callbacks = VerificationCallbacks(
             onVerificationStart: { [weak self] in
                 Task { @MainActor in
-                    self?.isVerifying = true
+                    self?.verification.isVerifying = true
                 }
             },
             onVerificationComplete: { [weak self] result in
                 Task { @MainActor in
                     guard let self = self else { return }
                     
-                    self.isVerifying = false
+                    self.verification.isVerifying = false
                     self.hasRunInitialVerification = true
                     
                     switch result {
@@ -240,12 +250,12 @@ class ChatViewModel: ObservableObject {
                         // Store the public key (this is already a string)
                         self.verificationTlsCertFingerprint = groundTruth.publicKeyFP
                         
-                        self.isVerified = true
-                        self.verificationError = nil
+                        self.verification.isVerified = true
+                        self.verification.error = nil
                         
                     case .failure(let error):
-                        self.isVerified = false
-                        self.verificationError = error.localizedDescription
+                        self.verification.isVerified = false
+                        self.verification.error = error.localizedDescription
                     }
                 }
             }
@@ -262,9 +272,9 @@ class ChatViewModel: ObservableObject {
             _ = try await secureClient.verify()
         } catch {
             await MainActor.run {
-                self.isVerifying = false
-                self.isVerified = false
-                self.verificationError = error.localizedDescription
+                self.verification.isVerifying = false
+                self.verification.isVerified = false
+                self.verification.error = error.localizedDescription
                 self.hasRunInitialVerification = true
             }
         }
@@ -311,6 +321,8 @@ class ChatViewModel: ObservableObject {
         chats.insert(newChat, at: 0)
         // Select the new chat
         selectChat(newChat)
+        // Request focus for the input when starting a new conversation
+        shouldFocusInput = true
     }
     
     /// Selects a chat as the current chat
@@ -434,7 +446,15 @@ class ChatViewModel: ObservableObject {
                 let modelId = AppConfig.shared.getModelConfig(currentModel)?.modelId ?? ""
                 
                 // Add system message first with language preference
-                var systemPrompt = AppConfig.shared.systemPrompt
+                let settingsManager = SettingsManager.shared
+                var systemPrompt: String
+                
+                // Use custom prompt if enabled, otherwise use default
+                if settingsManager.isUsingCustomPrompt && !settingsManager.customSystemPrompt.isEmpty {
+                    systemPrompt = settingsManager.customSystemPrompt
+                } else {
+                    systemPrompt = AppConfig.shared.systemPrompt
+                }
                 
                 // Replace MODEL_NAME placeholder with current model name
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
@@ -447,7 +467,6 @@ class ChatViewModel: ObservableObject {
                 }
                 
                 // Add personalization XML if enabled
-                let settingsManager = SettingsManager.shared
                 let personalizationXML = settingsManager.generateUserPreferencesXML()
                 if !personalizationXML.isEmpty {
                     systemPrompt = systemPrompt.replacingOccurrences(of: "{USER_PREFERENCES}", with: personalizationXML)
@@ -470,7 +489,7 @@ class ChatViewModel: ObservableObject {
                 ]
                 
                 // Add conversation messages
-                let messagesForContext = Array(self.messages.suffix(AppConfig.shared.maxMessagesPerRequest))
+                let messagesForContext = Array(self.messages.suffix(settingsManager.maxMessages))
                 for message in messagesForContext {
                     if message.role == .user {
                         messages.append(.user(.init(content: .string(message.content))))
@@ -491,38 +510,140 @@ class ChatViewModel: ObservableObject {
                 // Process the stream
                 var thinkStartTime: Date? = nil
                 var hasThinkTag = false
+                var thoughtsBuffer = ""
+                var isInThinkingMode = false
+                var isUsingReasoningFormat = false
+                var initialContentBuffer = ""
+                var isFirstChunk = true
                 
                 for try await chunk in stream {
-                    if let content = chunk.choices.first?.delta.content {
-                        // Update UI on main thread
-                        await MainActor.run {
-                            // Exit if the chat has changed
-                            guard self.currentChat?.id == streamChatId else { return }
+                    // Get the content from the delta
+                    let content = chunk.choices.first?.delta.content ?? ""
+                    
+                    // Check for reasoning content (supports both reasoning and reasoning_content fields)
+                    let hasReasoningContent = chunk.choices.first?.delta.reasoning != nil
+                    let reasoningContent = chunk.choices.first?.delta.reasoning ?? ""
+                    
+                    // Update UI on main thread
+                    await MainActor.run {
+                        // Exit if the chat has changed
+                        guard self.currentChat?.id == streamChatId else { return }
+                        
+                        if var chat = self.currentChat,
+                           !chat.messages.isEmpty,
+                           let lastIndex = chat.messages.indices.last {
                             
-                            if var chat = self.currentChat,
-                               !chat.messages.isEmpty {
-                                // Check for think tag start
-                                if content.contains("<think>") {
-                                    thinkStartTime = Date()
-                                    hasThinkTag = true
+                            // Detect start of reasoning_content format
+                            if hasReasoningContent && !isUsingReasoningFormat && !isInThinkingMode {
+                                isUsingReasoningFormat = true
+                                isInThinkingMode = true
+                                isFirstChunk = false
+                                thinkStartTime = Date() // Track when thinking started
+                                
+                                if !reasoningContent.isEmpty {
+                                    thoughtsBuffer = reasoningContent
+                                    chat.messages[lastIndex].thoughts = thoughtsBuffer
+                                    chat.messages[lastIndex].isThinking = true
+                                    self.updateChat(chat)
+                                }
+                            } else if isUsingReasoningFormat {
+                                // Continue with reasoning format
+                                if !reasoningContent.isEmpty {
+                                    thoughtsBuffer += reasoningContent
+                                    // Update thoughts in real-time for streaming
+                                    chat.messages[lastIndex].thoughts = thoughtsBuffer
+                                    chat.messages[lastIndex].isThinking = true
                                 }
                                 
-                                // Check for think tag end
-                                if hasThinkTag && content.contains("</think>") {
+                                // Check if regular content has appeared - this signals end of thinking
+                                if !content.isEmpty && isInThinkingMode {
+                                    // Calculate generation time before clearing thinkStartTime
                                     if let startTime = thinkStartTime {
-                                        let generationTime = Date().timeIntervalSince(startTime)
-                                        if let lastIndex = chat.messages.indices.last {
-                                            chat.messages[lastIndex].generationTimeSeconds = generationTime
-                                        }
+                                        chat.messages[lastIndex].generationTimeSeconds = Date().timeIntervalSince(startTime)
                                     }
-                                    hasThinkTag = false
+                                    
+                                    isInThinkingMode = false
                                     thinkStartTime = nil
+                                    
+                                    // Finalize thoughts and start regular content
+                                    chat.messages[lastIndex].thoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                                    chat.messages[lastIndex].isThinking = false
+                                    chat.messages[lastIndex].content = content
+                                } else if !content.isEmpty {
+                                    // Regular content after thinking has ended
+                                    chat.messages[lastIndex].content += content
+                                    chat.messages[lastIndex].isThinking = false
                                 }
                                 
-                                // Append the new content safely
-                                if let lastIndex = chat.messages.indices.last {
+                                // Always update if we got any new content
+                                if !reasoningContent.isEmpty || !content.isEmpty {
+                                    self.updateChat(chat)
+                                }
+                            } else if !isUsingReasoningFormat && !content.isEmpty {
+                                // Handle original <think> tag format
+                                if isFirstChunk {
+                                    initialContentBuffer += content
+                                    
+                                    // Check if we have enough content to determine format
+                                    if initialContentBuffer.contains("<think>") || initialContentBuffer.count > 5 {
+                                        isFirstChunk = false
+                                        let processContent = initialContentBuffer
+                                        initialContentBuffer = ""
+                                        
+                                        // Check for think tag
+                                        if processContent.contains("<think>") {
+                                            isInThinkingMode = true
+                                            hasThinkTag = true
+                                            thinkStartTime = Date()
+                                            
+                                            // Extract thoughts from <think> tags
+                                            if let thinkRange = processContent.range(of: "<think>") {
+                                                let afterThink = String(processContent[thinkRange.upperBound...])
+                                                thoughtsBuffer = afterThink
+                                                chat.messages[lastIndex].thoughts = thoughtsBuffer
+                                                chat.messages[lastIndex].isThinking = true
+                                            }
+                                        } else {
+                                            // Regular content
+                                            chat.messages[lastIndex].content += processContent
+                                        }
+                                        self.updateChat(chat)
+                                    }
+                                } else if hasThinkTag {
+                                    // Continue processing think tag content
+                                    if content.contains("</think>") {
+                                        // End of thinking
+                                        if let endRange = content.range(of: "</think>") {
+                                            let beforeEnd = String(content[..<endRange.lowerBound])
+                                            thoughtsBuffer += beforeEnd
+                                            
+                                            chat.messages[lastIndex].thoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                                            chat.messages[lastIndex].isThinking = false
+                                            
+                                            // Add content after </think>
+                                            let afterEnd = String(content[endRange.upperBound...])
+                                            chat.messages[lastIndex].content = afterEnd
+                                            
+                                            // Calculate generation time
+                                            if let startTime = thinkStartTime {
+                                                chat.messages[lastIndex].generationTimeSeconds = Date().timeIntervalSince(startTime)
+                                            }
+                                            
+                                            hasThinkTag = false
+                                            isInThinkingMode = false
+                                            thinkStartTime = nil
+                                            thoughtsBuffer = ""
+                                        }
+                                    } else {
+                                        // Continue accumulating thoughts
+                                        thoughtsBuffer += content
+                                        chat.messages[lastIndex].thoughts = thoughtsBuffer
+                                    }
+                                    self.updateChat(chat)
+                                } else {
+                                    // Regular content (no thinking)
                                     chat.messages[lastIndex].content += content
-                                    self.updateChat(chat) // Saves the full chat
+                                    self.updateChat(chat)
                                 }
                             }
                         }
@@ -533,13 +654,41 @@ class ChatViewModel: ObservableObject {
                 await MainActor.run {
                     self.isLoading = false
                     
-                    // If we still have an open think tag, calculate the time
-                    if hasThinkTag, let startTime = thinkStartTime,
-                       var chat = self.currentChat,
-                       !chat.messages.isEmpty {
-                        let generationTime = Date().timeIntervalSince(startTime)
-                        chat.messages[chat.messages.count - 1].generationTimeSeconds = generationTime
-                        self.updateChat(chat)
+                    // Handle any remaining buffered content when stream ends
+                    if var chat = self.currentChat,
+                       !chat.messages.isEmpty,
+                       let lastIndex = chat.messages.indices.last {
+                        
+                        // If we're still in thinking mode when stream ends
+                        if isInThinkingMode && !thoughtsBuffer.isEmpty {
+                            isInThinkingMode = false
+                            
+                            if isUsingReasoningFormat {
+                                // For reasoning_content format, keep thoughts as thoughts
+                                chat.messages[lastIndex].thoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                                chat.messages[lastIndex].isThinking = false
+                            } else {
+                                // For <think> format without closing tag, convert thoughts to content
+                                chat.messages[lastIndex].thoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                                chat.messages[lastIndex].isThinking = false
+                                // If there's no content yet, move thoughts to content
+                                if chat.messages[lastIndex].content.isEmpty {
+                                    chat.messages[lastIndex].content = thoughtsBuffer
+                                    chat.messages[lastIndex].thoughts = nil
+                                }
+                            }
+                            
+                            // Calculate generation time
+                            if let startTime = thinkStartTime {
+                                chat.messages[lastIndex].generationTimeSeconds = Date().timeIntervalSince(startTime)
+                            }
+                            
+                            self.updateChat(chat)
+                        } else if isFirstChunk && !initialContentBuffer.isEmpty {
+                            // Process any buffered content that wasn't processed
+                            chat.messages[lastIndex].content = initialContentBuffer
+                            self.updateChat(chat)
+                        }
                     }
                     
                     // Mark the chat as no longer having an active stream
@@ -860,7 +1009,7 @@ class ChatViewModel: ObservableObject {
             
             // Show warning if user is not authenticated or doesn't have subscription
             if !isAuthenticated || !hasSubscription {
-                self.verificationError = isAuthenticated 
+                self.verification.error = isAuthenticated 
                     ? "Premium model requires an active subscription." 
                     : "Premium model requires authentication."
                 
