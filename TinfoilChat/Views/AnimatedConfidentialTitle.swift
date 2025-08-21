@@ -17,7 +17,7 @@ struct AnimatedConfidentialTitle: View {
     @State private var animationTimer: Timer?
     @ObservedObject private var settings = SettingsManager.shared
     
-    private let fullText = "Confidential Chat"
+    private let fullText = "Private Chat"
     private let typingSpeed = 0.05 // seconds per character
     private let hapticGenerator = UIImpactFeedbackGenerator(style: .light)
     
