@@ -432,15 +432,10 @@ struct SettingsView: View {
                                             .foregroundColor(.secondary)
                                     }
                                     Spacer()
-                                    HStack(spacing: 4) {
-                                        if settings.isUsingCustomPrompt {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .font(.caption)
-                                                .foregroundColor(.green)
-                                        }
-                                        Image(systemName: "chevron.right")
-                                            .font(.caption2)
-                                            .foregroundColor(Color(UIColor.quaternaryLabel))
+                                    if settings.isUsingCustomPrompt {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.caption)
+                                            .foregroundColor(.green)
                                     }
                                 }
                             }
