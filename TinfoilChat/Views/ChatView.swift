@@ -827,7 +827,8 @@ struct TabbedWelcomeView: View {
                 .padding(.top, 8)
             }
         }
-        .padding(.vertical, 24)
+        .padding(.top, 24)
+        .padding(.bottom, 4)
         .onAppear {
             selectedModelId = viewModel.currentModel.id
         }
