@@ -111,7 +111,7 @@ struct MessageInputView: View {
                                            (isDarkMode ? .black : .white))
                     }
                 }
-                .padding(.trailing, 24)
+                .padding(.trailing, 16)
             }
             .padding(.vertical, 8)
         }
