@@ -416,7 +416,7 @@ struct ChatScrollView: View {
             // Messages ScrollView
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 0) {
+                    VStack(spacing: 0) {
                         if messages.isEmpty {
                             if let authManager = viewModel.authManager {
                                 WelcomeView(isDarkMode: isDarkMode, authManager: authManager)
@@ -461,7 +461,7 @@ struct ChatScrollView: View {
                         }
                     }
 
-                    // Bottom anchor point placed outside the LazyVStack so it always exists
+                    // Bottom anchor point placed outside the VStack so it always exists
                     Color.clear
                         .frame(height: 1)
                         .id("bottom")
