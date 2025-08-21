@@ -423,6 +423,21 @@ class ChatViewModel: ObservableObject {
         
         // Create and start a new task for the streaming request
         currentTask = Task {
+            // Begin background task to allow stream to complete if app goes to background
+            var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+            backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "CompleteStreamingResponse") {
+                // Clean up if system terminates the background task
+                UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                backgroundTaskId = .invalid
+            }
+            
+            defer {
+                // Always end the background task when done
+                if backgroundTaskId != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                }
+            }
+            
             do {
                 // Wait for client initialization if needed
                 if client == nil {
@@ -710,12 +725,30 @@ class ChatViewModel: ObservableObject {
                     
                     if var chat = self.currentChat,
                        !chat.messages.isEmpty {
+                        let lastIndex = chat.messages.count - 1
+                        let lastMessage = chat.messages[lastIndex]
+                        
+                        // Check if we got partial content before the error
+                        let hasPartialContent = !lastMessage.content.isEmpty || lastMessage.thoughts != nil
+                        
                         // Format a more user-friendly error message based on the error type
                         let userFriendlyError = formatUserFriendlyError(error)
                         
-                        // Update the last message in the full chat with the actual error
-                        chat.messages[chat.messages.count - 1].content = "Error: \(userFriendlyError)"
-                        chat.messages[chat.messages.count - 1].streamError = userFriendlyError
+                        // Handle network connection lost differently if we have partial content
+                        let nsError = error as NSError
+                        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorNetworkConnectionLost && hasPartialContent {
+                            // Keep partial content and append a note about the interruption
+                            if !chat.messages[lastIndex].content.isEmpty {
+                                chat.messages[lastIndex].content += "\n\n[Response interrupted: Network connection lost]"
+                            } else {
+                                chat.messages[lastIndex].content = "[Response interrupted: Network connection lost]"
+                            }
+                            chat.messages[lastIndex].streamError = "Network connection lost - response may be incomplete"
+                        } else {
+                            // For other errors or when no partial content exists, show error message
+                            chat.messages[lastIndex].content = "Error: \(userFriendlyError)"
+                            chat.messages[lastIndex].streamError = userFriendlyError
+                        }
                         
                         // Trigger error haptic feedback
                         Message.triggerErrorFeedback()
@@ -735,9 +768,10 @@ class ChatViewModel: ObservableObject {
         if nsError.domain == NSURLErrorDomain {
             switch nsError.code {
             case NSURLErrorNotConnectedToInternet, 
-                 NSURLErrorDataNotAllowed,
-                 NSURLErrorNetworkConnectionLost:
+                 NSURLErrorDataNotAllowed:
                 return "The Internet connection appears to be offline."
+            case NSURLErrorNetworkConnectionLost:
+                return "Network connection was lost. The response may be incomplete."
             case NSURLErrorTimedOut:
                 return "Request timed out. Please try again."
             case NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost:
