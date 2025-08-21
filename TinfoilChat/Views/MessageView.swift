@@ -97,8 +97,10 @@ struct MessageView: View {
                     }
                 }
                 
-                // Add copy button for assistant messages
-                if message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil) {
+                // Add copy button for assistant messages (only when not streaming)
+                if message.role == .assistant && 
+                   (!message.content.isEmpty || message.thoughts != nil) &&
+                   !(viewModel.isLoading && message.id == viewModel.messages.last?.id) {
                     HStack {
                         Button(action: copyMessage) {
                             HStack(spacing: 4) {
