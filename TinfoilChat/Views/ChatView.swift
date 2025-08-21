@@ -47,6 +47,10 @@ struct ChatContainer: View {
         .environmentObject(viewModel)
         .onAppear {
             setupNavigationBarAppearance()
+            
+            // Ensure sidebar is closed on initial appearance
+            isSidebarOpen = false
+            dragOffset = 0
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // App is going to background, record the time
@@ -59,6 +63,12 @@ struct ChatContainer: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             // App is coming to foreground, check if we should create a new chat
             checkAndCreateNewChatIfNeeded()
+            
+            // Ensure sidebar is fully closed when returning from background
+            withAnimation(.easeOut(duration: 0.2)) {
+                isSidebarOpen = false
+                dragOffset = 0
+            }
         }
         .sheet(isPresented: $viewModel.showVerifierSheet) {
             if let verifierView = viewModel.verifierView {
@@ -512,9 +522,10 @@ struct ChatScrollView: View {
                     if newMessages.count > lastMessageCount {
                         lastMessageCount = newMessages.count
                         userHasScrolled = false // Reset scroll state for new messages
-                        // Two-phase scroll on new items
+                        // Immediate scroll to prevent blank screen
                         scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                        DispatchQueue.main.async {
+                        // Then animated scroll for smooth effect
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             withAnimation(.easeOut(duration: 0.2)) {
                                 scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
                             }
@@ -522,7 +533,7 @@ struct ChatScrollView: View {
                     } else if !userHasScrolled {
                         // Only scroll if user hasn't manually scrolled up
                         scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                        DispatchQueue.main.async {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             withAnimation(.easeOut(duration: 0.2)) {
                                 scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
                             }
