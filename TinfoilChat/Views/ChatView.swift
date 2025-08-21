@@ -762,7 +762,7 @@ struct TabbedWelcomeView: View {
                     AnimatedConfidentialTitle()
                 }
                 
-                Text("This conversation is completely private, nobody can see your messages — not even Tinfoil.")
+                Text("This conversation is private.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
