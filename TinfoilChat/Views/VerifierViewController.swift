@@ -792,18 +792,25 @@ struct MeasurementDiffView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Measurement Comparison").font(.headline)
                 
-            Label(isVerified ? "Source and runtime measurements match" : "Measurement mismatch detected",
-                  systemImage: isVerified ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
-                .foregroundColor(isVerified ? .green : .red)
-                .font(.subheadline)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(isVerified ? 
-                              Color.green.opacity(colorScheme == .dark ? 0.2 : 0.1) : 
-                              Color.red.opacity(colorScheme == .dark ? 0.2 : 0.1))
-                )
+            HStack(spacing: 8) {
+                Image(systemName: isVerified ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
+                    .foregroundColor(isVerified ? .green : .red)
+                Text(isVerified ? "Source and runtime measurements match" : "Measurement mismatch detected")
+                    .foregroundColor(isVerified ? .green : .red)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer()
+            }
+            .font(.subheadline)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isVerified ? 
+                          Color.green.opacity(colorScheme == .dark ? 0.2 : 0.1) : 
+                          Color.red.opacity(colorScheme == .dark ? 0.2 : 0.1))
+            )
             
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .center, spacing: 8) {
