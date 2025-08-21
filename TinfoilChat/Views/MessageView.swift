@@ -96,6 +96,27 @@ struct MessageView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+                
+                // Add copy button for assistant messages
+                if message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil) {
+                    HStack {
+                        Button(action: copyMessage) {
+                            HStack(spacing: 4) {
+                                Image(systemName: showCopyFeedback ? "checkmark" : "doc.on.doc")
+                                    .font(.system(size: 12))
+                                if showCopyFeedback {
+                                    Text("Copied!")
+                                        .font(.system(size: 12))
+                                }
+                            }
+                            .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        
+                        Spacer()
+                    }
+                    .padding(.top, 4)
+                }
             }
             .padding(.vertical, 8)
             .padding(.horizontal, message.role == .user ? 12 : 0)
@@ -134,27 +155,10 @@ struct MessageView: View {
                     }
                 }
             }
-            .overlay(alignment: message.role == .user ? .leading : .trailing) {
-                if showCopyFeedback {
-                    copyFeedbackView
-                }
-            }
         }
         .padding(.horizontal, 4)
     }
     
-    // Feedback view shown when text is copied
-    private var copyFeedbackView: some View {
-        Text("Copied!")
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.black.opacity(0.7))
-            .foregroundColor(.white)
-            .cornerRadius(8)
-            .transition(.scale(scale: 0.8).combined(with: .opacity))
-            .padding(.horizontal, 8)
-    }
     
     // Function to copy the entire message
     private func copyMessage() {
@@ -185,7 +189,7 @@ struct MessageView: View {
         }
         
         // Hide the feedback after a delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             withAnimation {
                 showCopyFeedback = false
             }
