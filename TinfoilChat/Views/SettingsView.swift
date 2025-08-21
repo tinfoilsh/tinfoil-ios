@@ -397,6 +397,7 @@ struct SettingsView: View {
                                         Image(systemName: "minus.circle")
                                             .foregroundColor(settings.maxMessages > 1 ? .accentColor : .gray)
                                     }
+                                    .buttonStyle(BorderlessButtonStyle())
                                     .disabled(settings.maxMessages <= 1)
                                     
                                     Text("\(settings.maxMessages)")
@@ -411,6 +412,7 @@ struct SettingsView: View {
                                         Image(systemName: "plus.circle")
                                             .foregroundColor(settings.maxMessages < 50 ? .accentColor : .gray)
                                     }
+                                    .buttonStyle(BorderlessButtonStyle())
                                     .disabled(settings.maxMessages >= 50)
                                 }
                             }
