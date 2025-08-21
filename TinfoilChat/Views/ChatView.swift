@@ -506,6 +506,10 @@ struct ChatScrollView: View {
                             if value.translation.height > 0 && isLoading {
                                 userHasScrolled = true
                             }
+                            // Dismiss keyboard when scrolling up
+                            if value.translation.height > 10 && isKeyboardVisible {
+                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                            }
                         }
                         .onEnded { _ in
                             isScrolling = false
