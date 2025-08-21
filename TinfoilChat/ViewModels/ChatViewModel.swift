@@ -1107,7 +1107,17 @@ class ChatViewModel: ObservableObject {
             saveChats()
         }
         
-        // Clear current chats and create a new empty one
+        // Reset to a free model when signing out
+        let freeModels = AppConfig.shared.filteredModelTypes(
+            isAuthenticated: false,
+            hasActiveSubscription: false
+        )
+        if let defaultFreeModel = freeModels.first {
+            currentModel = defaultFreeModel
+            AppConfig.shared.currentModel = defaultFreeModel
+        }
+        
+        // Clear current chats and create a new empty one with the free model
         chats = []
         let newChat = Chat.create(modelType: currentModel)
         currentChat = newChat
