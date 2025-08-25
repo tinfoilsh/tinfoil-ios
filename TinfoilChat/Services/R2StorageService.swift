@@ -29,13 +29,13 @@ class R2StorageService: ObservableObject {
     private func defaultTokenGetter() async -> String? {
         do {
             // Ensure Clerk is loaded
-            let isLoaded = await Clerk.shared.isLoaded
+            let isLoaded = Clerk.shared.isLoaded
             if !isLoaded {
                 try await Clerk.shared.load()
             }
             
             // Get session token
-            if let session = await Clerk.shared.session,
+            if let session = Clerk.shared.session,
                let tokenResource = session.lastActiveToken {
                 return tokenResource.jwt
             }
@@ -109,9 +109,13 @@ class R2StorageService: ObservableObject {
         request.httpMethod = "PUT"
         request.allHTTPHeaderFields = try await getHeaders()
         
+        // Send encrypted data as JSON string
+        let encryptedJSON = try JSONEncoder().encode(encrypted)
+        let encryptedString = String(data: encryptedJSON, encoding: .utf8)!
+        
         let body = UploadConversationRequest(
             conversationId: chat.id,
-            data: try JSONEncoder().encode(encrypted).base64EncodedString(),
+            data: encryptedString,
             metadata: metadata
         )
         request.httpBody = try JSONEncoder().encode(body)
@@ -156,14 +160,14 @@ class R2StorageService: ObservableObject {
             // If decryption fails, create a placeholder with encrypted data
             let timestamp = chatId.split(separator: "_").first.map(String.init) ?? ""
             let parsedTimestamp = Int(timestamp) ?? 0
-            let createdAtMs = parsedTimestamp > 0 ? 9999999999999 - parsedTimestamp : Date().timeIntervalSince1970 * 1000
+            let createdAtMs = parsedTimestamp > 0 ? Double(9999999999999 - parsedTimestamp) : Date().timeIntervalSince1970 * 1000
             
             return StoredChat(
                 from: Chat.create(
                     id: chatId,
                     title: "Encrypted",
                     messages: [],
-                    createdAt: Date(timeIntervalSince1970: createdAtMs / 1000)
+                    createdAt: Date(timeIntervalSince1970: Double(createdAtMs) / 1000.0)
                 )
             )
         }

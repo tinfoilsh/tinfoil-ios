@@ -108,8 +108,8 @@ class ProfileSyncService: ObservableObject {
         
         // Try to decrypt the profile data
         do {
-            // Parse the encrypted data
-            guard let encryptedData = Data(base64Encoded: profileResponse.data) else {
+            // Parse the encrypted data (JSON string format)
+            guard let encryptedData = profileResponse.data.data(using: .utf8) else {
                 throw ProfileSyncError.invalidBase64
             }
             
@@ -159,9 +159,9 @@ class ProfileSyncService: ObservableObject {
         
         print("Encrypted profile data - IV length: \(encrypted.iv.count), data length: \(encrypted.data.count)")
         
-        // Encode encrypted data as JSON then base64
+        // Send encrypted data as JSON string
         let encryptedData = try JSONEncoder().encode(encrypted)
-        let base64String = encryptedData.base64EncodedString()
+        let jsonString = String(data: encryptedData, encoding: .utf8)!
         
         // Create upload request
         let url = URL(string: "\(apiBaseURL)/api/profile/")!
@@ -169,7 +169,7 @@ class ProfileSyncService: ObservableObject {
         request.httpMethod = "PUT"
         request.allHTTPHeaderFields = try await getHeaders()
         
-        let body = ProfileUploadRequest(data: base64String)
+        let body = ProfileUploadRequest(data: jsonString)
         request.httpBody = try JSONEncoder().encode(body)
         
         let (_, response) = try await URLSession.shared.data(for: request)
@@ -196,7 +196,8 @@ class ProfileSyncService: ObservableObject {
         do {
             _ = try await EncryptionService.shared.initialize()
             
-            guard let encryptedData = Data(base64Encoded: failedDecryptionData) else {
+            // Parse the encrypted data (JSON string format)
+            guard let encryptedData = failedDecryptionData.data(using: .utf8) else {
                 throw ProfileSyncError.invalidBase64
             }
             

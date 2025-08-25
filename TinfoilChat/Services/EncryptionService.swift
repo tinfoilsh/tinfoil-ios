@@ -99,7 +99,8 @@ class EncryptionService: ObservableObject {
         
         // Convert data to JSON
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        // Don't set date encoding - let StoredChat handle its own format
+        // encoder.dateEncodingStrategy = .iso8601
         let jsonData = try encoder.encode(data)
         
         // Generate random nonce (IV)
@@ -109,10 +110,8 @@ class EncryptionService: ObservableObject {
         let sealedBox = try AES.GCM.seal(jsonData, using: encryptionKey, nonce: nonce)
         
         // Extract ciphertext and tag
-        guard let ciphertext = sealedBox.ciphertext,
-              let tag = sealedBox.tag else {
-            throw EncryptionError.encryptionFailed
-        }
+        let ciphertext = sealedBox.ciphertext
+        let tag = sealedBox.tag
         
         // Combine ciphertext and tag
         var combinedData = Data()
@@ -163,7 +162,8 @@ class EncryptionService: ObservableObject {
         
         // Decode JSON
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        // Don't set date decoding - let StoredChat handle its own format
+        // decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(type, from: decryptedData)
     }
     

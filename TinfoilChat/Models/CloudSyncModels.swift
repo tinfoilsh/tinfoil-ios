@@ -14,21 +14,20 @@ struct StoredChat: Codable {
     let id: String
     var title: String
     var messages: [Message]
-    var createdAt: Date
-    var updatedAt: Date
-    var lastAccessedAt: Date
+    var createdAt: Date      // Will be encoded as ISO string for API
+    var updatedAt: Date      // Will be encoded as ISO string for API
+    var lastAccessedAt: Date // Will be encoded as timestamp in milliseconds
     var modelType: ModelType
     var language: String?
     var userId: String?
     
     // Sync metadata
     var syncVersion: Int
-    var syncedAt: Date?
+    var syncedAt: Date?      // Will be encoded as timestamp in milliseconds
     var locallyModified: Bool
     
     // For handling encrypted chats that failed to decrypt
     var decryptionFailed: Bool?
-    var dataCorrupted: Bool?
     var encryptedData: String?
     
     // For tracking streaming state
@@ -60,6 +59,84 @@ struct StoredChat: Codable {
             language: language,
             userId: userId
         )
+    }
+    
+    // Custom encoding for cross-platform compatibility
+    enum CodingKeys: String, CodingKey {
+        case id, title, messages, createdAt, updatedAt, lastAccessedAt
+        case modelType, language, userId
+        case syncVersion, syncedAt, locallyModified
+        case decryptionFailed, encryptedData, hasActiveStream
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(messages, forKey: .messages)
+        
+        // Dates as ISO strings
+        let isoFormatter = ISO8601DateFormatter()
+        try container.encode(isoFormatter.string(from: createdAt), forKey: .createdAt)
+        try container.encode(isoFormatter.string(from: updatedAt), forKey: .updatedAt)
+        
+        // Timestamps as milliseconds
+        try container.encode(Int(lastAccessedAt.timeIntervalSince1970 * 1000), forKey: .lastAccessedAt)
+        
+        try container.encode(modelType, forKey: .modelType)
+        try container.encodeIfPresent(language, forKey: .language)
+        try container.encodeIfPresent(userId, forKey: .userId)
+        
+        try container.encode(syncVersion, forKey: .syncVersion)
+        
+        // syncedAt as milliseconds timestamp if present
+        if let syncedAt = syncedAt {
+            try container.encode(Int(syncedAt.timeIntervalSince1970 * 1000), forKey: .syncedAt)
+        }
+        
+        try container.encode(locallyModified, forKey: .locallyModified)
+        try container.encodeIfPresent(decryptionFailed, forKey: .decryptionFailed)
+        try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
+        try container.encodeIfPresent(hasActiveStream, forKey: .hasActiveStream)
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        messages = try container.decode([Message].self, forKey: .messages)
+        
+        // Dates from ISO strings
+        let isoFormatter = ISO8601DateFormatter()
+        let createdAtString = try container.decode(String.self, forKey: .createdAt)
+        let updatedAtString = try container.decode(String.self, forKey: .updatedAt)
+        
+        createdAt = isoFormatter.date(from: createdAtString) ?? Date()
+        updatedAt = isoFormatter.date(from: updatedAtString) ?? Date()
+        
+        // Timestamps from milliseconds
+        let lastAccessedAtMs = try container.decode(Int.self, forKey: .lastAccessedAt)
+        lastAccessedAt = Date(timeIntervalSince1970: Double(lastAccessedAtMs) / 1000.0)
+        
+        modelType = try container.decode(ModelType.self, forKey: .modelType)
+        language = try container.decodeIfPresent(String.self, forKey: .language)
+        userId = try container.decodeIfPresent(String.self, forKey: .userId)
+        
+        syncVersion = try container.decode(Int.self, forKey: .syncVersion)
+        
+        // syncedAt from milliseconds timestamp if present
+        if let syncedAtMs = try container.decodeIfPresent(Int.self, forKey: .syncedAt) {
+            syncedAt = Date(timeIntervalSince1970: Double(syncedAtMs) / 1000.0)
+        } else {
+            syncedAt = nil
+        }
+        
+        locallyModified = try container.decode(Bool.self, forKey: .locallyModified)
+        decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed)
+        encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
+        hasActiveStream = try container.decodeIfPresent(Bool.self, forKey: .hasActiveStream)
     }
 }
 
