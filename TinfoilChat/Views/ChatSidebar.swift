@@ -133,8 +133,9 @@ struct ChatSidebar: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.secondary)
+                
                 if authManager.isAuthenticated {
-                    Text("Your chat history is stored locally.")
+                    Text("Your chats are encrypted and backed up.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 } else {
@@ -254,10 +255,17 @@ struct ChatListItem: View {
                             }
                         }
                     } else {
-                        Text(chat.title)
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(spacing: 4) {
+                            if chat.decryptionFailed {
+                                Image(systemName: "lock.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
+                            }
+                            Text(chat.decryptionFailed ? "Encrypted" : chat.title)
+                                .foregroundColor(chat.decryptionFailed ? .orange : .primary)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                         
                         if isSelected && showEditDelete {
                             // Edit and Delete buttons
@@ -275,11 +283,17 @@ struct ChatListItem: View {
                     }
                 }
                 
-                // Timestamp inside the cell
+                // Timestamp or decryption failure message inside the cell
                 if !isEditing {
-                    Text(timeString)
-                        .font(.caption)
-                        .foregroundColor(.gray)
+                    if chat.decryptionFailed {
+                        Text("Failed to decrypt: wrong key")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    } else {
+                        Text(timeString)
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
                 }
             }
             .padding()

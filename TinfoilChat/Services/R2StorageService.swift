@@ -28,6 +28,11 @@ class R2StorageService: ObservableObject {
     /// Default token getter using Clerk
     private func defaultTokenGetter() async -> String? {
         do {
+            // Check if Clerk has a publishable key
+            guard Clerk.shared.publishableKey != nil else {
+                return nil
+            }
+            
             // Ensure Clerk is loaded
             let isLoaded = Clerk.shared.isLoaded
             if !isLoaded {
@@ -35,14 +40,17 @@ class R2StorageService: ObservableObject {
             }
             
             // Get session token
-            if let session = Clerk.shared.session,
-               let tokenResource = session.lastActiveToken {
-                return tokenResource.jwt
+            if let session = Clerk.shared.session {
+                // Get a fresh token
+                if let token = try? await session.getToken() {
+                    return token.jwt
+                } else if let tokenResource = session.lastActiveToken {
+                    return tokenResource.jwt
+                }
             }
             
             return nil
         } catch {
-            print("Error getting auth token: \(error)")
             return nil
         }
     }
@@ -177,6 +185,7 @@ class R2StorageService: ObservableObject {
     
     /// List chats from cloud storage with optional pagination
     func listChats(limit: Int? = nil, continuationToken: String? = nil, includeContent: Bool = false) async throws -> ChatListResponse {
+        
         var components = URLComponents(string: "\(apiBaseURL)/api/chats/list")!
         var queryItems: [URLQueryItem] = []
         
@@ -194,18 +203,28 @@ class R2StorageService: ObservableObject {
             components.queryItems = queryItems
         }
         
+        
         var request = URLRequest(url: components.url!)
         request.httpMethod = "GET"
         request.allHTTPHeaderFields = try await getHeaders()
         
         let (data, response) = try await URLSession.shared.data(for: request)
         
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+        guard let httpResponse = response as? HTTPURLResponse else {
             throw R2StorageError.listFailed
         }
         
-        return try JSONDecoder().decode(ChatListResponse.self, from: data)
+        
+        guard httpResponse.statusCode == 200 else {
+            throw R2StorageError.listFailed
+        }
+        
+        do {
+            let result = try JSONDecoder().decode(ChatListResponse.self, from: data)
+            return result
+        } catch {
+            throw error
+        }
     }
     
     // MARK: - Delete Operations

@@ -33,6 +33,17 @@ class ChatViewModel: ObservableObject {
     @Published var verification = VerificationInfo()
     private var hasRunInitialVerification: Bool = false
     
+    // Cloud sync properties
+    @Published var isSyncing: Bool = false
+    @Published var lastSyncDate: Date?
+    @Published var syncErrors: [String] = []
+    @Published var encryptionKey: String?
+    @Published var isFirstTimeUser: Bool = false
+    @Published var showEncryptionSetup: Bool = false
+    @Published var showSyncErrorRecovery: Bool = false
+    private let cloudSync = CloudSyncService.shared
+    private let streamingTracker = StreamingTracker.shared
+    
     // Computed properties for backward compatibility
     var isVerifying: Bool { verification.isVerifying }
     var isVerified: Bool { verification.isVerified }
@@ -313,16 +324,40 @@ class ChatViewModel: ObservableObject {
             cancelGeneration()
         }
         
-        let newChat = Chat.create(
-            modelType: modelType ?? currentModel,
-            language: language,
-            userId: currentUserId
-        )
-        chats.insert(newChat, at: 0)
-        // Select the new chat
-        selectChat(newChat)
-        // Request focus for the input when starting a new conversation
-        shouldFocusInput = true
+        Task {
+            let newChat: Chat
+            
+            // Use timestamp-based ID for authenticated users (for cloud sync)
+            if authManager?.isAuthenticated == true {
+                do {
+                    newChat = try await Chat.createWithTimestampId(
+                        modelType: modelType ?? currentModel,
+                        language: language,
+                        userId: currentUserId
+                    )
+                } catch {
+                    // Fallback to UUID if ID generation fails
+                    newChat = Chat.create(
+                        modelType: modelType ?? currentModel,
+                        language: language,
+                        userId: currentUserId
+                    )
+                }
+            } else {
+                // Use regular UUID for anonymous users
+                newChat = Chat.create(
+                    modelType: modelType ?? currentModel,
+                    language: language,
+                    userId: currentUserId
+                )
+            }
+            
+            chats.insert(newChat, at: 0)
+            // Select the new chat
+            selectChat(newChat)
+            // Request focus for the input when starting a new conversation
+            shouldFocusInput = true
+        }
     }
     
     /// Selects a chat as the current chat
@@ -359,12 +394,23 @@ class ChatViewModel: ObservableObject {
         if let index = chats.firstIndex(where: { $0.id == id }) {
             let deletedChat = chats.remove(at: index)
             
+            // Mark as deleted for cloud sync
+            DeletedChatsTracker.shared.markAsDeleted(id)
+            
             // If the deleted chat was the current chat, select another one
             if currentChat?.id == deletedChat.id {
                 currentChat = chats.first
             }
             
             saveChats()
+            
+            // Delete from cloud
+            Task {
+                do {
+                    try await cloudSync.deleteFromCloud(id)
+                } catch {
+                }
+            }
         }
     }
     
@@ -413,6 +459,8 @@ class ChatViewModel: ObservableObject {
         if var chat = currentChat {
             chat.hasActiveStream = true
             updateChat(chat)
+            // Track streaming for cloud sync
+            streamingTracker.startStreaming(chat.id)
         }
         
         // Store the current chat ID to detect if it changes during streaming
@@ -710,6 +758,8 @@ class ChatViewModel: ObservableObject {
                     if var chat = self.currentChat {
                         chat.hasActiveStream = false
                         self.updateChat(chat)
+                        // End streaming tracking for cloud sync
+                        self.streamingTracker.endStreaming(chat.id)
                     }
                 }
             } catch {
@@ -721,6 +771,8 @@ class ChatViewModel: ObservableObject {
                     if var chat = self.currentChat {
                         chat.hasActiveStream = false
                         self.updateChat(chat)
+                        // End streaming tracking for cloud sync
+                        self.streamingTracker.endStreaming(chat.id)
                     }
                     
                     if var chat = self.currentChat,
@@ -812,6 +864,8 @@ class ChatViewModel: ObservableObject {
         if var chat = currentChat {
             chat.hasActiveStream = false
             updateChat(chat)
+            // End streaming tracking for cloud sync
+            streamingTracker.endStreaming(chat.id)
         }
         
         self.showVerifierSheet = false
@@ -1011,12 +1065,22 @@ class ChatViewModel: ObservableObject {
         }
     }
     
-    /// Saves chats to UserDefaults
+    /// Saves chats to UserDefaults and triggers cloud backup
     private func saveChats() {
         // Save chats for all authenticated users
         if hasChatAccess {
             let nonEmptyChats = chats.filter { !$0.messages.isEmpty }
             Chat.saveToDefaults(nonEmptyChats, userId: currentUserId)
+            
+            // Trigger cloud backup for the current chat if it has messages
+            if let currentChat = currentChat, !currentChat.messages.isEmpty {
+                Task {
+                    do {
+                        try await cloudSync.backupChat(currentChat.id)
+                    } catch {
+                    }
+                }
+            }
         }
     }
     
@@ -1128,16 +1192,227 @@ class ChatViewModel: ObservableObject {
     /// Handle sign-in by loading user's saved chats
     func handleSignIn() {
         if hasChatAccess, let userId = currentUserId {
-            let savedChats = Chat.loadFromDefaults(userId: userId)
-            if !savedChats.isEmpty {
-                chats = savedChats
-                // Create a new chat instead of selecting the first saved one
-                createNewChat()
-            } else {
-                createNewChat() // Create new chat if no saved chats exist
+            
+            // Check if we need to set up encryption first
+            let existingKey = EncryptionService.shared.getKey()
+            if existingKey == nil {
+                // Show encryption setup modal - sync will happen after user sets key
+                self.isFirstTimeUser = true
+                self.showEncryptionSetup = true
+                // Don't load chats or sync yet - wait for encryption setup
+                return
+            }
+            
+            // Initialize cloud sync first, which will load chats after syncing
+            Task {
+                await initializeCloudSync()
+                
+                // After sync completes, check if we have chats
+                await MainActor.run {
+                    if self.chats.isEmpty {
+                        self.createNewChat()
+                    } else {
+                        // Select the most recent chat or create new
+                        if let mostRecent = self.chats.first {
+                            self.currentChat = mostRecent
+                        } else {
+                            self.createNewChat()
+                        }
+                    }
+                }
+            }
+        } else {
+        }
+    }
+    
+    // MARK: - Cloud Sync Methods
+    
+    /// Initialize cloud sync when user signs in
+    private func initializeCloudSync() async {
+        do {
+            // Check if we have an existing key
+            let existingKey = EncryptionService.shared.getKey()
+            
+            if existingKey == nil {
+                // First-time user - show setup modal
+                await MainActor.run {
+                    self.isFirstTimeUser = true
+                    self.showEncryptionSetup = true
+                }
+                // Don't proceed until user sets up encryption
+                return
+            }
+            
+            // Initialize encryption with existing key
+            let key = try await EncryptionService.shared.initialize()
+            await MainActor.run {
+                self.encryptionKey = key
+                self.isFirstTimeUser = false
+            }
+            
+            // Initialize cloud sync service
+            try await cloudSync.initialize()
+            
+            // Perform initial sync
+            await performFullSync()
+        } catch {
+            await MainActor.run {
+                self.syncErrors.append(error.localizedDescription)
+            }
+        }
+    }
+    
+    /// Perform a full sync with the cloud
+    func performFullSync() async {
+        await MainActor.run {
+            self.isSyncing = true
+            self.syncErrors = []
+        }
+        
+        let result = await cloudSync.syncAllChats()
+        
+        await MainActor.run {
+            self.isSyncing = false
+            self.lastSyncDate = Date()
+            
+            if !result.errors.isEmpty {
+                self.syncErrors = result.errors
+                // Show error recovery UI if there are sync errors
+                self.showSyncErrorRecovery = true
+            }
+            
+            // Reload chats after sync
+            if let userId = self.currentUserId {
+                let syncedChats = Chat.loadFromDefaults(userId: userId)
+                if !syncedChats.isEmpty {
+                    self.chats = syncedChats
+                }
+            }
+        }
+    }
+    
+    /// Set encryption key (for key rotation)
+    func setEncryptionKey(_ key: String) async {
+        print("🔐 ChatViewModel: setEncryptionKey called with key: \(key.prefix(12))...")
+        do {
+            let oldKey = EncryptionService.shared.getKey()
+            print("📍 ChatViewModel: Old key: \(oldKey?.prefix(12) ?? "nil")...")
+            try await EncryptionService.shared.setKey(key)
+            
+            await MainActor.run {
+                self.encryptionKey = key
+                self.showEncryptionSetup = false
+            }
+            
+            print("🔑 ChatViewModel: Comparing keys - old: '\(oldKey ?? "nil")', new: '\(key)'")
+            // If key changed, handle re-encryption
+            if oldKey != key {
+                print("🔄 ChatViewModel: Key changed, attempting to decrypt encrypted chats")
+                
+                // Show syncing indicator while processing
+                await MainActor.run {
+                    self.isSyncing = true
+                }
+                
+                // Retry decryption with new key
+                let decryptedCount = await cloudSync.retryDecryptionWithNewKey { current, total in
+                    Task { @MainActor in
+                        // Could add progress tracking here if needed
+                    }
+                }
+                print("🔓 ChatViewModel: Decrypted \(decryptedCount) chats with new key")
+                
+                // Reload chats immediately after decryption to show decrypted chats
+                if decryptedCount > 0 {
+                    if let userId = self.currentUserId {
+                        let updatedChats = Chat.loadFromDefaults(userId: userId)
+                        await MainActor.run {
+                            self.chats = updatedChats
+                        }
+                    }
+                }
+                
+                // Re-encrypt and upload all chats in background
+                let reencryptResult = await cloudSync.reencryptAndUploadChats()
+                
+                // Perform full sync
+                await performFullSync()
+                
+                // Hide syncing indicator
+                await MainActor.run {
+                    self.isSyncing = false
+                    self.lastSyncDate = Date()
+                }
+            }
+            
+            // If this was first-time setup, initialize cloud sync and load chats
+            if isFirstTimeUser {
+                await MainActor.run {
+                    self.isFirstTimeUser = false
+                }
+                try await cloudSync.initialize()
+                await performFullSync()
+                
+                // After first-time sync, check if we have chats
+                await MainActor.run {
+                    if self.chats.isEmpty {
+                        self.createNewChat()
+                    } else {
+                        // Select the most recent chat
+                        if let mostRecent = self.chats.first {
+                            self.currentChat = mostRecent
+                        }
+                    }
+                }
+            }
+        } catch {
+            await MainActor.run {
+                self.syncErrors.append(error.localizedDescription)
+            }
+        }
+    }
+    
+    /// Retry decryption of failed chats with the current key
+    func retryDecryptionWithNewKey() async {
+        await MainActor.run {
+            self.isSyncing = true
+        }
+        
+        let decryptedCount = await cloudSync.retryDecryptionWithNewKey()
+        
+        await MainActor.run {
+            self.isSyncing = false
+            if decryptedCount > 0 {
+                self.lastSyncDate = Date()
             }
         }
         
+        // Reload chats after decryption
+        if let userId = currentUserId {
+            let updatedChats = Chat.loadFromDefaults(userId: userId)
+            await MainActor.run {
+                self.chats = updatedChats
+            }
+        }
+    }
+    
+    /// Re-encrypt and upload all chats with current key
+    func reencryptAndUploadChats() async {
+        await MainActor.run {
+            self.isSyncing = true
+        }
+        
+        let result = await cloudSync.reencryptAndUploadChats()
+        
+        await MainActor.run {
+            self.isSyncing = false
+            if result.uploaded > 0 {
+                self.lastSyncDate = Date()
+            }
+            if result.errors.count > 0 {
+                self.syncErrors.append(contentsOf: result.errors)
+            }
+        }
     }
 }
 

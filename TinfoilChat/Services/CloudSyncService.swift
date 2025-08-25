@@ -40,8 +40,34 @@ class CloudSyncService: ObservableObject {
         // Initialize encryption service
         _ = try await encryptionService.initialize()
         
-        // R2 storage will use default Clerk token getter
-        print("CloudSyncService initialized")
+        // Set up custom token getter for R2 storage that ensures Clerk is loaded
+        r2Storage.setTokenGetter { 
+            do {
+                // Check if Clerk has a publishable key
+                guard Clerk.shared.publishableKey != nil else {
+                    return nil
+                }
+                
+                // Ensure Clerk is loaded
+                if !Clerk.shared.isLoaded {
+                    try await Clerk.shared.load()
+                }
+                
+                // Get fresh token from session
+                if let session = Clerk.shared.session {
+                    if let token = try? await session.getToken() {
+                        return token.jwt
+                    } else if let tokenResource = session.lastActiveToken {
+                        return tokenResource.jwt
+                    }
+                }
+                
+                return nil
+            } catch {
+                return nil
+            }
+        }
+        
     }
     
     // MARK: - Single Chat Backup
@@ -80,11 +106,9 @@ class CloudSyncService: ObservableObject {
         if streamingTracker.isStreaming(chatId) {
             // Check if we already have a callback registered for this chat
             if streamingCallbacks.contains(chatId) {
-                print("Streaming callback already registered for chat: \(chatId)")
                 return
             }
             
-            print("Chat is streaming, registering for sync after stream ends: \(chatId)")
             
             // Mark that we have a callback registered
             streamingCallbacks.insert(chatId)
@@ -95,7 +119,6 @@ class CloudSyncService: ObservableObject {
                     // Remove from tracking set
                     self?.streamingCallbacks.remove(chatId)
                     
-                    print("Streaming ended, triggering delayed sync for chat: \(chatId)")
                     
                     // Re-trigger the backup after streaming ends
                     try? await self?.backupChat(chatId)
@@ -112,13 +135,11 @@ class CloudSyncService: ObservableObject {
         
         // Don't sync blank chats or chats with temporary IDs
         if chat.isBlankChat || chat.hasTemporaryId {
-            print("Skipping sync for blank or temporary chat: \(chatId), isBlankChat: \(chat.isBlankChat), hasTemporaryId: \(chat.hasTemporaryId)")
             return
         }
         
         // Double-check streaming status right before upload
         if streamingTracker.isStreaming(chatId) {
-            print("Chat started streaming during backup process, aborting sync: \(chatId)")
             return
         }
         
@@ -129,7 +150,6 @@ class CloudSyncService: ObservableObject {
         // Mark as synced
         await markChatAsSynced(chatId, version: storedChat.syncVersion)
         
-        print("Successfully backed up chat: \(chatId)")
     }
     
     // MARK: - Bulk Sync Operations
@@ -141,7 +161,6 @@ class CloudSyncService: ObservableObject {
         do {
             let unsyncedChats = await getUnsyncedChats()
             
-            print("Found \(unsyncedChats.count) unsynced chats")
             
             // Filter out blank chats, chats with temporary IDs, and streaming chats
             let chatsToSync = unsyncedChats.filter { chat in
@@ -150,7 +169,6 @@ class CloudSyncService: ObservableObject {
                 !streamingTracker.isStreaming(chat.id)
             }
             
-            print("Chats with messages to sync: \(chatsToSync.count)")
             
             // Upload all chats in parallel for better performance
             await withTaskGroup(of: (Bool, String?).self) { group in
@@ -158,7 +176,6 @@ class CloudSyncService: ObservableObject {
                     group.addTask { [weak self] in
                         // Skip if chat started streaming while in queue
                         if self?.streamingTracker.isStreaming(chat.id) ?? false {
-                            print("Skipping sync for chat \(chat.id) - started streaming")
                             return (false, nil)
                         }
                         
@@ -233,6 +250,7 @@ class CloudSyncService: ObservableObject {
                 includeContent: true
             )
             
+            
             let localChats = await getAllChatsFromStorage()
             
             // Initialize encryption service once before processing
@@ -249,7 +267,6 @@ class CloudSyncService: ObservableObject {
                     group.addTask { [weak self] in
                         // Skip if this chat was recently deleted
                         if self?.deletedChatsTracker.isDeleted(remoteChat.id) ?? false {
-                            print("Skipping sync for recently deleted chat: \(remoteChat.id)")
                             return (false, nil)
                         }
                         
@@ -279,7 +296,14 @@ class CloudSyncService: ObservableObject {
                                     
                                     if let decryptedChat = decryptedChat {
                                         // Save to local storage (skip blank chats)
-                                        if !decryptedChat.toChat().isBlankChat {
+                                        // For R2 data, ensure modelType is set
+                                        var chatToCheck = decryptedChat
+                                        if chatToCheck.modelType == nil {
+                                            chatToCheck.modelType = await MainActor.run {
+                                                AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+                                            }
+                                        }
+                                        if !chatToCheck.toChat().isBlankChat {
                                             await self?.saveChatToStorage(decryptedChat)
                                             await self?.markChatAsSynced(decryptedChat.id, version: decryptedChat.syncVersion)
                                             return (true, nil)
@@ -288,24 +312,73 @@ class CloudSyncService: ObservableObject {
                                     }
                                 } catch {
                                     // If decryption fails, store the encrypted data for later retry
-                                    print("Failed to decrypt chat \(remoteChat.id): \(error)")
+                                    
+                                    // Extract timestamp from the chat ID to use as createdAt
+                                    // Format: {reverseTimestamp}_{randomSuffix}
+                                    let createdDate: Date
+                                    if let underscoreIndex = remoteChat.id.firstIndex(of: "_"),
+                                       let timestamp = Int(remoteChat.id.prefix(upTo: underscoreIndex)) {
+                                        // Convert reversed timestamp to actual timestamp
+                                        let actualTimestamp = 9999999999999 - timestamp
+                                        createdDate = Date(timeIntervalSince1970: Double(actualTimestamp) / 1000.0)
+                                    } else {
+                                        // Fallback to ISO date parsing if ID format is different
+                                        let isoFormatter = ISO8601DateFormatter()
+                                        createdDate = isoFormatter.date(from: remoteChat.createdAt) ?? Date()
+                                    }
+                                    
+                                    let isoFormatter = ISO8601DateFormatter()
+                                    let updatedDate = isoFormatter.date(from: remoteChat.updatedAt) ?? Date()
                                     
                                     // Create placeholder with encrypted data
                                     var placeholderChat = StoredChat(
                                         from: await Chat.create(
                                             id: remoteChat.id,
                                             title: "Encrypted",
-                                            messages: []
+                                            messages: [],
+                                            createdAt: createdDate  // Use actual creation time
                                         )
                                     )
                                     placeholderChat.decryptionFailed = true
                                     placeholderChat.encryptedData = content
+                                    placeholderChat.updatedAt = updatedDate
                                     
                                     await self?.saveChatToStorage(placeholderChat)
                                     return (true, nil)
                                 }
                             } catch {
-                                return (false, "Failed to process chat \(remoteChat.id): \(error.localizedDescription)")
+                                // Even if we can't parse the encrypted data, store it for later
+                                // Extract timestamp from the chat ID to use as createdAt
+                                // Format: {reverseTimestamp}_{randomSuffix}
+                                let createdDate: Date
+                                if let underscoreIndex = remoteChat.id.firstIndex(of: "_"),
+                                   let timestamp = Int(remoteChat.id.prefix(upTo: underscoreIndex)) {
+                                    // Convert reversed timestamp to actual timestamp
+                                    let actualTimestamp = 9999999999999 - timestamp
+                                    createdDate = Date(timeIntervalSince1970: Double(actualTimestamp) / 1000.0)
+                                } else {
+                                    // Fallback to ISO date parsing if ID format is different
+                                    let isoFormatter = ISO8601DateFormatter()
+                                    createdDate = isoFormatter.date(from: remoteChat.createdAt) ?? Date()
+                                }
+                                
+                                let isoFormatter = ISO8601DateFormatter()
+                                let updatedDate = isoFormatter.date(from: remoteChat.updatedAt) ?? Date()
+                                
+                                var placeholderChat = StoredChat(
+                                    from: await Chat.create(
+                                        id: remoteChat.id,
+                                        title: "Encrypted",
+                                        messages: [],
+                                        createdAt: createdDate  // Use actual creation time
+                                    )
+                                )
+                                placeholderChat.decryptionFailed = true
+                                placeholderChat.encryptedData = content
+                                placeholderChat.updatedAt = updatedDate
+                                
+                                await self?.saveChatToStorage(placeholderChat)
+                                return (true, nil)  // Don't fail the sync
                             }
                         }
                         
@@ -378,7 +451,6 @@ class CloudSyncService: ObservableObject {
             // Successfully deleted from cloud, can remove from tracker
             deletedChatsTracker.removeFromDeleted(chatId)
             
-            print("Chat successfully deleted from cloud: \(chatId)")
         } catch {
             // Silently fail if no auth token set
             if let error = error as? R2StorageError,
@@ -430,7 +502,6 @@ class CloudSyncService: ObservableObject {
                     group.addTask { [weak self] in
                         // Skip if this chat was recently deleted
                         if self?.deletedChatsTracker.isDeleted(remoteChat.id) ?? false {
-                            print("Skipping load for recently deleted chat: \(remoteChat.id)")
                             return nil
                         }
                         
@@ -448,20 +519,37 @@ class CloudSyncService: ObservableObject {
                             do {
                                 return try await self?.encryptionService.decrypt(encrypted, as: StoredChat.self)
                             } catch {
-                                // If decryption fails, return placeholder
+                                // If decryption fails, return placeholder with proper dates
+                                // Extract timestamp from the chat ID (format: {reverseTimestamp}_{randomSuffix})
+                                let createdDate: Date
+                                if let underscoreIndex = remoteChat.id.firstIndex(of: "_"),
+                                   let timestamp = Int(remoteChat.id.prefix(upTo: underscoreIndex)) {
+                                    // Convert reversed timestamp to actual timestamp
+                                    let actualTimestamp = 9999999999999 - timestamp
+                                    createdDate = Date(timeIntervalSince1970: Double(actualTimestamp) / 1000.0)
+                                } else {
+                                    // Fallback to ISO date parsing if ID format is different
+                                    let isoFormatter = ISO8601DateFormatter()
+                                    createdDate = isoFormatter.date(from: remoteChat.createdAt) ?? Date()
+                                }
+                                
+                                let isoFormatter = ISO8601DateFormatter()
+                                let updatedDate = isoFormatter.date(from: remoteChat.updatedAt) ?? Date()
+                                
                                 var placeholderChat = StoredChat(
                                     from: await Chat.create(
                                         id: remoteChat.id,
                                         title: "Encrypted",
-                                        messages: []
+                                        messages: [],
+                                        createdAt: createdDate
                                     )
                                 )
                                 placeholderChat.decryptionFailed = true
                                 placeholderChat.encryptedData = content
+                                placeholderChat.updatedAt = updatedDate
                                 return placeholderChat
                             }
                         } catch {
-                            print("Failed to process chat \(remoteChat.id): \(error)")
                             return nil
                         }
                     }
@@ -482,7 +570,6 @@ class CloudSyncService: ObservableObject {
             )
             
         } catch {
-            print("Failed to load remote chats with pagination: \(error)")
             
             // Fall back to local chats if remote loading fails
             if loadLocal {
@@ -527,16 +614,38 @@ class CloudSyncService: ObservableObject {
     
     private func saveChatToStorage(_ storedChat: StoredChat) async {
         // TODO: Replace with Core Data save
+        let userId = await getCurrentUserId()
+        
         var chats = await getAllChatsFromStorage()
+        
+        // Find existing chat to preserve createdAt if it exists
+        let existingChat = chats.first { $0.id == storedChat.id }
         
         // Remove existing chat if present
         chats.removeAll { $0.id == storedChat.id }
         
+        // For R2 data without modelType, set it from current config
+        var chatToConvert = storedChat
+        if chatToConvert.modelType == nil {
+            chatToConvert.modelType = await MainActor.run {
+                AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+            }
+        }
+        
+        // Convert to Chat
+        var chatToSave = chatToConvert.toChat()
+        
+        // IMPORTANT: Preserve original createdAt date if chat already exists locally
+        // Only update content, not creation timestamp
+        if let existingChat = existingChat {
+            chatToSave.createdAt = existingChat.createdAt
+        }
+        
         // Add updated chat
-        chats.append(storedChat.toChat())
+        chats.append(chatToSave)
         
         // Save back to defaults
-        Chat.saveToDefaults(chats, userId: await getCurrentUserId())
+        Chat.saveToDefaults(chats, userId: userId)
     }
     
     private func markChatAsSynced(_ chatId: String, version: Int) async {
@@ -593,7 +702,7 @@ class CloudSyncService: ObservableObject {
                         do {
                             // Parse the stored encrypted data
                             guard let contentData = encryptedData.data(using: .utf8) else {
-                                throw CloudSyncError.invalidBase64
+                                    throw CloudSyncError.invalidBase64
                             }
                             
                             let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
@@ -603,31 +712,45 @@ class CloudSyncService: ObservableObject {
                             
                             guard let decryptedData = decryptedData else { return false }
                             
-                            print("Decrypted chat \(chat.id) - title: \(decryptedData.title), messages: \(decryptedData.messages.count)")
                             
                             // Create properly decrypted chat with original data, preserving the original ID
+                            // Get a model type for decrypted chat (use existing or get default)
+                            let modelForChat: ModelType
+                            if let existingModel = decryptedData.modelType {
+                                modelForChat = existingModel
+                            } else {
+                                // Get default model from config - if none available, skip this chat
+                                let defaultModel = await MainActor.run { 
+                                    return AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first 
+                                }
+                                guard let model = defaultModel else {
+                                    return false
+                                }
+                                modelForChat = model
+                            }
+                            
+                            // Match React: use ALL decrypted data fields, only override specific metadata
                             let updatedChat = StoredChat(
                                 from: Chat(
-                                    id: chat.id,  // Preserve the original ID
+                                    id: chat.id,  // Keep original ID (important!)
                                     title: decryptedData.title,
                                     messages: decryptedData.messages,
-                                    createdAt: decryptedData.createdAt,
-                                    modelType: decryptedData.modelType,
+                                    createdAt: decryptedData.createdAt,  // Use decrypted data's date
+                                    modelType: modelForChat,
                                     language: decryptedData.language,
                                     userId: decryptedData.userId,
-                                    syncVersion: chat.syncVersion,
-                                    syncedAt: chat.syncedAt,
-                                    locallyModified: false,
-                                    updatedAt: decryptedData.updatedAt,
-                                    decryptionFailed: false,
-                                    encryptedData: nil
+                                    syncVersion: chat.syncVersion,  // Preserve sync metadata
+                                    syncedAt: chat.syncedAt,  // Preserve sync metadata
+                                    locallyModified: false,  // Reset modification flag
+                                    updatedAt: decryptedData.updatedAt,  // Use decrypted data's date
+                                    decryptionFailed: false,  // Clear the decryption failure flag
+                                    encryptedData: nil  // Clear encrypted data
                                 )
                             )
                             
                             await self?.saveChatToStorage(updatedChat)
                             return true
                         } catch {
-                            print("Failed to decrypt chat \(chat.id): \(error)")
                             return false
                         }
                     }
@@ -666,7 +789,6 @@ class CloudSyncService: ObservableObject {
         // Get all local chats
         let allChats = await getAllChatsFromStorage()
         
-        print("Starting re-encryption of \(allChats.count) local chats")
         
         // Initialize encryption with new key
         do {
@@ -682,13 +804,11 @@ class CloudSyncService: ObservableObject {
             
             // Skip chats that failed to decrypt
             if chat.decryptionFailed {
-                print("Skipping chat that failed to decrypt: \(chat.id)")
                 continue
             }
             
             // Skip chats that still have encrypted data
             if chat.encryptedData != nil {
-                print("Skipping encrypted chat - needs decryption first: \(chat.id)")
                 continue
             }
             
@@ -712,15 +832,12 @@ class CloudSyncService: ObservableObject {
                 result.uploaded += 1
                 result.reencrypted += 1
                 
-                print("Chat re-encrypted and uploaded: \(chat.id), version: \(chatToReencrypt.syncVersion)")
             } catch {
                 let errorMsg = "Failed to re-encrypt chat \(chat.id): \(error)"
                 result.errors.append(errorMsg)
-                print(errorMsg)
             }
         }
         
-        print("Completed re-encryption - reencrypted: \(result.reencrypted), uploaded: \(result.uploaded)")
         
         return result
     }

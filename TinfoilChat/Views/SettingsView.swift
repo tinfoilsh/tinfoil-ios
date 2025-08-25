@@ -172,6 +172,7 @@ class SettingsManager: ObservableObject {
 
 struct SettingsView: View {
     @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var chatViewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(Clerk.self) private var clerk
     @ObservedObject private var settings = SettingsManager.shared
@@ -370,6 +371,16 @@ struct SettingsView: View {
                                     Spacer()
                                     Text(settings.selectedLanguage)
                                         .foregroundColor(.secondary)
+                                }
+                            }
+                            
+                            // Cloud Sync Settings
+                            if authManager.isAuthenticated {
+                                NavigationLink(destination: CloudSyncSettingsView(
+                                    viewModel: chatViewModel,
+                                    authManager: authManager
+                                )) {
+                                    Label("Cloud Sync", systemImage: "icloud")
                                 }
                             }
                         } header: {

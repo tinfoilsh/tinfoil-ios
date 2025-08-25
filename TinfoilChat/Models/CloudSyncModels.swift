@@ -17,7 +17,7 @@ struct StoredChat: Codable {
     var createdAt: Date      // Will be encoded as ISO string for API
     var updatedAt: Date      // Will be encoded as ISO string for API
     var lastAccessedAt: Date // Will be encoded as timestamp in milliseconds
-    var modelType: ModelType
+    var modelType: ModelType?  // Optional for R2 data compatibility
     var language: String?
     var userId: String?
     
@@ -50,14 +50,35 @@ struct StoredChat: Codable {
     }
     
     func toChat() -> Chat {
+        // For chats from R2 without modelType, caller should have set a default
+        // but we'll use a fallback just in case
+        let model = modelType ?? ModelType(
+            id: "gpt-4o",
+            config: ModelConfig(
+                id: "gpt-4o",
+                displayName: "GPT-4",
+                iconName: "gpt-4o",
+                description: "OpenAI GPT-4",
+                fullName: "GPT-4 Omni",
+                modelId: "openai/gpt-4o",
+                isFree: false
+            )
+        )
+        
         return Chat(
             id: id,
             title: title,
             messages: messages,
             createdAt: createdAt,
-            modelType: modelType,
+            modelType: model,
             language: language,
-            userId: userId
+            userId: userId,
+            syncVersion: syncVersion,
+            syncedAt: syncedAt,
+            locallyModified: locallyModified,
+            updatedAt: updatedAt,
+            decryptionFailed: decryptionFailed ?? false,
+            encryptedData: encryptedData
         )
     }
     
@@ -120,11 +141,14 @@ struct StoredChat: Codable {
         let lastAccessedAtMs = try container.decode(Int.self, forKey: .lastAccessedAt)
         lastAccessedAt = Date(timeIntervalSince1970: Double(lastAccessedAtMs) / 1000.0)
         
-        modelType = try container.decode(ModelType.self, forKey: .modelType)
+        // R2 stored data from React app doesn't have modelType, language, or userId
+        // These are iOS-specific fields, so we make them optional
+        modelType = try container.decodeIfPresent(ModelType.self, forKey: .modelType)
         language = try container.decodeIfPresent(String.self, forKey: .language)
         userId = try container.decodeIfPresent(String.self, forKey: .userId)
         
-        syncVersion = try container.decode(Int.self, forKey: .syncVersion)
+        // syncVersion may not exist in older data
+        syncVersion = try container.decodeIfPresent(Int.self, forKey: .syncVersion) ?? 0
         
         // syncedAt from milliseconds timestamp if present
         if let syncedAtMs = try container.decodeIfPresent(Int.self, forKey: .syncedAt) {
@@ -133,7 +157,7 @@ struct StoredChat: Codable {
             syncedAt = nil
         }
         
-        locallyModified = try container.decode(Bool.self, forKey: .locallyModified)
+        locallyModified = try container.decodeIfPresent(Bool.self, forKey: .locallyModified) ?? false
         decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed)
         encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
         hasActiveStream = try container.decodeIfPresent(Bool.self, forKey: .hasActiveStream)
@@ -181,9 +205,10 @@ struct RemoteChat: Codable {
     let key: String
     let createdAt: String
     let updatedAt: String
-    let title: String
-    let messageCount: Int
-    let size: Int
+    let title: String?  // Optional - encrypted chats don't have readable titles
+    let messageCount: Int?  // Optional - might not be present
+    let syncVersion: Int?  // Optional - for version tracking
+    let size: Int?  // Optional - file size
     let content: String?  // Encrypted chat content (optional in list)
 }
 

@@ -304,13 +304,24 @@ struct Message: Identifiable, Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
-        id = try container.decode(String.self, forKey: .id)
+        // Make id optional for cross-platform compatibility with React
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
         role = try container.decode(MessageRole.self, forKey: .role)
         content = try container.decode(String.self, forKey: .content)
         thoughts = try container.decodeIfPresent(String.self, forKey: .thoughts)
         isThinking = try container.decodeIfPresent(Bool.self, forKey: .isThinking) ?? false
-        timestamp = try container.decode(Date.self, forKey: .timestamp)
-        isCollapsed = try container.decode(Bool.self, forKey: .isCollapsed)
+        
+        // Handle timestamp as either Date or String (ISO8601) for cross-platform compatibility
+        if let date = try? container.decode(Date.self, forKey: .timestamp) {
+            timestamp = date
+        } else if let dateString = try? container.decode(String.self, forKey: .timestamp) {
+            let isoFormatter = ISO8601DateFormatter()
+            timestamp = isoFormatter.date(from: dateString) ?? Date()
+        } else {
+            timestamp = Date()
+        }
+        
+        isCollapsed = try container.decodeIfPresent(Bool.self, forKey: .isCollapsed) ?? false
         isStreaming = try container.decodeIfPresent(Bool.self, forKey: .isStreaming) ?? false
         streamError = try container.decodeIfPresent(String.self, forKey: .streamError)
         generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)

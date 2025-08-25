@@ -35,7 +35,14 @@ class AuthManager: ObservableObject {
     }
     
     func setChatViewModel(_ viewModel: ChatViewModel) {
+        print("🔗 AuthManager: ChatViewModel reference set")
         self.chatViewModel = viewModel
+        
+        // If already authenticated, trigger handleSignIn
+        if isAuthenticated {
+            print("🔐 AuthManager: Already authenticated, calling handleSignIn immediately")
+            viewModel.handleSignIn()
+        }
     }
     
     private func loadCachedAuthState() {
@@ -71,9 +78,15 @@ class AuthManager: ObservableObject {
             
             // Update user data immediately
             if let user = clerk.user {
+                print("🔐 AuthManager: User authenticated, updating data")
                 updateUserData(from: user)
                 // Handle sign in for chat
-                chatViewModel?.handleSignIn()
+                if let chatVM = chatViewModel {
+                    print("✅ AuthManager: Calling handleSignIn on ChatViewModel")
+                    chatVM.handleSignIn()
+                } else {
+                    print("⚠️ AuthManager: ChatViewModel is nil, cannot call handleSignIn")
+                }
             }
         } else {
         }
@@ -117,7 +130,13 @@ class AuthManager: ObservableObject {
         
         // Handle chat state changes if authentication or subscription status changed
         if !wasAuthenticated && isAuthenticated {
-            chatViewModel?.handleSignIn()
+            print("🔄 AuthManager: Auth status changed, calling handleSignIn")
+            if let chatVM = chatViewModel {
+                print("✅ AuthManager: Calling handleSignIn from updateUserData")
+                chatVM.handleSignIn()
+            } else {
+                print("⚠️ AuthManager: ChatViewModel is nil in updateUserData")
+            }
         }
     }
     
