@@ -20,9 +20,13 @@ struct ChatSidebar: View {
     @State private var deletingChatId: String? = nil
     @State private var showSettings: Bool = false
     
+    // Timer to update relative time strings
+    @State private var timeUpdateTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+    @State private var currentTime = Date()
+    
     // Helper function to format relative time
     private func relativeTimeString(from date: Date) -> String {
-        let now = Date()
+        let now = currentTime  // Use currentTime instead of Date() to trigger updates
         let difference = now.timeIntervalSince(date)
         
         if difference < 60 { // Less than 1 minute
@@ -49,6 +53,10 @@ struct ChatSidebar: View {
         sidebarContent
             .frame(width: 300)
             .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
+            .onReceive(timeUpdateTimer) { _ in
+                // Update the current time to trigger view refresh
+                currentTime = Date()
+            }
             .overlay(
                 VStack(spacing: 0) {
                     // Top border
@@ -158,7 +166,7 @@ struct ChatSidebar: View {
                             isSelected: viewModel.currentChat?.id == chat.id,
                             isEditing: editingChatId == chat.id,
                             editingTitle: $editingTitle,
-                            timeString: relativeTimeString(from: chat.createdAt),
+                            timeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
                             onSelect: {
                                 viewModel.selectChat(chat)
                             },
@@ -175,6 +183,37 @@ struct ChatSidebar: View {
                             onDelete: { confirmDelete(chat) },
                             showEditDelete: authManager.isAuthenticated
                         )
+                    }
+                    
+                    // Load More button or loading indicator
+                    if viewModel.hasMoreChats {
+                        if viewModel.isLoadingMore {
+                            HStack {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle())
+                                    .scaleEffect(0.8)
+                                Text("Loading...")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                        } else {
+                            Button(action: {
+                                Task {
+                                    await viewModel.loadMoreChats()
+                                }
+                            }) {
+                                HStack {
+                                    Image(systemName: "arrow.down.circle")
+                                    Text("Load More")
+                                }
+                                .foregroundColor(.accentColor)
+                                .font(.subheadline)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -289,7 +328,7 @@ struct ChatListItem: View {
                         Text("Failed to decrypt: wrong key")
                             .font(.caption)
                             .foregroundColor(.red)
-                    } else {
+                    } else if !timeString.isEmpty {
                         Text(timeString)
                             .font(.caption)
                             .foregroundColor(.gray)

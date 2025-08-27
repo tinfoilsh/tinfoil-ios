@@ -125,14 +125,6 @@ struct CloudSyncSettingsView: View {
             .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
             .navigationTitle("Cloud Sync Settings")
             .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .foregroundColor(.accentPrimary)
-                }
-            }
             .sheet(isPresented: $showKeyInput) {
                 NavigationView {
                     VStack(spacing: 20) {

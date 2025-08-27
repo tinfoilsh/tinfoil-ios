@@ -97,8 +97,9 @@ struct StoredChat: Codable {
         try container.encode(title, forKey: .title)
         try container.encode(messages, forKey: .messages)
         
-        // Dates as ISO strings
+        // Dates as ISO strings with fractional seconds (matching JavaScript's toISOString())
         let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         try container.encode(isoFormatter.string(from: createdAt), forKey: .createdAt)
         try container.encode(isoFormatter.string(from: updatedAt), forKey: .updatedAt)
         
@@ -129,13 +130,35 @@ struct StoredChat: Codable {
         title = try container.decode(String.self, forKey: .title)
         messages = try container.decode([Message].self, forKey: .messages)
         
-        // Dates from ISO strings
+        // Dates from ISO strings - configure formatter to handle fractional seconds
         let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        
+        // Also create a fallback formatter without fractional seconds
+        let isoFormatterNoFraction = ISO8601DateFormatter()
+        isoFormatterNoFraction.formatOptions = [.withInternetDateTime]
+        
         let createdAtString = try container.decode(String.self, forKey: .createdAt)
         let updatedAtString = try container.decode(String.self, forKey: .updatedAt)
         
-        createdAt = isoFormatter.date(from: createdAtString) ?? Date()
-        updatedAt = isoFormatter.date(from: updatedAtString) ?? Date()
+        // Try parsing with fractional seconds first, then without, before falling back
+        if let date = isoFormatter.date(from: createdAtString) {
+            createdAt = date
+        } else if let date = isoFormatterNoFraction.date(from: createdAtString) {
+            createdAt = date
+        } else {
+            print("⚠️ Failed to parse createdAt date: '\(createdAtString)' - using current date")
+            createdAt = Date()
+        }
+        
+        if let date = isoFormatter.date(from: updatedAtString) {
+            updatedAt = date
+        } else if let date = isoFormatterNoFraction.date(from: updatedAtString) {
+            updatedAt = date
+        } else {
+            print("⚠️ Failed to parse updatedAt date: '\(updatedAtString)' - using current date")
+            updatedAt = Date()
+        }
         
         // Timestamps from milliseconds
         let lastAccessedAtMs = try container.decode(Int.self, forKey: .lastAccessedAt)
@@ -372,5 +395,19 @@ class StreamingTracker {
             streamEndCallbacks[chatId] = []
         }
         streamEndCallbacks[chatId]?.append(callback)
+    }
+    
+    /// Update chat ID when it changes (e.g., from temporary to permanent ID)
+    func updateChatId(from oldId: String, to newId: String) {
+        if streamingChats.contains(oldId) {
+            streamingChats.remove(oldId)
+            streamingChats.insert(newId)
+        }
+        
+        // Move any callbacks to the new ID
+        if let callbacks = streamEndCallbacks[oldId] {
+            streamEndCallbacks[newId] = callbacks
+            streamEndCallbacks.removeValue(forKey: oldId)
+        }
     }
 }

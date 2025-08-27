@@ -44,6 +44,22 @@ class ChatViewModel: ObservableObject {
     private let cloudSync = CloudSyncService.shared
     private let streamingTracker = StreamingTracker.shared
     
+    // Pagination properties
+    @Published var isLoadingMore: Bool = false
+    @Published var hasMoreChats: Bool = false
+    private var paginationToken: String? = nil
+    private var isPaginationActive: Bool = false  // Track if we're using pagination vs full load
+    private var hasLoadedInitialPage: Bool = false  // Track if we've loaded the first page
+    private var hasAttemptedLoadMore: Bool = false  // Track if we've tried to load more at least once
+    
+    // IMPORTANT: Pagination token edge cases to handle:
+    // 1. Token should NOT be reset during auto-sync operations
+    // 2. Token should be preserved when creating/deleting chats locally
+    // 3. Token should only be reset when explicitly loading initial page
+    // 4. New chats created locally appear at top regardless of pagination state
+    // 5. Deleted chats are removed from view but don't affect pagination token
+    // 6. First page is loaded during initial sync, pagination starts from page 2
+    
     // Computed properties for backward compatibility
     var isVerifying: Bool { verification.isVerifying }
     var isVerified: Bool { verification.isVerified }
@@ -73,6 +89,7 @@ class ChatViewModel: ObservableObject {
     // Private properties
     private var client: OpenAI?
     private var currentTask: Task<Void, Error>?
+    private var autoSyncTimer: Timer?
     
     // Auth reference for Premium features
     @Published var authManager: AuthManager?
@@ -154,11 +171,80 @@ class ChatViewModel: ObservableObject {
         
         // Setup app lifecycle observers
         setupAppLifecycleObservers()
+        
+        // Set up auto-sync timer if already authenticated (e.g., app launch with existing session)
+        if authManager?.isAuthenticated == true {
+            setupAutoSyncTimer()
+        }
     }
     
     deinit {
+        // Stop auto-sync timer
+        autoSyncTimer?.invalidate()
+        autoSyncTimer = nil
+        
         // Remove app lifecycle observers
         NotificationCenter.default.removeObserver(self)
+    }
+    
+    /// Setup auto-sync timer to sync every 30 seconds
+    private func setupAutoSyncTimer() {
+        // Invalidate existing timer if any
+        autoSyncTimer?.invalidate()
+        
+        print("📅 Setting up auto-sync timer (every 30 seconds)")
+        
+        // Create timer that fires every 30 seconds
+        autoSyncTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            
+            // Only sync if authenticated
+            guard self.authManager?.isAuthenticated == true else {
+                print("⏭️ Auto-sync skipped - not authenticated")
+                return
+            }
+            
+            print("🔄 Auto-sync starting...")
+            
+            // Perform sync in background
+            Task {
+                do {
+                    // Sync all chats
+                    let syncResult = try await self.cloudSync.syncAllChats()
+                    print("✅ Auto-sync completed successfully (uploaded: \(syncResult.uploaded), downloaded: \(syncResult.downloaded))")
+                    
+                    // If we downloaded new chats, reload the chat list
+                    if syncResult.downloaded > 0 {
+                        // Use pagination-aware reload
+                        await self.resetPaginationAndReloadChats()
+                        
+                        // Force UI update
+                        await MainActor.run {
+                            self.objectWillChange.send()
+                            
+                            // Restore current chat selection if it still exists
+                            if let currentChatId = self.currentChat?.id,
+                               let chat = self.chats.first(where: { $0.id == currentChatId }) {
+                                self.currentChat = chat
+                            }
+                        }
+                        
+                        print("📱 Updated chats after sync (downloaded: \(syncResult.downloaded))")
+                    }
+                    
+                    // Also backup current chat if it has changes
+                    if let currentChat = await MainActor.run(body: { self.currentChat }),
+                       !currentChat.hasTemporaryId,
+                       !currentChat.messages.isEmpty,
+                       !currentChat.hasActiveStream {
+                        try await self.cloudSync.backupChat(currentChat.id)
+                        print("✅ Current chat backed up: \(currentChat.id)")
+                    }
+                } catch {
+                    print("❌ Auto-sync failed: \(error)")
+                }
+            }
+        }
     }
     
     /// Setup observers for app lifecycle events
@@ -172,6 +258,29 @@ class ChatViewModel: ObservableObject {
             // Add a small delay to allow auth state to stabilize, then retry client setup if needed
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 self?.retryClientSetup()
+            }
+            
+            // Resume auto-sync timer if authenticated
+            if self?.authManager?.isAuthenticated == true {
+                self?.setupAutoSyncTimer()
+            }
+        }
+        
+        // Listen for app going to background
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            // Pause auto-sync timer
+            self?.autoSyncTimer?.invalidate()
+            self?.autoSyncTimer = nil
+            
+            // Do one final sync before going to background
+            if self?.authManager?.isAuthenticated == true {
+                Task {
+                    try? await self?.cloudSync.syncAllChats()
+                }
             }
         }
     }
@@ -324,44 +433,31 @@ class ChatViewModel: ObservableObject {
             cancelGeneration()
         }
         
-        Task {
-            let newChat: Chat
-            
-            // Use timestamp-based ID for authenticated users (for cloud sync)
-            if authManager?.isAuthenticated == true {
-                do {
-                    newChat = try await Chat.createWithTimestampId(
-                        modelType: modelType ?? currentModel,
-                        language: language,
-                        userId: currentUserId
-                    )
-                } catch {
-                    // Fallback to UUID if ID generation fails
-                    newChat = Chat.create(
-                        modelType: modelType ?? currentModel,
-                        language: language,
-                        userId: currentUserId
-                    )
-                }
-            } else {
-                // Use regular UUID for anonymous users
-                newChat = Chat.create(
-                    modelType: modelType ?? currentModel,
-                    language: language,
-                    userId: currentUserId
-                )
-            }
-            
-            chats.insert(newChat, at: 0)
-            // Select the new chat
-            selectChat(newChat)
-            // Request focus for the input when starting a new conversation
+        // Check if we already have a blank chat at the top
+        if let firstChat = chats.first, firstChat.isBlankChat {
+            // Just select the existing blank chat
+            selectChat(firstChat)
             shouldFocusInput = true
+            return
         }
+        
+        // Create new chat with temporary ID (instant, no network call)
+        // The chat will automatically be blank (no messages) and have a temporary ID (UUID)
+        let newChat = Chat.create(
+            modelType: modelType ?? currentModel,
+            language: language,
+            userId: currentUserId
+        )
+        
+        chats.insert(newChat, at: 0)
+        selectChat(newChat)
+        shouldFocusInput = true
     }
     
     /// Selects a chat as the current chat
     func selectChat(_ chat: Chat) {
+        print("🔄 selectChat called with: \(chat.id), isBlank: \(chat.isBlankChat)")
+        
         // Cancel any ongoing generation first
         if isLoading {
             cancelGeneration()
@@ -371,14 +467,17 @@ class ChatViewModel: ObservableObject {
         let chatToSelect: Chat
         if let index = chats.firstIndex(where: { $0.id == chat.id }) {
             chatToSelect = chats[index]
+            print("✅ Found chat in array at index \(index)")
         } else {
             chatToSelect = chat
             if !chats.contains(where: { $0.id == chat.id }) {
                 chats.append(chatToSelect) // Add if truly new
+                print("📝 Added chat to array")
             }
         }
         
         currentChat = chatToSelect
+        print("✅ Current chat set to: \(currentChat?.id ?? "nil")")
         
         // Update the current model to match the chat's model
         if currentModel != chatToSelect.modelType {
@@ -432,20 +531,28 @@ class ChatViewModel: ObservableObject {
     func sendMessage(text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
+        print("📨 sendMessage called - currentChat: \(currentChat?.id ?? "nil"), isBlank: \(currentChat?.isBlankChat ?? false)")
+        
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         
-        // Update UI state
+        // Update UI state  
         isLoading = true
         
         // Create and add user message
         let userMessage = Message(role: .user, content: text)
         addMessage(userMessage)
         
-        // If this is the first message, generate a title for the chat
+        // If this is the first message, update creation date and generate title
         if var chat = currentChat, chat.messages.count == 1 {
+            // Update creation date to now (when first message is sent)
+            chat.createdAt = Date()
+            chat.updatedAt = Date()
+            
+            // Generate title
             let generatedTitle = Chat.generateTitle(from: text)
             chat.title = generatedTitle
+            
             updateChat(chat)
             // Trigger success haptic feedback for title generation
             Chat.triggerSuccessFeedback()
@@ -463,8 +570,10 @@ class ChatViewModel: ObservableObject {
             streamingTracker.startStreaming(chat.id)
         }
         
-        // Store the current chat ID to detect if it changes during streaming
-        let streamChatId = currentChat?.id
+        // Store the current chat for stream validation
+        // We'll track by messages rather than ID to handle ID changes
+        let streamingChat = currentChat
+        let streamMessageCount = currentChat?.messages.count ?? 0
         
         // Cancel any existing task
         currentTask?.cancel()
@@ -589,125 +698,125 @@ class ChatViewModel: ObservableObject {
                     
                     // Update UI on main thread
                     await MainActor.run {
-                        // Exit if the chat has changed
-                        guard self.currentChat?.id == streamChatId else { return }
+                        // Get current chat and validate it has messages
+                        guard var chat = self.currentChat,
+                              !chat.messages.isEmpty,
+                              let lastIndex = chat.messages.indices.last else { 
+                            print("⚠️ Stream update skipped: no current chat or no messages")
+                            return 
+                        }
                         
-                        if var chat = self.currentChat,
-                           !chat.messages.isEmpty,
-                           let lastIndex = chat.messages.indices.last {
+                        // Detect start of reasoning_content format
+                        if hasReasoningContent && !isUsingReasoningFormat && !isInThinkingMode {
+                            isUsingReasoningFormat = true
+                            isInThinkingMode = true
+                            isFirstChunk = false
+                            thinkStartTime = Date() // Track when thinking started
                             
-                            // Detect start of reasoning_content format
-                            if hasReasoningContent && !isUsingReasoningFormat && !isInThinkingMode {
-                                isUsingReasoningFormat = true
-                                isInThinkingMode = true
-                                isFirstChunk = false
-                                thinkStartTime = Date() // Track when thinking started
-                                
-                                if !reasoningContent.isEmpty {
-                                    thoughtsBuffer = reasoningContent
-                                    chat.messages[lastIndex].thoughts = thoughtsBuffer
-                                    chat.messages[lastIndex].isThinking = true
-                                    self.updateChat(chat)
-                                }
-                            } else if isUsingReasoningFormat {
-                                // Continue with reasoning format
-                                if !reasoningContent.isEmpty {
-                                    thoughtsBuffer += reasoningContent
-                                    // Update thoughts in real-time for streaming
-                                    chat.messages[lastIndex].thoughts = thoughtsBuffer
-                                    chat.messages[lastIndex].isThinking = true
-                                }
-                                
-                                // Check if regular content has appeared - this signals end of thinking
-                                if !content.isEmpty && isInThinkingMode {
-                                    // Calculate generation time before clearing thinkStartTime
-                                    if let startTime = thinkStartTime {
-                                        chat.messages[lastIndex].generationTimeSeconds = Date().timeIntervalSince(startTime)
-                                    }
-                                    
-                                    isInThinkingMode = false
-                                    thinkStartTime = nil
-                                    
-                                    // Finalize thoughts and start regular content
-                                    chat.messages[lastIndex].thoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                                    chat.messages[lastIndex].isThinking = false
-                                    chat.messages[lastIndex].content = content
-                                } else if !content.isEmpty {
-                                    // Regular content after thinking has ended
-                                    chat.messages[lastIndex].content += content
-                                    chat.messages[lastIndex].isThinking = false
+                            if !reasoningContent.isEmpty {
+                                thoughtsBuffer = reasoningContent
+                                chat.messages[lastIndex].thoughts = thoughtsBuffer
+                                chat.messages[lastIndex].isThinking = true
+                                self.updateChat(chat)
+                            }
+                        } else if isUsingReasoningFormat {
+                            // Continue with reasoning format
+                            if !reasoningContent.isEmpty {
+                                thoughtsBuffer += reasoningContent
+                                // Update thoughts in real-time for streaming
+                                chat.messages[lastIndex].thoughts = thoughtsBuffer
+                                chat.messages[lastIndex].isThinking = true
+                            }
+                            
+                            // Check if regular content has appeared - this signals end of thinking
+                            if !content.isEmpty && isInThinkingMode {
+                                // Calculate generation time before clearing thinkStartTime
+                                if let startTime = thinkStartTime {
+                                    chat.messages[lastIndex].generationTimeSeconds = Date().timeIntervalSince(startTime)
                                 }
                                 
-                                // Always update if we got any new content
-                                if !reasoningContent.isEmpty || !content.isEmpty {
-                                    self.updateChat(chat)
-                                }
-                            } else if !isUsingReasoningFormat && !content.isEmpty {
-                                // Handle original <think> tag format
-                                if isFirstChunk {
-                                    initialContentBuffer += content
+                                isInThinkingMode = false
+                                thinkStartTime = nil
+                                
+                                // Finalize thoughts and start regular content
+                                chat.messages[lastIndex].thoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                                chat.messages[lastIndex].isThinking = false
+                                chat.messages[lastIndex].content = content
+                            } else if !content.isEmpty {
+                                // Regular content after thinking has ended
+                                chat.messages[lastIndex].content += content
+                                chat.messages[lastIndex].isThinking = false
+                            }
+                            
+                            // Always update if we got any new content
+                            if !reasoningContent.isEmpty || !content.isEmpty {
+                                self.updateChat(chat)
+                            }
+                        } else if !isUsingReasoningFormat && !content.isEmpty {
+                            // Handle original <think> tag format
+                            if isFirstChunk {
+                                initialContentBuffer += content
+                                
+                                // Check if we have enough content to determine format
+                                if initialContentBuffer.contains("<think>") || initialContentBuffer.count > 5 {
+                                    isFirstChunk = false
+                                    let processContent = initialContentBuffer
+                                    initialContentBuffer = ""
                                     
-                                    // Check if we have enough content to determine format
-                                    if initialContentBuffer.contains("<think>") || initialContentBuffer.count > 5 {
-                                        isFirstChunk = false
-                                        let processContent = initialContentBuffer
-                                        initialContentBuffer = ""
+                                    // Check for think tag
+                                    if processContent.contains("<think>") {
+                                        isInThinkingMode = true
+                                        hasThinkTag = true
+                                        thinkStartTime = Date()
                                         
-                                        // Check for think tag
-                                        if processContent.contains("<think>") {
-                                            isInThinkingMode = true
-                                            hasThinkTag = true
-                                            thinkStartTime = Date()
-                                            
-                                            // Extract thoughts from <think> tags
-                                            if let thinkRange = processContent.range(of: "<think>") {
-                                                let afterThink = String(processContent[thinkRange.upperBound...])
-                                                thoughtsBuffer = afterThink
-                                                chat.messages[lastIndex].thoughts = thoughtsBuffer
-                                                chat.messages[lastIndex].isThinking = true
-                                            }
-                                        } else {
-                                            // Regular content
-                                            chat.messages[lastIndex].content += processContent
-                                        }
-                                        self.updateChat(chat)
-                                    }
-                                } else if hasThinkTag {
-                                    // Continue processing think tag content
-                                    if content.contains("</think>") {
-                                        // End of thinking
-                                        if let endRange = content.range(of: "</think>") {
-                                            let beforeEnd = String(content[..<endRange.lowerBound])
-                                            thoughtsBuffer += beforeEnd
-                                            
-                                            chat.messages[lastIndex].thoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                                            chat.messages[lastIndex].isThinking = false
-                                            
-                                            // Add content after </think>
-                                            let afterEnd = String(content[endRange.upperBound...])
-                                            chat.messages[lastIndex].content = afterEnd
-                                            
-                                            // Calculate generation time
-                                            if let startTime = thinkStartTime {
-                                                chat.messages[lastIndex].generationTimeSeconds = Date().timeIntervalSince(startTime)
-                                            }
-                                            
-                                            hasThinkTag = false
-                                            isInThinkingMode = false
-                                            thinkStartTime = nil
-                                            thoughtsBuffer = ""
+                                        // Extract thoughts from <think> tags
+                                        if let thinkRange = processContent.range(of: "<think>") {
+                                            let afterThink = String(processContent[thinkRange.upperBound...])
+                                            thoughtsBuffer = afterThink
+                                            chat.messages[lastIndex].thoughts = thoughtsBuffer
+                                            chat.messages[lastIndex].isThinking = true
                                         }
                                     } else {
-                                        // Continue accumulating thoughts
-                                        thoughtsBuffer += content
-                                        chat.messages[lastIndex].thoughts = thoughtsBuffer
+                                        // Regular content
+                                        chat.messages[lastIndex].content += processContent
                                     }
                                     self.updateChat(chat)
-                                } else {
-                                    // Regular content (no thinking)
-                                    chat.messages[lastIndex].content += content
-                                    self.updateChat(chat)
                                 }
+                            } else if hasThinkTag {
+                                // Continue processing think tag content
+                                if content.contains("</think>") {
+                                    // End of thinking
+                                    if let endRange = content.range(of: "</think>") {
+                                        let beforeEnd = String(content[..<endRange.lowerBound])
+                                        thoughtsBuffer += beforeEnd
+                                        
+                                        chat.messages[lastIndex].thoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                                        chat.messages[lastIndex].isThinking = false
+                                        
+                                        // Add content after </think>
+                                        let afterEnd = String(content[endRange.upperBound...])
+                                        chat.messages[lastIndex].content = afterEnd
+                                        
+                                        // Calculate generation time
+                                        if let startTime = thinkStartTime {
+                                            chat.messages[lastIndex].generationTimeSeconds = Date().timeIntervalSince(startTime)
+                                        }
+                                        
+                                        hasThinkTag = false
+                                        isInThinkingMode = false
+                                        thinkStartTime = nil
+                                        thoughtsBuffer = ""
+                                    }
+                                } else {
+                                    // Continue accumulating thoughts
+                                    thoughtsBuffer += content
+                                    chat.messages[lastIndex].thoughts = thoughtsBuffer
+                                }
+                                self.updateChat(chat)
+                            } else {
+                                // Regular content (no thinking)
+                                chat.messages[lastIndex].content += content
+                                self.updateChat(chat)
                             }
                         }
                     }
@@ -758,8 +867,84 @@ class ChatViewModel: ObservableObject {
                     if var chat = self.currentChat {
                         chat.hasActiveStream = false
                         self.updateChat(chat)
-                        // End streaming tracking for cloud sync
-                        self.streamingTracker.endStreaming(chat.id)
+                        
+                        // Convert temporary ID to permanent ID after streaming completes
+                        if chat.hasTemporaryId && self.authManager?.isAuthenticated == true {
+                            Task { @MainActor in
+                                do {
+                                    let newChat = try await Chat.createWithTimestampId(
+                                        modelType: chat.modelType,
+                                        language: chat.language,
+                                        userId: chat.userId
+                                    )
+                                    
+                                    // Get the current state of the chat
+                                    guard let currentChatNow = self.currentChat,
+                                          let index = self.chats.firstIndex(where: { $0.id == chat.id }) else {
+                                        print("⚠️ Cannot convert ID: currentChat is nil or chat not in array")
+                                        return
+                                    }
+                                    
+                                    // Update streaming tracker with new ID BEFORE we change the chat
+                                    self.streamingTracker.updateChatId(from: chat.id, to: newChat.id)
+                                    
+                                    // Create updated chat with permanent ID but current state
+                                    // IMPORTANT: Keep the original createdAt date from when first message was sent
+                                    var updatedChat = Chat(
+                                        id: newChat.id,
+                                        title: currentChatNow.title,
+                                        messages: currentChatNow.messages,
+                                        createdAt: currentChatNow.createdAt,  // Keep original date
+                                        modelType: currentChatNow.modelType,
+                                        language: currentChatNow.language,
+                                        userId: currentChatNow.userId,
+                                        syncVersion: currentChatNow.syncVersion,
+                                        syncedAt: currentChatNow.syncedAt,
+                                        locallyModified: true,
+                                        updatedAt: Date()
+                                    )
+                                    updatedChat.hasActiveStream = false
+                                    
+                                    // Update in the chats array
+                                    self.chats[index] = updatedChat
+                                    self.currentChat = updatedChat
+                                    
+                                    // Save the updated chat locally first
+                                    self.saveChats()
+                                    
+                                    // End streaming tracking with NEW ID for cloud sync
+                                    self.streamingTracker.endStreaming(updatedChat.id)
+                                    
+                                    // Now backup to cloud with new permanent ID
+                                    print("Backing up chat after ID conversion from \(chat.id) to \(updatedChat.id)")
+                                    try await self.cloudSync.backupChat(updatedChat.id)
+                                    print("Successfully backed up converted chat: \(updatedChat.id)")
+                                } catch {
+                                    print("Failed to generate permanent ID or backup: \(error)")
+                                    // Still need to end streaming with old ID if conversion fails
+                                    self.streamingTracker.endStreaming(chat.id)
+                                }
+                            }
+                        } else if !chat.hasTemporaryId && self.authManager?.isAuthenticated == true {
+                            // For chats with permanent IDs, end streaming and backup
+                            self.streamingTracker.endStreaming(chat.id)
+                            
+                            // Backup now that streaming is complete
+                            Task { @MainActor in
+                                do {
+                                    // Get the latest version of the chat after streaming
+                                    guard let latestChat = self.chats.first(where: { $0.id == chat.id }) else {
+                                        return
+                                    }
+                                    
+                                    print("Backing up chat with permanent ID: \(latestChat.id)")
+                                    try await self.cloudSync.backupChat(latestChat.id)
+                                    print("Successfully backed up chat: \(latestChat.id)")
+                                } catch {
+                                    print("Failed to backup chat \(chat.id): \(error)")
+                                }
+                            }
+                        }
                     }
                 }
             } catch {
@@ -771,8 +956,84 @@ class ChatViewModel: ObservableObject {
                     if var chat = self.currentChat {
                         chat.hasActiveStream = false
                         self.updateChat(chat)
-                        // End streaming tracking for cloud sync
-                        self.streamingTracker.endStreaming(chat.id)
+                        
+                        // Convert temporary ID to permanent ID after streaming completes
+                        if chat.hasTemporaryId && self.authManager?.isAuthenticated == true {
+                            Task { @MainActor in
+                                do {
+                                    let newChat = try await Chat.createWithTimestampId(
+                                        modelType: chat.modelType,
+                                        language: chat.language,
+                                        userId: chat.userId
+                                    )
+                                    
+                                    // Get the current state of the chat
+                                    guard let currentChatNow = self.currentChat,
+                                          let index = self.chats.firstIndex(where: { $0.id == chat.id }) else {
+                                        print("⚠️ Cannot convert ID: currentChat is nil or chat not in array")
+                                        return
+                                    }
+                                    
+                                    // Update streaming tracker with new ID BEFORE we change the chat
+                                    self.streamingTracker.updateChatId(from: chat.id, to: newChat.id)
+                                    
+                                    // Create updated chat with permanent ID but current state
+                                    // IMPORTANT: Keep the original createdAt date from when first message was sent
+                                    var updatedChat = Chat(
+                                        id: newChat.id,
+                                        title: currentChatNow.title,
+                                        messages: currentChatNow.messages,
+                                        createdAt: currentChatNow.createdAt,  // Keep original date
+                                        modelType: currentChatNow.modelType,
+                                        language: currentChatNow.language,
+                                        userId: currentChatNow.userId,
+                                        syncVersion: currentChatNow.syncVersion,
+                                        syncedAt: currentChatNow.syncedAt,
+                                        locallyModified: true,
+                                        updatedAt: Date()
+                                    )
+                                    updatedChat.hasActiveStream = false
+                                    
+                                    // Update in the chats array
+                                    self.chats[index] = updatedChat
+                                    self.currentChat = updatedChat
+                                    
+                                    // Save the updated chat locally first
+                                    self.saveChats()
+                                    
+                                    // End streaming tracking with NEW ID for cloud sync
+                                    self.streamingTracker.endStreaming(updatedChat.id)
+                                    
+                                    // Now backup to cloud with new permanent ID
+                                    print("Backing up chat after ID conversion from \(chat.id) to \(updatedChat.id)")
+                                    try await self.cloudSync.backupChat(updatedChat.id)
+                                    print("Successfully backed up converted chat: \(updatedChat.id)")
+                                } catch {
+                                    print("Failed to generate permanent ID or backup: \(error)")
+                                    // Still need to end streaming with old ID if conversion fails
+                                    self.streamingTracker.endStreaming(chat.id)
+                                }
+                            }
+                        } else if !chat.hasTemporaryId && self.authManager?.isAuthenticated == true {
+                            // For chats with permanent IDs, end streaming and backup
+                            self.streamingTracker.endStreaming(chat.id)
+                            
+                            // Backup now that streaming is complete
+                            Task { @MainActor in
+                                do {
+                                    // Get the latest version of the chat after streaming
+                                    guard let latestChat = self.chats.first(where: { $0.id == chat.id }) else {
+                                        return
+                                    }
+                                    
+                                    print("Backing up chat with permanent ID: \(latestChat.id)")
+                                    try await self.cloudSync.backupChat(latestChat.id)
+                                    print("Successfully backed up chat: \(latestChat.id)")
+                                } catch {
+                                    print("Failed to backup chat \(chat.id): \(error)")
+                                }
+                            }
+                        }
                     }
                     
                     if var chat = self.currentChat,
@@ -1039,9 +1300,44 @@ class ChatViewModel: ObservableObject {
     
     // MARK: - Private Methods
     
+    /// Ensures there's always a blank chat at the top of the list
+    private func ensureBlankChatAtTop() {
+        // Check if the first chat is blank (no messages)
+        if let firstChat = chats.first, firstChat.isBlankChat {
+            print("✅ Already have blank chat at top: \(firstChat.id)")
+            return // Already have a blank chat at top
+        }
+        
+        // Check if any chat in the list is blank
+        if let blankChatIndex = chats.firstIndex(where: { $0.isBlankChat }) {
+            // Move it to the top
+            let blankChat = chats.remove(at: blankChatIndex)
+            chats.insert(blankChat, at: 0)
+            print("📝 Moved existing blank chat to top: \(blankChat.id)")
+        } else {
+            // No blank chat exists, create one
+            // It will automatically be blank (no messages) and have a temporary ID (UUID)
+            let newBlankChat = Chat.create(
+                modelType: currentModel,
+                language: nil,
+                userId: currentUserId
+            )
+            chats.insert(newBlankChat, at: 0)
+            print("📝 Created new blank chat: \(newBlankChat.id)")
+            
+            // Important: Don't save yet, as this might be called during initialization
+            // The calling code will handle saving
+        }
+    }
+    
     /// Adds a message to the current chat
     private func addMessage(_ message: Message) {
-        guard var chat = currentChat else { return }
+        guard var chat = currentChat else { 
+            print("❌ addMessage: No current chat!")
+            return 
+        }
+        
+        print("✅ addMessage: Adding message to chat \(chat.id)")
         
         // Add directly to the full message list
         chat.messages.append(message)
@@ -1062,6 +1358,20 @@ class ChatViewModel: ObservableObject {
             if hasChatAccess {
                 saveChats()
             }
+        } else {
+            // Chat not found in array - this shouldn't happen but handle it
+            print("⚠️ updateChat: Chat \(chat.id) not found in array! Adding it.")
+            chats.insert(chat, at: 0)
+            
+            // Update currentChat if it's the one being updated
+            if currentChat?.id == chat.id {
+                currentChat = chat
+            }
+            
+            // Save chats for all authenticated users
+            if hasChatAccess {
+                saveChats()
+            }
         }
     }
     
@@ -1072,12 +1382,17 @@ class ChatViewModel: ObservableObject {
             let nonEmptyChats = chats.filter { !$0.messages.isEmpty }
             Chat.saveToDefaults(nonEmptyChats, userId: currentUserId)
             
-            // Trigger cloud backup for the current chat if it has messages
-            if let currentChat = currentChat, !currentChat.messages.isEmpty {
+            // Trigger cloud backup for the current chat if it has messages and permanent ID
+            // Don't try to backup chats with temporary IDs or while streaming
+            if let currentChat = currentChat, 
+               !currentChat.messages.isEmpty,
+               !currentChat.hasTemporaryId,
+               !currentChat.hasActiveStream {
                 Task {
                     do {
                         try await cloudSync.backupChat(currentChat.id)
                     } catch {
+                        print("Failed to backup chat during save: \(error)")
                     }
                 }
             }
@@ -1166,6 +1481,11 @@ class ChatViewModel: ObservableObject {
     
     /// Handle sign-out by clearing current chats but preserving them in storage
     func handleSignOut() {
+        // Stop auto-sync timer when signing out
+        autoSyncTimer?.invalidate()
+        autoSyncTimer = nil
+        print("⏹️ Auto-sync timer stopped (signed out)")
+        
         // Save current chats before clearing them (they're already associated with the user ID)
         if hasChatAccess {
             saveChats()
@@ -1212,6 +1532,9 @@ class ChatViewModel: ObservableObject {
     /// Handle sign-in by loading user's saved chats
     func handleSignIn() {
         if hasChatAccess, let userId = currentUserId {
+            // Start auto-sync timer now that user is authenticated
+            // (This also handles the case where someone signs in after app launch)
+            setupAutoSyncTimer()
             
             // Check if we need to set up encryption first
             let existingKey = EncryptionService.shared.getKey()
@@ -1225,10 +1548,13 @@ class ChatViewModel: ObservableObject {
                         // Now proceed with cloud sync
                         await initializeCloudSync()
                         
-                        // After sync completes, check if we have chats
+                        // After sync completes, ensure we have proper chat setup
                         await MainActor.run {
                             if self.chats.isEmpty {
                                 self.createNewChat()
+                            } else {
+                                // Ensure there's a blank chat at the top
+                                self.ensureBlankChatAtTop()
                             }
                         }
                     } catch {
@@ -1244,21 +1570,9 @@ class ChatViewModel: ObservableObject {
             
             // We have an encryption key, initialize cloud sync
             Task {
+                // For initial load on sign-in, we should use pagination
+                // to avoid loading all chats at once
                 await initializeCloudSync()
-                
-                // After sync completes, check if we have chats
-                await MainActor.run {
-                    if self.chats.isEmpty {
-                        self.createNewChat()
-                    } else {
-                        // Select the most recent chat or create new
-                        if let mostRecent = self.chats.first {
-                            self.currentChat = mostRecent
-                        } else {
-                            self.createNewChat()
-                        }
-                    }
-                }
             }
         } else {
         }
@@ -1292,11 +1606,216 @@ class ChatViewModel: ObservableObject {
             // Initialize cloud sync service
             try await cloudSync.initialize()
             
-            // Perform initial sync
+            // Clean up chats beyond first page ONLY on app launch (not during runtime)
+            // Check if this is initial app launch vs runtime sign-in
+            if chats.isEmpty {
+                await cleanupPaginatedChats()
+            }
+            
+            // Perform initial sync which loads ONLY the first page of chats
             await performFullSync()
+            
+            // Load chats from storage after sync
+            if let userId = currentUserId {
+                let loadedChats = Chat.loadFromDefaults(userId: userId)
+                await MainActor.run {
+                    // Clear current chat before loading new ones to avoid orphaned references
+                    self.currentChat = nil
+                    self.chats = loadedChats
+                    
+                    // Ensure blank chat at top
+                    self.ensureBlankChatAtTop()
+                    
+                    // Select the first chat (which should be the blank chat)
+                    if !self.chats.isEmpty {
+                        self.currentChat = self.chats.first
+                        print("🔵 Selected chat after sync: \(self.currentChat?.id ?? "nil") - isBlank: \(self.currentChat?.isBlankChat ?? false)")
+                    }
+                    
+                    // Mark that we've loaded the initial page
+                    self.hasLoadedInitialPage = true
+                    self.isPaginationActive = true
+                }
+            }
+            
+            // Get pagination token for page 2
+            // This needs to happen AFTER we've loaded the first page
+            if let listResult = try? await R2StorageService.shared.listChats(
+                limit: 10,
+                continuationToken: nil,
+                includeContent: false
+            ) {
+                await MainActor.run {
+                    self.paginationToken = listResult.nextContinuationToken
+                    self.hasMoreChats = listResult.hasMore
+                    print("📄 Pagination initialized - hasMore: \(listResult.hasMore), token: \(listResult.nextContinuationToken?.prefix(20) ?? "nil")")
+                }
+            }
         } catch {
             await MainActor.run {
                 self.syncErrors.append(error.localizedDescription)
+            }
+        }
+    }
+    
+    // MARK: - Pagination Methods
+    
+    /// Clean up chats beyond first page (called on app launch to ensure clean state)
+    private func cleanupPaginatedChats() async {
+        guard let userId = currentUserId else { return }
+        
+        // Load all chats from storage
+        let allChats = Chat.loadFromDefaults(userId: userId)
+        
+        // Filter synced chats (not blank, not temporary, and older than 1 minute to avoid deleting just-created chats)
+        let oneMinuteAgo = Date().addingTimeInterval(-60)
+        let syncedChats = allChats.filter { chat in
+            !chat.isBlankChat && 
+            !chat.hasTemporaryId &&
+            chat.createdAt < oneMinuteAgo  // Only clean up chats older than 1 minute
+        }.sorted { $0.createdAt > $1.createdAt }
+        
+        // Also keep all recent chats (created in last minute) regardless of count
+        let recentChats = allChats.filter { chat in
+            chat.createdAt >= oneMinuteAgo
+        }
+        
+        // If we have more than 10 old synced chats, keep only the first 10
+        if syncedChats.count > 10 {
+            print("📄 Cleaning up paginated chats: keeping first 10, removing \(syncedChats.count - 10)")
+            
+            // Keep first 10 synced chats + all unsaved chats (blank/temporary) + recent chats
+            let chatsToKeep = Array(syncedChats.prefix(10)) + 
+                             allChats.filter { chat in chat.isBlankChat || chat.hasTemporaryId } +
+                             recentChats
+            
+            // Remove duplicates based on chat ID
+            var seen = Set<String>()
+            let uniqueChats = chatsToKeep.filter { chat in
+                if seen.contains(chat.id) {
+                    return false
+                }
+                seen.insert(chat.id)
+                return true
+            }
+            
+            Chat.saveToDefaults(uniqueChats, userId: userId)
+            
+            await MainActor.run {
+                self.chats = uniqueChats.sorted { $0.createdAt > $1.createdAt }
+            }
+        }
+    }
+    
+    /// Load more chats (called when user scrolls to bottom)
+    func loadMoreChats() async {
+        // Prevent duplicate loads
+        guard !isLoadingMore else {
+            return
+        }
+        
+        // Must have a token to load more
+        guard let token = paginationToken else {
+            // No token means no more pages
+            await MainActor.run {
+                self.hasMoreChats = false
+            }
+            return
+        }
+        
+        await MainActor.run {
+            self.isLoadingMore = true
+        }
+        
+        // Load next page with the token
+        let result = await cloudSync.loadChatsWithPagination(
+            limit: 10,
+            continuationToken: token,
+            loadLocal: false  // Don't fall back to local when paginating
+        )
+        
+        await MainActor.run {
+            // Convert and append new chats
+            let newChats = result.chats.map { $0.toChat() }
+            
+            // Filter out any duplicates
+            let existingIds = Set(self.chats.map { $0.id })
+            let uniqueNewChats = newChats.filter { !existingIds.contains($0.id) }
+            
+            // Save ALL chats to storage (existing + new)
+            if let userId = self.currentUserId, !uniqueNewChats.isEmpty {
+                let allChats = self.chats + uniqueNewChats
+                Chat.saveToDefaults(allChats, userId: userId)
+                
+                // Append to visible chats array
+                self.chats.append(contentsOf: uniqueNewChats)
+            }
+            
+            // Update pagination state
+            self.hasMoreChats = result.hasMore
+            self.paginationToken = result.nextToken
+            self.isLoadingMore = false
+        }
+    }
+    
+    /// Reset pagination and reload all chats from storage (used after sync)
+    private func resetPaginationAndReloadChats() async {
+        // If pagination is active, we need to carefully handle the reload
+        if isPaginationActive {
+            // Don't reset pagination token during sync
+            // Just reload the currently loaded chats
+            if let userId = currentUserId {
+                let allChats = Chat.loadFromDefaults(userId: userId)
+                
+                // Sort by creation date (newest first)
+                let sortedChats = allChats.sorted { $0.createdAt > $1.createdAt }
+                
+                // Always keep recently created chats (within last 2 minutes) to avoid losing just-sent messages
+                let twoMinutesAgo = Date().addingTimeInterval(-120)
+                let recentChats = sortedChats.filter { $0.createdAt >= twoMinutesAgo }
+                
+                // Take the first page worth of chats (10) plus any blank/temporary/recent chats
+                let syncedChats = sortedChats.filter { 
+                    !$0.isBlankChat && 
+                    !$0.hasTemporaryId && 
+                    $0.createdAt < twoMinutesAgo 
+                }
+                let unsavedChats = sortedChats.filter { $0.isBlankChat || $0.hasTemporaryId }
+                
+                // Keep first 10 synced chats + all unsaved chats + all recent chats
+                let chatsToShow = Array(syncedChats.prefix(10)) + unsavedChats + recentChats
+                
+                // Remove duplicates based on chat ID
+                var seen = Set<String>()
+                let uniqueChats = chatsToShow.filter { chat in
+                    if seen.contains(chat.id) {
+                        return false
+                    }
+                    seen.insert(chat.id)
+                    return true
+                }
+                
+                await MainActor.run {
+                    // Update the chats array
+                    self.chats = uniqueChats.sorted { $0.createdAt > $1.createdAt }
+                    
+                    // Ensure blank chat at top
+                    self.ensureBlankChatAtTop()
+                    
+                    // Check if there are more chats beyond the first page
+                    if syncedChats.count > 10 {
+                        self.hasMoreChats = true
+                    }
+                }
+            }
+        } else {
+            // Not using pagination, do full reload
+            if let userId = currentUserId {
+                let loadedChats = Chat.loadFromDefaults(userId: userId)
+                await MainActor.run {
+                    self.chats = loadedChats
+                    self.ensureBlankChatAtTop()
+                }
             }
         }
     }
@@ -1325,6 +1844,9 @@ class ChatViewModel: ObservableObject {
                 let syncedChats = Chat.loadFromDefaults(userId: userId)
                 if !syncedChats.isEmpty {
                     self.chats = syncedChats
+                    
+                    // Ensure there's always a blank chat at the top
+                    self.ensureBlankChatAtTop()
                 }
             }
         }
