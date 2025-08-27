@@ -380,7 +380,7 @@ struct SettingsView: View {
                                     viewModel: chatViewModel,
                                     authManager: authManager
                                 )) {
-                                    Label("Cloud Sync", systemImage: "icloud")
+                                    Text("Cloud Sync")
                                 }
                             }
                         } header: {
@@ -540,14 +540,28 @@ struct SettingsView: View {
         }
         .alert("Sign Out", isPresented: $showSignOutConfirmation) {
             Button("Cancel", role: .cancel) { }
-            Button("Sign Out", role: .destructive) {
+            Button("Keep Encryption Key", role: .destructive) {
                 Task {
+                    // Sign out but keep the encryption key
+                    await authManager.signOut()
+                    dismiss()
+                }
+            }
+            Button("Delete Everything", role: .destructive) {
+                Task {
+                    // Clear encryption key and all local data
+                    EncryptionService.shared.clearKey()
+                    UserDefaults.standard.removeObject(forKey: "hasLaunchedBefore")
+                    
+                    // Clear all chats from local storage
+                    chatViewModel.clearAllLocalChats()
+                    
                     await authManager.signOut()
                     dismiss()
                 }
             }
         } message: {
-            Text("Are you sure you want to sign out?")
+            Text("Do you want to keep your encryption key and local chats for next time?\n\nIf you delete everything, you'll need to set up a new encryption key when you sign in again.")
         }
         .alert("Delete Account", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }

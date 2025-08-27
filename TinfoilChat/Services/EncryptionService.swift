@@ -38,6 +38,15 @@ class EncryptionService: ObservableObject {
     
     /// Initialize with existing key or generate new one
     func initialize() async throws -> String {
+        // Check if this is a fresh install by looking for a first launch marker
+        let hasLaunchedBefore = UserDefaults.standard.bool(forKey: "hasLaunchedBefore")
+        
+        if !hasLaunchedBefore {
+            // First launch after install - clear any lingering keychain data
+            deleteKeyFromKeychain()
+            UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
+        }
+        
         // Check if we have a stored key in Keychain
         if let storedKey = loadKeyFromKeychain() {
             try await setKey(storedKey)

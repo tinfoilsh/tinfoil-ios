@@ -1189,6 +1189,26 @@ class ChatViewModel: ObservableObject {
         
     }
     
+    /// Clear all local chats and reset to fresh state
+    func clearAllLocalChats() {
+        // Clear all chats from memory
+        chats.removeAll()
+        currentChat = nil
+        
+        // Clear from UserDefaults storage
+        if let userId = currentUserId {
+            Chat.saveToDefaults([], userId: userId)
+        }
+        
+        // Reset sync state
+        lastSyncDate = nil
+        syncErrors = []
+        isSyncing = false
+        
+        // Clear encryption key reference
+        encryptionKey = nil
+    }
+    
     /// Handle sign-in by loading user's saved chats
     func handleSignIn() {
         if hasChatAccess, let userId = currentUserId {
@@ -1196,14 +1216,33 @@ class ChatViewModel: ObservableObject {
             // Check if we need to set up encryption first
             let existingKey = EncryptionService.shared.getKey()
             if existingKey == nil {
-                // Show encryption setup modal - sync will happen after user sets key
-                self.isFirstTimeUser = true
-                self.showEncryptionSetup = true
-                // Don't load chats or sync yet - wait for encryption setup
+                // Auto-generate encryption key for new users (matches React behavior)
+                Task {
+                    do {
+                        let newKey = try await EncryptionService.shared.initialize()
+                        self.encryptionKey = newKey
+                        
+                        // Now proceed with cloud sync
+                        await initializeCloudSync()
+                        
+                        // After sync completes, check if we have chats
+                        await MainActor.run {
+                            if self.chats.isEmpty {
+                                self.createNewChat()
+                            }
+                        }
+                    } catch {
+                        // If key generation fails, fall back to showing setup modal
+                        await MainActor.run {
+                            self.isFirstTimeUser = true
+                            self.showEncryptionSetup = true
+                        }
+                    }
+                }
                 return
             }
             
-            // Initialize cloud sync first, which will load chats after syncing
+            // We have an encryption key, initialize cloud sync
             Task {
                 await initializeCloudSync()
                 
