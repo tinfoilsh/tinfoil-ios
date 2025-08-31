@@ -204,15 +204,21 @@ struct ChatSidebar: View {
                                     await viewModel.loadMoreChats()
                                 }
                             }) {
-                                HStack {
-                                    Image(systemName: "arrow.down.circle")
-                                    Text("Load More")
-                                }
-                                .foregroundColor(.accentColor)
-                                .font(.subheadline)
+                                Text("Load More")
+                                    .foregroundColor(.primary)
+                                    .font(.system(size: 16, weight: .regular))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color(UIColor.secondarySystemBackground).opacity(0.3))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .strokeBorder(Color.gray.opacity(0.1), lineWidth: 1)
+                                    )
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
+                            .buttonStyle(PlainButtonStyle())
                         }
                     }
                 }
