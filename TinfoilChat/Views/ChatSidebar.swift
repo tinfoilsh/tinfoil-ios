@@ -19,6 +19,9 @@ struct ChatSidebar: View {
     @State private var editingTitle: String = ""
     @State private var deletingChatId: String? = nil
     @State private var showSettings: Bool = false
+    @State private var showEncryptedChatAlert: Bool = false
+    @State private var selectedEncryptedChat: Chat? = nil
+    @State private var shouldOpenCloudSync: Bool = false
     
     // Timer to update relative time strings
     @State private var timeUpdateTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
@@ -88,7 +91,24 @@ struct ChatSidebar: View {
             }
         }
         .sheet(isPresented: $showSettings) {
-            SettingsView()
+            SettingsView(shouldOpenCloudSync: shouldOpenCloudSync)
+        }
+        .alert("Encrypted Chat", isPresented: $showEncryptedChatAlert) {
+            Button("Go to Settings") {
+                shouldOpenCloudSync = true
+                showSettings = true
+            }
+            Button("Cancel", role: .cancel) {
+                selectedEncryptedChat = nil
+            }
+        } message: {
+            Text("This chat is encrypted with a different key. Go to Settings > Cloud Sync to update your encryption key.")
+        }
+        .onChange(of: showSettings) { _, isShowing in
+            // Reset the cloud sync flag when settings closes
+            if !isShowing {
+                shouldOpenCloudSync = false
+            }
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
         }
@@ -168,7 +188,13 @@ struct ChatSidebar: View {
                             editingTitle: $editingTitle,
                             timeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
                             onSelect: {
-                                viewModel.selectChat(chat)
+                                if chat.decryptionFailed {
+                                    // Show alert for encrypted chats
+                                    selectedEncryptedChat = chat
+                                    showEncryptedChatAlert = true
+                                } else {
+                                    viewModel.selectChat(chat)
+                                }
                             },
                             onEdit: { 
                                 if editingChatId == chat.id {
