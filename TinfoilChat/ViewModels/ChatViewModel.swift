@@ -149,59 +149,21 @@ class ChatViewModel: ObservableObject {
         
         // Always create a new chat when the app is loaded initially
         if let auth = authManager, auth.isAuthenticated {
-            // Load saved chats from UserDefaults
-            let savedChats = Chat.loadFromDefaults(userId: currentUserId)
-            
-            // Sort by creation date (newest first)
-            let sortedChats = savedChats.sorted { $0.createdAt > $1.createdAt }
-            
-            // Clean up saved chats to only keep first page + unsaved chats
-            // This ensures app restart doesn't show previously paginated data
-            let oneMinuteAgo = Date().addingTimeInterval(-Constants.Pagination.cleanupThresholdSeconds)
-            let syncedChats = sortedChats.filter { chat in
-                !chat.isBlankChat && 
-                !chat.hasTemporaryId &&
-                chat.createdAt < oneMinuteAgo
-            }
-            let unsavedChats = sortedChats.filter { $0.isBlankChat || $0.hasTemporaryId }
-            let recentChats = sortedChats.filter { $0.createdAt >= oneMinuteAgo }
-            
-            // Keep only first page of synced chats + unsaved/recent chats
-            var chatsToKeep = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + unsavedChats + recentChats
-            
-            // Remove duplicates
-            var seen = Set<String>()
-            chatsToKeep = chatsToKeep.filter { chat in
-                if seen.contains(chat.id) {
-                    return false
-                }
-                seen.insert(chat.id)
-                return true
-            }
-            
-            // Save cleaned up chats back to storage
-            if !chatsToKeep.isEmpty {
-                Chat.saveToDefaults(chatsToKeep, userId: currentUserId)
-            }
-            
-            // Display only the first page
-            chats = Array(chatsToKeep.sorted { $0.createdAt > $1.createdAt }.prefix(Constants.Pagination.chatsPerPage))
-            
-            // Reset pagination state for fresh app start
-            paginationToken = nil
-            hasMoreChats = syncedChats.count > Constants.Pagination.chatsPerPage
-            isPaginationActive = false
-            hasLoadedInitialPage = false
-            hasAttemptedLoadMore = false
-            
-            // Create a new chat directly and set it as current
+            // Create a temporary blank chat for immediate display
             let newChat = Chat.create(
                 modelType: currentModel,
                 language: nil,
                 userId: currentUserId
             )
-            chats.insert(newChat, at: 0)
+            chats = [newChat]
             currentChat = newChat
+            
+            // Reset pagination state for fresh app start
+            paginationToken = nil
+            hasMoreChats = false
+            isPaginationActive = false
+            hasLoadedInitialPage = false
+            hasAttemptedLoadMore = false
         } else {
             // For non-authenticated users, just create a single chat without saving
             let newChat = Chat.create(modelType: currentModel)
@@ -217,9 +179,101 @@ class ChatViewModel: ObservableObject {
         if authManager?.isAuthenticated == true {
             setupAutoSyncTimer()
             
-            // Initialize pagination for authenticated users on app restart
+            // Initialize cloud sync and perform immediate sync on app restart
             Task {
-                await setupPaginationForAppRestart()
+                // Initialize cloud sync service first
+                do {
+                    // Initialize encryption
+                    let key = try await EncryptionService.shared.initialize()
+                    await MainActor.run {
+                        self.encryptionKey = key
+                    }
+                    
+                    // Initialize cloud sync
+                    try await cloudSync.initialize()
+                    
+                    // Perform immediate sync on app launch/restart
+                    print("🔄 Performing initial sync on app launch...")
+                    let syncResult = await cloudSync.syncAllChats()
+                    print("✅ Initial sync completed (uploaded: \(syncResult.uploaded), downloaded: \(syncResult.downloaded))")
+                    
+                    // Setup pagination after sync
+                    await setupPaginationForAppRestart()
+                    
+                    // Load and display chats after sync
+                    if let userId = currentUserId {
+                        let loadedChats = Chat.loadFromDefaults(userId: userId)
+                        print("📱 Loaded \(loadedChats.count) chats from storage after sync")
+                        
+                        // Sort by creation date (newest first)
+                        let sortedChats = loadedChats.sorted { $0.createdAt > $1.createdAt }
+                        
+                        // For initial sync, don't filter by time - just separate synced vs unsaved
+                        let syncedChats = sortedChats.filter { chat in
+                            !chat.isBlankChat && 
+                            !chat.hasTemporaryId
+                        }
+                        let unsavedChats = sortedChats.filter { $0.isBlankChat || $0.hasTemporaryId }
+                        
+                        print("📊 Synced chats: \(syncedChats.count), Unsaved chats: \(unsavedChats.count)")
+                        
+                        // Keep only first page of synced chats + all unsaved chats
+                        var chatsToKeep = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + unsavedChats
+                        
+                        // Remove duplicates
+                        var seen = Set<String>()
+                        chatsToKeep = chatsToKeep.filter { chat in
+                            if seen.contains(chat.id) {
+                                return false
+                            }
+                            seen.insert(chat.id)
+                            return true
+                        }
+                        
+                        // Save cleaned up chats back to storage
+                        if !chatsToKeep.isEmpty {
+                            Chat.saveToDefaults(chatsToKeep, userId: currentUserId)
+                        }
+                        
+                        // Display the first page
+                        let firstPageChats = Array(chatsToKeep.sorted { $0.createdAt > $1.createdAt }.prefix(Constants.Pagination.chatsPerPage))
+                        
+                        print("📄 Displaying \(firstPageChats.count) chats in UI")
+                        
+                        await MainActor.run {
+                            // Update chats array with synced data
+                            if !firstPageChats.isEmpty {
+                                self.chats = firstPageChats
+                                self.ensureBlankChatAtTop()
+                                print("✅ Updated UI with \(self.chats.count) chats")
+                                
+                                // Select the first chat
+                                if let first = self.chats.first {
+                                    self.currentChat = first
+                                    print("📍 Selected chat: \(first.id) - isBlank: \(first.isBlankChat)")
+                                }
+                            } else {
+                                // No chats loaded, ensure we have at least a blank chat
+                                if self.chats.isEmpty || !self.chats[0].isBlankChat {
+                                    let newChat = Chat.create(
+                                        modelType: self.currentModel,
+                                        language: nil,
+                                        userId: userId
+                                    )
+                                    self.chats = [newChat]
+                                    self.currentChat = newChat
+                                }
+                            }
+                            
+                            // Update pagination state
+                            self.hasMoreChats = syncedChats.count > Constants.Pagination.chatsPerPage
+                            self.hasLoadedInitialPage = true
+                            self.isPaginationActive = syncedChats.count > 0
+                        }
+                    }
+                } catch {
+                    print("❌ Failed to initialize cloud sync on app launch: \(error)")
+                }
             }
         }
     }
@@ -309,6 +363,19 @@ class ChatViewModel: ObservableObject {
             // Resume auto-sync timer if authenticated
             if self?.authManager?.isAuthenticated == true {
                 self?.setupAutoSyncTimer()
+                
+                // Perform immediate sync when returning from background
+                Task {
+                    print("🔄 Performing sync after returning from background...")
+                    if let syncResult = try? await self?.cloudSync.syncAllChats() {
+                        print("✅ Background return sync completed (uploaded: \(syncResult.uploaded), downloaded: \(syncResult.downloaded))")
+                        
+                        // Update chats if needed
+                        if syncResult.downloaded > 0 {
+                            await self?.updateChatsAfterSync()
+                        }
+                    }
+                }
             }
         }
         
@@ -1425,8 +1492,35 @@ class ChatViewModel: ObservableObject {
     private func saveChats() {
         // Save chats for all authenticated users
         if hasChatAccess {
-            let nonEmptyChats = chats.filter { !$0.messages.isEmpty }
-            Chat.saveToDefaults(nonEmptyChats, userId: currentUserId)
+            // Only save first page of chats + unsaved chats (to prevent persisting paginated data)
+            // Keep encrypted chats that failed to decrypt
+            let nonEmptyChats = chats.filter { !$0.messages.isEmpty || $0.decryptionFailed }
+            
+            // Separate into categories
+            let oneMinuteAgo = Date().addingTimeInterval(-Constants.Pagination.cleanupThresholdSeconds)
+            let syncedChats = nonEmptyChats.filter { chat in
+                !chat.isBlankChat && 
+                !chat.hasTemporaryId &&
+                chat.createdAt < oneMinuteAgo
+            }.sorted { $0.createdAt > $1.createdAt }
+            
+            let unsavedChats = nonEmptyChats.filter { $0.isBlankChat || $0.hasTemporaryId }
+            let recentChats = nonEmptyChats.filter { $0.createdAt >= oneMinuteAgo }
+            
+            // Only save first page of synced chats + all unsaved/recent chats
+            let chatsToSave = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + unsavedChats + recentChats
+            
+            // Remove duplicates
+            var seen = Set<String>()
+            let uniqueChatsToSave = chatsToSave.filter { chat in
+                if seen.contains(chat.id) {
+                    return false
+                }
+                seen.insert(chat.id)
+                return true
+            }
+            
+            Chat.saveToDefaults(uniqueChatsToSave, userId: currentUserId)
             
             // Trigger cloud backup for the current chat if it has messages and permanent ID
             // Don't try to backup chats with temporary IDs or while streaming
@@ -1628,11 +1722,80 @@ class ChatViewModel: ObservableObject {
                 return
             }
             
-            // We have an encryption key, initialize cloud sync
+            // We have an encryption key, perform immediate sync
             Task {
-                // For initial load on sign-in, we should use pagination
-                // to avoid loading all chats at once
-                await initializeCloudSync()
+                print("🔄 handleSignIn: Performing immediate sync...")
+                
+                // Initialize encryption and cloud sync
+                do {
+                    let key = try await EncryptionService.shared.initialize()
+                    self.encryptionKey = key
+                    try await cloudSync.initialize()
+                    
+                    // Perform sync
+                    let syncResult = await cloudSync.syncAllChats()
+                    print("✅ handleSignIn: Sync completed (uploaded: \(syncResult.uploaded), downloaded: \(syncResult.downloaded))")
+                    
+                    // Load and display synced chats
+                    if let userId = currentUserId {
+                        let loadedChats = Chat.loadFromDefaults(userId: userId)
+                        print("📚 handleSignIn: Total loaded chats: \(loadedChats.count)")
+                        
+                        // Debug: Check what we loaded
+                        for chat in loadedChats.prefix(5) {
+                            print("  - Chat: \(chat.id), blank: \(chat.isBlankChat), messages: \(chat.messages.count), title: \(chat.title), decryptionFailed: \(chat.decryptionFailed)")
+                        }
+                        
+                        let sortedChats = loadedChats.sorted { $0.createdAt > $1.createdAt }
+                        
+                        // Include encrypted chats that failed to decrypt (they have decryptionFailed flag)
+                        // Only filter out truly blank chats (not encrypted ones)
+                        let displayableChats = sortedChats.filter { chat in
+                            // Show if: has messages OR failed to decrypt OR has a non-blank title
+                            !chat.messages.isEmpty || chat.decryptionFailed || !chat.title.contains("New Chat")
+                        }
+                        print("📊 handleSignIn: Displayable chats (including encrypted): \(displayableChats.count)")
+                        
+                        // Take first page of displayable chats
+                        let firstPage = Array(displayableChats.prefix(Constants.Pagination.chatsPerPage))
+                        
+                        print("📄 handleSignIn: Displaying \(firstPage.count) chats (including blanks)")
+                        
+                        await MainActor.run {
+                            if !firstPage.isEmpty {
+                                // Replace current chats with synced ones
+                                self.chats = firstPage
+                                
+                                // Only add blank chat if we don't have one already
+                                if !self.chats.contains(where: { $0.isBlankChat }) {
+                                    self.ensureBlankChatAtTop()
+                                }
+                            } else {
+                                // No synced chats, keep the blank chat
+                                self.ensureBlankChatAtTop()
+                            }
+                            
+                            print("🎯 Final chat count in UI: \(self.chats.count)")
+                            
+                            if let first = self.chats.first {
+                                self.currentChat = first
+                            }
+                            
+                            // Force UI update
+                            self.objectWillChange.send()
+                            
+                            // Set pagination state
+                            self.hasMoreChats = sortedChats.count > Constants.Pagination.chatsPerPage
+                            self.hasLoadedInitialPage = true
+                            self.isPaginationActive = true
+                        }
+                    }
+                    
+                    // Setup pagination token
+                    await setupPaginationForAppRestart()
+                } catch {
+                    print("❌ handleSignIn: Failed to sync: \(error)")
+                }
             }
         } else {
         }
@@ -1678,23 +1841,48 @@ class ChatViewModel: ObservableObject {
             // Load chats from storage after sync
             if let userId = currentUserId {
                 let loadedChats = Chat.loadFromDefaults(userId: userId)
+                print("📱 initializeCloudSync: Loaded \(loadedChats.count) chats from storage")
+                
+                // Sort and take only first page for display
+                let sortedChats = loadedChats.sorted { $0.createdAt > $1.createdAt }
+                let nonBlankChats = sortedChats.filter { !$0.isBlankChat }
+                print("📊 initializeCloudSync: \(nonBlankChats.count) non-blank chats available")
+                
+                let firstPageChats = Array(nonBlankChats.prefix(Constants.Pagination.chatsPerPage))
+                print("📄 initializeCloudSync: Displaying \(firstPageChats.count) chats in first page")
+                
                 await MainActor.run {
-                    // Clear current chat before loading new ones to avoid orphaned references
-                    self.currentChat = nil
-                    self.chats = loadedChats
+                    // Update chats with synced data
+                    if !firstPageChats.isEmpty {
+                        self.chats = firstPageChats
+                        self.ensureBlankChatAtTop()
+                        print("✅ initializeCloudSync: Updated UI with \(self.chats.count) chats")
+                    } else {
+                        print("⚠️ initializeCloudSync: No synced chats to display, keeping blank chat")
+                        // No synced chats, ensure we have at least the blank chat
+                        if self.chats.isEmpty {
+                            let newChat = Chat.create(
+                                modelType: self.currentModel,
+                                language: nil,
+                                userId: userId
+                            )
+                            self.chats = [newChat]
+                            self.currentChat = newChat
+                        }
+                    }
                     
-                    // Ensure blank chat at top
-                    self.ensureBlankChatAtTop()
-                    
-                    // Select the first chat (which should be the blank chat)
-                    if !self.chats.isEmpty {
-                        self.currentChat = self.chats.first
-                        print("🔵 Selected chat after sync: \(self.currentChat?.id ?? "nil") - isBlank: \(self.currentChat?.isBlankChat ?? false)")
+                    // Select the first chat
+                    if let first = self.chats.first {
+                        self.currentChat = first
+                        print("🔵 Selected chat after sync: \(first.id) - isBlank: \(first.isBlankChat)")
                     }
                     
                     // Mark that we've loaded the initial page
                     self.hasLoadedInitialPage = true
-                    self.isPaginationActive = true
+                    self.isPaginationActive = nonBlankChats.count > 0
+                    
+                    // Set hasMoreChats based on total count
+                    self.hasMoreChats = nonBlankChats.count > Constants.Pagination.chatsPerPage
                 }
             }
             

@@ -9,9 +9,6 @@ import Foundation
 import Combine
 import Clerk
 
-// MARK: - Constants
-private let CHATS_PER_PAGE = 10
-
 // MARK: - Helper Functions
 
 /// Create properly configured ISO8601DateFormatter that handles JavaScript's toISOString() format
@@ -61,7 +58,6 @@ class CloudSyncService: ObservableObject {
     private let streamingTracker = StreamingTracker.shared
     
     // Constants
-    private let CHATS_PER_PAGE = 50  // Match React's PAGINATION.CHATS_PER_PAGE
     
     private init() {}
     
@@ -258,7 +254,7 @@ class CloudSyncService: ObservableObject {
         continuationToken: String? = nil,
         loadLocal: Bool = true
     ) async -> PaginatedChatsResult {
-        let pageLimit = limit ?? CHATS_PER_PAGE
+        let pageLimit = limit ?? Constants.Pagination.chatsPerPage
         // If not authenticated, fall back to local-only pagination
         guard await r2Storage.isAuthenticated() else {
             if loadLocal {
@@ -471,7 +467,7 @@ class CloudSyncService: ObservableObject {
         do {
             // Only fetch first page of chats during initial sync to match pagination
             let remoteList = try await r2Storage.listChats(
-                limit: CHATS_PER_PAGE,
+                limit: Constants.Pagination.chatsPerPage,
                 includeContent: true
             )
             
@@ -635,7 +631,7 @@ class CloudSyncService: ObservableObject {
                 }
                 .sorted { $0.createdAt > $1.createdAt } // Descending (newest first)
             
-            let localChatsInFirstPage = Array(sortedSyncedLocalChats.prefix(CHATS_PER_PAGE))
+            let localChatsInFirstPage = Array(sortedSyncedLocalChats.prefix(Constants.Pagination.chatsPerPage))
             
             for localChat in localChatsInFirstPage {
                 if !remoteChatMap.keys.contains(localChat.id) {
@@ -739,11 +735,13 @@ class CloudSyncService: ObservableObject {
         chats.append(chatToSave)
         
         // Filter out blank chats before saving (matches ChatViewModel.saveChats behavior)
-        // This prevents blank encrypted placeholders from persisting
-        let nonEmptyChats = chats.filter { !$0.messages.isEmpty }
+        // BUT keep encrypted chats that failed to decrypt (they have decryptionFailed flag)
+        let chatsToSave = chats.filter { chat in
+            !chat.messages.isEmpty || chat.decryptionFailed
+        }
         
         // Save back to defaults
-        Chat.saveToDefaults(nonEmptyChats, userId: userId)
+        Chat.saveToDefaults(chatsToSave, userId: userId)
     }
     
     private func markChatAsSynced(_ chatId: String, version: Int) async {
@@ -755,8 +753,9 @@ class CloudSyncService: ObservableObject {
             chats[index].locallyModified = false
             
             // Filter out blank chats before saving (matches ChatViewModel.saveChats behavior)
-            let nonEmptyChats = chats.filter { !$0.messages.isEmpty }
-            Chat.saveToDefaults(nonEmptyChats, userId: await getCurrentUserId())
+            // BUT keep encrypted chats that failed to decrypt
+            let chatsToSave = chats.filter { !$0.messages.isEmpty || $0.decryptionFailed }
+            Chat.saveToDefaults(chatsToSave, userId: await getCurrentUserId())
         }
     }
     
@@ -766,8 +765,9 @@ class CloudSyncService: ObservableObject {
         chats.removeAll { $0.id == chatId }
         
         // Filter out blank chats before saving (matches ChatViewModel.saveChats behavior)
-        let nonEmptyChats = chats.filter { !$0.messages.isEmpty }
-        Chat.saveToDefaults(nonEmptyChats, userId: await getCurrentUserId())
+        // BUT keep encrypted chats that failed to decrypt
+        let chatsToSave = chats.filter { !$0.messages.isEmpty || $0.decryptionFailed }
+        Chat.saveToDefaults(chatsToSave, userId: await getCurrentUserId())
     }
     
     private func getCurrentUserId() async -> String? {
