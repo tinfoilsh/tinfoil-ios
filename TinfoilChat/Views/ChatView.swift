@@ -261,6 +261,7 @@ struct ChatContainer: View {
                             // Open if dragged right past threshold
                             if gesture.translation.width > threshold {
                                 isSidebarOpen = true
+                                dismissKeyboard()
                             }
                         }
                         dragOffset = 0
@@ -347,7 +348,16 @@ struct ChatContainer: View {
     private func toggleSidebar() {
         withAnimation {
             isSidebarOpen.toggle()
+            // Dismiss keyboard when opening sidebar
+            if isSidebarOpen {
+                dismissKeyboard()
+            }
         }
+    }
+    
+    /// Dismisses the keyboard
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     
     /// Shows the authentication view
