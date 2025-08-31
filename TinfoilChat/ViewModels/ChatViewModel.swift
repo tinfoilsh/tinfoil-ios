@@ -149,20 +149,50 @@ class ChatViewModel: ObservableObject {
         
         // Always create a new chat when the app is loaded initially
         if let auth = authManager, auth.isAuthenticated {
-            // Load ONLY the first page of saved chats from UserDefaults
+            // Load saved chats from UserDefaults
             let savedChats = Chat.loadFromDefaults(userId: currentUserId)
             
             // Sort by creation date (newest first)
             let sortedChats = savedChats.sorted { $0.createdAt > $1.createdAt }
             
-            // Take only the first 10 chats for initial display
-            chats = Array(sortedChats.prefix(10))
+            // Clean up saved chats to only keep first page + unsaved chats
+            // This ensures app restart doesn't show previously paginated data
+            let oneMinuteAgo = Date().addingTimeInterval(-Constants.Pagination.cleanupThresholdSeconds)
+            let syncedChats = sortedChats.filter { chat in
+                !chat.isBlankChat && 
+                !chat.hasTemporaryId &&
+                chat.createdAt < oneMinuteAgo
+            }
+            let unsavedChats = sortedChats.filter { $0.isBlankChat || $0.hasTemporaryId }
+            let recentChats = sortedChats.filter { $0.createdAt >= oneMinuteAgo }
+            
+            // Keep only first page of synced chats + unsaved/recent chats
+            var chatsToKeep = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + unsavedChats + recentChats
+            
+            // Remove duplicates
+            var seen = Set<String>()
+            chatsToKeep = chatsToKeep.filter { chat in
+                if seen.contains(chat.id) {
+                    return false
+                }
+                seen.insert(chat.id)
+                return true
+            }
+            
+            // Save cleaned up chats back to storage
+            if !chatsToKeep.isEmpty {
+                Chat.saveToDefaults(chatsToKeep, userId: currentUserId)
+            }
+            
+            // Display only the first page
+            chats = Array(chatsToKeep.sorted { $0.createdAt > $1.createdAt }.prefix(Constants.Pagination.chatsPerPage))
             
             // Reset pagination state for fresh app start
             paginationToken = nil
-            hasMoreChats = sortedChats.count > 10
+            hasMoreChats = syncedChats.count > Constants.Pagination.chatsPerPage
             isPaginationActive = false
             hasLoadedInitialPage = false
+            hasAttemptedLoadMore = false
             
             // Create a new chat directly and set it as current
             let newChat = Chat.create(
@@ -208,10 +238,10 @@ class ChatViewModel: ObservableObject {
         // Invalidate existing timer if any
         autoSyncTimer?.invalidate()
         
-        print("📅 Setting up auto-sync timer (every 30 seconds)")
+        print("📅 Setting up auto-sync timer (every \(Int(Constants.Sync.autoSyncIntervalSeconds)) seconds)")
         
-        // Create timer that fires every 30 seconds
-        autoSyncTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+        // Create timer that fires at regular intervals
+        autoSyncTimer = Timer.scheduledTimer(withTimeInterval: Constants.Sync.autoSyncIntervalSeconds, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             
             // Only sync if authenticated
@@ -598,7 +628,7 @@ class ChatViewModel: ObservableObject {
         currentTask = Task {
             // Begin background task to allow stream to complete if app goes to background
             var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
-            backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "CompleteStreamingResponse") {
+            backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: Constants.Sync.backgroundTaskName) {
                 // Clean up if system terminates the background task
                 UIApplication.shared.endBackgroundTask(backgroundTaskId)
                 backgroundTaskId = .invalid
@@ -617,7 +647,7 @@ class ChatViewModel: ObservableObject {
                     setupTinfoilClient()
                     
                     // Wait for client to be available with timeout
-                    let maxWaitTime = 30.0 // 30 seconds timeout
+                    let maxWaitTime = Constants.Sync.clientInitTimeoutSeconds
                     let startTime = Date()
                     
                     while client == nil && Date().timeIntervalSince(startTime) < maxWaitTime {
@@ -1671,7 +1701,7 @@ class ChatViewModel: ObservableObject {
             // Get pagination token for page 2
             // This needs to happen AFTER we've loaded the first page
             if let listResult = try? await R2StorageService.shared.listChats(
-                limit: 10,
+                limit: Constants.Pagination.chatsPerPage,
                 continuationToken: nil,
                 includeContent: false
             ) {
@@ -1696,7 +1726,7 @@ class ChatViewModel: ObservableObject {
         do {
             // Get the list result to check if there are more pages
             if let listResult = try? await R2StorageService.shared.listChats(
-                limit: 10,
+                limit: Constants.Pagination.chatsPerPage,
                 continuationToken: nil,
                 includeContent: false
             ) {
@@ -1719,7 +1749,7 @@ class ChatViewModel: ObservableObject {
         let allChats = Chat.loadFromDefaults(userId: userId)
         
         // Filter synced chats (not blank, not temporary, and older than 1 minute to avoid deleting just-created chats)
-        let oneMinuteAgo = Date().addingTimeInterval(-60)
+        let oneMinuteAgo = Date().addingTimeInterval(-Constants.Pagination.cleanupThresholdSeconds)
         let syncedChats = allChats.filter { chat in
             !chat.isBlankChat && 
             !chat.hasTemporaryId &&
@@ -1731,12 +1761,12 @@ class ChatViewModel: ObservableObject {
             chat.createdAt >= oneMinuteAgo
         }
         
-        // If we have more than 10 old synced chats, keep only the first 10
-        if syncedChats.count > 10 {
-            print("📄 Cleaning up paginated chats: keeping first 10, removing \(syncedChats.count - 10)")
+        // If we have more than first page of old synced chats, keep only the first page
+        if syncedChats.count > Constants.Pagination.chatsPerPage {
+            print("📄 Cleaning up paginated chats: keeping first \(Constants.Pagination.chatsPerPage), removing \(syncedChats.count - Constants.Pagination.chatsPerPage)")
             
-            // Keep first 10 synced chats + all unsaved chats (blank/temporary) + recent chats
-            let chatsToKeep = Array(syncedChats.prefix(10)) + 
+            // Keep first page of synced chats + all unsaved chats (blank/temporary) + recent chats
+            let chatsToKeep = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + 
                              allChats.filter { chat in chat.isBlankChat || chat.hasTemporaryId } +
                              recentChats
             
@@ -1794,12 +1824,9 @@ class ChatViewModel: ObservableObject {
             let existingIds = Set(self.chats.map { $0.id })
             let uniqueNewChats = newChats.filter { !existingIds.contains($0.id) }
             
-            // Save ALL chats to storage (existing + new)
-            if let userId = self.currentUserId, !uniqueNewChats.isEmpty {
-                let allChats = self.chats + uniqueNewChats
-                Chat.saveToDefaults(allChats, userId: userId)
-                
-                // Append to visible chats array
+            // DON'T save paginated chats to storage - keep them in memory only
+            // Only append to the visible chats array
+            if !uniqueNewChats.isEmpty {
                 self.chats.append(contentsOf: uniqueNewChats)
             }
             
@@ -1825,7 +1852,7 @@ class ChatViewModel: ObservableObject {
         let currentlyLoadedIds = Set(chats.map { $0.id })
         
         // Separate chats into categories
-        let twoMinutesAgo = Date().addingTimeInterval(-120)
+        let twoMinutesAgo = Date().addingTimeInterval(-Constants.Pagination.recentChatThresholdSeconds)
         let recentChats = sortedChats.filter { $0.createdAt >= twoMinutesAgo }
         let unsavedChats = sortedChats.filter { $0.isBlankChat || $0.hasTemporaryId }
         let syncedChats = sortedChats.filter { 
@@ -1844,16 +1871,16 @@ class ChatViewModel: ObservableObject {
         updatedChats.append(contentsOf: recentChats)
         
         // 3. For synced chats, preserve pagination state
-        if hasAttemptedLoadMore && currentlyLoadedIds.count > 10 {
+        if hasAttemptedLoadMore && currentlyLoadedIds.count > Constants.Pagination.chatsPerPage {
             // User has loaded more pages - preserve all currently loaded synced chats
             let syncedChatsToShow = syncedChats.filter { chat in
-                // Keep if it was already loaded OR if it's in the first 10 positions
-                currentlyLoadedIds.contains(chat.id) || syncedChats.firstIndex(where: { $0.id == chat.id }) ?? Int.max < 10
+                // Keep if it was already loaded OR if it's in the first page positions
+                currentlyLoadedIds.contains(chat.id) || syncedChats.firstIndex(where: { $0.id == chat.id }) ?? Int.max < Constants.Pagination.chatsPerPage
             }
             updatedChats.append(contentsOf: syncedChatsToShow)
         } else {
             // Only first page loaded - update just the first page
-            updatedChats.append(contentsOf: Array(syncedChats.prefix(10)))
+            updatedChats.append(contentsOf: Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)))
         }
         
         // Remove duplicates based on chat ID
@@ -1892,7 +1919,7 @@ class ChatViewModel: ObservableObject {
                 let sortedChats = allChats.sorted { $0.createdAt > $1.createdAt }
                 
                 // Always keep recently created chats (within last 2 minutes) to avoid losing just-sent messages
-                let twoMinutesAgo = Date().addingTimeInterval(-120)
+                let twoMinutesAgo = Date().addingTimeInterval(-Constants.Pagination.recentChatThresholdSeconds)
                 let recentChats = sortedChats.filter { $0.createdAt >= twoMinutesAgo }
                 
                 // Take the first page worth of chats (10) plus any blank/temporary/recent chats
@@ -1903,8 +1930,8 @@ class ChatViewModel: ObservableObject {
                 }
                 let unsavedChats = sortedChats.filter { $0.isBlankChat || $0.hasTemporaryId }
                 
-                // Keep first 10 synced chats + all unsaved chats + all recent chats
-                let chatsToShow = Array(syncedChats.prefix(10)) + unsavedChats + recentChats
+                // Keep first page of synced chats + all unsaved chats + all recent chats
+                let chatsToShow = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + unsavedChats + recentChats
                 
                 // Remove duplicates based on chat ID
                 var seen = Set<String>()
@@ -1923,7 +1950,7 @@ class ChatViewModel: ObservableObject {
                 self.ensureBlankChatAtTop()
                 
                 // Check if there are more chats beyond the first page
-                if syncedChats.count > 10 {
+                if syncedChats.count > Constants.Pagination.chatsPerPage {
                     self.hasMoreChats = true
                 }
             }
@@ -1936,8 +1963,8 @@ class ChatViewModel: ObservableObject {
                 // Sort by creation date (newest first) 
                 let sortedChats = allChats.sorted { $0.createdAt > $1.createdAt }
                 
-                // Take only first 10 chats initially
-                self.chats = Array(sortedChats.prefix(10))
+                // Take only first page of chats initially
+                self.chats = Array(sortedChats.prefix(Constants.Pagination.chatsPerPage))
                 self.ensureBlankChatAtTop()
                 
                 // Set up pagination if there are more chats
