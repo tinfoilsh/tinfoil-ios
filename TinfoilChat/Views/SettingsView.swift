@@ -456,6 +456,25 @@ struct SettingsView: View {
                                     }
                                 }
                             }
+                            
+                            // Personalization
+                            NavigationLink(destination: PersonalizationView()) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Personalization")
+                                            .font(.body)
+                                        Text("Customize how the AI responds to you")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    if settings.isPersonalizationEnabled {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.caption)
+                                            .foregroundColor(.green)
+                                    }
+                                }
+                            }
                         } header: {
                             Text("Chat Settings")
                         }

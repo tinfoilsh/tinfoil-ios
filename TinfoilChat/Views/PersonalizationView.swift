@@ -1,5 +1,5 @@
 //
-//  MemoryView.swift
+//  PersonalizationView.swift
 //  TinfoilChat
 //
 //  Created on 19/07/25.
@@ -118,7 +118,7 @@ struct FlowResult {
     }
 }
 
-struct MemoryView: View {
+struct PersonalizationView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var settings = SettingsManager.shared
     @Environment(\.colorScheme) private var colorScheme
@@ -130,36 +130,31 @@ struct MemoryView: View {
     @State private var localAdditionalContext = ""
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Custom header
-            panelHeader
-            
-            // Content
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Text("Help Tin personalize your conversations")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 24)
-                        .padding(.top, 24)
-                    
-                    personalizationContent
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 24)
-                }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Help Tin personalize your conversations")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 24)
+                
+                personalizationContent
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 24)
             }
-            .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
-                .onTapGesture {
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                }
-                .simultaneousGesture(
-                    DragGesture()
-                        .onChanged { _ in
-                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        }
-                )
         }
         .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+        .navigationTitle("Personalization")
+        .navigationBarTitleDisplayMode(.inline)
+        .onTapGesture {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+        .simultaneousGesture(
+            DragGesture()
+                .onChanged { _ in
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+        )
         .accentColor(Color.accentPrimary)
         .onAppear {
             localNickname = settings.nickname
@@ -297,42 +292,5 @@ struct MemoryView: View {
             }
             .buttonStyle(BorderlessButtonStyle())
         }
-    }
-    
-    // Panel header matching the style from VerifierViewController
-    private var panelHeader: some View {
-        HStack {
-            HStack(spacing: 12) {
-                Image(systemName: "brain.head.profile")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.primary)
-                Text("Memory")
-                    .font(.title)
-                    .fontWeight(.bold)
-            }
-            Spacer()
-            
-            // Dismiss button with X icon
-            Button(action: {
-                dismiss()
-            }) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(Color(.systemGray))
-                    .padding(8)
-                    .background(Color(.systemGray6))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(PlainButtonStyle())
-            .accessibilityLabel("Close memory screen")
-        }
-        .padding()
-        .background(Color(UIColor.systemBackground))
-        .overlay(
-            Divider()
-                .opacity(0.2)
-            , alignment: .bottom
-        )
     }
 }

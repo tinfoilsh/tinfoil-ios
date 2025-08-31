@@ -346,8 +346,8 @@ struct ChatListItem: View {
                             Spacer()
                         }
                         
-                        if isSelected && showEditDelete {
-                            // Edit and Delete buttons
+                        if isSelected && showEditDelete && !chat.isBlankChat {
+                            // Edit and Delete buttons (not shown for new/blank chats)
                             HStack(spacing: 12) {
                                 Button(action: onEdit) {
                                     Image(systemName: "square.and.pencil")

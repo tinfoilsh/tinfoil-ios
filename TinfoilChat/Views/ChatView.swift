@@ -28,7 +28,6 @@ struct ChatContainer: View {
     @State private var dragOffset: CGFloat = 0
     @State private var showAuthView = false
     @State private var showSettings = false
-    @State private var showMemory = false
     @State private var lastBackgroundTime: Date?
     @State private var shouldCreateNewChatAfterSubscription = false
     @State private var showPremiumModal = false
@@ -83,9 +82,6 @@ struct ChatContainer: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
-        }
-        .sheet(isPresented: $showMemory) {
-            MemoryView()
         }
         .sheet(isPresented: $showPremiumModal) {
             PaywallView(displayCloseButton: true)
@@ -179,23 +175,6 @@ struct ChatContainer: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 8) {
                         ModelPicker(viewModel: viewModel)
-                        
-                        // Memory button
-                        Button(action: showMemoryView) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(.white)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .strokeBorder(.white, lineWidth: 1)
-                                    )
-                                    .frame(width: 24, height: 24)
-                                
-                                Image(systemName: "brain.head.profile")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.black)
-                            }
-                        }
                         
                         // New chat button
                         Button(action: createNewChat) {
@@ -371,9 +350,6 @@ struct ChatContainer: View {
     }
     
     /// Shows the memory view
-    private func showMemoryView() {
-        showMemory = true
-    }
     
     /// Creates a new chat if the current chat has messages
     private func createNewChat() {
