@@ -304,6 +304,19 @@ class ChatViewModel: ObservableObject {
                 return
             }
             
+            // Skip auto-sync if actively sending a message or streaming
+            if self.isLoading {
+                print("⏭️ Auto-sync skipped - message is being sent")
+                return
+            }
+            
+            // Skip if current chat has active stream
+            if let currentChat = self.currentChat, 
+               (currentChat.hasActiveStream || self.streamingTracker.isStreaming(currentChat.id)) {
+                print("⏭️ Auto-sync skipped - chat has active stream")
+                return
+            }
+            
             print("🔄 Auto-sync starting...")
             
             // Perform sync in background
@@ -661,6 +674,7 @@ class ChatViewModel: ObservableObject {
             // Update creation date to now (when first message is sent)
             chat.createdAt = Date()
             chat.updatedAt = Date()
+            chat.locallyModified = true  // Ensure it's marked as modified
             
             // Generate title
             let generatedTitle = Chat.generateTitle(from: text)
@@ -1032,6 +1046,14 @@ class ChatViewModel: ObservableObject {
                                     print("Backing up chat after ID conversion from \(chat.id) to \(updatedChat.id)")
                                     try await self.cloudSync.backupChat(updatedChat.id)
                                     print("Successfully backed up converted chat: \(updatedChat.id)")
+                                    
+                                    // After successful backup, mark as no longer locally modified
+                                    if let index = self.chats.firstIndex(where: { $0.id == updatedChat.id }) {
+                                        self.chats[index].locallyModified = false
+                                        if self.currentChat?.id == updatedChat.id {
+                                            self.currentChat?.locallyModified = false
+                                        }
+                                    }
                                 } catch {
                                     print("Failed to generate permanent ID or backup: \(error)")
                                     // Still need to end streaming with old ID if conversion fails
@@ -1053,6 +1075,14 @@ class ChatViewModel: ObservableObject {
                                     print("Backing up chat with permanent ID: \(latestChat.id)")
                                     try await self.cloudSync.backupChat(latestChat.id)
                                     print("Successfully backed up chat: \(latestChat.id)")
+                                    
+                                    // After successful backup, mark as no longer locally modified
+                                    if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
+                                        self.chats[index].locallyModified = false
+                                        if self.currentChat?.id == latestChat.id {
+                                            self.currentChat?.locallyModified = false
+                                        }
+                                    }
                                 } catch {
                                     print("Failed to backup chat \(chat.id): \(error)")
                                 }
@@ -1121,6 +1151,14 @@ class ChatViewModel: ObservableObject {
                                     print("Backing up chat after ID conversion from \(chat.id) to \(updatedChat.id)")
                                     try await self.cloudSync.backupChat(updatedChat.id)
                                     print("Successfully backed up converted chat: \(updatedChat.id)")
+                                    
+                                    // After successful backup, mark as no longer locally modified
+                                    if let index = self.chats.firstIndex(where: { $0.id == updatedChat.id }) {
+                                        self.chats[index].locallyModified = false
+                                        if self.currentChat?.id == updatedChat.id {
+                                            self.currentChat?.locallyModified = false
+                                        }
+                                    }
                                 } catch {
                                     print("Failed to generate permanent ID or backup: \(error)")
                                     // Still need to end streaming with old ID if conversion fails
@@ -1142,6 +1180,14 @@ class ChatViewModel: ObservableObject {
                                     print("Backing up chat with permanent ID: \(latestChat.id)")
                                     try await self.cloudSync.backupChat(latestChat.id)
                                     print("Successfully backed up chat: \(latestChat.id)")
+                                    
+                                    // After successful backup, mark as no longer locally modified
+                                    if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
+                                        self.chats[index].locallyModified = false
+                                        if self.currentChat?.id == latestChat.id {
+                                            self.currentChat?.locallyModified = false
+                                        }
+                                    }
                                 } catch {
                                     print("Failed to backup chat \(chat.id): \(error)")
                                 }
@@ -1455,16 +1501,29 @@ class ChatViewModel: ObservableObject {
         // Add directly to the full message list
         chat.messages.append(message)
         
+        // Mark as locally modified to prevent sync from overwriting
+        chat.locallyModified = true
+        chat.updatedAt = Date()
+        
         updateChat(chat) // Saves the full list
     }
     
     /// Updates a chat in the chats array AND saves
     private func updateChat(_ chat: Chat) {
+        var updatedChat = chat
+        
+        // If the chat has an active stream or is being actively modified, ensure it's marked as locally modified
+        // This prevents sync from overwriting it while messages are being sent
+        if chat.hasActiveStream || isLoading {
+            updatedChat.locallyModified = true
+            updatedChat.updatedAt = Date()
+        }
+        
         if let index = chats.firstIndex(where: { $0.id == chat.id }) {
-            chats[index] = chat
+            chats[index] = updatedChat
             // Update currentChat directly ONLY IF it's the one being updated
             if currentChat?.id == chat.id {
-                currentChat = chat
+                currentChat = updatedChat
             }
             
             // Save chats for all authenticated users
@@ -1474,11 +1533,11 @@ class ChatViewModel: ObservableObject {
         } else {
             // Chat not found in array - this shouldn't happen but handle it
             print("⚠️ updateChat: Chat \(chat.id) not found in array! Adding it.")
-            chats.insert(chat, at: 0)
+            chats.insert(updatedChat, at: 0)
             
             // Update currentChat if it's the one being updated
             if currentChat?.id == chat.id {
-                currentChat = chat
+                currentChat = updatedChat
             }
             
             // Save chats for all authenticated users
@@ -2033,8 +2092,19 @@ class ChatViewModel: ObservableObject {
         // Load all chats from storage (includes newly synced ones)
         let allChats = Chat.loadFromDefaults(userId: userId)
         
+        // IMPORTANT: Preserve locally modified chats and chats with active streams
+        // Create a map of locally modified chats to preserve them
+        let locallyModifiedChats = chats.filter { $0.locallyModified || $0.hasActiveStream || streamingTracker.isStreaming($0.id) }
+        let locallyModifiedIds = Set(locallyModifiedChats.map { $0.id })
+        
+        // Filter out locally modified chats from the synced data to avoid overwriting them
+        let syncedChatsFromStorage = allChats.filter { !locallyModifiedIds.contains($0.id) }
+        
+        // Combine: locally modified chats + synced chats
+        let combinedChats = locallyModifiedChats + syncedChatsFromStorage
+        
         // Sort by creation date (newest first)
-        let sortedChats = allChats.sorted { $0.createdAt > $1.createdAt }
+        let sortedChats = combinedChats.sorted { $0.createdAt > $1.createdAt }
         
         // Keep track of currently loaded chat IDs to preserve pagination
         let currentlyLoadedIds = Set(chats.map { $0.id })

@@ -499,9 +499,24 @@ class CloudSyncService: ObservableObject {
                         
                         // Process if:
                         // 1. Chat doesn't exist locally
-                        // 2. Remote is newer (based on updatedAt > syncedAt)
+                        // 2. Remote is newer (based on updatedAt > syncedAt) AND chat is not locally modified
                         // 3. Chat failed decryption (to retry with new key)
+                        // 4. Never overwrite if chat has active stream or is locally modified
                         let remoteTimestamp = parseISODate(remoteChat.updatedAt)?.timeIntervalSince1970 ?? 0
+                        
+                        // Skip if chat is locally modified or has active stream
+                        if let localChat = localChat {
+                            if localChat.locallyModified || localChat.hasActiveStream {
+                                // Don't overwrite locally modified chats or chats with active streams
+                                return (false, nil)
+                            }
+                            
+                            // Also check if chat is currently streaming using the tracker
+                            if self.streamingTracker.isStreaming(localChat.id) {
+                                return (false, nil)
+                            }
+                        }
+                        
                         let shouldProcess = localChat == nil ||
                             (!remoteTimestamp.isNaN && remoteTimestamp > (localChat?.syncedAt?.timeIntervalSince1970 ?? 0)) ||
                             (localChat?.decryptionFailed == true)
