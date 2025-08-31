@@ -149,9 +149,20 @@ class ChatViewModel: ObservableObject {
         
         // Always create a new chat when the app is loaded initially
         if let auth = authManager, auth.isAuthenticated {
-            // Load saved chats from UserDefaults but don't select them
+            // Load ONLY the first page of saved chats from UserDefaults
             let savedChats = Chat.loadFromDefaults(userId: currentUserId)
-            chats = savedChats
+            
+            // Sort by creation date (newest first)
+            let sortedChats = savedChats.sorted { $0.createdAt > $1.createdAt }
+            
+            // Take only the first 10 chats for initial display
+            chats = Array(sortedChats.prefix(10))
+            
+            // Reset pagination state for fresh app start
+            paginationToken = nil
+            hasMoreChats = sortedChats.count > 10
+            isPaginationActive = false
+            hasLoadedInitialPage = false
             
             // Create a new chat directly and set it as current
             let newChat = Chat.create(
@@ -175,6 +186,11 @@ class ChatViewModel: ObservableObject {
         // Set up auto-sync timer if already authenticated (e.g., app launch with existing session)
         if authManager?.isAuthenticated == true {
             setupAutoSyncTimer()
+            
+            // Initialize pagination for authenticated users on app restart
+            Task {
+                await setupPaginationForAppRestart()
+            }
         }
     }
     
@@ -215,8 +231,8 @@ class ChatViewModel: ObservableObject {
                     
                     // If we downloaded new chats, reload the chat list
                     if syncResult.downloaded > 0 {
-                        // Use pagination-aware reload
-                        await self.resetPaginationAndReloadChats()
+                        // Use intelligent update that preserves pagination
+                        await self.updateChatsAfterSync()
                         
                         // Force UI update
                         await MainActor.run {
@@ -1501,6 +1517,13 @@ class ChatViewModel: ObservableObject {
             AppConfig.shared.currentModel = defaultFreeModel
         }
         
+        // Reset pagination state when signing out
+        paginationToken = nil
+        hasMoreChats = false
+        isPaginationActive = false
+        hasLoadedInitialPage = false
+        hasAttemptedLoadMore = false
+        
         // Clear current chats and create a new empty one with the free model
         chats = []
         let newChat = Chat.create(modelType: currentModel)
@@ -1524,6 +1547,13 @@ class ChatViewModel: ObservableObject {
         lastSyncDate = nil
         syncErrors = []
         isSyncing = false
+        
+        // Reset pagination state
+        paginationToken = nil
+        hasMoreChats = false
+        isPaginationActive = false
+        hasLoadedInitialPage = false
+        hasAttemptedLoadMore = false
         
         // Clear encryption key reference
         encryptionKey = nil
@@ -1660,6 +1690,27 @@ class ChatViewModel: ObservableObject {
     
     // MARK: - Pagination Methods
     
+    /// Setup pagination state for app restart (when already authenticated)
+    private func setupPaginationForAppRestart() async {
+        // Try to get pagination token from cloud to enable Load More
+        do {
+            // Get the list result to check if there are more pages
+            if let listResult = try? await R2StorageService.shared.listChats(
+                limit: 10,
+                continuationToken: nil,
+                includeContent: false
+            ) {
+                await MainActor.run {
+                    self.paginationToken = listResult.nextContinuationToken
+                    self.hasMoreChats = listResult.hasMore
+                    self.isPaginationActive = true
+                    self.hasLoadedInitialPage = true
+                    print("📄 Pagination setup for app restart - hasMore: \(listResult.hasMore), token: \(listResult.nextContinuationToken?.prefix(20) ?? "nil")")
+                }
+            }
+        }
+    }
+    
     /// Clean up chats beyond first page (called on app launch to ensure clean state)
     private func cleanupPaginatedChats() async {
         guard let userId = currentUserId else { return }
@@ -1725,6 +1776,7 @@ class ChatViewModel: ObservableObject {
         
         await MainActor.run {
             self.isLoadingMore = true
+            self.hasAttemptedLoadMore = true  // Track that user has loaded additional pages
         }
         
         // Load next page with the token
@@ -1758,7 +1810,76 @@ class ChatViewModel: ObservableObject {
         }
     }
     
+    /// Intelligently update chats after sync without resetting pagination
+    @MainActor
+    private func updateChatsAfterSync() async {
+        guard let userId = currentUserId else { return }
+        
+        // Load all chats from storage (includes newly synced ones)
+        let allChats = Chat.loadFromDefaults(userId: userId)
+        
+        // Sort by creation date (newest first)
+        let sortedChats = allChats.sorted { $0.createdAt > $1.createdAt }
+        
+        // Keep track of currently loaded chat IDs to preserve pagination
+        let currentlyLoadedIds = Set(chats.map { $0.id })
+        
+        // Separate chats into categories
+        let twoMinutesAgo = Date().addingTimeInterval(-120)
+        let recentChats = sortedChats.filter { $0.createdAt >= twoMinutesAgo }
+        let unsavedChats = sortedChats.filter { $0.isBlankChat || $0.hasTemporaryId }
+        let syncedChats = sortedChats.filter { 
+            !$0.isBlankChat && 
+            !$0.hasTemporaryId && 
+            $0.createdAt < twoMinutesAgo 
+        }
+        
+        // Build the updated chat list
+        var updatedChats: [Chat] = []
+        
+        // 1. Add all unsaved chats (blank/temporary)
+        updatedChats.append(contentsOf: unsavedChats)
+        
+        // 2. Add recent chats (last 2 minutes)
+        updatedChats.append(contentsOf: recentChats)
+        
+        // 3. For synced chats, preserve pagination state
+        if hasAttemptedLoadMore && currentlyLoadedIds.count > 10 {
+            // User has loaded more pages - preserve all currently loaded synced chats
+            let syncedChatsToShow = syncedChats.filter { chat in
+                // Keep if it was already loaded OR if it's in the first 10 positions
+                currentlyLoadedIds.contains(chat.id) || syncedChats.firstIndex(where: { $0.id == chat.id }) ?? Int.max < 10
+            }
+            updatedChats.append(contentsOf: syncedChatsToShow)
+        } else {
+            // Only first page loaded - update just the first page
+            updatedChats.append(contentsOf: Array(syncedChats.prefix(10)))
+        }
+        
+        // Remove duplicates based on chat ID
+        var seen = Set<String>()
+        let uniqueChats = updatedChats.filter { chat in
+            if seen.contains(chat.id) {
+                return false
+            }
+            seen.insert(chat.id)
+            return true
+        }
+        
+        // Update the chats array
+        self.chats = uniqueChats.sorted { $0.createdAt > $1.createdAt }
+        
+        // Ensure blank chat at top
+        self.ensureBlankChatAtTop()
+        
+        // Update hasMoreChats if needed (but don't reset pagination token)
+        if syncedChats.count > chats.filter { !$0.isBlankChat && !$0.hasTemporaryId }.count {
+            self.hasMoreChats = true
+        }
+    }
+    
     /// Reset pagination and reload all chats from storage (used after sync)
+    @MainActor
     private func resetPaginationAndReloadChats() async {
         // If pagination is active, we need to carefully handle the reload
         if isPaginationActive {
@@ -1795,26 +1916,34 @@ class ChatViewModel: ObservableObject {
                     return true
                 }
                 
-                await MainActor.run {
-                    // Update the chats array
-                    self.chats = uniqueChats.sorted { $0.createdAt > $1.createdAt }
-                    
-                    // Ensure blank chat at top
-                    self.ensureBlankChatAtTop()
-                    
-                    // Check if there are more chats beyond the first page
-                    if syncedChats.count > 10 {
-                        self.hasMoreChats = true
-                    }
+                // Update the chats array
+                self.chats = uniqueChats.sorted { $0.createdAt > $1.createdAt }
+                
+                // Ensure blank chat at top
+                self.ensureBlankChatAtTop()
+                
+                // Check if there are more chats beyond the first page
+                if syncedChats.count > 10 {
+                    self.hasMoreChats = true
                 }
             }
         } else {
-            // Not using pagination, do full reload
+            // Not using pagination yet or pagination needs to be reset
+            // This happens after initial sync or when pagination hasn't been set up
             if let userId = currentUserId {
-                let loadedChats = Chat.loadFromDefaults(userId: userId)
-                await MainActor.run {
-                    self.chats = loadedChats
-                    self.ensureBlankChatAtTop()
+                let allChats = Chat.loadFromDefaults(userId: userId)
+                
+                // Sort by creation date (newest first) 
+                let sortedChats = allChats.sorted { $0.createdAt > $1.createdAt }
+                
+                // Take only first 10 chats initially
+                self.chats = Array(sortedChats.prefix(10))
+                self.ensureBlankChatAtTop()
+                
+                // Set up pagination if there are more chats
+                if sortedChats.count > 10 {
+                    self.hasMoreChats = true
+                    // Pagination token will be set by initializeCloudSync or setupPaginationForAppRestart
                 }
             }
         }
@@ -1839,14 +1968,10 @@ class ChatViewModel: ObservableObject {
                 self.showSyncErrorRecovery = true
             }
             
-            // Reload chats after sync
-            if let userId = self.currentUserId {
-                let syncedChats = Chat.loadFromDefaults(userId: userId)
-                if !syncedChats.isEmpty {
-                    self.chats = syncedChats
-                    
-                    // Ensure there's always a blank chat at the top
-                    self.ensureBlankChatAtTop()
+            // Use intelligent update that preserves pagination if user has loaded more pages
+            if result.downloaded > 0 || result.uploaded > 0 {
+                Task { @MainActor in
+                    await self.updateChatsAfterSync()
                 }
             }
         }
