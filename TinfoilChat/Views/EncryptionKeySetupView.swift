@@ -18,6 +18,7 @@ struct EncryptionKeySetupView: View {
     @State private var keyError: String? = nil
     @State private var isProcessing: Bool = false
     @State private var copiedToClipboard: Bool = false
+    @FocusState private var isKeyInputFocused: Bool
     
     var body: some View {
         NavigationView {
@@ -118,11 +119,12 @@ struct EncryptionKeySetupView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                         
-                        TextField("Enter your encryption key", text: $keyInput)
+                        TextField("Enter your encryption key (key_...)", text: $keyInput)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
                             .autocapitalization(.none)
                             .disableAutocorrection(true)
                             .font(.system(.body, design: .monospaced))
+                            .focused($isKeyInputFocused)
                         
                         if let error = keyError {
                             Label(error, systemImage: "exclamationmark.triangle")
@@ -174,6 +176,12 @@ struct EncryptionKeySetupView: View {
             )
         }
         .interactiveDismissDisabled(isProcessing)
+        .onAppear {
+            // Auto-focus the key input field when view appears
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                isKeyInputFocused = true
+            }
+        }
     }
     
     private func generateNewKey() {
@@ -194,6 +202,26 @@ struct EncryptionKeySetupView: View {
     }
     
     private func importExistingKey() {
+        // Validate key format before processing
+        if !keyInput.hasPrefix("key_") {
+            keyError = "Key must start with 'key_' prefix"
+            return
+        }
+        
+        // Validate key characters (after prefix)
+        let keyWithoutPrefix = String(keyInput.dropFirst(4))
+        let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789")
+        if keyWithoutPrefix.rangeOfCharacter(from: allowedCharacters.inverted) != nil {
+            keyError = "Key must only contain lowercase letters and numbers after the prefix"
+            return
+        }
+        
+        // Validate key length
+        if keyWithoutPrefix.count % 2 != 0 {
+            keyError = "Invalid key length"
+            return
+        }
+        
         isProcessing = true
         keyError = nil
         

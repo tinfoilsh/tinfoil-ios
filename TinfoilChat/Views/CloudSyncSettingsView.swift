@@ -19,6 +19,7 @@ struct CloudSyncSettingsView: View {
     @State private var showKeyConfirmation: Bool = false
     @State private var isProcessing: Bool = false
     @State private var copiedToClipboard: Bool = false
+    @FocusState private var isKeyFieldFocused: Bool
     
     var body: some View {
         NavigationStack {
@@ -132,11 +133,15 @@ struct CloudSyncSettingsView: View {
                             .font(.title2)
                             .fontWeight(.bold)
                         
-                        TextField("Enter new encryption key", text: $newKeyInput)
+                        TextField("Enter new encryption key (key_...)", text: $newKeyInput)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
                             .autocapitalization(.none)
                             .disableAutocorrection(true)
                             .font(.system(.body, design: .monospaced))
+                            .focused($isKeyFieldFocused)
+                            .onChange(of: newKeyInput) { _, newValue in
+                                validateKey(newValue)
+                            }
                         
                         if let error = keyError {
                             Label(error, systemImage: "exclamationmark.triangle")
@@ -156,20 +161,28 @@ struct CloudSyncSettingsView: View {
                             .cornerRadius(10)
                             
                             Button("Change Key") {
-                                changeEncryptionKey()
+                                if keyError == nil {
+                                    changeEncryptionKey()
+                                }
                             }
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(newKeyInput.isEmpty ? Color.gray : Color.accentPrimary)
+                            .background(newKeyInput.isEmpty || keyError != nil ? Color.gray : Color.accentPrimary)
                             .foregroundColor(.white)
                             .cornerRadius(10)
-                            .disabled(newKeyInput.isEmpty || isProcessing)
+                            .disabled(newKeyInput.isEmpty || keyError != nil || isProcessing)
                         }
                         
                         Spacer()
                     }
                     .padding()
                     .navigationBarHidden(true)
+                    .onAppear {
+                        // Automatically focus the text field and show keyboard
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            isKeyFieldFocused = true
+                        }
+                    }
                 }
                 .interactiveDismissDisabled(isProcessing)
             }
@@ -184,12 +197,49 @@ struct CloudSyncSettingsView: View {
         return "\(prefix)\(masked)"
     }
     
+    private func validateKey(_ key: String) {
+        // Reset error first
+        keyError = nil
+        
+        // Check if key is empty (this is handled by button disable state, but good to be explicit)
+        if key.isEmpty {
+            return
+        }
+        
+        // Check if key has the required prefix
+        if !key.hasPrefix("key_") {
+            keyError = "Key must start with 'key_' prefix"
+            return
+        }
+        
+        // Validate key characters (after prefix)
+        let keyWithoutPrefix = String(key.dropFirst(4))
+        let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789")
+        if keyWithoutPrefix.rangeOfCharacter(from: allowedCharacters.inverted) != nil {
+            keyError = "Key must only contain lowercase letters and numbers after the prefix"
+            return
+        }
+        
+        // Validate key length
+        if keyWithoutPrefix.count % 2 != 0 {
+            keyError = "Invalid key length"
+            return
+        }
+    }
+    
     private func changeEncryptionKey() {
         let keyToSet = newKeyInput
+        
+        // Validate one more time before proceeding
+        validateKey(keyToSet)
+        if keyError != nil {
+            return
+        }
         
         // Dismiss modal immediately for better UX
         showKeyInput = false
         newKeyInput = ""
+        keyError = nil
         
         // Process key change and decryption in background
         Task {
