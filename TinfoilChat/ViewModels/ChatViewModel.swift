@@ -1082,6 +1082,8 @@ class ChatViewModel: ObservableObject {
                                         if self.currentChat?.id == latestChat.id {
                                             self.currentChat?.locallyModified = false
                                         }
+                                        // Save the updated state to persist the locallyModified flag change
+                                        self.saveChats()
                                     }
                                 } catch {
                                     print("Failed to backup chat \(chat.id): \(error)")
@@ -1187,6 +1189,8 @@ class ChatViewModel: ObservableObject {
                                         if self.currentChat?.id == latestChat.id {
                                             self.currentChat?.locallyModified = false
                                         }
+                                        // Save the updated state to persist the locallyModified flag change
+                                        self.saveChats()
                                     }
                                 } catch {
                                     print("Failed to backup chat \(chat.id): \(error)")
