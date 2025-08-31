@@ -335,7 +335,6 @@ struct ChatListItem: View {
                             Text(chat.decryptionFailed ? "Encrypted" : chat.title)
                                 .foregroundColor(chat.decryptionFailed ? .orange : .primary)
                                 .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
                             
                             if chat.isBlankChat {
                                 // Blue dot indicator for new chats
@@ -343,6 +342,8 @@ struct ChatListItem: View {
                                     .fill(Color.blue)
                                     .frame(width: 8, height: 8)
                             }
+                            
+                            Spacer()
                         }
                         
                         if isSelected && showEditDelete {
