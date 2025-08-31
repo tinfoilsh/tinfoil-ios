@@ -310,6 +310,13 @@ struct ChatListItem: View {
                                 .foregroundColor(chat.decryptionFailed ? .orange : .primary)
                                 .lineLimit(1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                            
+                            if chat.isBlankChat {
+                                // Blue dot indicator for new chats
+                                Circle()
+                                    .fill(Color.blue)
+                                    .frame(width: 8, height: 8)
+                            }
                         }
                         
                         if isSelected && showEditDelete {
@@ -338,6 +345,11 @@ struct ChatListItem: View {
                         Text(timeString)
                             .font(.caption)
                             .foregroundColor(.gray)
+                    } else {
+                        // Placeholder for new chats to maintain consistent height
+                        Text(" ")
+                            .font(.caption)
+                            .frame(height: 14) // Same height as timestamp text
                     }
                 }
             }
