@@ -171,7 +171,8 @@ struct ChatContainer: View {
                     .scaledToFit()
                     .frame(height: 28)
             }
-            if authManager.isAuthenticated {
+            // Only show toolbar items when chat has messages (not a new/blank chat)
+            if authManager.isAuthenticated && !(viewModel.currentChat?.isBlankChat ?? true) {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 8) {
                         ModelPicker(viewModel: viewModel)
