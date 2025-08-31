@@ -37,7 +37,7 @@ struct CloudSyncSettingsView: View {
                                 .foregroundColor(.red)
                         } else {
                             Text("Synced")
-                                .foregroundColor(.accentPrimary)
+                                .foregroundColor(.adaptiveAccent)
                         }
                     }
                     
@@ -70,6 +70,7 @@ struct CloudSyncSettingsView: View {
                         }
                     }) {
                         Label("Sync Now", systemImage: "arrow.clockwise")
+                            .foregroundColor(.adaptiveAccent)
                     }
                     .disabled(viewModel.isSyncing || !authManager.isAuthenticated)
                 } header: {
@@ -100,7 +101,7 @@ struct CloudSyncSettingsView: View {
                                     }
                                 }) {
                                     Image(systemName: copiedToClipboard ? "checkmark.circle.fill" : "doc.on.doc")
-                                        .foregroundColor(copiedToClipboard ? .accentPrimary : .primary)
+                                        .foregroundColor(copiedToClipboard ? .adaptiveAccent : .primary)
                                 }
                             }
                             .padding(8)
@@ -114,6 +115,7 @@ struct CloudSyncSettingsView: View {
                         showKeyInput = true
                     }) {
                         Label("Change Encryption Key", systemImage: "key.fill")
+                            .foregroundColor(.adaptiveAccent)
                     }
                 } header: {
                     Text("Encryption")
@@ -129,10 +131,6 @@ struct CloudSyncSettingsView: View {
             .sheet(isPresented: $showKeyInput) {
                 NavigationView {
                     VStack(spacing: 20) {
-                        Text("Change Encryption Key")
-                            .font(.title2)
-                            .fontWeight(.bold)
-                        
                         TextField("Enter new encryption key (key_...)", text: $newKeyInput)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
                             .autocapitalization(.none)
@@ -149,34 +147,31 @@ struct CloudSyncSettingsView: View {
                                 .foregroundColor(.red)
                         }
                         
-                        HStack(spacing: 16) {
-                            Button("Cancel") {
-                                showKeyInput = false
-                                newKeyInput = ""
-                                keyError = nil
+                        Button("Change Key") {
+                            if keyError == nil {
+                                changeEncryptionKey()
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.gray.opacity(0.2))
-                            .cornerRadius(10)
-                            
-                            Button("Change Key") {
-                                if keyError == nil {
-                                    changeEncryptionKey()
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(newKeyInput.isEmpty || keyError != nil ? Color.gray : Color.accentPrimary)
-                            .foregroundColor(.white)
-                            .cornerRadius(10)
-                            .disabled(newKeyInput.isEmpty || keyError != nil || isProcessing)
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(newKeyInput.isEmpty || keyError != nil ? Color.gray : Color.accentPrimary)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                        .disabled(newKeyInput.isEmpty || keyError != nil || isProcessing)
                         
                         Spacer()
                     }
                     .padding()
-                    .navigationBarHidden(true)
+                    .navigationTitle("Change Encryption Key")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .navigationBarItems(
+                        leading: Button("Cancel") {
+                            showKeyInput = false
+                            newKeyInput = ""
+                            keyError = nil
+                        }
+                        .disabled(isProcessing)
+                    )
                     .onAppear {
                         // Automatically focus the text field and show keyboard
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
