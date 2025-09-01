@@ -53,7 +53,7 @@ class EncryptionService: ObservableObject {
         } else {
             // Generate new key
             let newKey = generateKey()
-            saveKeyToKeychain(newKey)
+            try saveKeyToKeychain(newKey)
             try await setKey(newKey)
             return newKey
         }
@@ -83,7 +83,7 @@ class EncryptionService: ObservableObject {
         self.encryptionKey = SymmetricKey(data: keyData)
         
         // Store the key in Keychain with prefix
-        saveKeyToKeychain(keyString)
+        try saveKeyToKeychain(keyString)
     }
     
     /// Get current encryption key as alphanumeric string
@@ -222,7 +222,7 @@ class EncryptionService: ObservableObject {
     
     // MARK: - Keychain Management
     
-    private func saveKeyToKeychain(_ key: String) {
+    private func saveKeyToKeychain(_ key: String) throws {
         let data = key.data(using: .utf8)!
         
         let query: [String: Any] = [
@@ -238,7 +238,7 @@ class EncryptionService: ObservableObject {
         // Add new item
         let status = SecItemAdd(query as CFDictionary, nil)
         if status != errSecSuccess {
-            print("Failed to save encryption key to keychain: \(status)")
+            throw EncryptionError.keychainSaveFailed(status: status)
         }
     }
     
@@ -283,6 +283,7 @@ enum EncryptionError: LocalizedError {
     case decryptionFailed
     case invalidEncryptedData
     case invalidBase64
+    case keychainSaveFailed(status: OSStatus)
     
     var errorDescription: String? {
         switch self {
@@ -302,6 +303,8 @@ enum EncryptionError: LocalizedError {
             return "Missing IV or data in encrypted data"
         case .invalidBase64:
             return "Invalid base64 encoding"
+        case .keychainSaveFailed(let status):
+            return "Failed to save encryption key to keychain (error: \(status))"
         }
     }
 }
