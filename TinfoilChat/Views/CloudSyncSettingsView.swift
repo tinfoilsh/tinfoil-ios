@@ -79,7 +79,7 @@ struct CloudSyncSettingsView: View {
                 
                 // Encryption Key Section
                 Section {
-                    if let key = viewModel.encryptionKey {
+                    if let key = viewModel.getCurrentEncryptionKey() {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Current Key")
                                 .font(.caption)

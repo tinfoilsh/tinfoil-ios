@@ -37,7 +37,7 @@ class ChatViewModel: ObservableObject {
     @Published var isSyncing: Bool = false
     @Published var lastSyncDate: Date?
     @Published var syncErrors: [String] = []
-    @Published var encryptionKey: String?
+    private var encryptionKey: String?  // Keep private for security
     @Published var isFirstTimeUser: Bool = false
     @Published var showEncryptionSetup: Bool = false
     @Published var showSyncErrorRecovery: Bool = false
@@ -2295,6 +2295,11 @@ class ChatViewModel: ObservableObject {
                 }
             }
         }
+    }
+    
+    /// Get the current encryption key (for display purposes only)
+    func getCurrentEncryptionKey() -> String? {
+        return encryptionKey
     }
     
     /// Set encryption key (for key rotation)
