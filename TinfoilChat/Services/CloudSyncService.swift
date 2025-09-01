@@ -130,7 +130,7 @@ class CloudSyncService: ObservableObject {
     
     private func doBackupChat(_ chatId: String) async throws {
         // Check if chat is currently streaming
-        if streamingTracker.isStreaming(chatId) {
+        if await streamingTracker.isStreaming(chatId) {
             // Check if we already have a callback registered for this chat
             if streamingCallbacks.contains(chatId) {
                 return
@@ -141,7 +141,7 @@ class CloudSyncService: ObservableObject {
             streamingCallbacks.insert(chatId)
             
             // Register to sync once streaming ends
-            streamingTracker.onStreamEnd(chatId) { [weak self] in
+            await streamingTracker.onStreamEnd(chatId) { [weak self] in
                 Task { @MainActor in
                     // Remove from tracking set
                     self?.streamingCallbacks.remove(chatId)
@@ -167,7 +167,7 @@ class CloudSyncService: ObservableObject {
         }
         
         // Double-check streaming status right before upload
-        if streamingTracker.isStreaming(chatId) {
+        if await streamingTracker.isStreaming(chatId) {
             return
         }
         
@@ -191,10 +191,14 @@ class CloudSyncService: ObservableObject {
             
             
             // Filter out blank chats, chats with temporary IDs, and streaming chats
-            let chatsToSync = unsyncedChats.filter { chat in
-                !chat.isBlankChat &&
-                !chat.hasTemporaryId &&
-                !streamingTracker.isStreaming(chat.id)
+            var chatsToSync: [Chat] = []
+            for chat in unsyncedChats {
+                if !chat.isBlankChat && !chat.hasTemporaryId {
+                    let isStreaming = await streamingTracker.isStreaming(chat.id)
+                    if !isStreaming {
+                        chatsToSync.append(chat)
+                    }
+                }
             }
             
             
@@ -203,7 +207,7 @@ class CloudSyncService: ObservableObject {
                 for chat in chatsToSync {
                     group.addTask { [weak self] in
                         // Skip if chat started streaming while in queue
-                        if self?.streamingTracker.isStreaming(chat.id) ?? false {
+                        if await self?.streamingTracker.isStreaming(chat.id) ?? false {
                             return (false, nil)
                         }
                         
@@ -288,7 +292,7 @@ class CloudSyncService: ObservableObject {
                         guard let self = self else { return nil }
                         
                         // Skip recently deleted chats
-                        if self.deletedChatsTracker.isDeleted(remoteChat.id) {
+                        if await self.deletedChatsTracker.isDeleted(remoteChat.id) {
                             return nil
                         }
                         
@@ -489,7 +493,7 @@ class CloudSyncService: ObservableObject {
                         guard let self = self else { return (false, nil) }
                         
                         // First validate if this remote chat should be processed
-                        if !self.shouldProcessRemoteChat(remoteChat) {
+                        if !(await self.shouldProcessRemoteChat(remoteChat)) {
                             // Clean up invalid chats from cloud
                             self.cleanupInvalidRemoteChat(remoteChat)
                             return (false, nil)
@@ -512,7 +516,7 @@ class CloudSyncService: ObservableObject {
                             }
                             
                             // Also check if chat is currently streaming using the tracker
-                            if self.streamingTracker.isStreaming(localChat.id) {
+                            if await self.streamingTracker.isStreaming(localChat.id) {
                                 return (false, nil)
                             }
                         }
@@ -672,7 +676,7 @@ class CloudSyncService: ObservableObject {
     /// Delete a chat from cloud storage
     func deleteFromCloud(_ chatId: String) async throws {
         // Mark as deleted locally first
-        deletedChatsTracker.markAsDeleted(chatId)
+        await deletedChatsTracker.markAsDeleted(chatId)
         
         // Don't attempt deletion if not authenticated
         guard await r2Storage.isAuthenticated() else {
@@ -683,7 +687,7 @@ class CloudSyncService: ObservableObject {
             try await r2Storage.deleteChat(chatId)
             
             // Successfully deleted from cloud, can remove from tracker
-            deletedChatsTracker.removeFromDeleted(chatId)
+            await deletedChatsTracker.removeFromDeleted(chatId)
             
         } catch {
             // Silently fail if no auth token set
@@ -797,9 +801,9 @@ class CloudSyncService: ObservableObject {
     
     /// Determines if a remote chat should be processed/stored locally
     /// Returns false for blank chats or invalid chats that shouldn't be synced
-    private func shouldProcessRemoteChat(_ remoteChat: RemoteChat) -> Bool {
+    private func shouldProcessRemoteChat(_ remoteChat: RemoteChat) async -> Bool {
         // Check if it was recently deleted locally
-        if deletedChatsTracker.isDeleted(remoteChat.id) {
+        if await deletedChatsTracker.isDeleted(remoteChat.id) {
             return false
         }
         

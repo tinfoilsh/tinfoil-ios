@@ -263,7 +263,12 @@ struct CloudSyncSettingsView: View {
         
         // Process key change and decryption in background
         Task {
-            await viewModel.setEncryptionKey(keyToSet)
+            do {
+                try await viewModel.setEncryptionKey(keyToSet)
+            } catch {
+                // Log error but don't show UI since modal is already dismissed
+                print("Failed to change encryption key: \(error)")
+            }
         }
     }
 }
