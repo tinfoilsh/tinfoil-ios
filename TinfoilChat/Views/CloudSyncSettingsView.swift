@@ -19,6 +19,7 @@ struct CloudSyncSettingsView: View {
     @State private var showKeyConfirmation: Bool = false
     @State private var isProcessing: Bool = false
     @State private var copiedToClipboard: Bool = false
+    @State private var isKeyVisible: Bool = false
     @FocusState private var isKeyFieldFocused: Bool
     
     var body: some View {
@@ -131,15 +132,36 @@ struct CloudSyncSettingsView: View {
             .sheet(isPresented: $showKeyInput) {
                 NavigationView {
                     VStack(spacing: 20) {
-                        TextField("Enter new encryption key (key_...)", text: $newKeyInput)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .autocapitalization(.none)
-                            .disableAutocorrection(true)
-                            .font(.system(.body, design: .monospaced))
-                            .focused($isKeyFieldFocused)
-                            .onChange(of: newKeyInput) { _, newValue in
-                                validateKey(newValue)
+                        HStack {
+                            if isKeyVisible {
+                                TextField("Enter new encryption key (key_...)", text: $newKeyInput)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    .autocapitalization(.none)
+                                    .disableAutocorrection(true)
+                                    .font(.system(.body, design: .monospaced))
+                                    .focused($isKeyFieldFocused)
+                                    .onChange(of: newKeyInput) { _, newValue in
+                                        validateKey(newValue)
+                                    }
+                            } else {
+                                SecureField("Enter new encryption key (key_...)", text: $newKeyInput)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    .autocapitalization(.none)
+                                    .disableAutocorrection(true)
+                                    .font(.system(.body, design: .monospaced))
+                                    .focused($isKeyFieldFocused)
+                                    .onChange(of: newKeyInput) { _, newValue in
+                                        validateKey(newValue)
+                                    }
                             }
+                            
+                            Button(action: {
+                                isKeyVisible.toggle()
+                            }) {
+                                Image(systemName: isKeyVisible ? "eye.slash" : "eye")
+                                    .foregroundColor(.secondary)
+                            }
+                        }
                         
                         if let error = keyError {
                             Label(error, systemImage: "exclamationmark.triangle")

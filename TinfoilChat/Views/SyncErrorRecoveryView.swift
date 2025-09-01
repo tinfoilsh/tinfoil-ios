@@ -15,6 +15,7 @@ struct SyncErrorRecoveryView: View {
     @State private var isRetrying: Bool = false
     @State private var keyInput: String = ""
     @State private var showKeyInput: Bool = false
+    @State private var isKeyVisible: Bool = false
     
     var body: some View {
         NavigationView {
@@ -147,11 +148,28 @@ struct SyncErrorRecoveryView: View {
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                         
-                        TextField("Enter encryption key", text: $keyInput)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .autocapitalization(.none)
-                            .disableAutocorrection(true)
-                            .font(.system(.body, design: .monospaced))
+                        HStack {
+                            if isKeyVisible {
+                                TextField("Enter encryption key", text: $keyInput)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    .autocapitalization(.none)
+                                    .disableAutocorrection(true)
+                                    .font(.system(.body, design: .monospaced))
+                            } else {
+                                SecureField("Enter encryption key", text: $keyInput)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    .autocapitalization(.none)
+                                    .disableAutocorrection(true)
+                                    .font(.system(.body, design: .monospaced))
+                            }
+                            
+                            Button(action: {
+                                isKeyVisible.toggle()
+                            }) {
+                                Image(systemName: isKeyVisible ? "eye.slash" : "eye")
+                                    .foregroundColor(.secondary)
+                            }
+                        }
                         
                         HStack(spacing: 16) {
                             Button("Cancel") {
