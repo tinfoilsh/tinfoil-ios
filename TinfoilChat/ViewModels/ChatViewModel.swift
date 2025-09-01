@@ -194,9 +194,7 @@ class ChatViewModel: ObservableObject {
                     try await cloudSync.initialize()
                     
                     // Perform immediate sync on app launch/restart
-                    print("🔄 Performing initial sync on app launch...")
                     let syncResult = await cloudSync.syncAllChats()
-                    print("✅ Initial sync completed (uploaded: \(syncResult.uploaded), downloaded: \(syncResult.downloaded))")
                     
                     // Setup pagination after sync
                     await setupPaginationForAppRestart()
@@ -204,7 +202,6 @@ class ChatViewModel: ObservableObject {
                     // Load and display chats after sync
                     if let userId = currentUserId {
                         let loadedChats = Chat.loadFromDefaults(userId: userId)
-                        print("📱 Loaded \(loadedChats.count) chats from storage after sync")
                         
                         // Sort by creation date (newest first)
                         let sortedChats = loadedChats.sorted { $0.createdAt > $1.createdAt }
@@ -216,7 +213,6 @@ class ChatViewModel: ObservableObject {
                         }
                         let unsavedChats = sortedChats.filter { $0.isBlankChat || $0.hasTemporaryId }
                         
-                        print("📊 Synced chats: \(syncedChats.count), Unsaved chats: \(unsavedChats.count)")
                         
                         // Keep only first page of synced chats + all unsaved chats
                         var chatsToKeep = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + unsavedChats
@@ -239,19 +235,16 @@ class ChatViewModel: ObservableObject {
                         // Display the first page
                         let firstPageChats = Array(chatsToKeep.sorted { $0.createdAt > $1.createdAt }.prefix(Constants.Pagination.chatsPerPage))
                         
-                        print("📄 Displaying \(firstPageChats.count) chats in UI")
                         
                         await MainActor.run {
                             // Update chats array with synced data
                             if !firstPageChats.isEmpty {
                                 self.chats = firstPageChats
                                 self.ensureBlankChatAtTop()
-                                print("✅ Updated UI with \(self.chats.count) chats")
                                 
                                 // Select the first chat
                                 if let first = self.chats.first {
                                     self.currentChat = first
-                                    print("📍 Selected chat: \(first.id) - isBlank: \(first.isBlankChat)")
                                 }
                             } else {
                                 // No chats loaded, ensure we have at least a blank chat
@@ -273,7 +266,6 @@ class ChatViewModel: ObservableObject {
                         }
                     }
                 } catch {
-                    print("❌ Failed to initialize cloud sync on app launch: \(error)")
                 }
             }
         }
@@ -293,7 +285,6 @@ class ChatViewModel: ObservableObject {
         // Invalidate existing timer if any
         autoSyncTimer?.invalidate()
         
-        print("📅 Setting up auto-sync timer (every \(Int(Constants.Sync.autoSyncIntervalSeconds)) seconds)")
         
         // Create timer that fires at regular intervals
         autoSyncTimer = Timer.scheduledTimer(withTimeInterval: Constants.Sync.autoSyncIntervalSeconds, repeats: true) { [weak self] _ in
@@ -301,31 +292,26 @@ class ChatViewModel: ObservableObject {
             
             // Only sync if authenticated
             guard self.authManager?.isAuthenticated == true else {
-                print("⏭️ Auto-sync skipped - not authenticated")
                 return
             }
             
             // Skip auto-sync if actively sending a message or streaming
             if self.isLoading {
-                print("⏭️ Auto-sync skipped - message is being sent")
                 return
             }
             
             // Skip if current chat has active stream
             if let currentChat = self.currentChat, 
                (currentChat.hasActiveStream || self.streamingTracker.isStreaming(currentChat.id)) {
-                print("⏭️ Auto-sync skipped - chat has active stream")
                 return
             }
             
-            print("🔄 Auto-sync starting...")
             
             // Perform sync in background
             Task {
                 do {
                     // Sync all chats
                     let syncResult = try await self.cloudSync.syncAllChats()
-                    print("✅ Auto-sync completed successfully (uploaded: \(syncResult.uploaded), downloaded: \(syncResult.downloaded))")
                     
                     // If we downloaded new chats, reload the chat list
                     if syncResult.downloaded > 0 {
@@ -343,7 +329,6 @@ class ChatViewModel: ObservableObject {
                             }
                         }
                         
-                        print("📱 Updated chats after sync (downloaded: \(syncResult.downloaded))")
                     }
                     
                     // Also backup current chat if it has changes
@@ -352,10 +337,8 @@ class ChatViewModel: ObservableObject {
                        !currentChat.messages.isEmpty,
                        !currentChat.hasActiveStream {
                         try await self.cloudSync.backupChat(currentChat.id)
-                        print("✅ Current chat backed up: \(currentChat.id)")
                     }
                 } catch {
-                    print("❌ Auto-sync failed: \(error)")
                 }
             }
         }
@@ -380,9 +363,7 @@ class ChatViewModel: ObservableObject {
                 
                 // Perform immediate sync when returning from background
                 Task {
-                    print("🔄 Performing sync after returning from background...")
                     if let syncResult = try? await self?.cloudSync.syncAllChats() {
-                        print("✅ Background return sync completed (uploaded: \(syncResult.uploaded), downloaded: \(syncResult.downloaded))")
                         
                         // Update chats if needed
                         if syncResult.downloaded > 0 {
@@ -583,7 +564,6 @@ class ChatViewModel: ObservableObject {
     
     /// Selects a chat as the current chat
     func selectChat(_ chat: Chat) {
-        print("🔄 selectChat called with: \(chat.id), isBlank: \(chat.isBlankChat)")
         
         // Cancel any ongoing generation first
         if isLoading {
@@ -594,17 +574,14 @@ class ChatViewModel: ObservableObject {
         let chatToSelect: Chat
         if let index = chats.firstIndex(where: { $0.id == chat.id }) {
             chatToSelect = chats[index]
-            print("✅ Found chat in array at index \(index)")
         } else {
             chatToSelect = chat
             if !chats.contains(where: { $0.id == chat.id }) {
                 chats.append(chatToSelect) // Add if truly new
-                print("📝 Added chat to array")
             }
         }
         
         currentChat = chatToSelect
-        print("✅ Current chat set to: \(currentChat?.id ?? "nil")")
         
         // Update the current model to match the chat's model
         if currentModel != chatToSelect.modelType {
@@ -658,7 +635,6 @@ class ChatViewModel: ObservableObject {
     func sendMessage(text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
-        print("📨 sendMessage called - currentChat: \(currentChat?.id ?? "nil"), isBlank: \(currentChat?.isBlankChat ?? false)")
         
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -830,7 +806,6 @@ class ChatViewModel: ObservableObject {
                         guard var chat = self.currentChat,
                               !chat.messages.isEmpty,
                               let lastIndex = chat.messages.indices.last else { 
-                            print("⚠️ Stream update skipped: no current chat or no messages")
                             return 
                         }
                         
@@ -1009,7 +984,6 @@ class ChatViewModel: ObservableObject {
                                     // Get the current state of the chat
                                     guard let currentChatNow = self.currentChat,
                                           let index = self.chats.firstIndex(where: { $0.id == chat.id }) else {
-                                        print("⚠️ Cannot convert ID: currentChat is nil or chat not in array")
                                         return
                                     }
                                     
@@ -1044,9 +1018,7 @@ class ChatViewModel: ObservableObject {
                                     self.streamingTracker.endStreaming(updatedChat.id)
                                     
                                     // Now backup to cloud with new permanent ID
-                                    print("Backing up chat after ID conversion from \(chat.id) to \(updatedChat.id)")
                                     try await self.cloudSync.backupChat(updatedChat.id)
-                                    print("Successfully backed up converted chat: \(updatedChat.id)")
                                     
                                     // After successful backup, mark as no longer locally modified
                                     if let index = self.chats.firstIndex(where: { $0.id == updatedChat.id }) {
@@ -1056,7 +1028,6 @@ class ChatViewModel: ObservableObject {
                                         }
                                     }
                                 } catch {
-                                    print("Failed to generate permanent ID or backup: \(error)")
                                     // Still need to end streaming with old ID if conversion fails
                                     self.streamingTracker.endStreaming(chat.id)
                                 }
@@ -1076,9 +1047,7 @@ class ChatViewModel: ObservableObject {
                                         return
                                     }
                                     
-                                    print("Backing up chat with permanent ID: \(latestChat.id)")
                                     try await self.cloudSync.backupChat(latestChat.id)
-                                    print("Successfully backed up chat: \(latestChat.id)")
                                     
                                     // After successful backup, mark as no longer locally modified
                                     // Note: The chat has already been marked as synced in CloudSyncService.markChatAsSynced
@@ -1094,7 +1063,6 @@ class ChatViewModel: ObservableObject {
                                         }
                                     }
                                 } catch {
-                                    print("Failed to backup chat \(chat.id): \(error)")
                                 }
                             }
                         }
@@ -1123,7 +1091,6 @@ class ChatViewModel: ObservableObject {
                                     // Get the current state of the chat
                                     guard let currentChatNow = self.currentChat,
                                           let index = self.chats.firstIndex(where: { $0.id == chat.id }) else {
-                                        print("⚠️ Cannot convert ID: currentChat is nil or chat not in array")
                                         return
                                     }
                                     
@@ -1158,9 +1125,7 @@ class ChatViewModel: ObservableObject {
                                     self.streamingTracker.endStreaming(updatedChat.id)
                                     
                                     // Now backup to cloud with new permanent ID
-                                    print("Backing up chat after ID conversion from \(chat.id) to \(updatedChat.id)")
                                     try await self.cloudSync.backupChat(updatedChat.id)
-                                    print("Successfully backed up converted chat: \(updatedChat.id)")
                                     
                                     // After successful backup, mark as no longer locally modified
                                     if let index = self.chats.firstIndex(where: { $0.id == updatedChat.id }) {
@@ -1170,7 +1135,6 @@ class ChatViewModel: ObservableObject {
                                         }
                                     }
                                 } catch {
-                                    print("Failed to generate permanent ID or backup: \(error)")
                                     // Still need to end streaming with old ID if conversion fails
                                     self.streamingTracker.endStreaming(chat.id)
                                 }
@@ -1190,9 +1154,7 @@ class ChatViewModel: ObservableObject {
                                         return
                                     }
                                     
-                                    print("Backing up chat with permanent ID: \(latestChat.id)")
                                     try await self.cloudSync.backupChat(latestChat.id)
-                                    print("Successfully backed up chat: \(latestChat.id)")
                                     
                                     // After successful backup, mark as no longer locally modified
                                     // Note: The chat has already been marked as synced in CloudSyncService.markChatAsSynced
@@ -1208,7 +1170,6 @@ class ChatViewModel: ObservableObject {
                                         }
                                     }
                                 } catch {
-                                    print("Failed to backup chat \(chat.id): \(error)")
                                 }
                             }
                         }
@@ -1482,7 +1443,6 @@ class ChatViewModel: ObservableObject {
     private func ensureBlankChatAtTop() {
         // Check if the first chat is blank (no messages)
         if let firstChat = chats.first, firstChat.isBlankChat {
-            print("✅ Already have blank chat at top: \(firstChat.id)")
             return // Already have a blank chat at top
         }
         
@@ -1491,7 +1451,6 @@ class ChatViewModel: ObservableObject {
             // Move it to the top
             let blankChat = chats.remove(at: blankChatIndex)
             chats.insert(blankChat, at: 0)
-            print("📝 Moved existing blank chat to top: \(blankChat.id)")
         } else {
             // No blank chat exists, create one
             // It will automatically be blank (no messages) and have a temporary ID (UUID)
@@ -1501,7 +1460,6 @@ class ChatViewModel: ObservableObject {
                 userId: currentUserId
             )
             chats.insert(newBlankChat, at: 0)
-            print("📝 Created new blank chat: \(newBlankChat.id)")
             
             // Important: Don't save yet, as this might be called during initialization
             // The calling code will handle saving
@@ -1511,11 +1469,9 @@ class ChatViewModel: ObservableObject {
     /// Adds a message to the current chat
     private func addMessage(_ message: Message) {
         guard var chat = currentChat else { 
-            print("❌ addMessage: No current chat!")
             return 
         }
         
-        print("✅ addMessage: Adding message to chat \(chat.id)")
         
         // Add directly to the full message list
         chat.messages.append(message)
@@ -1551,7 +1507,6 @@ class ChatViewModel: ObservableObject {
             }
         } else {
             // Chat not found in array - this shouldn't happen but handle it
-            print("⚠️ updateChat: Chat \(chat.id) not found in array! Adding it.")
             chats.insert(updatedChat, at: 0)
             
             // Update currentChat if it's the one being updated
@@ -1610,7 +1565,6 @@ class ChatViewModel: ObservableObject {
                     do {
                         try await cloudSync.backupChat(currentChat.id)
                     } catch {
-                        print("Failed to backup chat during save: \(error)")
                     }
                 }
             }
@@ -1702,7 +1656,6 @@ class ChatViewModel: ObservableObject {
         // Stop auto-sync timer when signing out
         autoSyncTimer?.invalidate()
         autoSyncTimer = nil
-        print("⏹️ Auto-sync timer stopped (signed out)")
         
         // Save current chats before clearing them (they're already associated with the user ID)
         if hasChatAccess {
@@ -1765,7 +1718,6 @@ class ChatViewModel: ObservableObject {
     func handleSignIn() {
         // Prevent duplicate sign-in flows
         guard !isSignInInProgress else {
-            print("⚠️ handleSignIn: Sign-in already in progress, skipping duplicate call")
             return
         }
         
@@ -1812,7 +1764,6 @@ class ChatViewModel: ObservableObject {
             
             // We have an encryption key, perform immediate sync
             Task {
-                print("🔄 handleSignIn: Performing immediate sync...")
                 
                 // Initialize encryption and cloud sync
                 do {
@@ -1822,16 +1773,13 @@ class ChatViewModel: ObservableObject {
                     
                     // Perform sync
                     let syncResult = await cloudSync.syncAllChats()
-                    print("✅ handleSignIn: Sync completed (uploaded: \(syncResult.uploaded), downloaded: \(syncResult.downloaded))")
                     
                     // Load and display synced chats
                     if let userId = currentUserId {
                         let loadedChats = Chat.loadFromDefaults(userId: userId)
-                        print("📚 handleSignIn: Total loaded chats: \(loadedChats.count)")
                         
                         // Debug: Check what we loaded
                         for chat in loadedChats.prefix(5) {
-                            print("  - Chat: \(chat.id), blank: \(chat.isBlankChat), messages: \(chat.messages.count), title: \(chat.title), decryptionFailed: \(chat.decryptionFailed)")
                         }
                         
                         let sortedChats = loadedChats.sorted { $0.createdAt > $1.createdAt }
@@ -1842,12 +1790,10 @@ class ChatViewModel: ObservableObject {
                             // Show if: has messages OR failed to decrypt OR has a non-blank title
                             !chat.messages.isEmpty || chat.decryptionFailed || !chat.title.contains("New Chat")
                         }
-                        print("📊 handleSignIn: Displayable chats (including encrypted): \(displayableChats.count)")
                         
                         // Take first page of displayable chats
                         let firstPage = Array(displayableChats.prefix(Constants.Pagination.chatsPerPage))
                         
-                        print("📄 handleSignIn: Displaying \(firstPage.count) chats (including blanks)")
                         
                         await MainActor.run {
                             if !firstPage.isEmpty {
@@ -1863,7 +1809,6 @@ class ChatViewModel: ObservableObject {
                                 self.ensureBlankChatAtTop()
                             }
                             
-                            print("🎯 Final chat count in UI: \(self.chats.count)")
                             
                             if let first = self.chats.first {
                                 self.currentChat = first
@@ -1885,7 +1830,6 @@ class ChatViewModel: ObservableObject {
                     // Mark sign-in as complete
                     isSignInInProgress = false
                 } catch {
-                    print("❌ handleSignIn: Failed to sync: \(error)")
                     isSignInInProgress = false
                 }
             }
@@ -1935,24 +1879,19 @@ class ChatViewModel: ObservableObject {
             // Load chats from storage after sync
             if let userId = currentUserId {
                 let loadedChats = Chat.loadFromDefaults(userId: userId)
-                print("📱 initializeCloudSync: Loaded \(loadedChats.count) chats from storage")
                 
                 // Sort and take only first page for display
                 let sortedChats = loadedChats.sorted { $0.createdAt > $1.createdAt }
                 let nonBlankChats = sortedChats.filter { !$0.isBlankChat }
-                print("📊 initializeCloudSync: \(nonBlankChats.count) non-blank chats available")
                 
                 let firstPageChats = Array(nonBlankChats.prefix(Constants.Pagination.chatsPerPage))
-                print("📄 initializeCloudSync: Displaying \(firstPageChats.count) chats in first page")
                 
                 await MainActor.run {
                     // Update chats with synced data
                     if !firstPageChats.isEmpty {
                         self.chats = firstPageChats
                         self.ensureBlankChatAtTop()
-                        print("✅ initializeCloudSync: Updated UI with \(self.chats.count) chats")
                     } else {
-                        print("⚠️ initializeCloudSync: No synced chats to display, keeping blank chat")
                         // No synced chats, ensure we have at least the blank chat
                         if self.chats.isEmpty {
                             let newChat = Chat.create(
@@ -1968,7 +1907,6 @@ class ChatViewModel: ObservableObject {
                     // Select the first chat
                     if let first = self.chats.first {
                         self.currentChat = first
-                        print("🔵 Selected chat after sync: \(first.id) - isBlank: \(first.isBlankChat)")
                     }
                     
                     // Mark that we've loaded the initial page
@@ -1990,7 +1928,6 @@ class ChatViewModel: ObservableObject {
                 await MainActor.run {
                     self.paginationToken = listResult.nextContinuationToken
                     self.hasMoreChats = listResult.hasMore
-                    print("📄 Pagination initialized - hasMore: \(listResult.hasMore), token: \(listResult.nextContinuationToken?.prefix(20) ?? "nil")")
                 }
             }
         } catch {
@@ -2017,7 +1954,6 @@ class ChatViewModel: ObservableObject {
                     self.hasMoreChats = listResult.hasMore
                     self.isPaginationActive = true
                     self.hasLoadedInitialPage = true
-                    print("📄 Pagination setup for app restart - hasMore: \(listResult.hasMore), token: \(listResult.nextContinuationToken?.prefix(20) ?? "nil")")
                 }
             }
         }
@@ -2045,7 +1981,6 @@ class ChatViewModel: ObservableObject {
         
         // If we have more than first page of old synced chats, keep only the first page
         if syncedChats.count > Constants.Pagination.chatsPerPage {
-            print("📄 Cleaning up paginated chats: keeping first \(Constants.Pagination.chatsPerPage), removing \(syncedChats.count - Constants.Pagination.chatsPerPage)")
             
             // Keep first page of synced chats + all unsaved chats (blank/temporary) + recent chats
             let chatsToKeep = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + 
@@ -2304,10 +2239,8 @@ class ChatViewModel: ObservableObject {
     
     /// Set encryption key (for key rotation)
     func setEncryptionKey(_ key: String) async {
-        print("🔐 ChatViewModel: setEncryptionKey called with key: \(key.prefix(12))...")
         do {
             let oldKey = EncryptionService.shared.getKey()
-            print("📍 ChatViewModel: Old key: \(oldKey?.prefix(12) ?? "nil")...")
             try await EncryptionService.shared.setKey(key)
             
             await MainActor.run {
@@ -2315,10 +2248,8 @@ class ChatViewModel: ObservableObject {
                 self.showEncryptionSetup = false
             }
             
-            print("🔑 ChatViewModel: Comparing keys - old: '\(oldKey ?? "nil")', new: '\(key)'")
             // If key changed, handle re-encryption
             if oldKey != key {
-                print("🔄 ChatViewModel: Key changed, attempting to decrypt encrypted chats")
                 
                 // Show syncing indicator while processing
                 await MainActor.run {
@@ -2331,7 +2262,6 @@ class ChatViewModel: ObservableObject {
                         // Could add progress tracking here if needed
                     }
                 }
-                print("🔓 ChatViewModel: Decrypted \(decryptedCount) chats with new key")
                 
                 // Reload chats immediately after decryption to show decrypted chats
                 if decryptedCount > 0 {

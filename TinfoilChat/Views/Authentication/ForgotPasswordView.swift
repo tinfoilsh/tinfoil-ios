@@ -243,7 +243,6 @@ struct ForgotPasswordView: View {
             try await SignIn.create(strategy: .identifier(email, strategy: .resetPasswordEmailCode()))
         } catch {
             errorMessage = "Failed to send reset code. Please check your email and try again."
-            print("Error sending reset code: \(error)")
         }
         
         isLoading = false
@@ -263,7 +262,6 @@ struct ForgotPasswordView: View {
             try await inProgressSignIn.attemptFirstFactor(strategy: .resetPasswordEmailCode(code: code))
         } catch {
             errorMessage = "Invalid verification code. Please try again."
-            print("Error verifying code: \(error)")
         }
         
         isLoading = false
@@ -290,7 +288,6 @@ struct ForgotPasswordView: View {
             }
         } catch {
             errorMessage = "Failed to reset password. Please ensure it meets the requirements."
-            print("Error resetting password: \(error)")
         }
         
         isLoading = false

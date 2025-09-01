@@ -239,7 +239,6 @@ class EncryptionService: ObservableObject {
         // Add new item
         let status = SecItemAdd(query as CFDictionary, nil)
         if status != errSecSuccess {
-            print("Error saving encryption key to keychain: \(status)")
         }
     }
     

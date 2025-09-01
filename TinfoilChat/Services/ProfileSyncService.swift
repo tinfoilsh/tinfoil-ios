@@ -44,7 +44,6 @@ class ProfileSyncService: ObservableObject {
             
             return nil
         } catch {
-            print("Error getting auth token: \(error)")
             return nil
         }
     }
@@ -73,11 +72,9 @@ class ProfileSyncService: ObservableObject {
     /// Fetch profile from cloud
     func fetchProfile() async throws -> ProfileData? {
         guard await isAuthenticated() else {
-            print("Skipping profile fetch - not authenticated")
             return nil
         }
         
-        print("Fetching profile from cloud")
         
         let url = URL(string: "\(apiBaseURL)/api/profile/")!
         var request = URLRequest(url: url)
@@ -91,7 +88,6 @@ class ProfileSyncService: ObservableObject {
         }
         
         if httpResponse.statusCode == 404 {
-            print("No profile exists in cloud yet")
             return nil
         }
         
@@ -101,7 +97,6 @@ class ProfileSyncService: ObservableObject {
         
         let profileResponse = try JSONDecoder().decode(ProfileResponse.self, from: data)
         
-        print("Profile data received from cloud - version: \(profileResponse.version ?? "unknown")")
         
         // Initialize encryption service
         _ = try await EncryptionService.shared.initialize()
@@ -115,7 +110,6 @@ class ProfileSyncService: ObservableObject {
             
             let encrypted = try JSONDecoder().decode(EncryptedData.self, from: encryptedData)
             
-            print("Parsed encrypted profile data - has IV: \(encrypted.iv.isEmpty ? "no" : "yes")")
             
             let decrypted = try await EncryptionService.shared.decrypt(encrypted, as: ProfileData.self)
             
@@ -123,7 +117,6 @@ class ProfileSyncService: ObservableObject {
             self.cachedProfile = decrypted
             self.failedDecryptionData = nil
             
-            print("Profile fetched and decrypted successfully")
             
             return decrypted
         } catch {
@@ -131,7 +124,6 @@ class ProfileSyncService: ObservableObject {
             self.failedDecryptionData = profileResponse.data
             self.cachedProfile = nil
             
-            print("Profile decryption failed: \(error.localizedDescription)")
             
             return nil
         }
@@ -140,11 +132,9 @@ class ProfileSyncService: ObservableObject {
     /// Save profile to cloud
     func saveProfile(_ profile: ProfileData) async throws -> (success: Bool, version: Int?) {
         guard await isAuthenticated() else {
-            print("Skipping profile save - not authenticated")
             return (false, nil)
         }
         
-        print("Saving profile to cloud")
         
         // Initialize encryption service
         _ = try await EncryptionService.shared.initialize()
@@ -157,7 +147,6 @@ class ProfileSyncService: ObservableObject {
         // Encrypt the profile data
         let encrypted = try await EncryptionService.shared.encrypt(profileWithMetadata)
         
-        print("Encrypted profile data - IV length: \(encrypted.iv.count), data length: \(encrypted.data.count)")
         
         // Send encrypted data as JSON string
         let encryptedData = try JSONEncoder().encode(encrypted)
@@ -182,7 +171,6 @@ class ProfileSyncService: ObservableObject {
         // Update cache
         self.cachedProfile = profileWithMetadata
         
-        print("Profile saved successfully - version: \(profileWithMetadata.version ?? 0)")
         
         return (true, profileWithMetadata.version)
     }
@@ -208,11 +196,9 @@ class ProfileSyncService: ObservableObject {
             self.cachedProfile = decrypted
             self.failedDecryptionData = nil
             
-            print("Profile decrypted successfully with new key")
             
             return decrypted
         } catch {
-            print("Profile decryption with new key failed: \(error.localizedDescription)")
             return nil
         }
     }

@@ -147,7 +147,6 @@ struct StoredChat: Codable {
         } else if let date = isoFormatterNoFraction.date(from: createdAtString) {
             createdAt = date
         } else {
-            print("⚠️ Failed to parse createdAt date: '\(createdAtString)' - using current date")
             createdAt = Date()
         }
         
@@ -156,7 +155,6 @@ struct StoredChat: Codable {
         } else if let date = isoFormatterNoFraction.date(from: updatedAtString) {
             updatedAt = date
         } else {
-            print("⚠️ Failed to parse updatedAt date: '\(updatedAtString)' - using current date")
             updatedAt = Date()
         }
         

@@ -35,12 +35,10 @@ class AuthManager: ObservableObject {
     }
     
     func setChatViewModel(_ viewModel: ChatViewModel) {
-        print("🔗 AuthManager: ChatViewModel reference set")
         self.chatViewModel = viewModel
         
         // If already authenticated, trigger handleSignIn
         if isAuthenticated {
-            print("🔐 AuthManager: Already authenticated, calling handleSignIn immediately")
             viewModel.handleSignIn()
         }
     }
@@ -78,7 +76,6 @@ class AuthManager: ObservableObject {
             
             // Update user data immediately
             if let user = clerk.user {
-                print("🔐 AuthManager: User authenticated, updating data")
                 updateUserData(from: user)
                 // handleSignIn will be called from updateUserData if needed
             }
@@ -124,12 +121,9 @@ class AuthManager: ObservableObject {
         
         // Handle chat state changes if authentication or subscription status changed
         if !wasAuthenticated && isAuthenticated {
-            print("🔄 AuthManager: Auth status changed, calling handleSignIn")
             if let chatVM = chatViewModel {
-                print("✅ AuthManager: Calling handleSignIn from updateUserData")
                 chatVM.handleSignIn()
             } else {
-                print("⚠️ AuthManager: ChatViewModel is nil in updateUserData")
             }
         }
     }
@@ -137,7 +131,6 @@ class AuthManager: ObservableObject {
     func initializeAuthState() async {
         do {
             guard let clerk = self.clerk else {
-                print("Error: Clerk instance not set")
                 isLoading = false
                 return
             }
@@ -173,7 +166,6 @@ class AuthManager: ObservableObject {
             isLoading = false
             
         } catch {
-            print("Error initializing auth state: \(error)")
             isLoading = false
         }
     }
@@ -202,7 +194,6 @@ class AuthManager: ObservableObject {
             clearAuthState()
             
         } catch {
-            print("Error signing out: \(error)")
         }
     }
     
@@ -286,7 +277,6 @@ class AuthManager: ObservableObject {
             clearAuthState()
             
         } catch {
-            print("Error deleting account: \(error)")
             throw error
         }
     }

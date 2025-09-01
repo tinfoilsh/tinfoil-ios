@@ -215,7 +215,6 @@ struct Chat: Identifiable, Codable {
                 UserDefaults.standard.set(data, forKey: "savedChats_anonymous")
             }
         } catch {
-            print("Error saving chats: \(error)")
         }
     }
     
@@ -239,7 +238,6 @@ struct Chat: Identifiable, Codable {
                     UserDefaults.standard.removeObject(forKey: "savedChats")
                     return chats.sorted { $0.createdAt > $1.createdAt }
                 } catch {
-                    print("Error migrating old chats: \(error)")
                     return []
                 }
             }
@@ -251,7 +249,6 @@ struct Chat: Identifiable, Codable {
             let chats = try decoder.decode([Chat].self, from: data)
             return chats.sorted { $0.createdAt > $1.createdAt }
         } catch {
-            print("Error loading chats: \(error)")
             return []
         }
     }

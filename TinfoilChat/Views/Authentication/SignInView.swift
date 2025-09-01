@@ -142,7 +142,6 @@ struct SignInView: View {
         onDismiss()
       }
     } catch {
-      print("Sign-in error:", error)
       await MainActor.run {
         errorMessage = "Sign-in failed: \(error.localizedDescription)"
         isLoading = false

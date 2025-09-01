@@ -606,7 +606,6 @@ struct SettingsView: View {
                         await authManager.signOut()
                         dismiss()
                     } catch {
-                        print("Delete account error: \(error)")
                     }
                 }
             }
