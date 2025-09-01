@@ -251,6 +251,11 @@ struct ChatSidebar: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
             }
+            .refreshable {
+                if authManager.isAuthenticated {
+                    await viewModel.performFullSync()
+                }
+            }
             
             Spacer()
             
