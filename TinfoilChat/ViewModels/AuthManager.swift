@@ -19,6 +19,7 @@ class AuthManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var timer: Timer?
     private var clerk: Clerk?
+    private var hasTriggeredSignIn = false
     
     // UserDefaults keys
     private let authStateKey = "sh.tinfoil.authState"
@@ -36,7 +37,14 @@ class AuthManager: ObservableObject {
     
     func setChatViewModel(_ viewModel: ChatViewModel) {
         self.chatViewModel = viewModel
-        // handleSignIn will be called from setClerk when authentication is confirmed
+        
+        // If already authenticated and clerk is set, trigger handleSignIn once
+        // This handles the case where AuthManager loads before ChatViewModel
+        if isAuthenticated, clerk != nil, clerk?.user != nil, !hasTriggeredSignIn {
+            hasTriggeredSignIn = true
+            viewModel.handleSignIn()
+        }
+        // Otherwise handleSignIn will be called from setClerk when authentication is confirmed
     }
     
     private func loadCachedAuthState() {
@@ -74,8 +82,11 @@ class AuthManager: ObservableObject {
             // Now set authenticated, which will trigger observers
             self.isAuthenticated = true
             
-            // Handle sign in for chat
-            chatViewModel?.handleSignIn()
+            // Handle sign in for chat if not already triggered
+            if !hasTriggeredSignIn, let chatVM = chatViewModel {
+                hasTriggeredSignIn = true
+                chatVM.handleSignIn()
+            }
         }
     }
     
@@ -117,9 +128,9 @@ class AuthManager: ObservableObject {
         
         // Handle chat state changes if authentication or subscription status changed
         if !wasAuthenticated && isAuthenticated {
-            if let chatVM = chatViewModel {
+            if !hasTriggeredSignIn, let chatVM = chatViewModel {
+                hasTriggeredSignIn = true
                 chatVM.handleSignIn()
-            } else {
             }
         }
     }
@@ -170,6 +181,7 @@ class AuthManager: ObservableObject {
         localUserData = nil
         isAuthenticated = false
         hasActiveSubscription = false
+        hasTriggeredSignIn = false  // Reset the flag on sign out
         
         // Clear saved auth state
         UserDefaults.standard.removeObject(forKey: authStateKey)
