@@ -498,8 +498,8 @@ struct SettingsView: View {
                                             .foregroundColor(.primary)
                                         Spacer()
                                         Image(systemName: "arrow.up.forward.square")
-                                            .font(.caption2)
-                                            .foregroundColor(Color(UIColor.quaternaryLabel))
+                                            .font(.footnote)
+                                            .foregroundColor(Color(UIColor.tertiaryLabel))
                                     }
                                 }
                             } else {
@@ -837,13 +837,7 @@ struct CustomSystemPromptView: View {
         }
         .navigationTitle("Custom System Prompt")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true)
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel") {
-                    dismiss()
-                }
-            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Save") {
                     customSystemPrompt = editingPrompt
