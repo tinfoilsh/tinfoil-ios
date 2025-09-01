@@ -834,11 +834,6 @@ struct TabbedWelcomeView: View {
                 } else {
                     AnimatedConfidentialTitle()
                 }
-                
-                Text("This conversation is private.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
             }
             .padding(.horizontal, 32)
             
@@ -846,7 +841,7 @@ struct TabbedWelcomeView: View {
             VStack(spacing: 2) {
                 Text("Choose your AI model")
                     .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.primary)
+                    .foregroundColor(.secondary)
                     .padding(.horizontal, 32)
                 
                 ScrollView(.horizontal, showsIndicators: false) {
