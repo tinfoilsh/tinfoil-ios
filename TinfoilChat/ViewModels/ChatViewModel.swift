@@ -44,6 +44,7 @@ class ChatViewModel: ObservableObject {
     private let cloudSync = CloudSyncService.shared
     private let streamingTracker = StreamingTracker.shared
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
+    private var hasPerformedInitialSync: Bool = false  // Track if initial sync has been done
     
     // Pagination properties
     @Published var isLoadingMore: Bool = false
@@ -97,7 +98,19 @@ class ChatViewModel: ObservableObject {
     private var pendingStreamUpdate: Chat?
     
     // Auth reference for Premium features
-    @Published var authManager: AuthManager?
+    @Published var authManager: AuthManager? {
+        didSet {
+            // When authManager is set and user is authenticated, start sync
+            if let authManager = authManager, authManager.isAuthenticated {
+                setupAutoSyncTimer()
+                
+                // Perform initial sync if not already done
+                Task {
+                    await performInitialSyncIfNeeded()
+                }
+            }
+        }
+    }
     
     var messages: [Message] { // This now holds all messages for the current chat
         currentChat?.messages ?? []
@@ -149,7 +162,7 @@ class ChatViewModel: ObservableObject {
         // Initialize with last selected model from AppConfig (which now persists)
         self.currentModel = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first!
         
-        // Store auth manager reference
+        // Store auth manager reference (will trigger initial sync via didSet if authenticated)
         self.authManager = authManager
         
         // Always create a new chat when the app is loaded initially
@@ -174,105 +187,12 @@ class ChatViewModel: ObservableObject {
             let newChat = Chat.create(modelType: currentModel)
             currentChat = newChat
             chats = [newChat]
-            
         }
         
         // Setup app lifecycle observers
         setupAppLifecycleObservers()
         
-        // Set up auto-sync timer if already authenticated (e.g., app launch with existing session)
-        if authManager?.isAuthenticated == true {
-            setupAutoSyncTimer()
-            
-            // Initialize cloud sync and perform immediate sync on app restart
-            Task {
-                // Initialize cloud sync service first
-                do {
-                    // Initialize encryption
-                    let key = try await EncryptionService.shared.initialize()
-                    await MainActor.run {
-                        self.encryptionKey = key
-                    }
-                    
-                    // Initialize cloud sync
-                    try await cloudSync.initialize()
-                    
-                    // Perform immediate sync on app launch/restart
-                    let syncResult = await cloudSync.syncAllChats()
-                    
-                    // Setup pagination after sync
-                    await setupPaginationForAppRestart()
-                    
-                    // Load and display chats after sync
-                    if let userId = currentUserId {
-                        let loadedChats = Chat.loadFromDefaults(userId: userId)
-                        
-                        // Sort by creation date (newest first)
-                        let sortedChats = loadedChats.sorted { $0.createdAt > $1.createdAt }
-                        
-                        // For initial sync, don't filter by time - just separate synced vs unsaved
-                        let syncedChats = sortedChats.filter { chat in
-                            !chat.isBlankChat && 
-                            !chat.hasTemporaryId
-                        }
-                        let unsavedChats = sortedChats.filter { $0.isBlankChat || $0.hasTemporaryId }
-                        
-                        
-                        // Keep only first page of synced chats + all unsaved chats
-                        var chatsToKeep = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + unsavedChats
-                        
-                        // Remove duplicates
-                        var seen = Set<String>()
-                        chatsToKeep = chatsToKeep.filter { chat in
-                            if seen.contains(chat.id) {
-                                return false
-                            }
-                            seen.insert(chat.id)
-                            return true
-                        }
-                        
-                        // Save cleaned up chats back to storage
-                        if !chatsToKeep.isEmpty {
-                            Chat.saveToDefaults(chatsToKeep, userId: currentUserId)
-                        }
-                        
-                        // Display the first page
-                        let firstPageChats = Array(chatsToKeep.sorted { $0.createdAt > $1.createdAt }.prefix(Constants.Pagination.chatsPerPage))
-                        
-                        
-                        await MainActor.run {
-                            // Update chats array with synced data
-                            if !firstPageChats.isEmpty {
-                                self.chats = firstPageChats
-                                self.ensureBlankChatAtTop()
-                                
-                                // Select the first chat
-                                if let first = self.chats.first {
-                                    self.currentChat = first
-                                }
-                            } else {
-                                // No chats loaded, ensure we have at least a blank chat
-                                if self.chats.isEmpty || !self.chats[0].isBlankChat {
-                                    let newChat = Chat.create(
-                                        modelType: self.currentModel,
-                                        language: nil,
-                                        userId: userId
-                                    )
-                                    self.chats = [newChat]
-                                    self.currentChat = newChat
-                                }
-                            }
-                            
-                            // Update pagination state
-                            self.hasMoreChats = syncedChats.count > Constants.Pagination.chatsPerPage
-                            self.hasLoadedInitialPage = true
-                            self.isPaginationActive = syncedChats.count > 0
-                        }
-                    }
-                } catch {
-                }
-            }
-        }
+        // Initial sync will be triggered when authManager is set (see authManager didSet)
     }
     
     deinit {
@@ -2027,6 +1947,47 @@ class ChatViewModel: ObservableObject {
                     self.hasLoadedInitialPage = true
                 }
             }
+        }
+    }
+    
+    /// Perform initial sync if it hasn't been done yet
+    private func performInitialSyncIfNeeded() async {
+        guard !hasPerformedInitialSync else { return }
+        guard hasChatAccess else { return }
+        
+        hasPerformedInitialSync = true
+        
+        do {
+            // Initialize encryption
+            let key = try await EncryptionService.shared.initialize()
+            await MainActor.run {
+                self.encryptionKey = key
+            }
+            
+            // Initialize cloud sync
+            try await cloudSync.initialize()
+            
+            // Perform immediate sync
+            let syncResult = await cloudSync.syncAllChats()
+            
+            // Update last sync date
+            await MainActor.run {
+                self.lastSyncDate = Date()
+            }
+            
+            // Setup pagination after sync
+            await setupPaginationForAppRestart()
+            
+            // Load and display chats after sync
+            if let userId = currentUserId {
+                let loadedChats = Chat.loadFromDefaults(userId: userId)
+                await MainActor.run {
+                    self.chats = loadedChats.sorted { $0.createdAt > $1.createdAt }
+                    self.ensureBlankChatAtTop()
+                }
+            }
+        } catch {
+            print("Failed to perform initial sync: \(error)")
         }
     }
     

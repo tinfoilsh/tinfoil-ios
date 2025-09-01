@@ -11,7 +11,7 @@ import Clerk
 struct ContentView: View {
     @Environment(Clerk.self) private var clerk
     @EnvironmentObject private var authManager: AuthManager
-    @StateObject private var chatViewModel = TinfoilChat.ChatViewModel()
+    @State private var chatViewModel: TinfoilChat.ChatViewModel?
     @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
@@ -31,34 +31,37 @@ struct ContentView: View {
                             .scaleEffect(1.2)
                     }
                 }
-            } else {
+            } else if let chatViewModel = chatViewModel {
                 // Use the ChatContainer from ChatView.swift
                 ChatContainer()
                     .environmentObject(chatViewModel)
             }
         }
         .onAppear {
-            // Pass the AuthManager to the ChatViewModel
-            chatViewModel.authManager = authManager
-            // Set up bidirectional reference
-            authManager.setChatViewModel(chatViewModel)
+            // Create ChatViewModel with authManager
+            if chatViewModel == nil {
+                let vm = TinfoilChat.ChatViewModel(authManager: authManager)
+                chatViewModel = vm
+                // Set up bidirectional reference
+                authManager.setChatViewModel(vm)
+            }
             
             // Update available models based on current auth status
-            chatViewModel.updateModelBasedOnAuthStatus(
+            chatViewModel?.updateModelBasedOnAuthStatus(
                 isAuthenticated: authManager.isAuthenticated,
                 hasActiveSubscription: authManager.hasActiveSubscription
             )
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
             // Update available models when auth status changes
-            chatViewModel.updateModelBasedOnAuthStatus(
+            chatViewModel?.updateModelBasedOnAuthStatus(
                 isAuthenticated: isAuthenticated,
                 hasActiveSubscription: authManager.hasActiveSubscription
             )
         }
         .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
             // Update available models when subscription status changes
-            chatViewModel.updateModelBasedOnAuthStatus(
+            chatViewModel?.updateModelBasedOnAuthStatus(
                 isAuthenticated: authManager.isAuthenticated,
                 hasActiveSubscription: hasSubscription
             )
