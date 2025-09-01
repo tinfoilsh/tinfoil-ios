@@ -22,8 +22,7 @@ struct CloudSyncSettingsView: View {
     @FocusState private var isKeyFieldFocused: Bool
     
     var body: some View {
-        NavigationStack {
-            List {
+        List {
                 // Sync Status Section
                 Section {
                     HStack {
@@ -124,10 +123,10 @@ struct CloudSyncSettingsView: View {
                         .font(.caption)
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
-            .navigationTitle("Cloud Sync Settings")
-            .navigationBarTitleDisplayMode(.large)
+        .scrollContentBackground(.hidden)
+        .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+        .navigationTitle("Cloud Sync Settings")
+        .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showKeyInput) {
                 NavigationView {
                     VStack(spacing: 20) {
@@ -200,7 +199,6 @@ struct CloudSyncSettingsView: View {
                     }
                 }
             }
-        }
     }
     
     private func maskKey(_ key: String) -> String {
