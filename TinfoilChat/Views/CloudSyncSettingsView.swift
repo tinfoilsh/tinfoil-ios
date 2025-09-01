@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AVFoundation
 
 struct CloudSyncSettingsView: View {
     @Environment(\.dismiss) var dismiss
@@ -14,12 +15,7 @@ struct CloudSyncSettingsView: View {
     @ObservedObject var authManager: AuthManager
     
     @State private var showKeyInput: Bool = false
-    @State private var newKeyInput: String = ""
-    @State private var keyError: String? = nil
-    @State private var showKeyConfirmation: Bool = false
     @State private var copiedToClipboard: Bool = false
-    @State private var isKeyVisible: Bool = false
-    @FocusState private var isKeyFieldFocused: Bool
     
     var body: some View {
         List {
@@ -134,75 +130,12 @@ struct CloudSyncSettingsView: View {
         .navigationTitle("Cloud Sync Settings")
         .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showKeyInput) {
-                NavigationView {
-                    VStack(spacing: 20) {
-                        HStack {
-                            if isKeyVisible {
-                                TextField("Enter new encryption key (key_...)", text: $newKeyInput)
-                                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                                    .autocapitalization(.none)
-                                    .disableAutocorrection(true)
-                                    .font(.system(.body, design: .monospaced))
-                                    .focused($isKeyFieldFocused)
-                                    .onChange(of: newKeyInput) { _, newValue in
-                                        validateKey(newValue)
-                                    }
-                            } else {
-                                SecureField("Enter new encryption key (key_...)", text: $newKeyInput)
-                                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                                    .autocapitalization(.none)
-                                    .disableAutocorrection(true)
-                                    .font(.system(.body, design: .monospaced))
-                                    .focused($isKeyFieldFocused)
-                                    .onChange(of: newKeyInput) { _, newValue in
-                                        validateKey(newValue)
-                                    }
-                            }
-                            
-                            Button(action: {
-                                isKeyVisible.toggle()
-                            }) {
-                                Image(systemName: isKeyVisible ? "eye.slash" : "eye")
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        
-                        if let error = keyError {
-                            Label(error, systemImage: "exclamationmark.triangle")
-                                .font(.caption)
-                                .foregroundColor(.red)
-                        }
-                        
-                        Button("Change Key") {
-                            if keyError == nil {
-                                changeEncryptionKey()
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(newKeyInput.isEmpty || keyError != nil ? Color.gray : Color.accentPrimary)
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
-                        .disabled(newKeyInput.isEmpty || keyError != nil)
-                        
-                        Spacer()
-                    }
-                    .padding()
-                    .navigationTitle("Change Encryption Key")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarLeading) {
-                            Button("Cancel") {
-                                showKeyInput = false
-                                newKeyInput = ""
-                                keyError = nil
-                            }
-                        }
-                    }
-                    .onAppear {
-                        // Automatically focus the text field and show keyboard
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            isKeyFieldFocused = true
+                EncryptionKeyInputView(isPresented: $showKeyInput) { importedKey in
+                    Task {
+                        do {
+                            try await viewModel.setEncryptionKey(importedKey)
+                        } catch {
+                            print("Failed to change encryption key: \(error)")
                         }
                     }
                 }
@@ -215,60 +148,5 @@ struct CloudSyncSettingsView: View {
         let prefix = String(key.prefix(visibleChars))
         let masked = String(repeating: "•", count: key.count - visibleChars)
         return "\(prefix)\(masked)"
-    }
-    
-    private func validateKey(_ key: String) {
-        // Reset error first
-        keyError = nil
-        
-        // Check if key is empty (this is handled by button disable state, but good to be explicit)
-        if key.isEmpty {
-            return
-        }
-        
-        // Check if key has the required prefix
-        if !key.hasPrefix("key_") {
-            keyError = "Key must start with 'key_' prefix"
-            return
-        }
-        
-        // Validate key characters (after prefix)
-        let keyWithoutPrefix = String(key.dropFirst(4))
-        let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789")
-        if keyWithoutPrefix.rangeOfCharacter(from: allowedCharacters.inverted) != nil {
-            keyError = "Key must only contain lowercase letters and numbers after the prefix"
-            return
-        }
-        
-        // Validate key length
-        if keyWithoutPrefix.count % 2 != 0 {
-            keyError = "Invalid key length"
-            return
-        }
-    }
-    
-    private func changeEncryptionKey() {
-        let keyToSet = newKeyInput
-        
-        // Validate one more time before proceeding
-        validateKey(keyToSet)
-        if keyError != nil {
-            return
-        }
-        
-        // Dismiss modal immediately for better UX
-        showKeyInput = false
-        newKeyInput = ""
-        keyError = nil
-        
-        // Process key change and decryption in background
-        Task {
-            do {
-                try await viewModel.setEncryptionKey(keyToSet)
-            } catch {
-                // Log error but don't show UI since modal is already dismissed
-                print("Failed to change encryption key: \(error)")
-            }
-        }
     }
 }

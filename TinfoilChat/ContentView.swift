@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Clerk
+import AVFoundation
 
 struct ContentView: View {
     @Environment(Clerk.self) private var clerk
@@ -15,10 +16,6 @@ struct ContentView: View {
     @Environment(\.colorScheme) var colorScheme
     @State private var showEncryptionAlert = false
     @State private var showKeyInputModal = false
-    @State private var newKeyInput: String = ""
-    @State private var keyError: String? = nil
-    @State private var isKeyVisible: Bool = false
-    @FocusState private var isKeyFieldFocused: Bool
     
     var body: some View {
         Group {
@@ -90,75 +87,25 @@ struct ContentView: View {
             Text("Your chats are encrypted end-to-end and backed up. Choose how to set up your encryption key.")
         }
         .sheet(isPresented: $showKeyInputModal) {
-            NavigationView {
-                VStack(spacing: 20) {
-                    HStack {
-                        if isKeyVisible {
-                            TextField("Enter encryption key (key_...)", text: $newKeyInput)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                .autocapitalization(.none)
-                                .disableAutocorrection(true)
-                                .font(.system(.body, design: .monospaced))
-                                .focused($isKeyFieldFocused)
-                                .onChange(of: newKeyInput) { _, newValue in
-                                    validateKey(newValue)
-                                }
-                        } else {
-                            SecureField("Enter encryption key (key_...)", text: $newKeyInput)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                .autocapitalization(.none)
-                                .disableAutocorrection(true)
-                                .font(.system(.body, design: .monospaced))
-                                .focused($isKeyFieldFocused)
-                                .onChange(of: newKeyInput) { _, newValue in
-                                    validateKey(newValue)
-                                }
+            EncryptionKeyInputView(isPresented: $showKeyInputModal) { importedKey in
+                Task {
+                    do {
+                        try await EncryptionService.shared.setKey(importedKey)
+                        print("Successfully imported key: \(importedKey)")
+                    } catch {
+                        await MainActor.run {
+                            let alert = UIAlertController(
+                                title: "Invalid Key",
+                                message: "The encryption key format is invalid.",
+                                preferredStyle: .alert
+                            )
+                            alert.addAction(UIAlertAction(title: "OK", style: .default))
+                            
+                            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                               let rootViewController = windowScene.windows.first?.rootViewController {
+                                rootViewController.present(alert, animated: true)
+                            }
                         }
-                        
-                        Button(action: {
-                            isKeyVisible.toggle()
-                        }) {
-                            Image(systemName: isKeyVisible ? "eye.slash" : "eye")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    
-                    if let error = keyError {
-                        Label(error, systemImage: "exclamationmark.triangle")
-                            .font(.caption)
-                            .foregroundColor(.red)
-                    }
-                    
-                    Button("Import Key") {
-                        if keyError == nil {
-                            importEncryptionKey()
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(newKeyInput.isEmpty || keyError != nil ? Color.gray : Color.accentPrimary)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
-                    .disabled(newKeyInput.isEmpty || keyError != nil)
-                    
-                    Spacer()
-                }
-                .padding()
-                .navigationTitle("Import Encryption Key")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button("Cancel") {
-                            showKeyInputModal = false
-                            newKeyInput = ""
-                            keyError = nil
-                        }
-                    }
-                }
-                .onAppear {
-                    // Automatically focus the text field and show keyboard
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        isKeyFieldFocused = true
                     }
                 }
             }
@@ -229,78 +176,6 @@ struct ContentView: View {
         }
     }
     
-    private func validateKey(_ key: String) {
-        // Reset error first
-        keyError = nil
-        
-        // Check if key is empty
-        if key.isEmpty {
-            return
-        }
-        
-        // Check if key has the required prefix
-        if !key.hasPrefix("key_") {
-            keyError = "Key must start with 'key_' prefix"
-            return
-        }
-        
-        // Validate key characters (after prefix)
-        let keyWithoutPrefix = String(key.dropFirst(4))
-        let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789")
-        if keyWithoutPrefix.rangeOfCharacter(from: allowedCharacters.inverted) != nil {
-            keyError = "Key must only contain lowercase letters and numbers after the prefix"
-            return
-        }
-        
-        // Validate key length
-        if keyWithoutPrefix.count % 2 != 0 {
-            keyError = "Invalid key length"
-            return
-        }
-    }
-    
-    private func importEncryptionKey() {
-        let keyToSet = newKeyInput
-        
-        // Validate one more time before proceeding
-        validateKey(keyToSet)
-        if keyError != nil {
-            return
-        }
-        
-        // Dismiss modal and process key
-        showKeyInputModal = false
-        
-        Task {
-            do {
-                // Use existing key
-                try await EncryptionService.shared.setKey(keyToSet)
-                
-                await MainActor.run {
-                    newKeyInput = ""
-                    keyError = nil
-                }
-            } catch {
-                await MainActor.run {
-                    // Show error alert
-                    let alert = UIAlertController(
-                        title: "Invalid Key",
-                        message: "The encryption key format is invalid. Keys must start with 'key_' followed by alphanumeric characters.",
-                        preferredStyle: .alert
-                    )
-                    alert.addAction(UIAlertAction(title: "OK", style: .default))
-                    
-                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                       let rootViewController = windowScene.windows.first?.rootViewController {
-                        rootViewController.present(alert, animated: true)
-                    }
-                    
-                    newKeyInput = ""
-                    keyError = nil
-                }
-            }
-        }
-    }
 }
 
 #Preview {
