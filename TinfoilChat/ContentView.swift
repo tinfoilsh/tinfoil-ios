@@ -53,6 +53,8 @@ struct ContentView: View {
             )
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
+            print("ContentView: authManager.isAuthenticated changed to \(isAuthenticated)")
+            
             // Update available models when auth status changes
             chatViewModel?.updateModelBasedOnAuthStatus(
                 isAuthenticated: isAuthenticated,
@@ -61,6 +63,7 @@ struct ContentView: View {
             
             // Trigger initial sync when user becomes authenticated
             if isAuthenticated {
+                print("ContentView: Calling handleSignIn because user is authenticated")
                 chatViewModel?.handleSignIn()
             }
         }

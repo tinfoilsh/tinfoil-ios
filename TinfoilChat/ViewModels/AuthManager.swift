@@ -67,16 +67,15 @@ class AuthManager: ObservableObject {
     func setClerk(_ clerk: Clerk) {
         self.clerk = clerk
         // Check if clerk is already loaded and has a user
-        if clerk.user != nil {
+        if let user = clerk.user {
+            // Update user data BEFORE setting isAuthenticated
+            updateUserData(from: user)
+            
+            // Now set authenticated, which will trigger observers
             self.isAuthenticated = true
             
-            // Update user data immediately
-            if let user = clerk.user {
-                updateUserData(from: user)
-                // Handle sign in for chat
-                chatViewModel?.handleSignIn()
-            }
-        } else {
+            // Handle sign in for chat
+            chatViewModel?.handleSignIn()
         }
     }
     

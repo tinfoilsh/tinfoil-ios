@@ -1680,13 +1680,19 @@ class ChatViewModel: ObservableObject {
     
     /// Handle sign-in by loading user's saved chats
     func handleSignIn() {
+        print("handleSignIn called")
+        
         // Prevent duplicate sign-in flows
         guard !isSignInInProgress else {
+            print("handleSignIn: Already in progress, skipping")
             return
         }
         
+        print("handleSignIn: hasChatAccess=\(hasChatAccess), userId=\(currentUserId ?? "nil")")
+        
         if hasChatAccess, let userId = currentUserId {
             isSignInInProgress = true
+            print("handleSignIn: Starting sign-in flow for user \(userId)")
             
             // Start auto-sync timer now that user is authenticated
             // (This also handles the case where someone signs in after app launch)
