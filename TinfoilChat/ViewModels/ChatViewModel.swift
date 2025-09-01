@@ -53,6 +53,7 @@ class ChatViewModel: ObservableObject {
     private let streamingTracker = StreamingTracker.shared
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
     private var hasPerformedInitialSync: Bool = false  // Track if initial sync has been done
+    private var hasAnonymousChatsToSync: Bool = false  // Track if we have anonymous chats to sync
     
     // Pagination properties
     @Published var isLoadingMore: Bool = false
@@ -1728,6 +1729,32 @@ class ChatViewModel: ObservableObject {
             isSignInInProgress = true
             print("handleSignIn: Starting sign-in flow for user \(userId)")
             
+            // Check if we have any anonymous chats to migrate
+            let anonymousChats = chats.filter { chat in
+                chat.userId == nil && !chat.messages.isEmpty
+            }
+            
+            if !anonymousChats.isEmpty {
+                print("Found \(anonymousChats.count) anonymous chats to migrate")
+                // Migrate anonymous chats to the current user
+                for var chat in anonymousChats {
+                    chat.userId = userId
+                    chat.locallyModified = true
+                    chat.syncVersion = 0  // Reset sync version to force upload
+                    // Update in our chats array
+                    if let index = chats.firstIndex(where: { $0.id == chat.id }) {
+                        chats[index] = chat
+                    }
+                }
+                // Save the updated chats
+                saveChats()
+                
+                // Mark that we have anonymous chats that need to be synced after encryption setup
+                Task { @MainActor in
+                    self.hasAnonymousChatsToSync = true
+                }
+            }
+            
             // Start auto-sync timer now that user is authenticated
             // (This also handles the case where someone signs in after app launch)
             setupAutoSyncTimer()
@@ -1741,6 +1768,21 @@ class ChatViewModel: ObservableObject {
                     // Initialize encryption - this will load from keychain if available
                     let key = try await EncryptionService.shared.initialize()
                     self.encryptionKey = key
+                    
+                    // If we have anonymous chats to sync, force re-encryption with proper key
+                    if self.hasAnonymousChatsToSync {
+                        print("Re-encrypting anonymous chats with user's key")
+                        // Force all local chats to be marked for sync
+                        if let userId = self.currentUserId {
+                            var updatedChats = Chat.loadFromDefaults(userId: userId)
+                            for i in 0..<updatedChats.count {
+                                updatedChats[i].locallyModified = true
+                                updatedChats[i].syncVersion = 0
+                            }
+                            Chat.saveToDefaults(updatedChats, userId: userId)
+                        }
+                        self.hasAnonymousChatsToSync = false
+                    }
                     
                     // Now proceed with cloud sync regardless of whether key was new or existing
                     await initializeCloudSync()

@@ -951,15 +951,8 @@ class CloudSyncService: ObservableObject {
             // Skip blank chats
             if chat.isBlankChat { continue }
             
-            // Skip chats that failed to decrypt
-            if chat.decryptionFailed {
-                continue
-            }
-            
-            // Skip chats that still have encrypted data
-            if chat.encryptedData != nil {
-                continue
-            }
+            // Don't skip any chats when re-encrypting with a new key
+            // We want to re-encrypt everything with the new key
             
             do {
                 // Re-encrypt the chat with the new key by forcing a sync
