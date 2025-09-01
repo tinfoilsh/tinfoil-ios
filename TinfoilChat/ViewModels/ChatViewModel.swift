@@ -1699,136 +1699,40 @@ class ChatViewModel: ObservableObject {
             setupAutoSyncTimer()
             
             // Check if we need to set up encryption first
-            let existingKey = EncryptionService.shared.getKey()
-            if existingKey == nil {
-                // Auto-generate encryption key for new users (matches React behavior)
-                Task {
-                    do {
-                        let newKey = try await EncryptionService.shared.initialize()
-                        self.encryptionKey = newKey
-                        
-                        // Now proceed with cloud sync
-                        await initializeCloudSync()
-                        
-                        // Update last sync date
-                        await MainActor.run {
-                            self.lastSyncDate = Date()
-                        }
-                        
-                        // After sync completes, ensure we have proper chat setup
-                        await MainActor.run {
-                            if self.chats.isEmpty {
-                                self.createNewChat()
-                            } else {
-                                // Ensure there's a blank chat at the top
-                                self.ensureBlankChatAtTop()
-                            }
-                            self.isSignInInProgress = false
-                        }
-                    } catch {
-                        // If key generation fails, fall back to showing setup modal
-                        await MainActor.run {
-                            self.isFirstTimeUser = true
-                            self.showEncryptionSetup = true
-                            self.isSignInInProgress = false
-                        }
-                    }
-                }
-                return
-            }
-            
-            // We have an encryption key, mark that initial sync has been done to avoid duplicate
-            hasPerformedInitialSync = true
-            
-            // Perform immediate sync
+            // Always try to initialize encryption service which will:
+            // 1. Load existing key from keychain if available
+            // 2. Generate new key only if no key exists in keychain
             Task {
-                // Check if we need to migrate old chats to cloud first
-                if CloudMigrationService.shared.isMigrationNeeded() {
-                    do {
-                        let migrationResult = try await CloudMigrationService.shared.migrateToCloud(userId: userId)
-                        print("Cloud migration completed: \(migrationResult.summary)")
-                        
-                        if !migrationResult.isSuccess && !migrationResult.errors.isEmpty {
-                            // Log errors but continue with normal flow
-                            print("Migration errors: \(migrationResult.errors.joined(separator: ", "))")
-                        }
-                    } catch {
-                        print("Cloud migration failed: \(error)")
-                        // Continue with normal flow even if migration fails
-                    }
-                }
-                
-                // Initialize encryption and cloud sync
                 do {
+                    // Initialize encryption - this will load from keychain if available
                     let key = try await EncryptionService.shared.initialize()
                     self.encryptionKey = key
-                    try await cloudSync.initialize()
                     
-                    // Perform sync
-                    let syncResult = await cloudSync.syncAllChats()
+                    // Now proceed with cloud sync regardless of whether key was new or existing
+                    await initializeCloudSync()
                     
                     // Update last sync date
                     await MainActor.run {
                         self.lastSyncDate = Date()
                     }
                     
-                    // Load and display synced chats
-                    if let userId = currentUserId {
-                        let loadedChats = Chat.loadFromDefaults(userId: userId)
-                        
-                        // Debug: Check what we loaded
-                        for chat in loadedChats.prefix(5) {
+                    // After sync completes, ensure we have proper chat setup
+                    await MainActor.run {
+                        if self.chats.isEmpty {
+                            self.createNewChat()
+                        } else {
+                            // Ensure there's a blank chat at the top
+                            self.ensureBlankChatAtTop()
                         }
-                        
-                        let sortedChats = loadedChats.sorted { $0.createdAt > $1.createdAt }
-                        
-                        // Include encrypted chats that failed to decrypt (they have decryptionFailed flag)
-                        // Only filter out truly blank chats (not encrypted ones)
-                        let displayableChats = sortedChats.filter { chat in
-                            // Show if: has messages OR failed to decrypt OR has a non-blank title
-                            !chat.messages.isEmpty || chat.decryptionFailed || !chat.title.contains("New Chat")
-                        }
-                        
-                        // Take first page of displayable chats
-                        let firstPage = Array(displayableChats.prefix(Constants.Pagination.chatsPerPage))
-                        
-                        
-                        await MainActor.run {
-                            if !firstPage.isEmpty {
-                                // Replace current chats with synced ones
-                                self.chats = firstPage
-                                
-                                // Only add blank chat if we don't have one already
-                                if !self.chats.contains(where: { $0.isBlankChat }) {
-                                    self.ensureBlankChatAtTop()
-                                }
-                            } else {
-                                // No synced chats, keep the blank chat
-                                self.ensureBlankChatAtTop()
-                            }
-                            
-                            
-                            if let first = self.chats.first {
-                                self.currentChat = first
-                            }
-                            
-                            // Force UI update
-                            self.objectWillChange.send()
-                            
-                            // Set pagination state
-                            self.hasMoreChats = sortedChats.count > Constants.Pagination.chatsPerPage
-                            self.hasLoadedInitialPage = true
-                            self.isPaginationActive = true
-                        }
+                        self.isSignInInProgress = false
                     }
-                    
-                    // Setup pagination token
-                    await setupPaginationForAppRestart()
-                    
-                    // Mark sign-in as complete
-                    isSignInInProgress = false
                 } catch {
-                    isSignInInProgress = false
+                    // If key initialization fails, fall back to showing setup modal
+                    await MainActor.run {
+                        self.isFirstTimeUser = true
+                        self.showEncryptionSetup = true
+                        self.isSignInInProgress = false
+                    }
                 }
             }
         } else {
@@ -1842,55 +1746,62 @@ class ChatViewModel: ObservableObject {
     /// Initialize cloud sync when user signs in
     private func initializeCloudSync() async {
         do {
-            // Check if we have an existing key
-            let existingKey = EncryptionService.shared.getKey()
+            // Mark that initial sync has been done to avoid duplicate
+            hasPerformedInitialSync = true
             
-            if existingKey == nil {
-                // First-time user - show setup modal
-                await MainActor.run {
-                    self.isFirstTimeUser = true
-                    self.showEncryptionSetup = true
+            // Check if we need to migrate old chats to cloud first
+            if let userId = currentUserId, CloudMigrationService.shared.isMigrationNeeded() {
+                do {
+                    let migrationResult = try await CloudMigrationService.shared.migrateToCloud(userId: userId)
+                    print("Cloud migration completed: \(migrationResult.summary)")
+                    
+                    if !migrationResult.isSuccess && !migrationResult.errors.isEmpty {
+                        // Log errors but continue with normal flow
+                        print("Migration errors: \(migrationResult.errors.joined(separator: ", "))")
+                    }
+                } catch {
+                    print("Cloud migration failed: \(error)")
+                    // Continue with normal flow even if migration fails
                 }
-                // Don't proceed until user sets up encryption
-                return
-            }
-            
-            // Initialize encryption with existing key
-            let key = try await EncryptionService.shared.initialize()
-            await MainActor.run {
-                self.encryptionKey = key
-                self.isFirstTimeUser = false
             }
             
             // Initialize cloud sync service
             try await cloudSync.initialize()
             
-            // Clean up chats beyond first page ONLY on app launch (not during runtime)
-            // Check if this is initial app launch vs runtime sign-in
-            if chats.isEmpty {
-                await cleanupPaginatedChats()
-            }
+            // Perform sync
+            let syncResult = await cloudSync.syncAllChats()
             
-            // Perform initial sync which loads ONLY the first page of chats
-            await performFullSync()
-            
-            // Load chats from storage after sync
+            // Load and display synced chats
             if let userId = currentUserId {
                 let loadedChats = Chat.loadFromDefaults(userId: userId)
                 
-                // Sort and take only first page for display
-                let sortedChats = loadedChats.sorted { $0.createdAt > $1.createdAt }
-                let nonBlankChats = sortedChats.filter { !$0.isBlankChat }
+                // Debug: Check what we loaded
+                for chat in loadedChats.prefix(5) {
+                }
                 
-                let firstPageChats = Array(nonBlankChats.prefix(Constants.Pagination.chatsPerPage))
+                let sortedChats = loadedChats.sorted { $0.createdAt > $1.createdAt }
+                
+                // Include encrypted chats that failed to decrypt (they have decryptionFailed flag)
+                // Only filter out truly blank chats (not encrypted ones)
+                let displayableChats = sortedChats.filter { chat in
+                    // Show if: has messages OR failed to decrypt OR has a non-blank title
+                    !chat.messages.isEmpty || chat.decryptionFailed || !chat.title.contains("New Chat")
+                }
+                
+                // Take first page of displayable chats
+                let firstPage = Array(displayableChats.prefix(Constants.Pagination.chatsPerPage))
                 
                 await MainActor.run {
-                    // Update chats with synced data
-                    if !firstPageChats.isEmpty {
-                        self.chats = firstPageChats
-                        self.ensureBlankChatAtTop()
+                    if !firstPage.isEmpty {
+                        // Replace current chats with synced ones
+                        self.chats = firstPage
+                        
+                        // Only add blank chat if we don't have one already
+                        if !self.chats.contains(where: { $0.isBlankChat }) {
+                            self.ensureBlankChatAtTop()
+                        }
                     } else {
-                        // No synced chats, ensure we have at least the blank chat
+                        // No synced chats, keep the blank chat
                         if self.chats.isEmpty {
                             let newChat = Chat.create(
                                 modelType: self.currentModel,
@@ -1909,25 +1820,15 @@ class ChatViewModel: ObservableObject {
                     
                     // Mark that we've loaded the initial page
                     self.hasLoadedInitialPage = true
-                    self.isPaginationActive = nonBlankChats.count > 0
+                    self.isPaginationActive = displayableChats.count > 0
                     
                     // Set hasMoreChats based on total count
-                    self.hasMoreChats = nonBlankChats.count > Constants.Pagination.chatsPerPage
+                    self.hasMoreChats = displayableChats.count > Constants.Pagination.chatsPerPage
                 }
             }
             
-            // Get pagination token for page 2
-            // This needs to happen AFTER we've loaded the first page
-            if let listResult = try? await R2StorageService.shared.listChats(
-                limit: Constants.Pagination.chatsPerPage,
-                continuationToken: nil,
-                includeContent: false
-            ) {
-                await MainActor.run {
-                    self.paginationToken = listResult.nextContinuationToken
-                    self.hasMoreChats = listResult.hasMore
-                }
-            }
+            // Setup pagination token
+            await setupPaginationForAppRestart()
         } catch {
             await MainActor.run {
                 self.syncErrors.append(error.localizedDescription)
