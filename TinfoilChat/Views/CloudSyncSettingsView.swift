@@ -17,7 +17,6 @@ struct CloudSyncSettingsView: View {
     @State private var newKeyInput: String = ""
     @State private var keyError: String? = nil
     @State private var showKeyConfirmation: Bool = false
-    @State private var isProcessing: Bool = false
     @State private var copiedToClipboard: Bool = false
     @State private var isKeyVisible: Bool = false
     @FocusState private var isKeyFieldFocused: Bool
@@ -179,7 +178,7 @@ struct CloudSyncSettingsView: View {
                         .background(newKeyInput.isEmpty || keyError != nil ? Color.gray : Color.accentPrimary)
                         .foregroundColor(.white)
                         .cornerRadius(10)
-                        .disabled(newKeyInput.isEmpty || keyError != nil || isProcessing)
+                        .disabled(newKeyInput.isEmpty || keyError != nil)
                         
                         Spacer()
                     }
@@ -192,7 +191,6 @@ struct CloudSyncSettingsView: View {
                             newKeyInput = ""
                             keyError = nil
                         }
-                        .disabled(isProcessing)
                     )
                     .onAppear {
                         // Automatically focus the text field and show keyboard
@@ -201,7 +199,6 @@ struct CloudSyncSettingsView: View {
                         }
                     }
                 }
-                .interactiveDismissDisabled(isProcessing)
             }
         }
     }
