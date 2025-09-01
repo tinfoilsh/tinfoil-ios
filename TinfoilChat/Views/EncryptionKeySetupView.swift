@@ -166,7 +166,7 @@ struct EncryptionKeySetupView: View {
             .navigationBarItems(
                 trailing: Button("Skip") {
                     // Allow skipping for now, but generate a key in the background
-                    Task {
+                    Task { @MainActor in
                         let key = EncryptionService.shared.generateKey()
                         await viewModel.setEncryptionKey(key)
                         dismiss()
@@ -190,7 +190,7 @@ struct EncryptionKeySetupView: View {
             isProcessing = true
             keyError = nil
             
-            Task {
+            Task { @MainActor in
                 await viewModel.setEncryptionKey(generatedKey)
                 dismiss()
             }
@@ -225,7 +225,7 @@ struct EncryptionKeySetupView: View {
         isProcessing = true
         keyError = nil
         
-        Task {
+        Task { @MainActor in
             do {
                 try await EncryptionService.shared.setKey(keyInput)
                 await viewModel.setEncryptionKey(keyInput)

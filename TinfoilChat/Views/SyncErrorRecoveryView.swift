@@ -188,7 +188,7 @@ struct SyncErrorRecoveryView: View {
         isRetrying = true
         viewModel.syncErrors.removeAll()
         
-        Task {
+        Task { @MainActor in
             await viewModel.performFullSync()
             isRetrying = false
             
@@ -202,7 +202,7 @@ struct SyncErrorRecoveryView: View {
     private func retryDecryption() {
         isRetrying = true
         
-        Task {
+        Task { @MainActor in
             await viewModel.retryDecryptionWithNewKey()
             isRetrying = false
             
@@ -219,7 +219,7 @@ struct SyncErrorRecoveryView: View {
     }
     
     private func updateKey() {
-        Task {
+        Task { @MainActor in
             do {
                 try await EncryptionService.shared.setKey(keyInput)
                 await viewModel.setEncryptionKey(keyInput)
