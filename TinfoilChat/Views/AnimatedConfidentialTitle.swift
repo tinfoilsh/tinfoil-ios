@@ -54,8 +54,10 @@ struct AnimatedConfidentialTitle: View {
                 currentIndex += 1
                 
                 // Trigger haptic feedback for each character if enabled
-                if settings.hapticFeedbackEnabled {
-                    hapticGenerator.impactOccurred(intensity: 0.3)
+                Task { @MainActor in
+                    if settings.hapticFeedbackEnabled {
+                        hapticGenerator.impactOccurred(intensity: 0.3)
+                    }
                 }
             } else {
                 timer.invalidate()

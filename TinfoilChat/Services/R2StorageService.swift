@@ -28,7 +28,7 @@ class R2StorageService: ObservableObject {
     private func defaultTokenGetter() async -> String? {
         do {
             // Check if Clerk has a publishable key
-            guard await Clerk.shared.publishableKey != nil else {
+            guard await !Clerk.shared.publishableKey.isEmpty else {
                 return nil
             }
             

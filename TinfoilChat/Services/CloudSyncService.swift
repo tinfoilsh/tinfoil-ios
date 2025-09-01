@@ -71,7 +71,7 @@ class CloudSyncService: ObservableObject {
         r2Storage.setTokenGetter { 
             do {
                 // Check if Clerk has a publishable key
-                guard Clerk.shared.publishableKey != nil else {
+                guard !Clerk.shared.publishableKey.isEmpty else {
                     return nil
                 }
                 
@@ -130,7 +130,7 @@ class CloudSyncService: ObservableObject {
     
     private func doBackupChat(_ chatId: String) async throws {
         // Check if chat is currently streaming
-        if await streamingTracker.isStreaming(chatId) {
+        if streamingTracker.isStreaming(chatId) {
             // Check if we already have a callback registered for this chat
             if streamingCallbacks.contains(chatId) {
                 return
@@ -141,7 +141,7 @@ class CloudSyncService: ObservableObject {
             streamingCallbacks.insert(chatId)
             
             // Register to sync once streaming ends
-            await streamingTracker.onStreamEnd(chatId) { [weak self] in
+            streamingTracker.onStreamEnd(chatId) { [weak self] in
                 Task { @MainActor in
                     // Remove from tracking set
                     self?.streamingCallbacks.remove(chatId)
@@ -167,7 +167,7 @@ class CloudSyncService: ObservableObject {
         }
         
         // Double-check streaming status right before upload
-        if await streamingTracker.isStreaming(chatId) {
+        if streamingTracker.isStreaming(chatId) {
             return
         }
         
@@ -186,65 +186,57 @@ class CloudSyncService: ObservableObject {
     func backupUnsyncedChats() async -> SyncResult {
         var result = SyncResult()
         
-        do {
-            let unsyncedChats = await getUnsyncedChats()
-            
-            
-            // Filter out blank chats, chats with temporary IDs, and streaming chats
-            var chatsToSync: [Chat] = []
-            for chat in unsyncedChats {
-                if !chat.isBlankChat && !chat.hasTemporaryId {
-                    let isStreaming = await streamingTracker.isStreaming(chat.id)
-                    if !isStreaming {
-                        chatsToSync.append(chat)
+        let unsyncedChats = await getUnsyncedChats()
+        
+        
+        // Filter out blank chats, chats with temporary IDs, and streaming chats
+        var chatsToSync: [Chat] = []
+        for chat in unsyncedChats {
+            if !chat.isBlankChat && !chat.hasTemporaryId {
+                let isStreaming = streamingTracker.isStreaming(chat.id)
+                if !isStreaming {
+                    chatsToSync.append(chat)
+                }
+            }
+        }
+        
+        
+        // Upload all chats in parallel for better performance
+        await withTaskGroup(of: (Bool, String?).self) { group in
+            for chat in chatsToSync {
+                group.addTask { [weak self] in
+                    // Skip if chat started streaming while in queue
+                    if await self?.streamingTracker.isStreaming(chat.id) ?? false {
+                        return (false, nil)
+                    }
+                    
+                    do {
+                        let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion + 1)
+                        try await self?.r2Storage.uploadChat(storedChat)
+                        await self?.markChatAsSynced(chat.id, version: storedChat.syncVersion)
+                        return (true, nil)
+                    } catch {
+                        return (false, "Failed to backup chat \(chat.id): \(error.localizedDescription)")
                     }
                 }
             }
             
-            
-            // Upload all chats in parallel for better performance
-            await withTaskGroup(of: (Bool, String?).self) { group in
-                for chat in chatsToSync {
-                    group.addTask { [weak self] in
-                        // Skip if chat started streaming while in queue
-                        if await self?.streamingTracker.isStreaming(chat.id) ?? false {
-                            return (false, nil)
-                        }
-                        
-                        do {
-                            let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion + 1)
-                            try await self?.r2Storage.uploadChat(storedChat)
-                            await self?.markChatAsSynced(chat.id, version: storedChat.syncVersion)
-                            return (true, nil)
-                        } catch {
-                            return (false, "Failed to backup chat \(chat.id): \(error.localizedDescription)")
-                        }
-                    }
-                }
-                
-                // Collect results
-                for await (success, error) in group {
-                    if success {
-                        result = SyncResult(
-                            uploaded: result.uploaded + 1,
-                            downloaded: result.downloaded,
-                            errors: result.errors
-                        )
-                    } else if let error = error {
-                        result = SyncResult(
-                            uploaded: result.uploaded,
-                            downloaded: result.downloaded,
-                            errors: result.errors + [error]
-                        )
-                    }
+            // Collect results
+            for await (success, error) in group {
+                if success {
+                    result = SyncResult(
+                        uploaded: result.uploaded + 1,
+                        downloaded: result.downloaded,
+                        errors: result.errors
+                    )
+                } else if let error = error {
+                    result = SyncResult(
+                        uploaded: result.uploaded,
+                        downloaded: result.downloaded,
+                        errors: result.errors + [error]
+                    )
                 }
             }
-        } catch {
-            result = SyncResult(
-                uploaded: result.uploaded,
-                downloaded: result.downloaded,
-                errors: result.errors + ["Failed to get unsynced chats: \(error.localizedDescription)"]
-            )
         }
         
         return result
@@ -429,7 +421,7 @@ class CloudSyncService: ObservableObject {
         let updatedDate = parseISODate(remoteChat.updatedAt) ?? Date()
         
         var placeholderChat = StoredChat(
-            from: await Chat.create(
+            from: Chat.create(
                 id: remoteChat.id,
                 title: "Encrypted",
                 messages: [],
@@ -516,7 +508,7 @@ class CloudSyncService: ObservableObject {
                             }
                             
                             // Also check if chat is currently streaming using the tracker
-                            if await self.streamingTracker.isStreaming(localChat.id) {
+                            if self.streamingTracker.isStreaming(localChat.id) {
                                 return (false, nil)
                             }
                         }
@@ -572,7 +564,7 @@ class CloudSyncService: ObservableObject {
                                     
                                     // Create placeholder with encrypted data
                                     var placeholderChat = StoredChat(
-                                        from: await Chat.create(
+                                        from: Chat.create(
                                             id: remoteChat.id,
                                             title: "Encrypted",
                                             messages: [],
@@ -604,7 +596,7 @@ class CloudSyncService: ObservableObject {
                                 let updatedDate = parseISODate(remoteChat.updatedAt) ?? Date()
                                 
                                 var placeholderChat = StoredChat(
-                                    from: await Chat.create(
+                                    from: Chat.create(
                                         id: remoteChat.id,
                                         title: "Encrypted",
                                         messages: [],
@@ -676,7 +668,7 @@ class CloudSyncService: ObservableObject {
     /// Delete a chat from cloud storage
     func deleteFromCloud(_ chatId: String) async throws {
         // Mark as deleted locally first
-        await deletedChatsTracker.markAsDeleted(chatId)
+        deletedChatsTracker.markAsDeleted(chatId)
         
         // Don't attempt deletion if not authenticated
         guard await r2Storage.isAuthenticated() else {
@@ -687,7 +679,7 @@ class CloudSyncService: ObservableObject {
             try await r2Storage.deleteChat(chatId)
             
             // Successfully deleted from cloud, can remove from tracker
-            await deletedChatsTracker.removeFromDeleted(chatId)
+            deletedChatsTracker.removeFromDeleted(chatId)
             
         } catch {
             // Silently fail if no auth token set
@@ -791,7 +783,7 @@ class CloudSyncService: ObservableObject {
     
     private func getCurrentUserId() async -> String? {
         // Get from Clerk
-        if let user = await Clerk.shared.user {
+        if let user = Clerk.shared.user {
             return user.id
         }
         return nil
@@ -803,7 +795,7 @@ class CloudSyncService: ObservableObject {
     /// Returns false for blank chats or invalid chats that shouldn't be synced
     private func shouldProcessRemoteChat(_ remoteChat: RemoteChat) async -> Bool {
         // Check if it was recently deleted locally
-        if await deletedChatsTracker.isDeleted(remoteChat.id) {
+        if deletedChatsTracker.isDeleted(remoteChat.id) {
             return false
         }
         

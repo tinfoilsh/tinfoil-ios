@@ -38,13 +38,13 @@ class ProfileSyncService: ObservableObject {
     private func defaultTokenGetter() async -> String? {
         do {
             // Ensure Clerk is loaded
-            let isLoaded = await Clerk.shared.isLoaded
+            let isLoaded = Clerk.shared.isLoaded
             if !isLoaded {
                 try await Clerk.shared.load()
             }
             
             // Get session token
-            if let session = await Clerk.shared.session,
+            if let session = Clerk.shared.session,
                let tokenResource = session.lastActiveToken {
                 return tokenResource.jwt
             }

@@ -230,35 +230,33 @@ class ChatViewModel: ObservableObject {
         
         // Create timer that fires at regular intervals
         autoSyncTimer = Timer.scheduledTimer(withTimeInterval: Constants.Sync.autoSyncIntervalSeconds, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            
-            // Only sync if authenticated
-            guard self.authManager?.isAuthenticated == true else {
-                return
-            }
-            
-            // Skip auto-sync if actively sending a message or streaming
-            if self.isLoading {
-                return
-            }
-            
-            // Skip if current chat has active stream
-            if let currentChat = self.currentChat, 
-               (currentChat.hasActiveStream || self.streamingTracker.isStreaming(currentChat.id)) {
-                return
-            }
-            
-            
-            // Perform sync in background
-            Task {
+            Task { @MainActor in
+                guard let self = self else { return }
+                
+                // Only sync if authenticated
+                guard self.authManager?.isAuthenticated == true else {
+                    return
+                }
+                
+                // Skip auto-sync if actively sending a message or streaming
+                if self.isLoading {
+                    return
+                }
+                
+                // Skip if current chat has active stream
+                if let currentChat = self.currentChat, 
+                   (currentChat.hasActiveStream || self.streamingTracker.isStreaming(currentChat.id)) {
+                    return
+                }
+                
+                
+                // Perform sync in background
                 do {
                     // Sync all chats
-                    let syncResult = try await self.cloudSync.syncAllChats()
+                    let syncResult = await self.cloudSync.syncAllChats()
                     
                     // Update last sync date after successful sync
-                    await MainActor.run {
-                        self.lastSyncDate = Date()
-                    }
+                    self.lastSyncDate = Date()
                     
                     // If we downloaded new chats, reload the chat list
                     if syncResult.downloaded > 0 {
@@ -266,14 +264,12 @@ class ChatViewModel: ObservableObject {
                         await self.updateChatsAfterSync()
                         
                         // Force UI update
-                        await MainActor.run {
-                            self.objectWillChange.send()
-                            
-                            // Restore current chat selection if it still exists
-                            if let currentChatId = self.currentChat?.id,
-                               let chat = self.chats.first(where: { $0.id == currentChatId }) {
-                                self.currentChat = chat
-                            }
+                        self.objectWillChange.send()
+                        
+                        // Restore current chat selection if it still exists
+                        if let currentChatId = self.currentChat?.id,
+                           let chat = self.chats.first(where: { $0.id == currentChatId }) {
+                            self.currentChat = chat
                         }
                         
                     }
@@ -305,16 +301,14 @@ class ChatViewModel: ObservableObject {
             }
             
             // Resume auto-sync timer if authenticated
-            if self?.authManager?.isAuthenticated == true {
-                self?.setupAutoSyncTimer()
-                
-                // Perform immediate sync when returning from background
-                Task {
-                    if let syncResult = try? await self?.cloudSync.syncAllChats() {
+            Task { @MainActor in
+                if self?.authManager?.isAuthenticated == true {
+                    self?.setupAutoSyncTimer()
+                    
+                    // Perform immediate sync when returning from background
+                    if let syncResult = await self?.cloudSync.syncAllChats() {
                         // Update last sync date
-                        await MainActor.run {
-                            self?.lastSyncDate = Date()
-                        }
+                        self?.lastSyncDate = Date()
                         
                         // Update chats if needed
                         if syncResult.downloaded > 0 {
@@ -331,18 +325,16 @@ class ChatViewModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            // Pause auto-sync timer
-            self?.autoSyncTimer?.invalidate()
-            self?.autoSyncTimer = nil
-            
-            // Do one final sync before going to background
-            if self?.authManager?.isAuthenticated == true {
-                Task {
-                    if let _ = try? await self?.cloudSync.syncAllChats() {
+            Task { @MainActor in
+                // Pause auto-sync timer
+                self?.autoSyncTimer?.invalidate()
+                self?.autoSyncTimer = nil
+                
+                // Do one final sync before going to background
+                if self?.authManager?.isAuthenticated == true {
+                    if let _ = await self?.cloudSync.syncAllChats() {
                         // Update last sync date
-                        await MainActor.run {
-                            self?.lastSyncDate = Date()
-                        }
+                        self?.lastSyncDate = Date()
                     }
                 }
             }
@@ -632,8 +624,8 @@ class ChatViewModel: ObservableObject {
         
         // Store the current chat for stream validation
         // We'll track by messages rather than ID to handle ID changes
-        let streamingChat = currentChat
-        let streamMessageCount = currentChat?.messages.count ?? 0
+        let _ = currentChat
+        let _ = currentChat?.messages.count ?? 0
         let streamChatId = currentChat?.id
         
         // Cancel any existing task
@@ -1337,9 +1329,17 @@ class ChatViewModel: ObservableObject {
     
     /// Requests microphone permission
     private func requestMicrophonePermission() async -> Bool {
-        return await withCheckedContinuation { continuation in
-            audioSession.requestRecordPermission { granted in
-                continuation.resume(returning: granted)
+        if #available(iOS 17.0, *) {
+            return await withCheckedContinuation { continuation in
+                AVAudioApplication.requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+        } else {
+            return await withCheckedContinuation { continuation in
+                audioSession.requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
             }
         }
     }
@@ -1491,10 +1491,12 @@ class ChatViewModel: ObservableObject {
                 // Cancel existing timer and create new one
                 streamUpdateTimer?.invalidate()
                 streamUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
-                    if let pending = self?.pendingStreamUpdate {
-                        self?.pendingStreamUpdate = nil
-                        if self?.hasChatAccess == true {
-                            self?.saveChats()
+                    Task { @MainActor in
+                        if let _ = self?.pendingStreamUpdate {
+                            self?.pendingStreamUpdate = nil
+                            if self?.hasChatAccess == true {
+                                self?.saveChats()
+                            }
                         }
                     }
                 }
@@ -1845,14 +1847,14 @@ class ChatViewModel: ObservableObject {
             try await cloudSync.initialize()
             
             // Perform sync
-            let syncResult = await cloudSync.syncAllChats()
+            let _ = await cloudSync.syncAllChats()
             
             // Load and display synced chats
             if let userId = currentUserId {
                 let loadedChats = Chat.loadFromDefaults(userId: userId)
                 
                 // Debug: Check what we loaded
-                for chat in loadedChats.prefix(5) {
+                for _ in loadedChats.prefix(5) {
                 }
                 
                 let sortedChats = loadedChats.sorted { $0.createdAt > $1.createdAt }
@@ -1952,7 +1954,7 @@ class ChatViewModel: ObservableObject {
             try await cloudSync.initialize()
             
             // Perform immediate sync
-            let syncResult = await cloudSync.syncAllChats()
+            let _ = await cloudSync.syncAllChats()
             
             // Update last sync date
             await MainActor.run {
@@ -2156,7 +2158,7 @@ class ChatViewModel: ObservableObject {
         self.ensureBlankChatAtTop()
         
         // Update hasMoreChats if needed (but don't reset pagination token)
-        if syncedChats.count > chats.filter { !$0.isBlankChat && !$0.hasTemporaryId }.count {
+        if syncedChats.count > (chats.filter { !$0.isBlankChat && !$0.hasTemporaryId }.count) {
             self.hasMoreChats = true
         }
     }
@@ -2303,7 +2305,7 @@ class ChatViewModel: ObservableObject {
                 }
                 
                 // Re-encrypt and upload all chats in background
-                let reencryptResult = await cloudSync.reencryptAndUploadChats()
+                let _ = await cloudSync.reencryptAndUploadChats()
                 
                 // Perform full sync
                 await performFullSync()

@@ -187,7 +187,6 @@ struct SettingsView: View {
     @State private var showLanguagePicker = false
     @State private var showSignOutConfirmation = false
     @State private var showPremiumModal = false
-    @State private var navigateToCloudSync = false
     
     var shouldOpenCloudSync: Bool = false
     
@@ -384,10 +383,12 @@ struct SettingsView: View {
                             
                             // Cloud Sync Settings
                             if authManager.isAuthenticated {
-                                NavigationLink(destination: CloudSyncSettingsView(
-                                    viewModel: chatViewModel,
-                                    authManager: authManager
-                                ), isActive: $navigateToCloudSync) {
+                                NavigationLink {
+                                    CloudSyncSettingsView(
+                                        viewModel: chatViewModel,
+                                        authManager: authManager
+                                    )
+                                } label: {
                                     Text("Cloud Sync")
                                 }
                             }
@@ -563,7 +564,6 @@ struct SettingsView: View {
         .onAppear {
             // Auto-navigate to Cloud Sync if requested
             if shouldOpenCloudSync {
-                navigateToCloudSync = true
             }
         }
         .sheet(isPresented: $showAuthView) {
