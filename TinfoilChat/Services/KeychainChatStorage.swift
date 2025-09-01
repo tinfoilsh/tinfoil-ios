@@ -25,26 +25,34 @@ class KeychainChatStorage {
         let encoder = JSONEncoder()
         let data = try encoder.encode(chats)
         
-        // Delete any existing item
-        deleteItem(key: key)
-        
-        // Create query for adding new item
+        // Create base query
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
-            kSecAttrAccount as String: key,
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            kSecAttrAccount as String: key
         ]
         
         if let accessGroup = accessGroup {
             query[kSecAttrAccessGroup as String] = accessGroup
         }
         
-        // Add to Keychain
-        let status = SecItemAdd(query as CFDictionary, nil)
+        // Attributes to update/add
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
         
-        if status != errSecSuccess && status != errSecDuplicateItem {
+        // Try to update existing item first
+        var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        
+        // If item doesn't exist, add it
+        if status == errSecItemNotFound {
+            var addQuery = query
+            addQuery.merge(attributes) { _, new in new }
+            status = SecItemAdd(addQuery as CFDictionary, nil)
+        }
+        
+        if status != errSecSuccess {
             throw KeychainError.saveFailed(status: status)
         }
     }
