@@ -1768,6 +1768,21 @@ class ChatViewModel: ObservableObject {
             
             // We have an encryption key, perform immediate sync
             Task {
+                // Check if we need to migrate old chats to cloud first
+                if CloudMigrationService.shared.isMigrationNeeded() {
+                    do {
+                        let migrationResult = try await CloudMigrationService.shared.migrateToCloud(userId: userId)
+                        print("Cloud migration completed: \(migrationResult.summary)")
+                        
+                        if !migrationResult.isSuccess && !migrationResult.errors.isEmpty {
+                            // Log errors but continue with normal flow
+                            print("Migration errors: \(migrationResult.errors.joined(separator: ", "))")
+                        }
+                    } catch {
+                        print("Cloud migration failed: \(error)")
+                        // Continue with normal flow even if migration fails
+                    }
+                }
                 
                 // Initialize encryption and cloud sync
                 do {
