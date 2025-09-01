@@ -208,7 +208,13 @@ class EncryptionService: ObservableObject {
                 throw EncryptionError.invalidKeyCharacters
             }
             
-            let byte = UInt8(highIndex * chars.count + lowIndex)
+            // Validate that the combined value doesn't exceed UInt8 max (255)
+            let combinedValue = highIndex * chars.count + lowIndex
+            guard combinedValue <= 255 else {
+                throw EncryptionError.invalidKeyCharacters
+            }
+            
+            let byte = UInt8(combinedValue)
             bytes.append(byte)
         }
         
