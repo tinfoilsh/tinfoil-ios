@@ -2196,7 +2196,7 @@ class ChatViewModel: ObservableObject {
                 self.ensureBlankChatAtTop()
                 
                 // Set up pagination if there are more chats
-                if sortedChats.count > 10 {
+                if sortedChats.count > Constants.Pagination.chatsPerPage {
                     self.hasMoreChats = true
                     // Pagination token will be set by initializeCloudSync or setupPaginationForAppRestart
                 }
