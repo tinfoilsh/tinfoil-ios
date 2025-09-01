@@ -63,7 +63,7 @@ struct StoredChat: Codable {
             )
         )
         
-        return Chat(
+        var chat = Chat(
             id: id,
             title: title,
             messages: messages,
@@ -78,6 +78,13 @@ struct StoredChat: Codable {
             decryptionFailed: decryptionFailed ?? false,
             encryptedData: encryptedData
         )
+        
+        // Preserve streaming state
+        if let hasActiveStream = hasActiveStream {
+            chat.hasActiveStream = hasActiveStream
+        }
+        
+        return chat
     }
     
     // Custom encoding for cross-platform compatibility
