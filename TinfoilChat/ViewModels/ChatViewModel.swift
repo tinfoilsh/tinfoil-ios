@@ -678,6 +678,7 @@ class ChatViewModel: ObservableObject {
         // We'll track by messages rather than ID to handle ID changes
         let streamingChat = currentChat
         let streamMessageCount = currentChat?.messages.count ?? 0
+        let streamChatId = currentChat?.id
         
         // Cancel any existing task
         currentTask?.cancel()
@@ -802,6 +803,9 @@ class ChatViewModel: ObservableObject {
                     
                     // Update UI on main thread
                     await MainActor.run {
+                        // Verify we're still on the same chat
+                        guard self.currentChat?.id == streamChatId else { return }
+                        
                         // Get current chat and validate it has messages
                         guard var chat = self.currentChat,
                               !chat.messages.isEmpty,
