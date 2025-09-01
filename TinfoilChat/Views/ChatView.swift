@@ -839,36 +839,53 @@ struct TabbedWelcomeView: View {
             
             // Model selection tabs
             VStack(spacing: 2) {
-                Text("Choose your AI model")
-                    .font(.system(size: 18, weight: .medium))
+                Text("Choose an AI model")
+                    .font(.system(size: 14, weight: .regular))
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 32)
                 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
-                        ForEach(availableModels) { model in
-                            ModelTab(
-                                model: model,
-                                isSelected: selectedModelId == model.id,
-                                isDarkMode: isDarkMode,
-                                isEnabled: canUseModel(model),
-                                showPricingLabel: !(authManager.isAuthenticated && authManager.hasActiveSubscription)
-                            ) {
-                                if !canUseModel(model) {
-                                    // Set clerk_user_id attribute right before showing paywall
-                                    if authManager.isAuthenticated, let clerkUserId = authManager.localUserData?["id"] as? String {
-                                        Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 16) {
+                            ForEach(availableModels) { model in
+                                ModelTab(
+                                    model: model,
+                                    isSelected: selectedModelId == model.id,
+                                    isDarkMode: isDarkMode,
+                                    isEnabled: canUseModel(model),
+                                    showPricingLabel: !(authManager.isAuthenticated && authManager.hasActiveSubscription)
+                                ) {
+                                    if !canUseModel(model) {
+                                        // Set clerk_user_id attribute right before showing paywall
+                                        if authManager.isAuthenticated, let clerkUserId = authManager.localUserData?["id"] as? String {
+                                            Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
+                                        }
+                                        showPremiumModal = true
+                                    } else {
+                                        selectModel(model)
                                     }
-                                    showPremiumModal = true
-                                } else {
-                                    selectModel(model)
                                 }
+                                .id(model.id)
+                            }
+                        }
+                        .padding(.horizontal, 32)
+                    }
+                    .frame(height: 100)
+                    .onAppear {
+                        // Scroll to selected model when view appears
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            withAnimation {
+                                proxy.scrollTo(selectedModelId, anchor: .center)
                             }
                         }
                     }
-                    .padding(.horizontal, 32)
+                    .onChange(of: selectedModelId) { _, newModelId in
+                        // Scroll to newly selected model
+                        withAnimation {
+                            proxy.scrollTo(newModelId, anchor: .center)
+                        }
+                    }
                 }
-                .frame(height: 100)
             }
             
             // Show loading view while waiting for subscription (where the subscription prompt used to be)
