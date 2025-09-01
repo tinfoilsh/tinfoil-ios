@@ -202,14 +202,17 @@ struct EncryptionKeySetupView: View {
     }
     
     private func importExistingKey() {
+        // Trim whitespace and newlines from input
+        let trimmedKey = keyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        
         // Validate key format before processing
-        if !keyInput.hasPrefix("key_") {
+        if !trimmedKey.hasPrefix("key_") {
             keyError = "Key must start with 'key_' prefix"
             return
         }
         
         // Validate key characters (after prefix)
-        let keyWithoutPrefix = String(keyInput.dropFirst(4))
+        let keyWithoutPrefix = String(trimmedKey.dropFirst(4))
         let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789")
         if keyWithoutPrefix.rangeOfCharacter(from: allowedCharacters.inverted) != nil {
             keyError = "Key must only contain lowercase letters and numbers after the prefix"
@@ -227,8 +230,8 @@ struct EncryptionKeySetupView: View {
         
         Task { @MainActor in
             do {
-                try await EncryptionService.shared.setKey(keyInput)
-                await viewModel.setEncryptionKey(keyInput)
+                try await EncryptionService.shared.setKey(trimmedKey)
+                await viewModel.setEncryptionKey(trimmedKey)
                 dismiss()
             } catch {
                 keyError = error.localizedDescription
