@@ -91,6 +91,8 @@ class ChatViewModel: ObservableObject {
     private var client: OpenAI?
     private var currentTask: Task<Void, Error>?
     private var autoSyncTimer: Timer?
+    private var didBecomeActiveObserver: NSObjectProtocol?
+    private var willResignActiveObserver: NSObjectProtocol?
     
     // Auth reference for Premium features
     @Published var authManager: AuthManager?
@@ -277,7 +279,12 @@ class ChatViewModel: ObservableObject {
         autoSyncTimer = nil
         
         // Remove app lifecycle observers
-        NotificationCenter.default.removeObserver(self)
+        if let observer = didBecomeActiveObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = willResignActiveObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
     
     /// Setup auto-sync timer to sync every 30 seconds
@@ -347,7 +354,7 @@ class ChatViewModel: ObservableObject {
     /// Setup observers for app lifecycle events
     private func setupAppLifecycleObservers() {
         // Listen for app becoming active (returning from background)
-        NotificationCenter.default.addObserver(
+        didBecomeActiveObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification,
             object: nil,
             queue: .main
@@ -375,7 +382,7 @@ class ChatViewModel: ObservableObject {
         }
         
         // Listen for app going to background
-        NotificationCenter.default.addObserver(
+        willResignActiveObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.willResignActiveNotification,
             object: nil,
             queue: .main
