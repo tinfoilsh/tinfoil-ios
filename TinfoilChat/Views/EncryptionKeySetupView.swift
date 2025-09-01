@@ -165,17 +165,19 @@ struct EncryptionKeySetupView: View {
                 .padding(.bottom)
             }
             .navigationBarTitle("", displayMode: .inline)
-            .navigationBarItems(
-                trailing: Button("Skip") {
-                    // Allow skipping for now, but generate a key in the background
-                    Task { @MainActor in
-                        let key = EncryptionService.shared.generateKey()
-                        await viewModel.setEncryptionKey(key)
-                        dismiss()
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Skip") {
+                        // Allow skipping for now, but generate a key in the background
+                        Task { @MainActor in
+                            let key = EncryptionService.shared.generateKey()
+                            await viewModel.setEncryptionKey(key)
+                            dismiss()
+                        }
                     }
+                    .disabled(isProcessing)
                 }
-                .disabled(isProcessing)
-            )
+            }
         }
         .interactiveDismissDisabled(isProcessing)
         .onAppear {

@@ -190,13 +190,15 @@ struct CloudSyncSettingsView: View {
                     .padding()
                     .navigationTitle("Change Encryption Key")
                     .navigationBarTitleDisplayMode(.inline)
-                    .navigationBarItems(
-                        leading: Button("Cancel") {
-                            showKeyInput = false
-                            newKeyInput = ""
-                            keyError = nil
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button("Cancel") {
+                                showKeyInput = false
+                                newKeyInput = ""
+                                keyError = nil
+                            }
                         }
-                    )
+                    }
                     .onAppear {
                         // Automatically focus the text field and show keyboard
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {

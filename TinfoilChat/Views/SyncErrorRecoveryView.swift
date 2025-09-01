@@ -131,11 +131,13 @@ struct SyncErrorRecoveryView: View {
                 .padding()
             }
             .navigationBarTitle("", displayMode: .inline)
-            .navigationBarItems(
-                trailing: Button("Done") {
-                    dismiss()
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
                 }
-            )
+            }
             .sheet(isPresented: $showKeyInput) {
                 NavigationView {
                     VStack(spacing: 20) {
