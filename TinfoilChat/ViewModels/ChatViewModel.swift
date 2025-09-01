@@ -35,7 +35,16 @@ class ChatViewModel: ObservableObject {
     
     // Cloud sync properties
     @Published var isSyncing: Bool = false
-    @Published var lastSyncDate: Date?
+    @Published var lastSyncDate: Date? {
+        didSet {
+            // Persist to UserDefaults whenever it changes (scoped to user)
+            if let date = lastSyncDate, let userId = currentUserId {
+                UserDefaults.standard.set(date, forKey: "lastSyncDate_\(userId)")
+            } else if let userId = currentUserId {
+                UserDefaults.standard.removeObject(forKey: "lastSyncDate_\(userId)")
+            }
+        }
+    }
     @Published var syncErrors: [String] = []
     private var encryptionKey: String?  // Keep private for security
     @Published var isFirstTimeUser: Bool = false
@@ -97,7 +106,16 @@ class ChatViewModel: ObservableObject {
     private var pendingStreamUpdate: Chat?
     
     // Auth reference for Premium features
-    @Published var authManager: AuthManager?
+    @Published var authManager: AuthManager? {
+        didSet {
+            // Load user-specific last sync date when auth changes
+            if let userId = currentUserId {
+                lastSyncDate = UserDefaults.standard.object(forKey: "lastSyncDate_\(userId)") as? Date
+            } else {
+                lastSyncDate = nil
+            }
+        }
+    }
     
     var messages: [Message] { // This now holds all messages for the current chat
         currentChat?.messages ?? []
@@ -148,6 +166,9 @@ class ChatViewModel: ObservableObject {
     init(authManager: AuthManager? = nil) {
         // Initialize with last selected model from AppConfig (which now persists)
         self.currentModel = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first!
+        
+        // Load persisted last sync date (will be loaded per-user when auth is set)
+        // Initial load happens in the authManager didSet
         
         // Store auth manager reference (will trigger initial sync via didSet if authenticated)
         self.authManager = authManager
