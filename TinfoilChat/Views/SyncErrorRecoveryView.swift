@@ -40,7 +40,7 @@ struct SyncErrorRecoveryView: View {
                     } else {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 8) {
-                                ForEach(viewModel.syncErrors, id: \.self) { error in
+                                ForEach(Array(viewModel.syncErrors.enumerated()), id: \.offset) { index, error in
                                     HStack(alignment: .top) {
                                         Image(systemName: "exclamationmark.triangle.fill")
                                             .foregroundColor(.orange)
