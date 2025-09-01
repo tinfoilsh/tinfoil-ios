@@ -218,6 +218,7 @@ struct SettingsView: View {
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 Image(systemName: "person.circle.fill")
+                    .resizable()
                     .foregroundColor(.secondary)
             }
         } else if let userData = authManager.localUserData,
@@ -228,6 +229,7 @@ struct SettingsView: View {
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 Image(systemName: "person.circle.fill")
+                    .resizable()
                     .foregroundColor(.secondary)
             }
         } else {
