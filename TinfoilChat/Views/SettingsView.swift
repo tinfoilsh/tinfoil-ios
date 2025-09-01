@@ -571,7 +571,7 @@ struct SettingsView: View {
         }
         .alert("Sign Out", isPresented: $showSignOutConfirmation) {
             Button("Cancel", role: .cancel) { }
-            Button("Keep Encryption Key", role: .destructive) {
+            Button("Keep Encryption Key") {
                 Task {
                     // Sign out but keep the encryption key
                     await authManager.signOut()
