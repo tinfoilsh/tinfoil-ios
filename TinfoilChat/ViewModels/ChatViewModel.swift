@@ -2093,7 +2093,7 @@ class ChatViewModel: ObservableObject {
         
         // Load next page with the token
         let result = await cloudSync.loadChatsWithPagination(
-            limit: 10,
+            limit: Constants.Pagination.chatsPerPage,
             continuationToken: token,
             loadLocal: false  // Don't fall back to local when paginating
         )
