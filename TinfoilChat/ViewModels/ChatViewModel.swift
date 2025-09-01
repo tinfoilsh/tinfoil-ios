@@ -98,19 +98,7 @@ class ChatViewModel: ObservableObject {
     private var pendingStreamUpdate: Chat?
     
     // Auth reference for Premium features
-    @Published var authManager: AuthManager? {
-        didSet {
-            // When authManager is set and user is authenticated, start sync
-            if let authManager = authManager, authManager.isAuthenticated {
-                setupAutoSyncTimer()
-                
-                // Perform initial sync if not already done
-                Task {
-                    await performInitialSyncIfNeeded()
-                }
-            }
-        }
-    }
+    @Published var authManager: AuthManager?
     
     var messages: [Message] { // This now holds all messages for the current chat
         currentChat?.messages ?? []
@@ -1716,6 +1704,11 @@ class ChatViewModel: ObservableObject {
                         // Now proceed with cloud sync
                         await initializeCloudSync()
                         
+                        // Update last sync date
+                        await MainActor.run {
+                            self.lastSyncDate = Date()
+                        }
+                        
                         // After sync completes, ensure we have proper chat setup
                         await MainActor.run {
                             if self.chats.isEmpty {
@@ -1738,7 +1731,10 @@ class ChatViewModel: ObservableObject {
                 return
             }
             
-            // We have an encryption key, perform immediate sync
+            // We have an encryption key, mark that initial sync has been done to avoid duplicate
+            hasPerformedInitialSync = true
+            
+            // Perform immediate sync
             Task {
                 // Check if we need to migrate old chats to cloud first
                 if CloudMigrationService.shared.isMigrationNeeded() {
@@ -1764,6 +1760,11 @@ class ChatViewModel: ObservableObject {
                     
                     // Perform sync
                     let syncResult = await cloudSync.syncAllChats()
+                    
+                    // Update last sync date
+                    await MainActor.run {
+                        self.lastSyncDate = Date()
+                    }
                     
                     // Load and display synced chats
                     if let userId = currentUserId {

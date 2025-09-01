@@ -34,9 +34,12 @@ struct CloudSyncSettingsView: View {
                         } else if !viewModel.syncErrors.isEmpty {
                             Text("Error")
                                 .foregroundColor(.red)
-                        } else {
+                        } else if viewModel.lastSyncDate != nil {
                             Text("Synced")
                                 .foregroundColor(.green)
+                        } else {
+                            Text("Not synced")
+                                .foregroundColor(.gray)
                         }
                     }
                     

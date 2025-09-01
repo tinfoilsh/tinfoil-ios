@@ -58,6 +58,11 @@ struct ContentView: View {
                 isAuthenticated: isAuthenticated,
                 hasActiveSubscription: authManager.hasActiveSubscription
             )
+            
+            // Trigger initial sync when user becomes authenticated
+            if isAuthenticated {
+                chatViewModel?.handleSignIn()
+            }
         }
         .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
             // Update available models when subscription status changes

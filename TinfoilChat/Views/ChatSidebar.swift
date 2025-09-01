@@ -163,7 +163,7 @@ struct ChatSidebar: View {
                     .foregroundColor(.secondary)
                 
                 if authManager.isAuthenticated {
-                    Text("Your chats are encrypted and backed up.")
+                    Text("Your chats are encrypted and backed up. You can manage your encryption key in Settings.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 } else {
