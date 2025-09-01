@@ -333,7 +333,9 @@ class DeletedChatsTracker {
     
     private func cleanupExpired() {
         let now = Date()
-        for (chatId, deletionTime) in deletionTimes {
+        // Create a copy of the dictionary to iterate over to avoid mutation during enumeration
+        let deletionTimesCopy = deletionTimes
+        for (chatId, deletionTime) in deletionTimesCopy {
             if now.timeIntervalSince(deletionTime) > expirationTime {
                 deletedChats.remove(chatId)
                 deletionTimes.removeValue(forKey: chatId)
