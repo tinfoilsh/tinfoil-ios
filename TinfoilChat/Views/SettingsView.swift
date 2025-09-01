@@ -385,7 +385,7 @@ struct SettingsView: View {
                                 NavigationLink(destination: CloudSyncSettingsView(
                                     viewModel: chatViewModel,
                                     authManager: authManager
-                                )) {
+                                ), isActive: $navigateToCloudSync) {
                                     Text("Cloud Sync")
                                 }
                             }
