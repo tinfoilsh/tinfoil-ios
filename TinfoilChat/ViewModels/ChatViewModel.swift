@@ -2195,6 +2195,18 @@ class ChatViewModel: ObservableObject {
         // Update the chats array
         self.chats = uniqueChats.sorted { $0.createdAt > $1.createdAt }
         
+        // Update currentChat if it was synced with new messages
+        if let currentChat = self.currentChat,
+           !currentChat.locallyModified,
+           !currentChat.hasActiveStream,
+           let updatedChat = self.chats.first(where: { $0.id == currentChat.id }) {
+            // Check if the chat actually changed (different message count or updated timestamp)
+            if updatedChat.messages.count != currentChat.messages.count ||
+               updatedChat.updatedAt != currentChat.updatedAt {
+                self.currentChat = updatedChat
+            }
+        }
+        
         // Ensure blank chat at top
         self.ensureBlankChatAtTop()
         

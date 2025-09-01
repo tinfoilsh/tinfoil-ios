@@ -36,11 +36,7 @@ class AuthManager: ObservableObject {
     
     func setChatViewModel(_ viewModel: ChatViewModel) {
         self.chatViewModel = viewModel
-        
-        // If already authenticated, trigger handleSignIn
-        if isAuthenticated {
-            viewModel.handleSignIn()
-        }
+        // handleSignIn will be called from setClerk when authentication is confirmed
     }
     
     private func loadCachedAuthState() {
