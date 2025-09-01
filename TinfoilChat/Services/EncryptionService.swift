@@ -20,6 +20,7 @@ class EncryptionService: ObservableObject {
     static let shared = EncryptionService()
     
     private let keychainKey = "sh.tinfoil.encryptionKey"
+    private let keychainService = "sh.tinfoil.chat"
     private var encryptionKey: SymmetricKey?
     
     private init() {}
@@ -227,6 +228,7 @@ class EncryptionService: ObservableObject {
         
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
             kSecAttrAccount as String: keychainKey,
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -245,6 +247,7 @@ class EncryptionService: ObservableObject {
     private func loadKeyFromKeychain() -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
             kSecAttrAccount as String: keychainKey,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
@@ -265,6 +268,7 @@ class EncryptionService: ObservableObject {
     private func deleteKeyFromKeychain() {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
             kSecAttrAccount as String: keychainKey
         ]
         
