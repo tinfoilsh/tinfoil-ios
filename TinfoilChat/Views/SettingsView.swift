@@ -172,6 +172,7 @@ class SettingsManager: ObservableObject {
 
 struct SettingsView: View {
     @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var chatViewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(Clerk.self) private var clerk
     @ObservedObject private var settings = SettingsManager.shared
@@ -186,6 +187,8 @@ struct SettingsView: View {
     @State private var showLanguagePicker = false
     @State private var showSignOutConfirmation = false
     @State private var showPremiumModal = false
+    
+    var shouldOpenCloudSync: Bool = false
     
     // Complete list of languages based on ISO 639-1
     var languages: [String] {
@@ -205,6 +208,34 @@ struct SettingsView: View {
             "Tamil", "Telugu", "Thai", "Turkish", "Ukrainian",
             "Urdu", "Uzbek", "Vietnamese", "Welsh", "Yiddish"
         ].sorted()
+    }
+    
+    @ViewBuilder
+    private var userAvatar: some View {
+        if let user = clerk.user, !user.imageUrl.isEmpty {
+            AsyncImage(url: URL(string: user.imageUrl)) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Image(systemName: "person.circle.fill")
+                    .resizable()
+                    .foregroundColor(.secondary)
+            }
+        } else if let userData = authManager.localUserData,
+                  let imageUrlString = userData["imageUrl"] as? String,
+                  !imageUrlString.isEmpty,
+                  let url = URL(string: imageUrlString) {
+            AsyncImage(url: url) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Image(systemName: "person.circle.fill")
+                    .resizable()
+                    .foregroundColor(.secondary)
+            }
+        } else {
+            Image(systemName: "person.circle.fill")
+                .resizable()
+                .foregroundColor(.secondary)
+        }
     }
     
     var body: some View {
@@ -247,32 +278,9 @@ struct SettingsView: View {
                                 // User info row
                                 HStack {
                                     // Avatar
-                                    Group {
-                                        if let user = clerk.user, !user.imageUrl.isEmpty {
-                                            AsyncImage(url: URL(string: user.imageUrl)) { image in
-                                                image.resizable().aspectRatio(contentMode: .fill)
-                                            } placeholder: {
-                                                Image(systemName: "person.circle.fill")
-                                                    .foregroundColor(.secondary)
-                                            }
-                                        } else if let userData = authManager.localUserData,
-                                                  let imageUrlString = userData["imageUrl"] as? String,
-                                                  !imageUrlString.isEmpty,
-                                                  let url = URL(string: imageUrlString) {
-                                            AsyncImage(url: url) { image in
-                                                image.resizable().aspectRatio(contentMode: .fill)
-                                            } placeholder: {
-                                                Image(systemName: "person.circle.fill")
-                                                    .foregroundColor(.secondary)
-                                            }
-                                        } else {
-                                            Image(systemName: "person.circle.fill")
-                                                .resizable()
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
-                                    .frame(width: 40, height: 40)
-                                    .clipShape(Circle())
+                                    userAvatar
+                                        .frame(width: 40, height: 40)
+                                        .clipShape(Circle())
                                     
                                     // User info
                                     VStack(alignment: .leading, spacing: 2) {
@@ -372,6 +380,18 @@ struct SettingsView: View {
                                         .foregroundColor(.secondary)
                                 }
                             }
+                            
+                            // Cloud Sync Settings
+                            if authManager.isAuthenticated {
+                                NavigationLink {
+                                    CloudSyncSettingsView(
+                                        viewModel: chatViewModel,
+                                        authManager: authManager
+                                    )
+                                } label: {
+                                    Text("Cloud Sync")
+                                }
+                            }
                         } header: {
                             Text("Preferences")
                         }
@@ -433,6 +453,25 @@ struct SettingsView: View {
                                     }
                                     Spacer()
                                     if settings.isUsingCustomPrompt {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.caption)
+                                            .foregroundColor(.green)
+                                    }
+                                }
+                            }
+                            
+                            // Personalization
+                            NavigationLink(destination: PersonalizationView()) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Personalization")
+                                            .font(.body)
+                                        Text("Customize how the AI responds to you")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    if settings.isPersonalizationEnabled {
                                         Image(systemName: "checkmark.circle.fill")
                                             .font(.caption)
                                             .foregroundColor(.green)
@@ -522,6 +561,11 @@ struct SettingsView: View {
             }
             .navigationBarHidden(true)
         }
+        .onAppear {
+            // Auto-navigate to Cloud Sync if requested
+            if shouldOpenCloudSync {
+            }
+        }
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()
                 .environment(Clerk.shared)
@@ -529,14 +573,28 @@ struct SettingsView: View {
         }
         .alert("Sign Out", isPresented: $showSignOutConfirmation) {
             Button("Cancel", role: .cancel) { }
-            Button("Sign Out", role: .destructive) {
+            Button("Keep Encryption Key") {
                 Task {
+                    // Sign out but keep the encryption key
+                    await authManager.signOut()
+                    dismiss()
+                }
+            }
+            Button("Delete Everything", role: .destructive) {
+                Task {
+                    // Clear encryption key and all local data
+                    EncryptionService.shared.clearKey()
+                    UserDefaults.standard.removeObject(forKey: "hasLaunchedBefore")
+                    
+                    // Clear all chats from local storage
+                    chatViewModel.clearAllLocalChats()
+                    
                     await authManager.signOut()
                     dismiss()
                 }
             }
         } message: {
-            Text("Are you sure you want to sign out?")
+            Text("Do you want to keep your encryption key and local chats for next time?\n\nIf you delete everything, you'll need to set up a new encryption key when you sign in again.")
         }
         .alert("Delete Account", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
@@ -547,7 +605,6 @@ struct SettingsView: View {
                         await authManager.signOut()
                         dismiss()
                     } catch {
-                        print("Delete account error: \(error)")
                     }
                 }
             }

@@ -49,4 +49,16 @@ enum Constants {
         static let githubRepo = "tinfoilsh/confidential-inference-proxy"
         static let githubReleaseURL = "https://github.com/tinfoilsh/confidential-inference-proxy/releases"
     }
+    
+    enum Pagination {
+        static let chatsPerPage = 10
+        static let recentChatThresholdSeconds: TimeInterval = 120  // 2 minutes
+        static let cleanupThresholdSeconds: TimeInterval = 60     // 1 minute
+    }
+    
+    enum Sync {
+        static let autoSyncIntervalSeconds: TimeInterval = 30.0
+        static let clientInitTimeoutSeconds: TimeInterval = 30.0
+        static let backgroundTaskName = "CompleteStreamingResponse"
+    }
 } 

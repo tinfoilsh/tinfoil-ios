@@ -22,6 +22,28 @@ struct Chat: Identifiable, Codable {
     var language: String?
     var userId: String?
     
+    // Sync metadata
+    var syncVersion: Int = 0
+    var syncedAt: Date?
+    var locallyModified: Bool = true
+    var updatedAt: Date
+    
+    // For handling encrypted chats that failed to decrypt
+    var decryptionFailed: Bool = false
+    var encryptedData: String?
+    
+    // Computed properties for sync filtering
+    var isBlankChat: Bool {
+        // Don't treat failed-to-decrypt chats as blank
+        return messages.isEmpty && !decryptionFailed
+    }
+    
+    var hasTemporaryId: Bool {
+        // Temporary IDs are UUID-based (no underscore), permanent IDs have timestamp format (with underscore)
+        // Format: {reverseTimestamp}_{randomSuffix} for permanent IDs
+        return !id.contains("_")
+    }
+    
     init(
         id: String = UUID().uuidString, 
         title: String = "New Chat", 
@@ -29,7 +51,13 @@ struct Chat: Identifiable, Codable {
         createdAt: Date = Date(),
         modelType: ModelType,
         language: String? = nil,
-        userId: String? = nil) 
+        userId: String? = nil,
+        syncVersion: Int = 0,
+        syncedAt: Date? = nil,
+        locallyModified: Bool = true,
+        updatedAt: Date? = nil,
+        decryptionFailed: Bool = false,
+        encryptedData: String? = nil) 
     {
         self.id = id
         self.title = title
@@ -38,11 +66,18 @@ struct Chat: Identifiable, Codable {
         self.modelType = modelType
         self.language = language
         self.userId = userId
+        self.syncVersion = syncVersion
+        self.syncedAt = syncedAt
+        self.locallyModified = locallyModified
+        self.updatedAt = updatedAt ?? createdAt
+        self.decryptionFailed = decryptionFailed
+        self.encryptedData = encryptedData
     }
     
     // MARK: - Factory Methods
     
     /// Creates a new chat with the current model from AppConfig
+    /// Note: For cloud sync, use createWithTimestampId() to get server-generated IDs
     @MainActor
     static func create(
         id: String = UUID().uuidString,
@@ -51,7 +86,11 @@ struct Chat: Identifiable, Codable {
         createdAt: Date = Date(),
         modelType: ModelType? = nil,
         language: String? = nil,
-        userId: String? = nil
+        userId: String? = nil,
+        syncVersion: Int = 0,
+        syncedAt: Date? = nil,
+        locallyModified: Bool = true,
+        updatedAt: Date? = nil
     ) -> Chat {
         let model = modelType ?? AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first!
         return Chat(
@@ -61,6 +100,34 @@ struct Chat: Identifiable, Codable {
             createdAt: createdAt,
             modelType: model,
             language: language,
+            userId: userId,
+            syncVersion: syncVersion,
+            syncedAt: syncedAt,
+            locallyModified: locallyModified,
+            updatedAt: updatedAt
+        )
+    }
+    
+    /// Creates a new chat with a server-generated timestamp ID for proper cloud sync
+    @MainActor
+    static func createWithTimestampId(
+        title: String = "New Chat",
+        messages: [Message] = [],
+        createdAt: Date = Date(),
+        modelType: ModelType? = nil,
+        language: String? = nil,
+        userId: String? = nil
+    ) async throws -> Chat {
+        // Generate timestamp-based ID from server
+        let idResponse = try await R2StorageService.shared.generateConversationId()
+        
+        return create(
+            id: idResponse.conversationId,
+            title: title,
+            messages: messages,
+            createdAt: createdAt,
+            modelType: modelType,
+            language: language,
             userId: userId
         )
     }
@@ -69,6 +136,8 @@ struct Chat: Identifiable, Codable {
     
     enum CodingKeys: String, CodingKey {
         case id, title, messages, hasActiveStream, createdAt, modelType, language, userId
+        case syncVersion, syncedAt, locallyModified, updatedAt
+        case decryptionFailed, encryptedData
     }
     
     init(from decoder: Decoder) throws {
@@ -82,6 +151,16 @@ struct Chat: Identifiable, Codable {
         modelType = try container.decode(ModelType.self, forKey: .modelType)
         language = try container.decodeIfPresent(String.self, forKey: .language)
         userId = try container.decodeIfPresent(String.self, forKey: .userId)
+        
+        // Sync metadata
+        syncVersion = try container.decodeIfPresent(Int.self, forKey: .syncVersion) ?? 0
+        syncedAt = try container.decodeIfPresent(Date.self, forKey: .syncedAt)
+        locallyModified = try container.decodeIfPresent(Bool.self, forKey: .locallyModified) ?? true
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+        
+        // Encryption fields
+        decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed) ?? false
+        encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -94,6 +173,16 @@ struct Chat: Identifiable, Codable {
         try container.encode(modelType, forKey: .modelType)
         try container.encodeIfPresent(language, forKey: .language)
         try container.encodeIfPresent(userId, forKey: .userId)
+        
+        // Sync metadata
+        try container.encode(syncVersion, forKey: .syncVersion)
+        try container.encodeIfPresent(syncedAt, forKey: .syncedAt)
+        try container.encode(locallyModified, forKey: .locallyModified)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        
+        // Encryption fields
+        try container.encode(decryptionFailed, forKey: .decryptionFailed)
+        try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
     }
     
     // MARK: - Haptic Feedback Methods
@@ -113,59 +202,26 @@ struct Chat: Identifiable, Codable {
         HapticFeedback.trigger(.error)
     }
     
-    // MARK: - UserDefaults Methods
+    // MARK: - Secure Storage Methods
     
     static func saveToDefaults(_ chats: [Chat], userId: String?) {
         do {
-            let encoder = JSONEncoder()
-            let data = try encoder.encode(chats)
-            if let userId = userId {
-                // Store chats under user-specific key
-                UserDefaults.standard.set(data, forKey: "savedChats_\(userId)")
-            } else {
-                // Store chats under anonymous key
-                UserDefaults.standard.set(data, forKey: "savedChats_anonymous")
-            }
+            let userIdKey = userId ?? "anonymous"
+            try KeychainChatStorage.shared.saveChats(chats, userId: userIdKey)
         } catch {
-            print("Error saving chats: \(error)")
+            print("Failed to save chats to Keychain: \(error)")
         }
     }
     
     static func loadFromDefaults(userId: String?) -> [Chat] {
-        let key = userId != nil ? "savedChats_\(userId!)" : "savedChats_anonymous"
-        guard let data = UserDefaults.standard.data(forKey: key) else {
-            // If no chats found for specific user, try loading from old generic key for migration
-            if let oldData = UserDefaults.standard.data(forKey: "savedChats") {
-                do {
-                    let decoder = JSONDecoder()
-                    var chats = try decoder.decode([Chat].self, from: oldData)
-                    // Update chats with user ID
-                    chats = chats.map { chat in
-                        var updatedChat = chat
-                        updatedChat.userId = userId
-                        return updatedChat
-                    }
-                    // Save migrated chats to new user-specific key
-                    saveToDefaults(chats, userId: userId)
-                    // Remove old data
-                    UserDefaults.standard.removeObject(forKey: "savedChats")
-                    return chats.sorted { $0.createdAt > $1.createdAt }
-                } catch {
-                    print("Error migrating old chats: \(error)")
-                    return []
-                }
-            }
-            return []
+        let userIdKey = userId ?? "anonymous"
+        
+        // Load from Keychain - migration to cloud is handled separately by CloudMigrationService
+        if let chats = KeychainChatStorage.shared.loadChats(userId: userIdKey) {
+            return chats.sorted { $0.createdAt > $1.createdAt }
         }
         
-        do {
-            let decoder = JSONDecoder()
-            let chats = try decoder.decode([Chat].self, from: data)
-            return chats.sorted { $0.createdAt > $1.createdAt }
-        } catch {
-            print("Error loading chats: \(error)")
-            return []
-        }
+        return []
     }
     
     // MARK: - Title Generation
@@ -196,6 +252,18 @@ struct Message: Identifiable, Codable, Equatable {
     var streamError: String? = nil
     var generationTimeSeconds: Double? = nil
     
+    private static let iso8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    
+    private static let iso8601FormatterNoFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+    
     init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = false, generationTimeSeconds: Double? = nil) {
         self.id = id
         self.role = role
@@ -216,13 +284,26 @@ struct Message: Identifiable, Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
-        id = try container.decode(String.self, forKey: .id)
+        // Make id optional for cross-platform compatibility with React
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
         role = try container.decode(MessageRole.self, forKey: .role)
         content = try container.decode(String.self, forKey: .content)
         thoughts = try container.decodeIfPresent(String.self, forKey: .thoughts)
         isThinking = try container.decodeIfPresent(Bool.self, forKey: .isThinking) ?? false
-        timestamp = try container.decode(Date.self, forKey: .timestamp)
-        isCollapsed = try container.decode(Bool.self, forKey: .isCollapsed)
+        
+        // Handle timestamp as either Date or String (ISO8601) for cross-platform compatibility
+        if let date = try? container.decode(Date.self, forKey: .timestamp) {
+            timestamp = date
+        } else if let dateString = try? container.decode(String.self, forKey: .timestamp) {
+            // Try parsing with fractional seconds first, then without
+            timestamp = Self.iso8601Formatter.date(from: dateString) 
+                ?? Self.iso8601FormatterNoFractional.date(from: dateString)
+                ?? Date()
+        } else {
+            timestamp = Date()
+        }
+        
+        isCollapsed = try container.decodeIfPresent(Bool.self, forKey: .isCollapsed) ?? false
         isStreaming = try container.decodeIfPresent(Bool.self, forKey: .isStreaming) ?? false
         streamError = try container.decodeIfPresent(String.self, forKey: .streamError)
         generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)

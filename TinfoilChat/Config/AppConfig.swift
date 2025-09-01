@@ -152,7 +152,6 @@ class AppConfig: ObservableObject {
             // Set initialization as complete
             isInitialized = true
         } catch {
-            print("Error loading remote config: \(error)")
             initializationError = error
         }
     }
@@ -184,7 +183,6 @@ class AppConfig: ObservableObject {
             
             isInitialized = true
         } catch {
-            print("Error loading mock config: \(error)")
             initializationError = error
         }
     }

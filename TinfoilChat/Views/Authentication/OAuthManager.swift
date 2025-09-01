@@ -81,7 +81,6 @@ class OAuthManager {
           break // Exit the loop once authenticated
         }
       } catch {
-        print("Error checking auth state: \(error)")
       }
       
       do {

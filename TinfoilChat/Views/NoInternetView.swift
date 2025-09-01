@@ -63,6 +63,5 @@ struct NoInternetView: View {
 #Preview {
     NoInternetView {
         // Preview action
-        print("Try Again tapped")
     }
 } 

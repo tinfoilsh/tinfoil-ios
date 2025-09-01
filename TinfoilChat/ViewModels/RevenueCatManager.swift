@@ -75,16 +75,13 @@ class RevenueCatManager: ObservableObject {
     /// Log in user to RevenueCat
     func loginUser(_ userId: String) async {
         do {
-            print("RevenueCat: Logging in user with ID: \(userId)")
             let (customerInfo, _) = try await Purchases.shared.logIn(userId)
             await MainActor.run {
                 self.customerInfo = customerInfo
             }
             // Also set clerk_user_id as attribute
             setClerkUserId(userId)
-            print("RevenueCat: User logged in successfully. Anonymous ID: \(customerInfo.originalAppUserId)")
         } catch {
-            print("Failed to log in user to RevenueCat: \(error)")
         }
     }
     
@@ -96,7 +93,6 @@ class RevenueCatManager: ObservableObject {
                 self.customerInfo = customerInfo
             }
         } catch {
-            print("Failed to log out user from RevenueCat: \(error)")
         }
     }
     
@@ -106,7 +102,6 @@ class RevenueCatManager: ObservableObject {
         do {
             offerings = try await Purchases.shared.offerings()
         } catch {
-            print("Failed to fetch offerings: \(error)")
         }
         isLoading = false
     }

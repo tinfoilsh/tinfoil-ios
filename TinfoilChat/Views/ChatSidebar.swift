@@ -19,10 +19,17 @@ struct ChatSidebar: View {
     @State private var editingTitle: String = ""
     @State private var deletingChatId: String? = nil
     @State private var showSettings: Bool = false
+    @State private var showEncryptedChatAlert: Bool = false
+    @State private var selectedEncryptedChat: Chat? = nil
+    @State private var shouldOpenCloudSync: Bool = false
+    
+    // Timer to update relative time strings
+    @State private var timeUpdateTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+    @State private var currentTime = Date()
     
     // Helper function to format relative time
     private func relativeTimeString(from date: Date) -> String {
-        let now = Date()
+        let now = currentTime  // Use currentTime instead of Date() to trigger updates
         let difference = now.timeIntervalSince(date)
         
         if difference < 60 { // Less than 1 minute
@@ -49,6 +56,10 @@ struct ChatSidebar: View {
         sidebarContent
             .frame(width: 300)
             .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
+            .onReceive(timeUpdateTimer) { _ in
+                // Update the current time to trigger view refresh
+                currentTime = Date()
+            }
             .overlay(
                 VStack(spacing: 0) {
                     // Top border
@@ -80,7 +91,24 @@ struct ChatSidebar: View {
             }
         }
         .sheet(isPresented: $showSettings) {
-            SettingsView()
+            SettingsView(shouldOpenCloudSync: shouldOpenCloudSync)
+        }
+        .alert("Encrypted Chat", isPresented: $showEncryptedChatAlert) {
+            Button("Go to Settings") {
+                shouldOpenCloudSync = true
+                showSettings = true
+            }
+            Button("Cancel", role: .cancel) {
+                selectedEncryptedChat = nil
+            }
+        } message: {
+            Text("This chat is encrypted with a different key. Go to Settings > Cloud Sync to update your encryption key.")
+        }
+        .onChange(of: showSettings) { _, isShowing in
+            // Reset the cloud sync flag when settings closes
+            if !isShowing {
+                shouldOpenCloudSync = false
+            }
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
         }
@@ -133,8 +161,9 @@ struct ChatSidebar: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.secondary)
+                
                 if authManager.isAuthenticated {
-                    Text("Your chat history is stored locally.")
+                    Text("Your chats are encrypted and backed up. You can manage your encryption key in Settings.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 } else {
@@ -157,9 +186,15 @@ struct ChatSidebar: View {
                             isSelected: viewModel.currentChat?.id == chat.id,
                             isEditing: editingChatId == chat.id,
                             editingTitle: $editingTitle,
-                            timeString: relativeTimeString(from: chat.createdAt),
+                            timeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
                             onSelect: {
-                                viewModel.selectChat(chat)
+                                if chat.decryptionFailed {
+                                    // Show alert for encrypted chats
+                                    selectedEncryptedChat = chat
+                                    showEncryptedChatAlert = true
+                                } else {
+                                    viewModel.selectChat(chat)
+                                }
                             },
                             onEdit: { 
                                 if editingChatId == chat.id {
@@ -174,6 +209,43 @@ struct ChatSidebar: View {
                             onDelete: { confirmDelete(chat) },
                             showEditDelete: authManager.isAuthenticated
                         )
+                    }
+                    
+                    // Load More button or loading indicator
+                    if viewModel.hasMoreChats {
+                        if viewModel.isLoadingMore {
+                            HStack {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle())
+                                    .scaleEffect(0.8)
+                                Text("Loading...")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                        } else {
+                            Button(action: {
+                                Task {
+                                    await viewModel.loadMoreChats()
+                                }
+                            }) {
+                                Text("Load More")
+                                    .foregroundColor(.primary)
+                                    .font(.system(size: 16, weight: .regular))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color(UIColor.secondarySystemBackground).opacity(0.3))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .strokeBorder(Color.gray.opacity(0.1), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -254,13 +326,28 @@ struct ChatListItem: View {
                             }
                         }
                     } else {
-                        Text(chat.title)
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(spacing: 4) {
+                            if chat.decryptionFailed {
+                                Image(systemName: "lock.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
+                            }
+                            Text(chat.decryptionFailed ? "Encrypted" : chat.title)
+                                .foregroundColor(chat.decryptionFailed ? .orange : .primary)
+                                .lineLimit(1)
+                            
+                            if chat.isBlankChat {
+                                // Blue dot indicator for new chats
+                                Circle()
+                                    .fill(Color.blue)
+                                    .frame(width: 8, height: 8)
+                            }
+                            
+                            Spacer()
+                        }
                         
-                        if isSelected && showEditDelete {
-                            // Edit and Delete buttons
+                        if isSelected && showEditDelete && !chat.isBlankChat {
+                            // Edit and Delete buttons (not shown for new/blank chats)
                             HStack(spacing: 12) {
                                 Button(action: onEdit) {
                                     Image(systemName: "square.and.pencil")
@@ -275,11 +362,22 @@ struct ChatListItem: View {
                     }
                 }
                 
-                // Timestamp inside the cell
+                // Timestamp or decryption failure message inside the cell
                 if !isEditing {
-                    Text(timeString)
-                        .font(.caption)
-                        .foregroundColor(.gray)
+                    if chat.decryptionFailed {
+                        Text("Failed to decrypt: wrong key")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    } else if !timeString.isEmpty {
+                        Text(timeString)
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    } else {
+                        // Placeholder for new chats to maintain consistent height
+                        Text(" ")
+                            .font(.caption)
+                            .frame(height: 14) // Same height as timestamp text
+                    }
                 }
             }
             .padding()

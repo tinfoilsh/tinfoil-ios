@@ -75,7 +75,6 @@ struct TinfoilChatApp: App {
                                         }
                                     }
                                 } catch {
-                                    print("Tinfoil: Failed to load Clerk: \(error)")
                                 }
                             
                             }
