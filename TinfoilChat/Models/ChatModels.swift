@@ -34,7 +34,8 @@ struct Chat: Identifiable, Codable {
     
     // Computed properties for sync filtering
     var isBlankChat: Bool {
-        return messages.isEmpty
+        // Don't treat failed-to-decrypt chats as blank
+        return messages.isEmpty && !decryptionFailed
     }
     
     var hasTemporaryId: Bool {
