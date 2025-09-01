@@ -1764,7 +1764,7 @@ class ChatViewModel: ObservableObject {
             hasPerformedInitialSync = true
             
             // Check if we need to migrate old chats to cloud first
-            if let userId = currentUserId, CloudMigrationService.shared.isMigrationNeeded() {
+            if let userId = currentUserId, CloudMigrationService.shared.isMigrationNeeded(userId: userId) {
                 do {
                     let migrationResult = try await CloudMigrationService.shared.migrateToCloud(userId: userId)
                     print("Cloud migration completed: \(migrationResult.summary)")

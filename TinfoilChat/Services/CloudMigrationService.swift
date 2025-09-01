@@ -17,35 +17,33 @@ class CloudMigrationService {
     private init() {}
     
     /// Check if migration is needed and not already completed
-    func isMigrationNeeded() -> Bool {
+    func isMigrationNeeded(userId: String? = nil) -> Bool {
         // Check if migration was already completed
         if UserDefaults.standard.bool(forKey: migrationKey) {
             return false
         }
         
-        // Check if there are any old chats in UserDefaults
-        return hasLocalChats()
+        // Check if there are any old chats in UserDefaults for the current user
+        return hasLocalChats(userId: userId)
     }
     
-    /// Check if there are local chats that need migration
-    private func hasLocalChats() -> Bool {
-        // Check for various old chat storage keys
-        let keysToCheck = [
+    /// Check if there are local chats that need migration for a specific user
+    private func hasLocalChats(userId: String?) -> Bool {
+        // If we have a userId, only check that user's chats
+        if let userId = userId {
+            let userKey = "savedChats_\(userId)"
+            if UserDefaults.standard.data(forKey: userKey) != nil {
+                return true
+            }
+        }
+        
+        // Check anonymous/legacy keys (these are not user-specific)
+        let legacyKeys = [
             "savedChats",
             "savedChats_anonymous"
         ]
         
-        // Also check for user-specific keys
-        for key in UserDefaults.standard.dictionaryRepresentation().keys {
-            if key.hasPrefix("savedChats_") {
-                if UserDefaults.standard.data(forKey: key) != nil {
-                    return true
-                }
-            }
-        }
-        
-        // Check legacy keys
-        for key in keysToCheck {
+        for key in legacyKeys {
             if UserDefaults.standard.data(forKey: key) != nil {
                 return true
             }
