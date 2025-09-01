@@ -93,7 +93,7 @@ class ProfileSyncService: ObservableObject {
             return nil
         }
         
-        guard httpResponse.statusCode == 200 else {
+        guard (200...299).contains(httpResponse.statusCode) else {
             throw ProfileSyncError.fetchFailed
         }
         
@@ -170,7 +170,7 @@ class ProfileSyncService: ObservableObject {
         let (_, response) = try await URLSession.shared.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+              (200...299).contains(httpResponse.statusCode) else {
             throw ProfileSyncError.saveFailed
         }
         
