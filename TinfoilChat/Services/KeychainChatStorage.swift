@@ -36,19 +36,19 @@ class KeychainChatStorage {
             query[kSecAttrAccessGroup as String] = accessGroup
         }
         
-        // Attributes to update/add
-        let attributes: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        // Attributes for update (only data, not accessibility)
+        let updateAttributes: [String: Any] = [
+            kSecValueData as String: data
         ]
         
         // Try to update existing item first
-        var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        var status = SecItemUpdate(query as CFDictionary, updateAttributes as CFDictionary)
         
-        // If item doesn't exist, add it
+        // If item doesn't exist, add it with accessibility settings
         if status == errSecItemNotFound {
             var addQuery = query
-            addQuery.merge(attributes) { _, new in new }
+            addQuery[kSecValueData as String] = data
+            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             status = SecItemAdd(addQuery as CFDictionary, nil)
         }
         
