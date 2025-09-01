@@ -231,14 +231,8 @@ struct EncryptionKeySetupView: View {
         keyError = nil
         
         Task { @MainActor in
-            do {
-                try await EncryptionService.shared.setKey(trimmedKey)
-                await viewModel.setEncryptionKey(trimmedKey)
-                dismiss()
-            } catch {
-                keyError = error.localizedDescription
-                isProcessing = false
-            }
+            await viewModel.setEncryptionKey(trimmedKey)
+            dismiss()
         }
     }
 }
