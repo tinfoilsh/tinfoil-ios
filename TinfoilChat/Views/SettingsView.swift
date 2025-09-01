@@ -382,13 +382,10 @@ struct SettingsView: View {
                             
                             // Cloud Sync Settings
                             if authManager.isAuthenticated {
-                                NavigationLink(
-                                    destination: CloudSyncSettingsView(
-                                        viewModel: chatViewModel,
-                                        authManager: authManager
-                                    ),
-                                    isActive: $navigateToCloudSync
-                                ) {
+                                NavigationLink(destination: CloudSyncSettingsView(
+                                    viewModel: chatViewModel,
+                                    authManager: authManager
+                                )) {
                                     Text("Cloud Sync")
                                 }
                             }
