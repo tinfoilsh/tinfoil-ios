@@ -64,7 +64,9 @@ struct EncryptionKeySetupView: View {
                                         .cornerRadius(8)
                                     
                                     Button(action: {
-                                        UIPasteboard.general.string = generatedKey
+                                        let pasteboard = UIPasteboard.general
+                                        pasteboard.setItems([[UIPasteboard.typeAutomatic: generatedKey]], 
+                                                          options: [.expirationDate: Date().addingTimeInterval(60)])
                                         copiedToClipboard = true
                                         
                                         // Reset after 2 seconds
