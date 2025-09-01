@@ -77,7 +77,8 @@ class AuthManager: ObservableObject {
             // Update user data immediately
             if let user = clerk.user {
                 updateUserData(from: user)
-                // handleSignIn will be called from updateUserData if needed
+                // Handle sign in for chat
+                chatViewModel?.handleSignIn()
             }
         } else {
         }
