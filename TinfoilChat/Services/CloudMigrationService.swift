@@ -130,15 +130,15 @@ class CloudMigrationService {
             }
         }
         
-        // If all chats migrated successfully, clean up UserDefaults
-        if failedCount == 0 && migratedCount > 0 {
+        // If no failures occurred, mark migration as complete
+        if failedCount == 0 {
             cleanupUserDefaults(userId: userId)
             
             // Mark migration as complete
             UserDefaults.standard.set(true, forKey: migrationKey)
             UserDefaults.standard.removeObject(forKey: migrationInProgressKey)
-        } else if failedCount > 0 {
-            // Migration partially failed, don't mark as complete
+        } else {
+            // Migration failed, don't mark as complete
             UserDefaults.standard.removeObject(forKey: migrationInProgressKey)
         }
         
