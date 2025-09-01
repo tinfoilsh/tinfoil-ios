@@ -92,6 +92,11 @@ class EncryptionService: ObservableObject {
         return loadKeyFromKeychain()
     }
     
+    /// Check if an encryption key exists in the keychain
+    func hasEncryptionKey() -> Bool {
+        return loadKeyFromKeychain() != nil
+    }
+    
     /// Remove encryption key
     func clearKey() {
         encryptionKey = nil
@@ -223,7 +228,7 @@ class EncryptionService: ObservableObject {
     
     // MARK: - Keychain Management
     
-    private func saveKeyToKeychain(_ key: String) throws {
+    func saveKeyToKeychain(_ key: String) throws {
         let data = key.data(using: .utf8)!
         
         let query: [String: Any] = [

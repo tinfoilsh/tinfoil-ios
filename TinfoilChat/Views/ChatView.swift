@@ -99,10 +99,6 @@ struct ChatContainer: View {
                     }
                 }
         }
-        .sheet(isPresented: $viewModel.showEncryptionSetup) {
-            EncryptionKeySetupView(viewModel: viewModel)
-                .interactiveDismissDisabled(viewModel.isFirstTimeUser)
-        }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SubscriptionStatusUpdated"))) { _ in
             // Force refresh when subscription status changes
             if authManager.hasActiveSubscription && shouldCreateNewChatAfterSubscription {
