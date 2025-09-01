@@ -76,7 +76,9 @@ class ProfileSyncService: ObservableObject {
         }
         
         
-        let url = URL(string: "\(apiBaseURL)/api/profile/")!
+        guard let url = URL(string: "\(apiBaseURL)/api/profile/") else {
+            throw ProfileSyncError.invalidURL
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.allHTTPHeaderFields = try await getHeaders()
@@ -150,10 +152,14 @@ class ProfileSyncService: ObservableObject {
         
         // Send encrypted data as JSON string
         let encryptedData = try JSONEncoder().encode(encrypted)
-        let jsonString = String(data: encryptedData, encoding: .utf8)!
+        guard let jsonString = String(data: encryptedData, encoding: .utf8) else {
+            throw ProfileSyncError.encodingFailed
+        }
         
         // Create upload request
-        let url = URL(string: "\(apiBaseURL)/api/profile/")!
+        guard let url = URL(string: "\(apiBaseURL)/api/profile/") else {
+            throw ProfileSyncError.invalidURL
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.allHTTPHeaderFields = try await getHeaders()
@@ -225,6 +231,8 @@ enum ProfileSyncError: LocalizedError {
     case invalidBase64
     case encryptionFailed
     case decryptionFailed
+    case encodingFailed
+    case invalidURL
     
     var errorDescription: String? {
         switch self {
@@ -242,6 +250,10 @@ enum ProfileSyncError: LocalizedError {
             return "Failed to encrypt profile data"
         case .decryptionFailed:
             return "Failed to decrypt profile data"
+        case .encodingFailed:
+            return "Failed to encode data as UTF-8 string"
+        case .invalidURL:
+            return "Invalid API URL configuration"
         }
     }
 }
