@@ -1064,6 +1064,9 @@ class ChatViewModel: ObservableObject {
                             // For chats with permanent IDs, end streaming and backup
                             self.streamingTracker.endStreaming(chat.id)
                             
+                            // Save the chat to storage first to ensure we backup the latest version
+                            self.saveChats()
+                            
                             // Backup now that streaming is complete
                             Task { @MainActor in
                                 do {
@@ -1077,13 +1080,17 @@ class ChatViewModel: ObservableObject {
                                     print("Successfully backed up chat: \(latestChat.id)")
                                     
                                     // After successful backup, mark as no longer locally modified
+                                    // Note: The chat has already been marked as synced in CloudSyncService.markChatAsSynced
+                                    // We just need to update our local state to match
                                     if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
-                                        self.chats[index].locallyModified = false
-                                        if self.currentChat?.id == latestChat.id {
-                                            self.currentChat?.locallyModified = false
+                                        // Reload from storage to get the updated sync state
+                                        let updatedChats = Chat.loadFromDefaults(userId: self.currentUserId)
+                                        if let syncedChat = updatedChats.first(where: { $0.id == latestChat.id }) {
+                                            self.chats[index] = syncedChat
+                                            if self.currentChat?.id == latestChat.id {
+                                                self.currentChat = syncedChat
+                                            }
                                         }
-                                        // Save the updated state to persist the locallyModified flag change
-                                        self.saveChats()
                                     }
                                 } catch {
                                     print("Failed to backup chat \(chat.id): \(error)")
@@ -1171,6 +1178,9 @@ class ChatViewModel: ObservableObject {
                             // For chats with permanent IDs, end streaming and backup
                             self.streamingTracker.endStreaming(chat.id)
                             
+                            // Save the chat to storage first to ensure we backup the latest version
+                            self.saveChats()
+                            
                             // Backup now that streaming is complete
                             Task { @MainActor in
                                 do {
@@ -1184,13 +1194,17 @@ class ChatViewModel: ObservableObject {
                                     print("Successfully backed up chat: \(latestChat.id)")
                                     
                                     // After successful backup, mark as no longer locally modified
+                                    // Note: The chat has already been marked as synced in CloudSyncService.markChatAsSynced
+                                    // We just need to update our local state to match
                                     if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
-                                        self.chats[index].locallyModified = false
-                                        if self.currentChat?.id == latestChat.id {
-                                            self.currentChat?.locallyModified = false
+                                        // Reload from storage to get the updated sync state
+                                        let updatedChats = Chat.loadFromDefaults(userId: self.currentUserId)
+                                        if let syncedChat = updatedChats.first(where: { $0.id == latestChat.id }) {
+                                            self.chats[index] = syncedChat
+                                            if self.currentChat?.id == latestChat.id {
+                                                self.currentChat = syncedChat
+                                            }
                                         }
-                                        // Save the updated state to persist the locallyModified flag change
-                                        self.saveChats()
                                     }
                                 } catch {
                                     print("Failed to backup chat \(chat.id): \(error)")

@@ -158,25 +158,32 @@ class CloudSyncService: ObservableObject {
         
         // Load chat from storage
         guard let chat = await loadChatFromStorage(chatId) else {
+            print("⚠️ Chat \(chatId) not found in storage")
             return // Chat might have been deleted
         }
         
+        print("📤 Backing up chat \(chatId) - messages: \(chat.messages.count), locallyModified: \(chat.locallyModified), syncVersion: \(chat.syncVersion)")
+        
         // Don't sync blank chats or chats with temporary IDs
         if chat.isBlankChat || chat.hasTemporaryId {
+            print("⏭️ Skipping backup - blank or temporary chat")
             return
         }
         
         // Double-check streaming status right before upload
         if streamingTracker.isStreaming(chatId) {
+            print("⏭️ Skipping backup - chat is streaming")
             return
         }
         
         // Convert to StoredChat and upload
         let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion + 1)
+        print("📤 Uploading chat with \(storedChat.messages.count) messages, new syncVersion: \(storedChat.syncVersion)")
         try await r2Storage.uploadChat(storedChat)
         
         // Mark as synced
         await markChatAsSynced(chatId, version: storedChat.syncVersion)
+        print("✅ Chat \(chatId) marked as synced with version \(storedChat.syncVersion)")
         
     }
     

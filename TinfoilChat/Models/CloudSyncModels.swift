@@ -38,7 +38,7 @@ struct StoredChat: Codable {
         self.title = chat.title
         self.messages = chat.messages
         self.createdAt = chat.createdAt
-        self.updatedAt = chat.createdAt
+        self.updatedAt = chat.updatedAt
         self.lastAccessedAt = Date()
         self.modelType = chat.modelType
         self.language = chat.language

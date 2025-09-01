@@ -211,6 +211,32 @@ struct SettingsView: View {
         ].sorted()
     }
     
+    @ViewBuilder
+    private var userAvatar: some View {
+        if let user = clerk.user, !user.imageUrl.isEmpty {
+            AsyncImage(url: URL(string: user.imageUrl)) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Image(systemName: "person.circle.fill")
+                    .foregroundColor(.secondary)
+            }
+        } else if let userData = authManager.localUserData,
+                  let imageUrlString = userData["imageUrl"] as? String,
+                  !imageUrlString.isEmpty,
+                  let url = URL(string: imageUrlString) {
+            AsyncImage(url: url) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Image(systemName: "person.circle.fill")
+                    .foregroundColor(.secondary)
+            }
+        } else {
+            Image(systemName: "person.circle.fill")
+                .resizable()
+                .foregroundColor(.secondary)
+        }
+    }
+    
     var body: some View {
         NavigationStack {
             ZStack {
@@ -251,32 +277,9 @@ struct SettingsView: View {
                                 // User info row
                                 HStack {
                                     // Avatar
-                                    Group {
-                                        if let user = clerk.user, !user.imageUrl.isEmpty {
-                                            AsyncImage(url: URL(string: user.imageUrl)) { image in
-                                                image.resizable().aspectRatio(contentMode: .fill)
-                                            } placeholder: {
-                                                Image(systemName: "person.circle.fill")
-                                                    .foregroundColor(.secondary)
-                                            }
-                                        } else if let userData = authManager.localUserData,
-                                                  let imageUrlString = userData["imageUrl"] as? String,
-                                                  !imageUrlString.isEmpty,
-                                                  let url = URL(string: imageUrlString) {
-                                            AsyncImage(url: url) { image in
-                                                image.resizable().aspectRatio(contentMode: .fill)
-                                            } placeholder: {
-                                                Image(systemName: "person.circle.fill")
-                                                    .foregroundColor(.secondary)
-                                            }
-                                        } else {
-                                            Image(systemName: "person.circle.fill")
-                                                .resizable()
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
-                                    .frame(width: 40, height: 40)
-                                    .clipShape(Circle())
+                                    userAvatar
+                                        .frame(width: 40, height: 40)
+                                        .clipShape(Circle())
                                     
                                     // User info
                                     VStack(alignment: .leading, spacing: 2) {
