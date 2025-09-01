@@ -299,6 +299,7 @@ struct ProfileUploadRequest: Codable {
 // MARK: - Sync State Models
 
 /// Tracks deleted chats to prevent resurrection during sync
+@MainActor
 class DeletedChatsTracker {
     static let shared = DeletedChatsTracker()
     
@@ -345,6 +346,7 @@ class DeletedChatsTracker {
 }
 
 /// Tracks chats that are currently streaming to prevent sync conflicts
+@MainActor
 class StreamingTracker {
     static let shared = StreamingTracker()
     
