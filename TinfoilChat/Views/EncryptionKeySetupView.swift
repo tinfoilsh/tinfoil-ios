@@ -170,9 +170,18 @@ struct EncryptionKeySetupView: View {
                     Button("Skip") {
                         // Allow skipping for now, but generate a key in the background
                         Task { @MainActor in
-                            let key = EncryptionService.shared.generateKey()
-                            await viewModel.setEncryptionKey(key)
-                            dismiss()
+                            do {
+                                let key = EncryptionService.shared.generateKey()
+                                try await viewModel.setEncryptionKey(key)
+                                dismiss()
+                            } catch {
+                                // If auto-generation fails, show error but still allow dismissal
+                                keyError = "Failed to auto-generate key: \(error.localizedDescription)"
+                                // Still dismiss after a delay so user isn't stuck
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                    dismiss()
+                                }
+                            }
                         }
                     }
                     .disabled(isProcessing)
@@ -195,8 +204,13 @@ struct EncryptionKeySetupView: View {
             keyError = nil
             
             Task { @MainActor in
-                await viewModel.setEncryptionKey(generatedKey)
-                dismiss()
+                do {
+                    try await viewModel.setEncryptionKey(generatedKey)
+                    dismiss()
+                } catch {
+                    isProcessing = false
+                    keyError = "Failed to save encryption key: \(error.localizedDescription)"
+                }
             }
         } else {
             // Generate new key
@@ -233,8 +247,13 @@ struct EncryptionKeySetupView: View {
         keyError = nil
         
         Task { @MainActor in
-            await viewModel.setEncryptionKey(trimmedKey)
-            dismiss()
+            do {
+                try await viewModel.setEncryptionKey(trimmedKey)
+                dismiss()
+            } catch {
+                isProcessing = false
+                keyError = "Failed to save encryption key: \(error.localizedDescription)"
+            }
         }
     }
 }

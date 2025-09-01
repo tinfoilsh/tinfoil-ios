@@ -2267,7 +2267,7 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Set encryption key (for key rotation)
-    func setEncryptionKey(_ key: String) async {
+    func setEncryptionKey(_ key: String) async throws {
         do {
             let oldKey = EncryptionService.shared.getKey()
             try await EncryptionService.shared.setKey(key)
@@ -2339,6 +2339,7 @@ class ChatViewModel: ObservableObject {
             await MainActor.run {
                 self.syncErrors.append(error.localizedDescription)
             }
+            throw error  // Re-throw to let caller handle it
         }
     }
     
