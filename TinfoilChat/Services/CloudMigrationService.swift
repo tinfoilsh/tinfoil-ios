@@ -76,6 +76,7 @@ class CloudMigrationService {
                     allChats.append(contentsOf: chats)
                 } catch {
                     errors.append("Failed to decode chats from \(key): \(error.localizedDescription)")
+                    failedCount += 1
                 }
             }
         }
@@ -90,6 +91,7 @@ class CloudMigrationService {
                     allChats.append(contentsOf: chats)
                 } catch {
                     errors.append("Failed to decode chats from \(userKey): \(error.localizedDescription)")
+                    failedCount += 1
                 }
             }
         }
