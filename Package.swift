@@ -12,6 +12,9 @@ let package = Package(
         // RevenueCat SDK for in-app purchases
         .package(url: "https://github.com/RevenueCat/purchases-ios.git", from: "4.31.0"),
         
+        // SwiftMath for native LaTeX rendering
+        .package(url: "https://github.com/mgriebling/SwiftMath.git", from: "1.3.2"),
+        
         // Existing dependencies should be added here as well
         // Add any other SPM dependencies your project uses
     ],
@@ -20,6 +23,7 @@ let package = Package(
             name: "TinfoilChat",
             dependencies: [
                 .product(name: "RevenueCat", package: "purchases-ios"),
+                .product(name: "SwiftMath", package: "SwiftMath"),
             ]
         )
     ]

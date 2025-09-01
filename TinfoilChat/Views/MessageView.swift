@@ -8,6 +8,7 @@
 
 import SwiftUI
 import MarkdownUI
+import SwiftMath
 
 /// Preference key for tracking which thinking box is expanded
 struct ThinkingBoxExpansionPreferenceKey: PreferenceKey {
@@ -58,7 +59,7 @@ struct MessageView: View {
                         
                         // Display regular content if present
                         if !message.content.isEmpty {
-                            MarkdownText(content: message.content, isDarkMode: isDarkMode)
+                            LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
@@ -78,7 +79,7 @@ struct MessageView: View {
                         
                         // Remainder: text after </think> if present
                         if !parsed.remainderText.isEmpty {
-                            MarkdownText(content: parsed.remainderText, isDarkMode: isDarkMode)
+                            LaTeXMarkdownView(content: parsed.remainderText, isDarkMode: isDarkMode)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
@@ -90,9 +91,9 @@ struct MessageView: View {
                         // Error message display
                         ErrorMessageView(errorMessage: message.streamError!, isDarkMode: isDarkMode)
                     } else if message.role == .user {
-                        AdaptiveMarkdownText(content: message.content, isDarkMode: isDarkMode)
+                        LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
                     } else {
-                        MarkdownText(content: message.content, isDarkMode: isDarkMode)
+                        LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
