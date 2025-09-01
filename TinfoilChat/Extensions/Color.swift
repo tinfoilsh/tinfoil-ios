@@ -22,7 +22,7 @@ extension Color {
             return .white
         } else {
             // Use the green accent in light mode
-            return UIColor(red: 16/255, green: 185/255, blue: 129/255, alpha: 1)
+            return UIColor(Color.accentPrimary)
         }
     })
 } 
