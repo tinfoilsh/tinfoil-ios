@@ -107,7 +107,7 @@ class ProfileSyncService: ObservableObject {
         do {
             // Parse the encrypted data (JSON string format)
             guard let encryptedData = profileResponse.data.data(using: .utf8) else {
-                throw ProfileSyncError.invalidBase64
+                throw ProfileSyncError.invalidDataFormat
             }
             
             let encrypted = try JSONDecoder().decode(EncryptedData.self, from: encryptedData)
@@ -192,7 +192,7 @@ class ProfileSyncService: ObservableObject {
             
             // Parse the encrypted data (JSON string format)
             guard let encryptedData = failedDecryptionData.data(using: .utf8) else {
-                throw ProfileSyncError.invalidBase64
+                throw ProfileSyncError.invalidDataFormat
             }
             
             let encrypted = try JSONDecoder().decode(EncryptedData.self, from: encryptedData)
@@ -228,7 +228,7 @@ enum ProfileSyncError: LocalizedError {
     case invalidResponse
     case fetchFailed
     case saveFailed
-    case invalidBase64
+    case invalidDataFormat
     case encryptionFailed
     case decryptionFailed
     case encodingFailed
@@ -244,8 +244,8 @@ enum ProfileSyncError: LocalizedError {
             return "Failed to fetch profile from cloud"
         case .saveFailed:
             return "Failed to save profile to cloud"
-        case .invalidBase64:
-            return "Invalid base64 encoding in profile data"
+        case .invalidDataFormat:
+            return "Invalid data format in profile response"
         case .encryptionFailed:
             return "Failed to encrypt profile data"
         case .decryptionFailed:
