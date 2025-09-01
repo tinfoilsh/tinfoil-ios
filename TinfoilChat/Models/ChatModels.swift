@@ -284,6 +284,8 @@ struct Message: Identifiable, Codable, Equatable {
     var streamError: String? = nil
     var generationTimeSeconds: Double? = nil
     
+    private static let iso8601Formatter = ISO8601DateFormatter()
+    
     init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = false, generationTimeSeconds: Double? = nil) {
         self.id = id
         self.role = role
@@ -315,8 +317,7 @@ struct Message: Identifiable, Codable, Equatable {
         if let date = try? container.decode(Date.self, forKey: .timestamp) {
             timestamp = date
         } else if let dateString = try? container.decode(String.self, forKey: .timestamp) {
-            let isoFormatter = ISO8601DateFormatter()
-            timestamp = isoFormatter.date(from: dateString) ?? Date()
+            timestamp = Self.iso8601Formatter.date(from: dateString) ?? Date()
         } else {
             timestamp = Date()
         }
