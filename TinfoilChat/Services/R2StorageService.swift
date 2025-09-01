@@ -28,18 +28,18 @@ class R2StorageService: ObservableObject {
     private func defaultTokenGetter() async -> String? {
         do {
             // Check if Clerk has a publishable key
-            guard Clerk.shared.publishableKey != nil else {
+            guard await Clerk.shared.publishableKey != nil else {
                 return nil
             }
             
             // Ensure Clerk is loaded
-            let isLoaded = Clerk.shared.isLoaded
+            let isLoaded = await Clerk.shared.isLoaded
             if !isLoaded {
                 try await Clerk.shared.load()
             }
             
             // Get session token
-            if let session = Clerk.shared.session {
+            if let session = await Clerk.shared.session {
                 // Get a fresh token
                 if let token = try? await session.getToken() {
                     return token.jwt
@@ -170,7 +170,7 @@ class R2StorageService: ObservableObject {
             let createdAtMs = parsedTimestamp > 0 ? Double(9999999999999 - parsedTimestamp) : Date().timeIntervalSince1970 * 1000
             
             return StoredChat(
-                from: Chat.create(
+                from: await Chat.create(
                     id: chatId,
                     title: "Encrypted",
                     messages: [],

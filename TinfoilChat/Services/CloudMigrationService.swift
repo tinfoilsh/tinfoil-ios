@@ -96,7 +96,14 @@ class CloudMigrationService {
         }
         
         // Remove duplicates based on chat ID
-        let uniqueChats = Array(Set(allChats))
+        var seen = Set<String>()
+        let uniqueChats = allChats.filter { chat in
+            if seen.contains(chat.id) {
+                return false
+            }
+            seen.insert(chat.id)
+            return true
+        }
         
         // Upload each chat to R2
         for chat in uniqueChats {
@@ -107,14 +114,7 @@ class CloudMigrationService {
                 }
                 
                 // Create StoredChat format for R2
-                let storedChat = StoredChat(
-                    id: chat.id,
-                    messages: chat.messages,
-                    title: chat.title,
-                    createdAt: chat.createdAt,
-                    language: chat.language,
-                    modelType: chat.modelType
-                )
+                let storedChat = StoredChat(from: chat)
                 
                 // Upload to R2
                 try await R2StorageService.shared.uploadChat(storedChat)
