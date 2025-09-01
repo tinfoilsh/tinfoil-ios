@@ -173,9 +173,6 @@ class CloudMigrationService {
             let userKey = "savedChats_\(userId)"
             UserDefaults.standard.removeObject(forKey: userKey)
         }
-        
-        // Synchronize to ensure changes are persisted
-        UserDefaults.standard.synchronize()
     }
     
     /// Reset migration status (useful for testing)
