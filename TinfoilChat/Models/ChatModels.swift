@@ -201,56 +201,78 @@ struct Chat: Identifiable, Codable {
         HapticFeedback.trigger(.error)
     }
     
-    // MARK: - UserDefaults Methods
+    // MARK: - Secure Storage Methods
     
     static func saveToDefaults(_ chats: [Chat], userId: String?) {
         do {
-            let encoder = JSONEncoder()
-            let data = try encoder.encode(chats)
-            if let userId = userId {
-                // Store chats under user-specific key
-                UserDefaults.standard.set(data, forKey: "savedChats_\(userId)")
-            } else {
-                // Store chats under anonymous key
-                UserDefaults.standard.set(data, forKey: "savedChats_anonymous")
-            }
+            let userIdKey = userId ?? "anonymous"
+            try KeychainChatStorage.shared.saveChats(chats, userId: userIdKey)
         } catch {
+            print("Failed to save chats to Keychain: \(error)")
         }
     }
     
     static func loadFromDefaults(userId: String?) -> [Chat] {
-        let key = userId != nil ? "savedChats_\(userId!)" : "savedChats_anonymous"
-        guard let data = UserDefaults.standard.data(forKey: key) else {
-            // If no chats found for specific user, try loading from old generic key for migration
-            if let oldData = UserDefaults.standard.data(forKey: "savedChats") {
-                do {
-                    let decoder = JSONDecoder()
-                    var chats = try decoder.decode([Chat].self, from: oldData)
-                    // Update chats with user ID
-                    chats = chats.map { chat in
-                        var updatedChat = chat
-                        updatedChat.userId = userId
-                        return updatedChat
-                    }
-                    // Save migrated chats to new user-specific key
-                    saveToDefaults(chats, userId: userId)
-                    // Remove old data
-                    UserDefaults.standard.removeObject(forKey: "savedChats")
-                    return chats.sorted { $0.createdAt > $1.createdAt }
-                } catch {
-                    return []
-                }
-            }
-            return []
+        let userIdKey = userId ?? "anonymous"
+        
+        // Try loading from Keychain first
+        if let chats = KeychainChatStorage.shared.loadChats(userId: userIdKey) {
+            return chats.sorted { $0.createdAt > $1.createdAt }
         }
         
-        do {
-            let decoder = JSONDecoder()
-            let chats = try decoder.decode([Chat].self, from: data)
-            return chats.sorted { $0.createdAt > $1.createdAt }
-        } catch {
-            return []
+        // Migration: Check if there are chats in UserDefaults to migrate
+        let oldKey = userId != nil ? "savedChats_\(userId!)" : "savedChats_anonymous"
+        if let data = UserDefaults.standard.data(forKey: oldKey) {
+            do {
+                let decoder = JSONDecoder()
+                var chats = try decoder.decode([Chat].self, from: data)
+                
+                // Update chats with user ID if needed
+                chats = chats.map { chat in
+                    var updatedChat = chat
+                    updatedChat.userId = userId
+                    return updatedChat
+                }
+                
+                // Save to Keychain
+                try KeychainChatStorage.shared.saveChats(chats, userId: userIdKey)
+                
+                // Remove from UserDefaults after successful migration
+                UserDefaults.standard.removeObject(forKey: oldKey)
+                UserDefaults.standard.removeObject(forKey: "savedChats")
+                
+                return chats.sorted { $0.createdAt > $1.createdAt }
+            } catch {
+                print("Migration failed: \(error)")
+            }
         }
+        
+        // Also check for legacy "savedChats" key
+        if let oldData = UserDefaults.standard.data(forKey: "savedChats") {
+            do {
+                let decoder = JSONDecoder()
+                var chats = try decoder.decode([Chat].self, from: oldData)
+                
+                // Update chats with user ID
+                chats = chats.map { chat in
+                    var updatedChat = chat
+                    updatedChat.userId = userId
+                    return updatedChat
+                }
+                
+                // Save to Keychain
+                try KeychainChatStorage.shared.saveChats(chats, userId: userIdKey)
+                
+                // Remove old data
+                UserDefaults.standard.removeObject(forKey: "savedChats")
+                
+                return chats.sorted { $0.createdAt > $1.createdAt }
+            } catch {
+                print("Legacy migration failed: \(error)")
+            }
+        }
+        
+        return []
     }
     
     // MARK: - Title Generation
