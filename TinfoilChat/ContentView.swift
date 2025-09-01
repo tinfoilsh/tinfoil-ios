@@ -91,7 +91,6 @@ struct ContentView: View {
                 Task {
                     do {
                         try await EncryptionService.shared.setKey(importedKey)
-                        print("Successfully imported key: \(importedKey)")
                     } catch {
                         await MainActor.run {
                             let alert = UIAlertController(
