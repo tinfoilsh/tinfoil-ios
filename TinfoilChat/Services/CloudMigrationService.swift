@@ -11,15 +11,23 @@ import Foundation
 class CloudMigrationService {
     static let shared = CloudMigrationService()
     
-    private let migrationKey = "hasCompletedCloudMigration_v1"
+    private let migrationKeyPrefix = "hasCompletedCloudMigration_v1_"
     private let migrationInProgressKey = "cloudMigrationInProgress"
+    
+    private func migrationKey(for userId: String?) -> String {
+        if let userId = userId {
+            return "\(migrationKeyPrefix)\(userId)"
+        }
+        // For anonymous/legacy data migration
+        return "\(migrationKeyPrefix)anonymous"
+    }
     
     private init() {}
     
     /// Check if migration is needed and not already completed
     func isMigrationNeeded(userId: String? = nil) -> Bool {
-        // Check if migration was already completed
-        if UserDefaults.standard.bool(forKey: migrationKey) {
+        // Check if migration was already completed for this user
+        if UserDefaults.standard.bool(forKey: migrationKey(for: userId)) {
             return false
         }
         
@@ -128,12 +136,12 @@ class CloudMigrationService {
             }
         }
         
-        // If no failures occurred, mark migration as complete
+        // If no failures occurred, mark migration as complete for this user
         if failedCount == 0 {
             cleanupUserDefaults(userId: userId)
             
-            // Mark migration as complete
-            UserDefaults.standard.set(true, forKey: migrationKey)
+            // Mark migration as complete for this specific user
+            UserDefaults.standard.set(true, forKey: migrationKey(for: userId))
             UserDefaults.standard.removeObject(forKey: migrationInProgressKey)
         } else {
             // Migration failed, don't mark as complete
@@ -171,8 +179,18 @@ class CloudMigrationService {
     }
     
     /// Reset migration status (useful for testing)
-    func resetMigration() {
-        UserDefaults.standard.removeObject(forKey: migrationKey)
+    func resetMigration(userId: String? = nil) {
+        if let userId = userId {
+            // Reset for specific user
+            UserDefaults.standard.removeObject(forKey: migrationKey(for: userId))
+        } else {
+            // Reset all migration keys
+            for key in UserDefaults.standard.dictionaryRepresentation().keys {
+                if key.hasPrefix(migrationKeyPrefix) {
+                    UserDefaults.standard.removeObject(forKey: key)
+                }
+            }
+        }
         UserDefaults.standard.removeObject(forKey: migrationInProgressKey)
     }
     
