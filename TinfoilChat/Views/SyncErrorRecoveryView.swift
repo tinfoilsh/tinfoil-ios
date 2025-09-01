@@ -239,7 +239,6 @@ struct SyncErrorRecoveryView: View {
     private func updateKey() {
         Task { @MainActor in
             do {
-                try await EncryptionService.shared.setKey(keyInput)
                 await viewModel.setEncryptionKey(keyInput)
                 showKeyInput = false
                 keyInput = ""
