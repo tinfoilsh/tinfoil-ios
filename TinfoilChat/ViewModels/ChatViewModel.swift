@@ -40,7 +40,6 @@ class ChatViewModel: ObservableObject {
     private var encryptionKey: String?  // Keep private for security
     @Published var isFirstTimeUser: Bool = false
     @Published var showEncryptionSetup: Bool = false
-    @Published var showSyncErrorRecovery: Bool = false
     private let cloudSync = CloudSyncService.shared
     private let streamingTracker = StreamingTracker.shared
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
@@ -2186,7 +2185,8 @@ class ChatViewModel: ObservableObject {
             if !result.errors.isEmpty {
                 self.syncErrors = result.errors
                 // Show error recovery UI if there are sync errors
-                self.showSyncErrorRecovery = true
+                // Log sync error but don't show modal
+                print("Sync error: Already in progress")
             }
             
             // Use intelligent update that preserves pagination if user has loaded more pages

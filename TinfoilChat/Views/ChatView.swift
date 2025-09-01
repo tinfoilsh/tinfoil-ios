@@ -103,9 +103,6 @@ struct ChatContainer: View {
             EncryptionKeySetupView(viewModel: viewModel)
                 .interactiveDismissDisabled(viewModel.isFirstTimeUser)
         }
-        .sheet(isPresented: $viewModel.showSyncErrorRecovery) {
-            SyncErrorRecoveryView(viewModel: viewModel)
-        }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SubscriptionStatusUpdated"))) { _ in
             // Force refresh when subscription status changes
             if authManager.hasActiveSubscription && shouldCreateNewChatAfterSubscription {
