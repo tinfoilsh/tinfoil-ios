@@ -18,6 +18,13 @@ class ProfileSyncService: ObservableObject {
     private var cachedProfile: ProfileData? = nil
     private var failedDecryptionData: String? = nil
     
+    // Shared ISO8601 formatter with fractional seconds for consistency
+    private static let iso8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    
     private init() {}
     
     // MARK: - Configuration
@@ -143,7 +150,7 @@ class ProfileSyncService: ObservableObject {
         
         // Add metadata
         var profileWithMetadata = profile
-        profileWithMetadata.updatedAt = ISO8601DateFormatter().string(from: Date())
+        profileWithMetadata.updatedAt = Self.iso8601Formatter.string(from: Date())
         profileWithMetadata.version = (profile.version ?? 0) + 1
         
         // Encrypt the profile data
