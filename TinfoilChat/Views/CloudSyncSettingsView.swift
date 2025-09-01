@@ -71,7 +71,7 @@ struct CloudSyncSettingsView: View {
                         }
                     }) {
                         Label("Sync Now", systemImage: "arrow.clockwise")
-                            .foregroundColor(.adaptiveAccent)
+                            .foregroundColor(.primary)
                     }
                     .disabled(viewModel.isSyncing || !authManager.isAuthenticated)
                 } header: {
@@ -116,7 +116,7 @@ struct CloudSyncSettingsView: View {
                         showKeyInput = true
                     }) {
                         Label("Change Encryption Key", systemImage: "key.fill")
-                            .foregroundColor(.adaptiveAccent)
+                            .foregroundColor(.primary)
                     }
                 } header: {
                     Text("Encryption")
