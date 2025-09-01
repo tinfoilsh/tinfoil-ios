@@ -108,7 +108,7 @@ struct StoredChat: Codable {
         try container.encode(isoFormatter.string(from: createdAt), forKey: .createdAt)
         try container.encode(isoFormatter.string(from: updatedAt), forKey: .updatedAt)
         
-        try container.encode(modelType, forKey: .modelType)
+        try container.encodeIfPresent(modelType, forKey: .modelType)
         try container.encodeIfPresent(language, forKey: .language)
         try container.encodeIfPresent(userId, forKey: .userId)
         
