@@ -234,6 +234,11 @@ class ChatViewModel: ObservableObject {
                     // Sync all chats
                     let syncResult = try await self.cloudSync.syncAllChats()
                     
+                    // Update last sync date after successful sync
+                    await MainActor.run {
+                        self.lastSyncDate = Date()
+                    }
+                    
                     // If we downloaded new chats, reload the chat list
                     if syncResult.downloaded > 0 {
                         // Use intelligent update that preserves pagination
@@ -285,6 +290,10 @@ class ChatViewModel: ObservableObject {
                 // Perform immediate sync when returning from background
                 Task {
                     if let syncResult = try? await self?.cloudSync.syncAllChats() {
+                        // Update last sync date
+                        await MainActor.run {
+                            self?.lastSyncDate = Date()
+                        }
                         
                         // Update chats if needed
                         if syncResult.downloaded > 0 {
@@ -308,7 +317,12 @@ class ChatViewModel: ObservableObject {
             // Do one final sync before going to background
             if self?.authManager?.isAuthenticated == true {
                 Task {
-                    try? await self?.cloudSync.syncAllChats()
+                    if let _ = try? await self?.cloudSync.syncAllChats() {
+                        // Update last sync date
+                        await MainActor.run {
+                            self?.lastSyncDate = Date()
+                        }
+                    }
                 }
             }
         }
