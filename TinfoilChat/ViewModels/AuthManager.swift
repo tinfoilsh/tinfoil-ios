@@ -80,13 +80,7 @@ class AuthManager: ObservableObject {
             if let user = clerk.user {
                 print("🔐 AuthManager: User authenticated, updating data")
                 updateUserData(from: user)
-                // Handle sign in for chat
-                if let chatVM = chatViewModel {
-                    print("✅ AuthManager: Calling handleSignIn on ChatViewModel")
-                    chatVM.handleSignIn()
-                } else {
-                    print("⚠️ AuthManager: ChatViewModel is nil, cannot call handleSignIn")
-                }
+                // handleSignIn will be called from updateUserData if needed
             }
         } else {
         }

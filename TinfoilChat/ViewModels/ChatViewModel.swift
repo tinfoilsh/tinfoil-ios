@@ -43,6 +43,7 @@ class ChatViewModel: ObservableObject {
     @Published var showSyncErrorRecovery: Bool = false
     private let cloudSync = CloudSyncService.shared
     private let streamingTracker = StreamingTracker.shared
+    private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
     
     // Pagination properties
     @Published var isLoadingMore: Bool = false
@@ -1762,7 +1763,15 @@ class ChatViewModel: ObservableObject {
     
     /// Handle sign-in by loading user's saved chats
     func handleSignIn() {
+        // Prevent duplicate sign-in flows
+        guard !isSignInInProgress else {
+            print("⚠️ handleSignIn: Sign-in already in progress, skipping duplicate call")
+            return
+        }
+        
         if hasChatAccess, let userId = currentUserId {
+            isSignInInProgress = true
+            
             // Start auto-sync timer now that user is authenticated
             // (This also handles the case where someone signs in after app launch)
             setupAutoSyncTimer()
@@ -1787,12 +1796,14 @@ class ChatViewModel: ObservableObject {
                                 // Ensure there's a blank chat at the top
                                 self.ensureBlankChatAtTop()
                             }
+                            self.isSignInInProgress = false
                         }
                     } catch {
                         // If key generation fails, fall back to showing setup modal
                         await MainActor.run {
                             self.isFirstTimeUser = true
                             self.showEncryptionSetup = true
+                            self.isSignInInProgress = false
                         }
                     }
                 }
@@ -1870,11 +1881,17 @@ class ChatViewModel: ObservableObject {
                     
                     // Setup pagination token
                     await setupPaginationForAppRestart()
+                    
+                    // Mark sign-in as complete
+                    isSignInInProgress = false
                 } catch {
                     print("❌ handleSignIn: Failed to sync: \(error)")
+                    isSignInInProgress = false
                 }
             }
         } else {
+            // User doesn't have chat access, reset flag
+            isSignInInProgress = false
         }
     }
     
