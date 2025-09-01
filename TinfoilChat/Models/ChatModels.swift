@@ -252,7 +252,17 @@ struct Message: Identifiable, Codable, Equatable {
     var streamError: String? = nil
     var generationTimeSeconds: Double? = nil
     
-    private static let iso8601Formatter = ISO8601DateFormatter()
+    private static let iso8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    
+    private static let iso8601FormatterNoFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
     
     init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = false, generationTimeSeconds: Double? = nil) {
         self.id = id
@@ -285,7 +295,10 @@ struct Message: Identifiable, Codable, Equatable {
         if let date = try? container.decode(Date.self, forKey: .timestamp) {
             timestamp = date
         } else if let dateString = try? container.decode(String.self, forKey: .timestamp) {
-            timestamp = Self.iso8601Formatter.date(from: dateString) ?? Date()
+            // Try parsing with fractional seconds first, then without
+            timestamp = Self.iso8601Formatter.date(from: dateString) 
+                ?? Self.iso8601FormatterNoFractional.date(from: dateString)
+                ?? Date()
         } else {
             timestamp = Date()
         }
