@@ -708,6 +708,30 @@ class ChatViewModel: ObservableObject {
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{CURRENT_DATETIME}", with: currentDateTime)
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{TIMEZONE}", with: timezone)
                 
+                // Append rules if they exist
+                let rules = AppConfig.shared.rules
+                if !rules.isEmpty {
+                    // Apply same replacements to rules
+                    var processedRules = rules.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
+                    
+                    if let chat = currentChat, let language = chat.language {
+                        processedRules = processedRules.replacingOccurrences(of: "{LANGUAGE}", with: language)
+                    } else {
+                        processedRules = processedRules.replacingOccurrences(of: "{LANGUAGE}", with: "English")
+                    }
+                    
+                    if !personalizationXML.isEmpty {
+                        processedRules = processedRules.replacingOccurrences(of: "{USER_PREFERENCES}", with: personalizationXML)
+                    } else {
+                        processedRules = processedRules.replacingOccurrences(of: "{USER_PREFERENCES}", with: "")
+                    }
+                    
+                    processedRules = processedRules.replacingOccurrences(of: "{CURRENT_DATETIME}", with: currentDateTime)
+                    processedRules = processedRules.replacingOccurrences(of: "{TIMEZONE}", with: timezone)
+                    
+                    systemPrompt += "\n" + processedRules
+                }
+                
                 // Build messages array inline
                 var messages: [ChatQuery.ChatCompletionMessageParam] = [
                     .system(.init(content: .textContent(systemPrompt)))
