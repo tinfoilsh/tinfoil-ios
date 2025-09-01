@@ -562,9 +562,28 @@ struct SettingsView: View {
             .navigationBarHidden(true)
         }
         .onAppear {
+            // Reset navigation bar to use system colors for settings screens
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithDefaultBackground()
+            
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+            
             // Auto-navigate to Cloud Sync if requested
             if shouldOpenCloudSync {
             }
+        }
+        .onDisappear {
+            // Restore dark navigation bar for main chat view
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = UIColor(Color(hex: "#111827"))
+            appearance.shadowColor = .clear
+            
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()

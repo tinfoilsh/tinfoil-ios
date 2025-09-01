@@ -129,6 +129,15 @@ struct CloudSyncSettingsView: View {
         .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
         .navigationTitle("Cloud Sync Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // Reset navigation bar to use system colors for settings screens
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithDefaultBackground()
+            
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        }
             .sheet(isPresented: $showKeyInput) {
                 EncryptionKeyInputView(isPresented: $showKeyInput) { importedKey in
                     Task {
