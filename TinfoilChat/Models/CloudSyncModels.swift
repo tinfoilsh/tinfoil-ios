@@ -16,7 +16,6 @@ struct StoredChat: Codable {
     var messages: [Message]
     var createdAt: Date      // Will be encoded as ISO string for API
     var updatedAt: Date      // Will be encoded as ISO string for API
-    var lastAccessedAt: Date // Will be encoded as timestamp in milliseconds
     var modelType: ModelType?  // Optional for R2 data compatibility
     var language: String?
     var userId: String?
@@ -39,7 +38,6 @@ struct StoredChat: Codable {
         self.messages = chat.messages
         self.createdAt = chat.createdAt
         self.updatedAt = chat.updatedAt
-        self.lastAccessedAt = Date()
         self.modelType = chat.modelType
         self.language = chat.language
         self.userId = chat.userId
@@ -84,7 +82,7 @@ struct StoredChat: Codable {
     
     // Custom encoding for cross-platform compatibility
     enum CodingKeys: String, CodingKey {
-        case id, title, messages, createdAt, updatedAt, lastAccessedAt
+        case id, title, messages, createdAt, updatedAt
         case modelType, language, userId
         case syncVersion, syncedAt, locallyModified
         case decryptionFailed, encryptedData, hasActiveStream
@@ -102,9 +100,6 @@ struct StoredChat: Codable {
         isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         try container.encode(isoFormatter.string(from: createdAt), forKey: .createdAt)
         try container.encode(isoFormatter.string(from: updatedAt), forKey: .updatedAt)
-        
-        // Timestamps as milliseconds
-        try container.encode(Int(lastAccessedAt.timeIntervalSince1970 * 1000), forKey: .lastAccessedAt)
         
         try container.encode(modelType, forKey: .modelType)
         try container.encodeIfPresent(language, forKey: .language)
@@ -157,10 +152,6 @@ struct StoredChat: Codable {
         } else {
             updatedAt = Date()
         }
-        
-        // Timestamps from milliseconds
-        let lastAccessedAtMs = try container.decode(Int.self, forKey: .lastAccessedAt)
-        lastAccessedAt = Date(timeIntervalSince1970: Double(lastAccessedAtMs) / 1000.0)
         
         // R2 stored data from React app doesn't have modelType, language, or userId
         // These are iOS-specific fields, so we make them optional
