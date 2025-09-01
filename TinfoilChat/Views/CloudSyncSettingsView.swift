@@ -36,16 +36,19 @@ struct CloudSyncSettingsView: View {
                                 .foregroundColor(.red)
                         } else {
                             Text("Synced")
-                                .foregroundColor(.adaptiveAccent)
+                                .foregroundColor(.green)
                         }
                     }
                     
-                    if let lastSync = viewModel.lastSyncDate {
-                        HStack {
-                            Text("Last Sync")
-                                .foregroundColor(.secondary)
-                            Spacer()
+                    HStack {
+                        Text("Last Sync")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        if let lastSync = viewModel.lastSyncDate {
                             Text(lastSync, style: .relative)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("Never")
                                 .foregroundColor(.secondary)
                         }
                     }

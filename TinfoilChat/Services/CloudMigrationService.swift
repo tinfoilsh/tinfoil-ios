@@ -80,17 +80,16 @@ class CloudMigrationService {
             }
         }
         
-        // Get user-specific chats
-        for key in UserDefaults.standard.dictionaryRepresentation().keys {
-            if key.hasPrefix("savedChats_") && !legacyKeys.contains(key) {
-                if let data = UserDefaults.standard.data(forKey: key) {
-                    do {
-                        let decoder = JSONDecoder()
-                        let chats = try decoder.decode([Chat].self, from: data)
-                        allChats.append(contentsOf: chats)
-                    } catch {
-                        errors.append("Failed to decode chats from \(key): \(error.localizedDescription)")
-                    }
+        // Get user-specific chats - only migrate chats for the current user
+        if let userId = userId {
+            let userKey = "savedChats_\(userId)"
+            if let data = UserDefaults.standard.data(forKey: userKey) {
+                do {
+                    let decoder = JSONDecoder()
+                    let chats = try decoder.decode([Chat].self, from: data)
+                    allChats.append(contentsOf: chats)
+                } catch {
+                    errors.append("Failed to decode chats from \(userKey): \(error.localizedDescription)")
                 }
             }
         }
@@ -131,7 +130,7 @@ class CloudMigrationService {
         
         // If all chats migrated successfully, clean up UserDefaults
         if failedCount == 0 && migratedCount > 0 {
-            cleanupUserDefaults()
+            cleanupUserDefaults(userId: userId)
             
             // Mark migration as complete
             UserDefaults.standard.set(true, forKey: migrationKey)
@@ -150,7 +149,7 @@ class CloudMigrationService {
     }
     
     /// Clean up old chat data from UserDefaults
-    private func cleanupUserDefaults() {
+    private func cleanupUserDefaults(userId: String?) {
         // Remove all old chat storage keys
         let keysToRemove = [
             "savedChats",
@@ -161,11 +160,10 @@ class CloudMigrationService {
             UserDefaults.standard.removeObject(forKey: key)
         }
         
-        // Remove user-specific keys
-        for key in UserDefaults.standard.dictionaryRepresentation().keys {
-            if key.hasPrefix("savedChats_") {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
+        // Remove user-specific key for current user only
+        if let userId = userId {
+            let userKey = "savedChats_\(userId)"
+            UserDefaults.standard.removeObject(forKey: userKey)
         }
         
         // Synchronize to ensure changes are persisted
