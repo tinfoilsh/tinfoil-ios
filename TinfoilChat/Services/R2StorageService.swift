@@ -9,7 +9,6 @@ import Foundation
 import Clerk
 
 /// Service for managing cloud storage operations with R2 backend
-@MainActor
 class R2StorageService: ObservableObject {
     static let shared = R2StorageService()
     

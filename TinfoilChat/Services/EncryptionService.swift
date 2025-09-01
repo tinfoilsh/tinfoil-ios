@@ -16,7 +16,6 @@ struct EncryptedData: Codable {
 }
 
 /// Service for handling end-to-end encryption of chat data
-@MainActor
 class EncryptionService: ObservableObject {
     static let shared = EncryptionService()
     
@@ -239,6 +238,7 @@ class EncryptionService: ObservableObject {
         // Add new item
         let status = SecItemAdd(query as CFDictionary, nil)
         if status != errSecSuccess {
+            print("Failed to save encryption key to keychain: \(status)")
         }
     }
     
