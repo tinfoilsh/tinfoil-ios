@@ -93,6 +93,8 @@ class ChatViewModel: ObservableObject {
     private var autoSyncTimer: Timer?
     private var didBecomeActiveObserver: NSObjectProtocol?
     private var willResignActiveObserver: NSObjectProtocol?
+    private var streamUpdateTimer: Timer?
+    private var pendingStreamUpdate: Chat?
     
     // Auth reference for Premium features
     @Published var authManager: AuthManager?
@@ -277,6 +279,10 @@ class ChatViewModel: ObservableObject {
         // Stop auto-sync timer
         autoSyncTimer?.invalidate()
         autoSyncTimer = nil
+        
+        // Stop stream update timer
+        streamUpdateTimer?.invalidate()
+        streamUpdateTimer = nil
         
         // Remove app lifecycle observers
         if let observer = didBecomeActiveObserver {
@@ -831,7 +837,7 @@ class ChatViewModel: ObservableObject {
                                 thoughtsBuffer = reasoningContent
                                 chat.messages[lastIndex].thoughts = thoughtsBuffer
                                 chat.messages[lastIndex].isThinking = true
-                                self.updateChat(chat)
+                                self.updateChat(chat, throttleForStreaming: true)
                             }
                         } else if isUsingReasoningFormat {
                             // Continue with reasoning format
@@ -864,7 +870,7 @@ class ChatViewModel: ObservableObject {
                             
                             // Always update if we got any new content
                             if !reasoningContent.isEmpty || !content.isEmpty {
-                                self.updateChat(chat)
+                                self.updateChat(chat, throttleForStreaming: true)
                             }
                         } else if !isUsingReasoningFormat && !content.isEmpty {
                             // Handle original <think> tag format
@@ -894,7 +900,7 @@ class ChatViewModel: ObservableObject {
                                         // Regular content
                                         chat.messages[lastIndex].content += processContent
                                     }
-                                    self.updateChat(chat)
+                                    self.updateChat(chat, throttleForStreaming: true)
                                 }
                             } else if hasThinkTag {
                                 // Continue processing think tag content
@@ -926,11 +932,11 @@ class ChatViewModel: ObservableObject {
                                     thoughtsBuffer += content
                                     chat.messages[lastIndex].thoughts = thoughtsBuffer
                                 }
-                                self.updateChat(chat)
+                                self.updateChat(chat, throttleForStreaming: true)
                             } else {
                                 // Regular content (no thinking)
                                 chat.messages[lastIndex].content += content
-                                self.updateChat(chat)
+                                self.updateChat(chat, throttleForStreaming: true)
                             }
                         }
                     }
@@ -969,18 +975,29 @@ class ChatViewModel: ObservableObject {
                                 chat.messages[lastIndex].generationTimeSeconds = Date().timeIntervalSince(startTime)
                             }
                             
-                            self.updateChat(chat)
+                            self.updateChat(chat, throttleForStreaming: false)  // Final update, don't throttle
                         } else if isFirstChunk && !initialContentBuffer.isEmpty {
                             // Process any buffered content that wasn't processed
                             chat.messages[lastIndex].content = initialContentBuffer
-                            self.updateChat(chat)
+                            self.updateChat(chat, throttleForStreaming: false)  // Final update, don't throttle
                         }
                     }
                     
                     // Mark the chat as no longer having an active stream
                     if var chat = self.currentChat {
                         chat.hasActiveStream = false
-                        self.updateChat(chat)
+                        
+                        // Force any pending stream updates to save immediately
+                        self.streamUpdateTimer?.invalidate()
+                        self.streamUpdateTimer = nil
+                        if self.pendingStreamUpdate != nil {
+                            self.pendingStreamUpdate = nil
+                            if self.hasChatAccess {
+                                self.saveChats()
+                            }
+                        }
+                        
+                        self.updateChat(chat)  // Final update without throttling
                         
                         // Convert temporary ID to permanent ID after streaming completes
                         if chat.hasTemporaryId && self.authManager?.isAuthenticated == true {
@@ -1087,7 +1104,18 @@ class ChatViewModel: ObservableObject {
                     // Mark the chat as no longer having an active stream
                     if var chat = self.currentChat {
                         chat.hasActiveStream = false
-                        self.updateChat(chat)
+                        
+                        // Force any pending stream updates to save immediately
+                        self.streamUpdateTimer?.invalidate()
+                        self.streamUpdateTimer = nil
+                        if self.pendingStreamUpdate != nil {
+                            self.pendingStreamUpdate = nil
+                            if self.hasChatAccess {
+                                self.saveChats()
+                            }
+                        }
+                        
+                        self.updateChat(chat)  // Final update without throttling
                         
                         // Convert temporary ID to permanent ID after streaming completes
                         if chat.hasTemporaryId && self.authManager?.isAuthenticated == true {
@@ -1495,7 +1523,7 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Updates a chat in the chats array AND saves
-    private func updateChat(_ chat: Chat) {
+    private func updateChat(_ chat: Chat, throttleForStreaming: Bool = false) {
         var updatedChat = chat
         
         // If the chat has an active stream or is being actively modified, ensure it's marked as locally modified
@@ -1512,9 +1540,26 @@ class ChatViewModel: ObservableObject {
                 currentChat = updatedChat
             }
             
-            // Save chats for all authenticated users
-            if hasChatAccess {
-                saveChats()
+            // During streaming, batch saves to reduce disk I/O
+            if throttleForStreaming {
+                // Store pending update
+                pendingStreamUpdate = updatedChat
+                
+                // Cancel existing timer and create new one
+                streamUpdateTimer?.invalidate()
+                streamUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+                    if let pending = self?.pendingStreamUpdate {
+                        self?.pendingStreamUpdate = nil
+                        if self?.hasChatAccess == true {
+                            self?.saveChats()
+                        }
+                    }
+                }
+            } else {
+                // Save immediately for non-streaming updates
+                if hasChatAccess {
+                    saveChats()
+                }
             }
         } else {
             // Chat not found in array - this shouldn't happen but handle it
