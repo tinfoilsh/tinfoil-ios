@@ -452,7 +452,7 @@ struct SettingsView: View {
                                             .foregroundColor(.secondary)
                                     }
                                     Spacer()
-                                    if settings.isUsingCustomPrompt {
+                                    if ProfileManager.shared.isUsingCustomPrompt || settings.isUsingCustomPrompt {
                                         Image(systemName: "checkmark.circle.fill")
                                             .font(.caption)
                                             .foregroundColor(.green)
@@ -471,7 +471,7 @@ struct SettingsView: View {
                                             .foregroundColor(.secondary)
                                     }
                                     Spacer()
-                                    if settings.isPersonalizationEnabled {
+                                    if ProfileManager.shared.isUsingPersonalization || settings.isPersonalizationEnabled {
                                         Image(systemName: "checkmark.circle.fill")
                                             .font(.caption)
                                             .foregroundColor(.green)
@@ -794,6 +794,7 @@ struct ProfileEditorView: View {
 struct CustomSystemPromptView: View {
     @Binding var isUsingCustomPrompt: Bool
     @Binding var customSystemPrompt: String
+    @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @State private var editingPrompt: String = ""
@@ -809,6 +810,9 @@ struct CustomSystemPromptView: View {
             Section {
                 Toggle("Enable Custom System Prompt", isOn: $isUsingCustomPrompt)
                     .tint(Color.green)
+                    .onChange(of: isUsingCustomPrompt) { _, newValue in
+                        profileManager.isUsingCustomPrompt = newValue
+                    }
             } header: {
                 Text("Status")
             } footer: {
@@ -859,6 +863,9 @@ struct CustomSystemPromptView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Save") {
+                    // Save to both ProfileManager and SettingsManager
+                    profileManager.customSystemPrompt = editingPrompt
+                    profileManager.isUsingCustomPrompt = isUsingCustomPrompt
                     customSystemPrompt = editingPrompt
                     dismiss()
                 }
@@ -866,8 +873,28 @@ struct CustomSystemPromptView: View {
             }
         }
         .onAppear {
-            // Initialize with current custom prompt or default if empty
-            editingPrompt = customSystemPrompt.isEmpty ? defaultSystemPrompt : customSystemPrompt
+            // Load from ProfileManager first, then fall back to SettingsManager
+            if !profileManager.customSystemPrompt.isEmpty {
+                editingPrompt = profileManager.customSystemPrompt
+                isUsingCustomPrompt = profileManager.isUsingCustomPrompt
+            } else if !customSystemPrompt.isEmpty {
+                editingPrompt = customSystemPrompt
+            } else {
+                editingPrompt = defaultSystemPrompt
+            }
+            
+            // Trigger a sync from cloud to ensure we have latest data
+            Task {
+                await profileManager.syncFromCloud()
+                
+                // Update local state with synced data
+                await MainActor.run {
+                    if !profileManager.customSystemPrompt.isEmpty {
+                        editingPrompt = profileManager.customSystemPrompt
+                        isUsingCustomPrompt = profileManager.isUsingCustomPrompt
+                    }
+                }
+            }
         }
         .alert("Restore Default", isPresented: $showRestoreConfirmation) {
             Button("Cancel", role: .cancel) { }
