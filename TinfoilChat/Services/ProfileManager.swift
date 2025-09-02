@@ -43,6 +43,7 @@ class ProfileManager: ObservableObject {
     private var hasPendingChanges: Bool = false
     private var lastSyncedProfile: ProfileData?
     private var cancellables = Set<AnyCancellable>()
+    private var isApplyingProfile: Bool = false  // Flag to prevent observer loops
     
     // Keychain keys
     private let keychainKey = "userProfile"
@@ -77,11 +78,15 @@ class ProfileManager: ObservableObject {
         
         keychainHelper.save(data, for: keychainKey, service: keychainService)
         
-        // Mark that we have pending changes for cloud sync
-        hasPendingChanges = true
-        
-        // Debounce cloud sync
-        debounceCloudSync()
+        // Only mark pending changes if this is a user-initiated change
+        // (not when saving from cloud sync)
+        if !isSyncing {
+            // Mark that we have pending changes for cloud sync
+            hasPendingChanges = true
+            
+            // Debounce cloud sync
+            debounceCloudSync()
+        }
     }
     
     /// Create ProfileData from current settings
@@ -104,6 +109,8 @@ class ProfileManager: ObservableObject {
     
     /// Apply profile data to published properties
     private func applyProfile(_ profile: ProfileData) {
+        isApplyingProfile = true  // Prevent observer loops
+        
         if let isDarkMode = profile.isDarkMode {
             self.isDarkMode = isDarkMode
         }
@@ -137,6 +144,8 @@ class ProfileManager: ObservableObject {
         if let version = profile.version {
             self.lastSyncedVersion = version
         }
+        
+        isApplyingProfile = false  // Re-enable observers
     }
     
     // MARK: - Change Observers
@@ -146,6 +155,7 @@ class ProfileManager: ObservableObject {
         $isDarkMode
             .dropFirst()
             .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
@@ -153,6 +163,7 @@ class ProfileManager: ObservableObject {
         $maxPromptMessages
             .dropFirst()
             .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
@@ -160,6 +171,7 @@ class ProfileManager: ObservableObject {
         $language
             .dropFirst()
             .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
@@ -168,6 +180,7 @@ class ProfileManager: ObservableObject {
             .dropFirst()
             .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
             .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
@@ -176,6 +189,7 @@ class ProfileManager: ObservableObject {
             .dropFirst()
             .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
             .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
@@ -183,6 +197,7 @@ class ProfileManager: ObservableObject {
         $traits
             .dropFirst()
             .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
@@ -191,6 +206,7 @@ class ProfileManager: ObservableObject {
             .dropFirst()
             .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
             .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
@@ -198,6 +214,7 @@ class ProfileManager: ObservableObject {
         $isUsingPersonalization
             .dropFirst()
             .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
@@ -205,6 +222,7 @@ class ProfileManager: ObservableObject {
         $isUsingCustomPrompt
             .dropFirst()
             .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
@@ -213,6 +231,7 @@ class ProfileManager: ObservableObject {
             .dropFirst()
             .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
             .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
@@ -242,11 +261,6 @@ class ProfileManager: ObservableObject {
     
     /// Sync profile from cloud
     func syncFromCloud() async {
-        // Skip if we have pending local changes
-        guard !hasPendingChanges else {
-            return
-        }
-        
         // Skip if not authenticated
         guard await profileSync.isAuthenticated() else {
             return
@@ -256,14 +270,42 @@ class ProfileManager: ObservableObject {
             if let cloudProfile = try await profileSync.fetchProfile() {
                 let cloudVersion = cloudProfile.version ?? 0
                 
-                // Check if cloud profile is newer or different
-                if cloudVersion > lastSyncedVersion || hasProfileChanged(cloudProfile, lastSyncedProfile) {
+                // Check if cloud profile is newer
+                if cloudVersion > lastSyncedVersion {
+                    // Cloud has newer version - apply it even if we have pending changes
+                    isSyncing = true  // Mark that we're syncing to prevent triggering upload
                     applyProfile(cloudProfile)
-                    saveToKeychain()
+                    
+                    // Save to keychain without triggering sync
+                    let data = try? JSONEncoder().encode(cloudProfile)
+                    if let data = data {
+                        keychainHelper.save(data, for: keychainKey, service: keychainService)
+                    }
+                    
                     lastSyncedVersion = cloudVersion
                     lastSyncedProfile = cloudProfile
                     lastSyncDate = Date()
                     syncError = nil
+                    isSyncing = false
+                    
+                    // Clear pending changes flag since cloud version is newer
+                    hasPendingChanges = false
+                } else if !hasPendingChanges && hasProfileChanged(cloudProfile, lastSyncedProfile) {
+                    // No local changes and cloud is different - apply cloud version
+                    isSyncing = true  // Mark that we're syncing to prevent triggering upload
+                    applyProfile(cloudProfile)
+                    
+                    // Save to keychain without triggering sync
+                    let data = try? JSONEncoder().encode(cloudProfile)
+                    if let data = data {
+                        keychainHelper.save(data, for: keychainKey, service: keychainService)
+                    }
+                    
+                    lastSyncedVersion = cloudVersion
+                    lastSyncedProfile = cloudProfile
+                    lastSyncDate = Date()
+                    syncError = nil
+                    isSyncing = false
                 }
             }
         } catch {

@@ -64,6 +64,9 @@ struct TinfoilChatApp: App {
                                     // Initialize authentication state
                                     await authManager.initializeAuthState()
                                     
+                                    // Initialize ProfileManager to start auto-sync
+                                    _ = ProfileManager.shared
+                                    
                                     // Add observer for Clerk auth state changes
                                     NotificationCenter.default.addObserver(
                                         forName: NSNotification.Name("ClerkUserChanged"),
@@ -72,6 +75,8 @@ struct TinfoilChatApp: App {
                                     ) { _ in
                                         Task {
                                             await authManager.initializeAuthState()
+                                            // Sync profile when auth state changes
+                                            await ProfileManager.shared.performFullSync()
                                         }
                                     }
                                 } catch {
