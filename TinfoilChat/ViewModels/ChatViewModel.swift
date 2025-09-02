@@ -684,12 +684,19 @@ class ChatViewModel: ObservableObject {
                 // Replace MODEL_NAME placeholder with current model name
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
                 
-                // Replace language placeholder
-                if let chat = currentChat, let language = chat.language {
-                    systemPrompt = systemPrompt.replacingOccurrences(of: "{LANGUAGE}", with: language)
+                // Replace language placeholder - use current settings preference
+                let languageToUse: String
+                if settingsManager.selectedLanguage != "System" {
+                    // Use the language from settings
+                    languageToUse = settingsManager.selectedLanguage
+                } else if let chat = currentChat, let chatLanguage = chat.language {
+                    // Fall back to chat's language if set
+                    languageToUse = chatLanguage
                 } else {
-                    systemPrompt = systemPrompt.replacingOccurrences(of: "{LANGUAGE}", with: "English")
+                    // Default to English
+                    languageToUse = "English"
                 }
+                systemPrompt = systemPrompt.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
                 
                 // Add personalization XML if enabled
                 let personalizationXML = settingsManager.generateUserPreferencesXML()
@@ -714,11 +721,8 @@ class ChatViewModel: ObservableObject {
                     // Apply same replacements to rules
                     var processedRules = rules.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
                     
-                    if let chat = currentChat, let language = chat.language {
-                        processedRules = processedRules.replacingOccurrences(of: "{LANGUAGE}", with: language)
-                    } else {
-                        processedRules = processedRules.replacingOccurrences(of: "{LANGUAGE}", with: "English")
-                    }
+                    // Use the same language that was used for the system prompt
+                    processedRules = processedRules.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
                     
                     if !personalizationXML.isEmpty {
                         processedRules = processedRules.replacingOccurrences(of: "{USER_PREFERENCES}", with: personalizationXML)
