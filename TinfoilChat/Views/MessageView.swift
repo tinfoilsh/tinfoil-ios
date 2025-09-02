@@ -241,8 +241,9 @@ struct MessageBubbleModifier: ViewModifier {
         Group {
             if isUserMessage {
                 content
-                    // User messages get adaptive width based on content with minimum width
-                    .frame(minWidth: 60, idealWidth: nil, maxWidth: max(60, UIScreen.main.bounds.width * 0.85), alignment: .trailing)
+                    // User messages get adaptive width based on content
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .trailing)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             } else {
                 content
