@@ -121,6 +121,7 @@ struct FlowResult {
 struct PersonalizationView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var settings = SettingsManager.shared
+    @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.colorScheme) private var colorScheme
     
     // Local state for form fields
@@ -157,10 +158,32 @@ struct PersonalizationView: View {
         )
         .accentColor(Color.accentPrimary)
         .onAppear {
-            localNickname = settings.nickname
-            localProfession = settings.profession
-            localTraits = settings.selectedTraits
-            localAdditionalContext = settings.additionalContext
+            // Load from ProfileManager first, then fall back to SettingsManager
+            localNickname = !profileManager.nickname.isEmpty ? profileManager.nickname : settings.nickname
+            localProfession = !profileManager.profession.isEmpty ? profileManager.profession : settings.profession
+            localTraits = !profileManager.traits.isEmpty ? profileManager.traits : settings.selectedTraits
+            localAdditionalContext = !profileManager.additionalContext.isEmpty ? profileManager.additionalContext : settings.additionalContext
+            
+            // Trigger a sync from cloud to ensure we have latest data
+            Task {
+                await profileManager.syncFromCloud()
+                
+                // Update local state with synced data
+                await MainActor.run {
+                    if !profileManager.nickname.isEmpty {
+                        localNickname = profileManager.nickname
+                    }
+                    if !profileManager.profession.isEmpty {
+                        localProfession = profileManager.profession
+                    }
+                    if !profileManager.traits.isEmpty {
+                        localTraits = profileManager.traits
+                    }
+                    if !profileManager.additionalContext.isEmpty {
+                        localAdditionalContext = profileManager.additionalContext
+                    }
+                }
+            }
         }
     }
     
@@ -185,6 +208,8 @@ struct PersonalizationView: View {
                             .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                     )
                     .onChange(of: localNickname) { _, newValue in
+                        profileManager.nickname = newValue
+                        profileManager.isUsingPersonalization = !newValue.isEmpty || !localProfession.isEmpty || !localTraits.isEmpty || !localAdditionalContext.isEmpty
                         settings.nickname = newValue
                         settings.isPersonalizationEnabled = true
                     }
@@ -213,6 +238,8 @@ struct PersonalizationView: View {
                             .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                     )
                     .onChange(of: localProfession) { _, newValue in
+                        profileManager.profession = newValue
+                        profileManager.isUsingPersonalization = !localNickname.isEmpty || !newValue.isEmpty || !localTraits.isEmpty || !localAdditionalContext.isEmpty
                         settings.profession = newValue
                         settings.isPersonalizationEnabled = true
                     }
@@ -234,6 +261,8 @@ struct PersonalizationView: View {
                     selectedTraits: $localTraits
                 )
                 .onChange(of: localTraits) { _, newValue in
+                    profileManager.traits = newValue
+                    profileManager.isUsingPersonalization = !localNickname.isEmpty || !localProfession.isEmpty || !newValue.isEmpty || !localAdditionalContext.isEmpty
                     settings.selectedTraits = newValue
                     settings.isPersonalizationEnabled = true
                 }
@@ -263,6 +292,8 @@ struct PersonalizationView: View {
                     )
                     .lineLimit(3...6)
                     .onChange(of: localAdditionalContext) { _, newValue in
+                        profileManager.additionalContext = newValue
+                        profileManager.isUsingPersonalization = !localNickname.isEmpty || !localProfession.isEmpty || !localTraits.isEmpty || !newValue.isEmpty
                         settings.additionalContext = newValue
                         settings.isPersonalizationEnabled = true
                     }
@@ -275,7 +306,17 @@ struct PersonalizationView: View {
             
             // Reset button
             Button(action: {
+                // Reset ProfileManager
+                profileManager.nickname = ""
+                profileManager.profession = ""
+                profileManager.traits = []
+                profileManager.additionalContext = ""
+                profileManager.isUsingPersonalization = false
+                
+                // Reset SettingsManager
                 settings.resetPersonalization()
+                
+                // Reset local state
                 localNickname = ""
                 localProfession = ""
                 localTraits = []

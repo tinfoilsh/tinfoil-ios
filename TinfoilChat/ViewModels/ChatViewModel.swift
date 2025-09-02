@@ -281,6 +281,9 @@ class ChatViewModel: ObservableObject {
                        !currentChat.hasActiveStream {
                         try await self.cloudSync.backupChat(currentChat.id)
                     }
+                    
+                    // Sync profile settings periodically
+                    await ProfileManager.shared.syncFromCloud()
                 } catch {
                 }
             }
@@ -675,10 +678,13 @@ class ChatViewModel: ObservableObject {
                 
                 // Add system message first with language preference
                 let settingsManager = SettingsManager.shared
+                let profileManager = ProfileManager.shared
                 var systemPrompt: String
                 
-                // Use custom prompt if enabled, otherwise use default
-                if settingsManager.isUsingCustomPrompt && !settingsManager.customSystemPrompt.isEmpty {
+                // Use custom prompt if enabled (from ProfileManager), otherwise use default
+                if let customPrompt = profileManager.getCustomSystemPrompt() {
+                    systemPrompt = customPrompt
+                } else if settingsManager.isUsingCustomPrompt && !settingsManager.customSystemPrompt.isEmpty {
                     systemPrompt = settingsManager.customSystemPrompt
                 } else {
                     systemPrompt = AppConfig.shared.systemPrompt
@@ -687,9 +693,12 @@ class ChatViewModel: ObservableObject {
                 // Replace MODEL_NAME placeholder with current model name
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
                 
-                // Replace language placeholder - use current settings preference
+                // Replace language placeholder - use ProfileManager language first, then settings preference
                 let languageToUse: String
-                if settingsManager.selectedLanguage != "System" {
+                if !profileManager.language.isEmpty && profileManager.language != "English" {
+                    // Use the language from ProfileManager
+                    languageToUse = profileManager.language
+                } else if settingsManager.selectedLanguage != "System" {
                     // Use the language from settings
                     languageToUse = settingsManager.selectedLanguage
                 } else if let chat = currentChat, let chatLanguage = chat.language {
@@ -701,8 +710,14 @@ class ChatViewModel: ObservableObject {
                 }
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
                 
-                // Add personalization XML if enabled
-                let personalizationXML = settingsManager.generateUserPreferencesXML()
+                // Add personalization - use ProfileManager first, then fall back to SettingsManager
+                var personalizationXML = ""
+                if let profilePersonalization = profileManager.getPersonalizationPrompt() {
+                    personalizationXML = "<user_preferences>\n\(profilePersonalization)\n</user_preferences>"
+                } else {
+                    personalizationXML = settingsManager.generateUserPreferencesXML()
+                }
+                
                 if !personalizationXML.isEmpty {
                     systemPrompt = systemPrompt.replacingOccurrences(of: "{USER_PREFERENCES}", with: personalizationXML)
                 } else {
@@ -744,8 +759,9 @@ class ChatViewModel: ObservableObject {
                     .system(.init(content: .textContent(systemPrompt)))
                 ]
                 
-                // Add conversation messages
-                let messagesForContext = Array(self.messages.suffix(settingsManager.maxMessages))
+                // Add conversation messages - use ProfileManager's maxPromptMessages if available
+                let maxMessages = profileManager.maxPromptMessages > 0 ? profileManager.maxPromptMessages : settingsManager.maxMessages
+                let messagesForContext = Array(self.messages.suffix(maxMessages))
                 for message in messagesForContext {
                     if message.role == .user {
                         messages.append(.user(.init(content: .string(message.content))))
@@ -1823,6 +1839,9 @@ class ChatViewModel: ObservableObject {
                     
                     // Now proceed with cloud sync regardless of whether key was new or existing
                     await initializeCloudSync()
+                    
+                    // Sync user profile settings
+                    await ProfileManager.shared.performFullSync()
                     
                     // Update last sync date
                     await MainActor.run {
