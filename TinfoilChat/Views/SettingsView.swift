@@ -412,6 +412,7 @@ struct SettingsView: View {
                                     Button(action: {
                                         if settings.maxMessages > 1 {
                                             settings.maxMessages -= 1
+                                            ProfileManager.shared.maxPromptMessages = settings.maxMessages
                                         }
                                     }) {
                                         Image(systemName: "minus.circle")
@@ -427,6 +428,7 @@ struct SettingsView: View {
                                     Button(action: {
                                         if settings.maxMessages < 50 {
                                             settings.maxMessages += 1
+                                            ProfileManager.shared.maxPromptMessages = settings.maxMessages
                                         }
                                     }) {
                                         Image(systemName: "plus.circle")
@@ -573,6 +575,35 @@ struct SettingsView: View {
             // Auto-navigate to Cloud Sync if requested
             if shouldOpenCloudSync {
             }
+            
+            // Sync ProfileManager settings
+            Task {
+                // Trigger sync from cloud
+                await ProfileManager.shared.syncFromCloud()
+                
+                // Update settings from ProfileManager
+                await MainActor.run {
+                    let profileManager = ProfileManager.shared
+                    
+                    // Update language if different
+                    if !profileManager.language.isEmpty && profileManager.language != "English" {
+                        settings.selectedLanguage = profileManager.language
+                    }
+                    
+                    // Update max messages if different
+                    if profileManager.maxPromptMessages > 0 && profileManager.maxPromptMessages != settings.maxMessages {
+                        settings.maxMessages = profileManager.maxPromptMessages
+                    }
+                    
+                    // Update custom prompt settings
+                    if profileManager.isUsingCustomPrompt {
+                        settings.isUsingCustomPrompt = profileManager.isUsingCustomPrompt
+                        if !profileManager.customSystemPrompt.isEmpty {
+                            settings.customSystemPrompt = profileManager.customSystemPrompt
+                        }
+                    }
+                }
+            }
         }
         .onDisappear {
             // Restore dark navigation bar for main chat view
@@ -695,12 +726,14 @@ struct SettingsView: View {
 struct LanguagePickerView: View {
     @Binding var selectedLanguage: String
     let languages: [String]
+    @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
         List(languages, id: \.self) { language in
             Button(action: {
                 selectedLanguage = language
+                profileManager.language = language
                 dismiss()
             }) {
                 HStack {
@@ -716,6 +749,22 @@ struct LanguagePickerView: View {
         }
         .navigationTitle("Default Language")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // Load from ProfileManager if available
+            if !profileManager.language.isEmpty && profileManager.language != "English" {
+                selectedLanguage = profileManager.language
+            }
+            
+            // Trigger sync to get latest from cloud
+            Task {
+                await profileManager.syncFromCloud()
+                await MainActor.run {
+                    if !profileManager.language.isEmpty && profileManager.language != "English" {
+                        selectedLanguage = profileManager.language
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -863,24 +912,51 @@ struct CustomSystemPromptView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Save") {
+                    // Add <system> tags if not present when saving
+                    var promptToSave = editingPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !promptToSave.isEmpty {
+                        if !promptToSave.hasPrefix("<system>") {
+                            promptToSave = "<system>\n\(promptToSave)"
+                        }
+                        if !promptToSave.hasSuffix("</system>") {
+                            promptToSave = "\(promptToSave)\n</system>"
+                        }
+                    }
+                    
                     // Save to both ProfileManager and SettingsManager
-                    profileManager.customSystemPrompt = editingPrompt
+                    profileManager.customSystemPrompt = promptToSave
                     profileManager.isUsingCustomPrompt = isUsingCustomPrompt
-                    customSystemPrompt = editingPrompt
+                    customSystemPrompt = promptToSave
                     dismiss()
                 }
                 .fontWeight(.semibold)
             }
         }
         .onAppear {
+            // Helper function to strip system tags
+            func stripSystemTags(_ prompt: String) -> String {
+                var result = prompt
+                // Remove opening <system> tag and any whitespace after it
+                if result.hasPrefix("<system>") {
+                    result = String(result.dropFirst(8))
+                    result = result.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                // Remove closing </system> tag and any whitespace before it
+                if result.hasSuffix("</system>") {
+                    result = String(result.dropLast(9))
+                    result = result.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                return result
+            }
+            
             // Load from ProfileManager first, then fall back to SettingsManager
             if !profileManager.customSystemPrompt.isEmpty {
-                editingPrompt = profileManager.customSystemPrompt
+                editingPrompt = stripSystemTags(profileManager.customSystemPrompt)
                 isUsingCustomPrompt = profileManager.isUsingCustomPrompt
             } else if !customSystemPrompt.isEmpty {
-                editingPrompt = customSystemPrompt
+                editingPrompt = stripSystemTags(customSystemPrompt)
             } else {
-                editingPrompt = defaultSystemPrompt
+                editingPrompt = stripSystemTags(defaultSystemPrompt)
             }
             
             // Trigger a sync from cloud to ensure we have latest data
@@ -890,7 +966,7 @@ struct CustomSystemPromptView: View {
                 // Update local state with synced data
                 await MainActor.run {
                     if !profileManager.customSystemPrompt.isEmpty {
-                        editingPrompt = profileManager.customSystemPrompt
+                        editingPrompt = stripSystemTags(profileManager.customSystemPrompt)
                         isUsingCustomPrompt = profileManager.isUsingCustomPrompt
                     }
                 }
@@ -899,7 +975,17 @@ struct CustomSystemPromptView: View {
         .alert("Restore Default", isPresented: $showRestoreConfirmation) {
             Button("Cancel", role: .cancel) { }
             Button("Restore", role: .destructive) {
-                editingPrompt = defaultSystemPrompt
+                // Strip system tags from default prompt when restoring
+                var strippedDefault = defaultSystemPrompt
+                if strippedDefault.hasPrefix("<system>") {
+                    strippedDefault = String(strippedDefault.dropFirst(8))
+                    strippedDefault = strippedDefault.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                if strippedDefault.hasSuffix("</system>") {
+                    strippedDefault = String(strippedDefault.dropLast(9))
+                    strippedDefault = strippedDefault.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                editingPrompt = strippedDefault
             }
         } message: {
             Text("Are you sure you want to restore the default system prompt? Your custom prompt will be replaced.")

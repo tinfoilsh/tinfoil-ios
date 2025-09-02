@@ -68,7 +68,7 @@ class CloudSyncService: ObservableObject {
         _ = try await encryptionService.initialize()
         
         // Set up custom token getter for R2 storage that ensures Clerk is loaded
-        r2Storage.setTokenGetter { 
+        let tokenGetter: () async -> String? = {
             do {
                 // Check if Clerk has a publishable key
                 guard !Clerk.shared.publishableKey.isEmpty else {
@@ -94,6 +94,10 @@ class CloudSyncService: ObservableObject {
                 return nil
             }
         }
+        
+        // Set token getter for both R2 storage and ProfileSync
+        r2Storage.setTokenGetter(tokenGetter)
+        ProfileSyncService.shared.setTokenGetter(tokenGetter)
         
     }
     
