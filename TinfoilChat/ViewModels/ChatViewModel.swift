@@ -508,6 +508,9 @@ class ChatViewModel: ObservableObject {
         chats.insert(newChat, at: 0)
         selectChat(newChat)
         shouldFocusInput = true
+        
+        // Preserve pagination state - adding a blank chat doesn't affect whether more chats are available
+        // The hasMoreChats flag should remain unchanged
     }
     
     /// Selects a chat as the current chat
@@ -1543,6 +1546,10 @@ class ChatViewModel: ObservableObject {
                 currentChat = updatedChat
             }
             
+            // IMPORTANT: Preserve pagination state when inserting new chats
+            // Adding a new chat doesn't affect whether more chats are available to load
+            // The hasMoreChats flag should remain unchanged
+            
             // Save chats for all authenticated users
             if hasChatAccess {
                 saveChats()
@@ -2060,10 +2067,14 @@ class ChatViewModel: ObservableObject {
         
         // Must have a token to load more
         guard let token = paginationToken else {
-            // No token means no more pages
-            await MainActor.run {
-                self.hasMoreChats = false
+            // No token could mean pagination hasn't been set up yet OR there are no more pages
+            // Only set hasMoreChats = false if pagination has been initialized
+            if isPaginationActive || hasLoadedInitialPage {
+                await MainActor.run {
+                    self.hasMoreChats = false
+                }
             }
+            // Otherwise, leave hasMoreChats unchanged - it may still be true
             return
         }
         
@@ -2185,10 +2196,9 @@ class ChatViewModel: ObservableObject {
         // Ensure blank chat at top
         self.ensureBlankChatAtTop()
         
-        // Update hasMoreChats if needed (but don't reset pagination token)
-        if syncedChats.count > (chats.filter { !$0.isBlankChat && !$0.hasTemporaryId }.count) {
-            self.hasMoreChats = true
-        }
+        // Update hasMoreChats based on total synced chats vs displayed non-blank chats
+        let displayedSyncedChats = chats.filter { !$0.isBlankChat && !$0.hasTemporaryId }.count
+        self.hasMoreChats = syncedChats.count > displayedSyncedChats
     }
     
     /// Reset pagination and reload all chats from storage (used after sync)
@@ -2235,10 +2245,8 @@ class ChatViewModel: ObservableObject {
                 // Ensure blank chat at top
                 self.ensureBlankChatAtTop()
                 
-                // Check if there are more chats beyond the first page
-                if syncedChats.count > Constants.Pagination.chatsPerPage {
-                    self.hasMoreChats = true
-                }
+                // Update hasMoreChats based on whether there are more chats beyond the first page
+                self.hasMoreChats = syncedChats.count > Constants.Pagination.chatsPerPage
             }
         } else {
             // Not using pagination yet or pagination needs to be reset
@@ -2253,11 +2261,9 @@ class ChatViewModel: ObservableObject {
                 self.chats = Array(sortedChats.prefix(Constants.Pagination.chatsPerPage))
                 self.ensureBlankChatAtTop()
                 
-                // Set up pagination if there are more chats
-                if sortedChats.count > Constants.Pagination.chatsPerPage {
-                    self.hasMoreChats = true
-                    // Pagination token will be set by initializeCloudSync or setupPaginationForAppRestart
-                }
+                // Set up pagination based on whether there are more chats
+                self.hasMoreChats = sortedChats.count > Constants.Pagination.chatsPerPage
+                // Pagination token will be set by initializeCloudSync or setupPaginationForAppRestart
             }
         }
     }
