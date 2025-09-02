@@ -2,8 +2,9 @@
 //  ContentView.swift
 //  TinfoilChat
 //
-//  Created by Sacha  on 2/25/25.
-//
+//  Created on 07/11/25.
+//  Copyright © 2025 Tinfoil. All rights reserved.
+
 
 import SwiftUI
 import Clerk
