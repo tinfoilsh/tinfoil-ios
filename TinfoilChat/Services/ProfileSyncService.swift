@@ -65,6 +65,13 @@ class ProfileSyncService: ObservableObject {
     
     private func getHeaders() async throws -> [String: String] {
         guard let token = await (getToken ?? defaultTokenGetter)() else {
+            print("ProfileSyncService: No auth token available")
+            throw ProfileSyncError.authenticationRequired
+        }
+        
+        // Check if token looks valid (basic check)
+        if token.isEmpty {
+            print("ProfileSyncService: Empty auth token")
             throw ProfileSyncError.authenticationRequired
         }
         
@@ -90,7 +97,13 @@ class ProfileSyncService: ObservableObject {
         request.httpMethod = "GET"
         request.allHTTPHeaderFields = try await getHeaders()
         
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            print("ProfileSyncService: Network error during fetch: \(error)")
+            throw ProfileSyncError.fetchFailed
+        }
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ProfileSyncError.invalidResponse
@@ -101,6 +114,10 @@ class ProfileSyncService: ObservableObject {
         }
         
         guard (200...299).contains(httpResponse.statusCode) else {
+            print("ProfileSyncService: Fetch failed with status code: \(httpResponse.statusCode)")
+            if let errorData = try? JSONSerialization.jsonObject(with: data, options: []) {
+                print("ProfileSyncService: Error response: \(errorData)")
+            }
             throw ProfileSyncError.fetchFailed
         }
         
@@ -174,18 +191,25 @@ class ProfileSyncService: ObservableObject {
         let body = ProfileUploadRequest(data: jsonString)
         request.httpBody = try JSONEncoder().encode(body)
         
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw ProfileSyncError.saveFailed
         }
         
-        // Update cache
+        // Try to parse the response to get the server-assigned version
+        var serverVersion = profileWithMetadata.version
+        if let responseData = try? JSONDecoder().decode(ProfileUploadResponse.self, from: data) {
+            serverVersion = responseData.version
+        }
+        
+        // Update cache with server version
+        profileWithMetadata.version = serverVersion
         self.cachedProfile = profileWithMetadata
         
         
-        return (true, profileWithMetadata.version)
+        return (true, serverVersion)
     }
     
     /// Retry decryption with new key

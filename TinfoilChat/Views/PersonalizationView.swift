@@ -124,12 +124,6 @@ struct PersonalizationView: View {
     @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.colorScheme) private var colorScheme
     
-    // Local state for form fields
-    @State private var localNickname = ""
-    @State private var localProfession = ""
-    @State private var localTraits: [String] = []
-    @State private var localAdditionalContext = ""
-    
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -158,31 +152,9 @@ struct PersonalizationView: View {
         )
         .accentColor(Color.accentPrimary)
         .onAppear {
-            // Load from ProfileManager first, then fall back to SettingsManager
-            localNickname = !profileManager.nickname.isEmpty ? profileManager.nickname : settings.nickname
-            localProfession = !profileManager.profession.isEmpty ? profileManager.profession : settings.profession
-            localTraits = !profileManager.traits.isEmpty ? profileManager.traits : settings.selectedTraits
-            localAdditionalContext = !profileManager.additionalContext.isEmpty ? profileManager.additionalContext : settings.additionalContext
-            
-            // Trigger a sync from cloud to ensure we have latest data
+            // Trigger a sync from cloud when view appears
             Task {
                 await profileManager.syncFromCloud()
-                
-                // Update local state with synced data
-                await MainActor.run {
-                    if !profileManager.nickname.isEmpty {
-                        localNickname = profileManager.nickname
-                    }
-                    if !profileManager.profession.isEmpty {
-                        localProfession = profileManager.profession
-                    }
-                    if !profileManager.traits.isEmpty {
-                        localTraits = profileManager.traits
-                    }
-                    if !profileManager.additionalContext.isEmpty {
-                        localAdditionalContext = profileManager.additionalContext
-                    }
-                }
             }
         }
     }
@@ -196,7 +168,7 @@ struct PersonalizationView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.primary)
-                TextField("Nickname", text: $localNickname)
+                TextField("Nickname", text: $profileManager.nickname)
                     .textFieldStyle(.plain)
                     .padding(12)
                     .background(
@@ -207,9 +179,8 @@ struct PersonalizationView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                     )
-                    .onChange(of: localNickname) { _, newValue in
-                        profileManager.nickname = newValue
-                        profileManager.isUsingPersonalization = !newValue.isEmpty || !localProfession.isEmpty || !localTraits.isEmpty || !localAdditionalContext.isEmpty
+                    .onChange(of: profileManager.nickname) { _, newValue in
+                        profileManager.isUsingPersonalization = !newValue.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
                         settings.nickname = newValue
                         settings.isPersonalizationEnabled = true
                     }
@@ -226,7 +197,7 @@ struct PersonalizationView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.primary)
-                TextField("Profession", text: $localProfession)
+                TextField("Profession", text: $profileManager.profession)
                     .textFieldStyle(.plain)
                     .padding(12)
                     .background(
@@ -237,9 +208,8 @@ struct PersonalizationView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                     )
-                    .onChange(of: localProfession) { _, newValue in
-                        profileManager.profession = newValue
-                        profileManager.isUsingPersonalization = !localNickname.isEmpty || !newValue.isEmpty || !localTraits.isEmpty || !localAdditionalContext.isEmpty
+                    .onChange(of: profileManager.profession) { _, newValue in
+                        profileManager.isUsingPersonalization = !profileManager.nickname.isEmpty || !newValue.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
                         settings.profession = newValue
                         settings.isPersonalizationEnabled = true
                     }
@@ -258,11 +228,10 @@ struct PersonalizationView: View {
                     .foregroundColor(.primary)
                 TraitSelectionView(
                     availableTraits: settings.availableTraits,
-                    selectedTraits: $localTraits
+                    selectedTraits: $profileManager.traits
                 )
-                .onChange(of: localTraits) { _, newValue in
-                    profileManager.traits = newValue
-                    profileManager.isUsingPersonalization = !localNickname.isEmpty || !localProfession.isEmpty || !newValue.isEmpty || !localAdditionalContext.isEmpty
+                .onChange(of: profileManager.traits) { _, newValue in
+                    profileManager.isUsingPersonalization = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !newValue.isEmpty || !profileManager.additionalContext.isEmpty
                     settings.selectedTraits = newValue
                     settings.isPersonalizationEnabled = true
                 }
@@ -279,7 +248,7 @@ struct PersonalizationView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.primary)
-                TextField("Anything else Tin should know about you?", text: $localAdditionalContext, axis: .vertical)
+                TextField("Anything else Tin should know about you?", text: $profileManager.additionalContext, axis: .vertical)
                     .textFieldStyle(.plain)
                     .padding(12)
                     .background(
@@ -291,9 +260,8 @@ struct PersonalizationView: View {
                             .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                     )
                     .lineLimit(3...6)
-                    .onChange(of: localAdditionalContext) { _, newValue in
-                        profileManager.additionalContext = newValue
-                        profileManager.isUsingPersonalization = !localNickname.isEmpty || !localProfession.isEmpty || !localTraits.isEmpty || !newValue.isEmpty
+                    .onChange(of: profileManager.additionalContext) { _, newValue in
+                        profileManager.isUsingPersonalization = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !newValue.isEmpty
                         settings.additionalContext = newValue
                         settings.isPersonalizationEnabled = true
                     }
@@ -315,12 +283,6 @@ struct PersonalizationView: View {
                 
                 // Reset SettingsManager
                 settings.resetPersonalization()
-                
-                // Reset local state
-                localNickname = ""
-                localProfession = ""
-                localTraits = []
-                localAdditionalContext = ""
             }) {
                 Text("Reset All")
                     .foregroundColor(.white)
