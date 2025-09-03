@@ -15,8 +15,10 @@ struct ContentView: View {
     @EnvironmentObject private var authManager: AuthManager
     @State private var chatViewModel: TinfoilChat.ChatViewModel?
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.scenePhase) var scenePhase
     @State private var showEncryptionAlert = false
     @State private var showKeyInputModal = false
+    @State private var lastSyncTime: Date?
     
     var body: some View {
         Group {
@@ -110,9 +112,22 @@ struct ContentView: View {
                 }
             }
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active && authManager.isAuthenticated {
+                // Sync when app becomes active if authenticated
+                // Only sync if it's been more than 30 seconds since last sync
+                let shouldSync = lastSyncTime == nil || Date().timeIntervalSince(lastSyncTime!) > 30
+                
+                if shouldSync {
+                    Task {
+                        // Sync chats
+                        await chatViewModel?.performFullSync()
+                        lastSyncTime = Date()
+                    }
+                }
+            }
+        }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
-            print("ContentView: authManager.isAuthenticated changed to \(isAuthenticated)")
-            
             // Update available models when auth status changes
             chatViewModel?.updateModelBasedOnAuthStatus(
                 isAuthenticated: isAuthenticated,
