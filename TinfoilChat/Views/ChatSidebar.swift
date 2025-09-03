@@ -250,6 +250,7 @@ struct ChatSidebar: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
+                .padding(.bottom, 8)
             }
             .refreshable {
                 if authManager.isAuthenticated {
@@ -263,11 +264,9 @@ struct ChatSidebar: View {
                 }
             }
             
-            Spacer()
-            
             Divider()
                 .background(Color.gray.opacity(0.3))
-                .padding(.vertical, 8)
+                .padding(.bottom, 8)
             
             // Settings Button
             Button(action: {
