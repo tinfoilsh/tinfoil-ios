@@ -2083,14 +2083,16 @@ class ChatViewModel: ObservableObject {
         
         // Must have a token to load more
         guard let token = paginationToken else {
-            // No token could mean pagination hasn't been set up yet OR there are no more pages
-            // Only set hasMoreChats = false if pagination has been initialized
-            if isPaginationActive || hasLoadedInitialPage {
-                await MainActor.run {
-                    self.hasMoreChats = false
-                }
+            // No token but hasMoreChats might still be true after sync
+            // In this case, we should NOT set hasMoreChats to false automatically
+            // Only set it to false if we're certain there are no more
+            if !hasMoreChats {
+                // Already false, nothing to do
+                return
             }
-            // Otherwise, leave hasMoreChats unchanged - it may still be true
+            
+            // If hasMoreChats is true but no token, this is likely after a sync
+            // Don't change hasMoreChats - the sync logic should have set it correctly
             return
         }
         
@@ -2131,6 +2133,10 @@ class ChatViewModel: ObservableObject {
     @MainActor
     private func updateChatsAfterSync() async {
         guard let userId = currentUserId else { return }
+        
+        // IMPORTANT: Preserve pagination token before updating
+        let savedPaginationToken = self.paginationToken
+        let savedIsPaginationActive = self.isPaginationActive
         
         // Load all chats from storage (includes newly synced ones)
         let allChats = Chat.loadFromDefaults(userId: userId)
@@ -2214,7 +2220,23 @@ class ChatViewModel: ObservableObject {
         
         // Update hasMoreChats based on total synced chats vs displayed non-blank chats
         let displayedSyncedChats = chats.filter { !$0.isBlankChat && !$0.hasTemporaryId }.count
-        self.hasMoreChats = syncedChats.count > displayedSyncedChats
+        
+        // Only update hasMoreChats if we have a clear indication
+        // Don't set it to false unless we're certain there are no more
+        if syncedChats.count > displayedSyncedChats {
+            self.hasMoreChats = true
+        } else if syncedChats.count <= Constants.Pagination.chatsPerPage {
+            // Only set to false if total synced chats fit in first page
+            self.hasMoreChats = false
+        }
+        // Otherwise, preserve existing hasMoreChats state
+        
+        // IMPORTANT: Restore pagination state that was saved at the beginning
+        // This ensures the pagination token doesn't get lost during sync
+        if savedIsPaginationActive {
+            self.paginationToken = savedPaginationToken
+            self.isPaginationActive = savedIsPaginationActive
+        }
     }
     
     /// Reset pagination and reload all chats from storage (used after sync)
