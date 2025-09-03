@@ -88,14 +88,12 @@ class CloudSyncService: ObservableObject {
                             return token.jwt
                         }
                     } catch {
-                        print("CloudSyncService: Failed to get/refresh token: \(error)")
-                        // Don't fall back to expired token - it will just cause 401 errors
+                        // Token refresh failed - don't fall back to expired token
                     }
                 }
                 
                 return nil
             } catch {
-                print("CloudSyncService: Token getter error: \(error)")
                 return nil
             }
         }

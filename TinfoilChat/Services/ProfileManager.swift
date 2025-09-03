@@ -268,20 +268,15 @@ class ProfileManager: ObservableObject {
     func syncFromCloud() async {
         // Skip if not authenticated
         guard await profileSync.isAuthenticated() else {
-            print("ProfileManager: Not authenticated for sync")
             return
         }
-        
-        print("ProfileManager: Checking for cloud updates...")
         
         do {
             if let cloudProfile = try await profileSync.fetchProfile() {
                 let cloudVersion = cloudProfile.version ?? 0
-                print("ProfileManager: Cloud version: \(cloudVersion), Local version: \(lastSyncedVersion)")
                 
                 // Check if cloud profile is newer
                 if cloudVersion > lastSyncedVersion {
-                    print("ProfileManager: Applying newer cloud version")
                     // Cloud has newer version - apply it even if we have pending changes
                     isSyncing = true  // Mark that we're syncing to prevent triggering upload
                     applyProfile(cloudProfile)
@@ -300,9 +295,7 @@ class ProfileManager: ObservableObject {
                     
                     // Clear pending changes flag since cloud version is newer
                     hasPendingChanges = false
-                    print("ProfileManager: Successfully applied cloud profile")
                 } else if !hasPendingChanges && hasProfileChanged(cloudProfile, lastSyncedProfile) {
-                    print("ProfileManager: Cloud has changes (same version), applying")
                     // No local changes and cloud is different - apply cloud version
                     isSyncing = true  // Mark that we're syncing to prevent triggering upload
                     applyProfile(cloudProfile)
@@ -318,14 +311,9 @@ class ProfileManager: ObservableObject {
                     lastSyncDate = Date()
                     syncError = nil
                     isSyncing = false
-                } else {
-                    print("ProfileManager: No cloud updates needed (version: \(cloudVersion) <= \(lastSyncedVersion))")
                 }
-            } else {
-                print("ProfileManager: No profile found in cloud")
             }
         } catch {
-            print("ProfileManager: Sync error: \(error)")
             syncError = error.localizedDescription
         }
     }

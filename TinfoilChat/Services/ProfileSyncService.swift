@@ -65,13 +65,11 @@ class ProfileSyncService: ObservableObject {
     
     private func getHeaders() async throws -> [String: String] {
         guard let token = await (getToken ?? defaultTokenGetter)() else {
-            print("ProfileSyncService: No auth token available")
             throw ProfileSyncError.authenticationRequired
         }
         
         // Check if token looks valid (basic check)
         if token.isEmpty {
-            print("ProfileSyncService: Empty auth token")
             throw ProfileSyncError.authenticationRequired
         }
         
@@ -101,7 +99,6 @@ class ProfileSyncService: ObservableObject {
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
-            print("ProfileSyncService: Network error during fetch: \(error)")
             throw ProfileSyncError.fetchFailed
         }
         
@@ -114,10 +111,6 @@ class ProfileSyncService: ObservableObject {
         }
         
         guard (200...299).contains(httpResponse.statusCode) else {
-            print("ProfileSyncService: Fetch failed with status code: \(httpResponse.statusCode)")
-            if let errorData = try? JSONSerialization.jsonObject(with: data, options: []) {
-                print("ProfileSyncService: Error response: \(errorData)")
-            }
             throw ProfileSyncError.fetchFailed
         }
         

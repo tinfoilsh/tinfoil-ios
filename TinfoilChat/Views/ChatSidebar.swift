@@ -253,9 +253,12 @@ struct ChatSidebar: View {
             }
             .refreshable {
                 if authManager.isAuthenticated {
-                    // Use a detached task to prevent cancellation when user releases pull-to-refresh
-                    Task.detached {
-                        await viewModel.performFullSync()
+                    // Create a continuation to properly handle the async operation
+                    await withCheckedContinuation { continuation in
+                        Task.detached {
+                            await viewModel.performFullSync()
+                            continuation.resume()
+                        }
                     }
                 }
             }

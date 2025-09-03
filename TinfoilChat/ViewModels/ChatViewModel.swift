@@ -1885,14 +1885,11 @@ class ChatViewModel: ObservableObject {
             if let userId = currentUserId, CloudMigrationService.shared.isMigrationNeeded(userId: userId) {
                 do {
                     let migrationResult = try await CloudMigrationService.shared.migrateToCloud(userId: userId)
-                    print("Cloud migration completed: \(migrationResult.summary)")
                     
                     if !migrationResult.isSuccess && !migrationResult.errors.isEmpty {
-                        // Log errors but continue with normal flow
-                        print("Migration errors: \(migrationResult.errors.joined(separator: ", "))")
+                        // Migration had errors but continue with normal flow
                     }
                 } catch {
-                    print("Cloud migration failed: \(error)")
                     // Continue with normal flow even if migration fails
                 }
             }
@@ -2296,22 +2293,20 @@ class ChatViewModel: ObservableObject {
         
         let result = await cloudSync.syncAllChats()
         
+        // Update chats if there were changes (await this before marking sync complete)
+        if result.downloaded > 0 || result.uploaded > 0 {
+            await self.updateChatsAfterSync()
+        }
+        
+        // Also sync profile settings
+        await ProfileManager.shared.performFullSync()
+        
         await MainActor.run {
             self.isSyncing = false
             self.lastSyncDate = Date()
             
             if !result.errors.isEmpty {
                 self.syncErrors = result.errors
-                // Show error recovery UI if there are sync errors
-                // Log sync error but don't show modal
-                print("Sync error: Already in progress")
-            }
-            
-            // Use intelligent update that preserves pagination if user has loaded more pages
-            if result.downloaded > 0 || result.uploaded > 0 {
-                Task { @MainActor in
-                    await self.updateChatsAfterSync()
-                }
             }
         }
     }
