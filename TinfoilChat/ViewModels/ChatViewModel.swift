@@ -57,11 +57,30 @@ class ChatViewModel: ObservableObject {
     
     // Pagination properties
     @Published var isLoadingMore: Bool = false
-    @Published var hasMoreChats: Bool = false
-    private var paginationToken: String? = nil
+    @Published var hasMoreChats: Bool = false {
+        didSet { persistPaginationStateIfPossible() }
+    }
+    private var paginationToken: String? = nil {
+        didSet { persistPaginationStateIfPossible() }
+    }
     private var isPaginationActive: Bool = false  // Track if we're using pagination vs full load
+    {
+        didSet { persistPaginationStateIfPossible() }
+    }
     private var hasLoadedInitialPage: Bool = false  // Track if we've loaded the first page
+    {
+        didSet { persistPaginationStateIfPossible() }
+    }
     private var hasAttemptedLoadMore: Bool = false  // Track if we've tried to load more at least once
+    {
+        didSet { persistPaginationStateIfPossible() }
+    }
+    
+    // Controls when pagination state is written to storage to avoid clobbering persisted values during init
+    private var shouldPersistPaginationState: Bool = false
+    {
+        didSet { persistPaginationStateIfPossible() }
+    }
     
     // IMPORTANT: Pagination token edge cases to handle:
     // 1. Token should NOT be reset during auto-sync operations
@@ -115,6 +134,11 @@ class ChatViewModel: ObservableObject {
             } else {
                 lastSyncDate = nil
             }
+            
+            // When auth becomes available and authenticated, restore persisted pagination state immediately
+            if authManager?.isAuthenticated == true {
+                loadPersistedPaginationState()
+            }
         }
     }
     
@@ -138,6 +162,48 @@ class ChatViewModel: ObservableObject {
     // Computed property to check if speech-to-text is available
     var hasSpeechToTextAccess: Bool {
         return authManager?.isAuthenticated ?? false
+    }
+    
+    // MARK: - Pagination Persistence
+    
+    private func paginationDefaultsKey(_ suffix: String) -> String? {
+        guard let userId = currentUserId else { return nil }
+        return "pagination_\(suffix)_\(userId)"
+    }
+    
+    private func persistPaginationStateIfPossible() {
+        guard shouldPersistPaginationState else { return }
+        guard let userId = currentUserId else { return }
+        if let token = paginationToken, !token.isEmpty {
+            UserDefaults.standard.set(token, forKey: "pagination_token_\(userId)")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "pagination_token_\(userId)")
+        }
+        UserDefaults.standard.set(hasMoreChats, forKey: "pagination_hasMore_\(userId)")
+        UserDefaults.standard.set(isPaginationActive, forKey: "pagination_active_\(userId)")
+        UserDefaults.standard.set(hasLoadedInitialPage, forKey: "pagination_loadedFirst_\(userId)")
+        UserDefaults.standard.set(hasAttemptedLoadMore, forKey: "pagination_attempted_\(userId)")
+    }
+    
+    private func loadPersistedPaginationState() {
+        guard let userId = currentUserId else { return }
+        if let token = UserDefaults.standard.string(forKey: "pagination_token_\(userId)") {
+            paginationToken = token
+        }
+        if UserDefaults.standard.object(forKey: "pagination_hasMore_\(userId)") != nil {
+            hasMoreChats = UserDefaults.standard.bool(forKey: "pagination_hasMore_\(userId)")
+        }
+        if UserDefaults.standard.object(forKey: "pagination_active_\(userId)") != nil {
+            isPaginationActive = UserDefaults.standard.bool(forKey: "pagination_active_\(userId)")
+        }
+        if UserDefaults.standard.object(forKey: "pagination_loadedFirst_\(userId)") != nil {
+            hasLoadedInitialPage = UserDefaults.standard.bool(forKey: "pagination_loadedFirst_\(userId)")
+        }
+        if UserDefaults.standard.object(forKey: "pagination_attempted_\(userId)") != nil {
+            hasAttemptedLoadMore = UserDefaults.standard.bool(forKey: "pagination_attempted_\(userId)")
+        }
+        // Enable persistence after we've loaded any saved state to prevent clobbering
+        shouldPersistPaginationState = true
     }
     
     // Get current user ID from auth manager
@@ -186,11 +252,7 @@ class ChatViewModel: ObservableObject {
             currentChat = newChat
             
             // Reset pagination state for fresh app start
-            paginationToken = nil
-            hasMoreChats = false
-            isPaginationActive = false
-            hasLoadedInitialPage = false
-            hasAttemptedLoadMore = false
+            // Don't wipe persisted values here; let restoration happen via loadPersistedPaginationState()
         } else {
             // For non-authenticated users, just create a single chat without saving
             let newChat = Chat.create(modelType: currentModel)
@@ -198,6 +260,10 @@ class ChatViewModel: ObservableObject {
             chats = [newChat]
         }
         
+        // Load any previously persisted pagination state (per-user)
+        // Delay enabling persistence until after load to avoid overwriting saved values
+        loadPersistedPaginationState()
+
         // Setup app lifecycle observers
         setupAppLifecycleObservers()
         
@@ -1782,6 +1848,9 @@ class ChatViewModel: ObservableObject {
             isSignInInProgress = true
             print("handleSignIn: Starting sign-in flow for user \(userId)")
             
+            // Restore pagination state immediately for better UX on cold start
+            loadPersistedPaginationState()
+            
             // Check if we have any anonymous chats to migrate
             let anonymousChats = chats.filter { chat in
                 chat.userId == nil && !chat.messages.isEmpty
@@ -2218,18 +2287,17 @@ class ChatViewModel: ObservableObject {
         // Ensure blank chat at top
         self.ensureBlankChatAtTop()
         
-        // Update hasMoreChats based on total synced chats vs displayed non-blank chats
+        // Update hasMoreChats conservatively to preserve server-provided pagination
         let displayedSyncedChats = chats.filter { !$0.isBlankChat && !$0.hasTemporaryId }.count
-        
-        // Only update hasMoreChats if we have a clear indication
-        // Don't set it to false unless we're certain there are no more
+
+        // Set to true if we clearly have more locally than are displayed
         if syncedChats.count > displayedSyncedChats {
             self.hasMoreChats = true
-        } else if syncedChats.count <= Constants.Pagination.chatsPerPage {
-            // Only set to false if total synced chats fit in first page
+        } else if self.paginationToken == nil && syncedChats.count <= Constants.Pagination.chatsPerPage {
+            // Only set to false when not using remote pagination and we are certain the total fits on one page
             self.hasMoreChats = false
         }
-        // Otherwise, preserve existing hasMoreChats state
+        // Otherwise, preserve existing hasMoreChats which may have been set from remote list
         
         // IMPORTANT: Restore pagination state that was saved at the beginning
         // This ensures the pagination token doesn't get lost during sync
@@ -2319,6 +2387,10 @@ class ChatViewModel: ObservableObject {
         if result.downloaded > 0 || result.uploaded > 0 {
             await self.updateChatsAfterSync()
         }
+        
+        // Always refresh pagination token and hasMore state from the server after a sync
+        // This guards against cold-start races where the token wasn't available yet
+        await self.setupPaginationForAppRestart()
         
         // Also sync profile settings
         await ProfileManager.shared.performFullSync()
