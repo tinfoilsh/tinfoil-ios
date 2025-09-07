@@ -254,13 +254,7 @@ struct ChatSidebar: View {
             }
             .refreshable {
                 if authManager.isAuthenticated {
-                    // Create a continuation to properly handle the async operation
-                    await withCheckedContinuation { continuation in
-                        Task.detached {
-                            await viewModel.performFullSync()
-                            continuation.resume()
-                        }
-                    }
+                    await viewModel.performFullSync()
                 }
             }
             
