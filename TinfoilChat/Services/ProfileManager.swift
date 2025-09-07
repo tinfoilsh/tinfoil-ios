@@ -125,27 +125,14 @@ class ProfileManager: ObservableObject {
         if let language = profile.language {
             self.language = language
         }
-        if let nickname = profile.nickname {
-            self.nickname = nickname
-        }
-        if let profession = profile.profession {
-            self.profession = profession
-        }
-        if let traits = profile.traits {
-            self.traits = traits
-        }
-        if let additionalContext = profile.additionalContext {
-            self.additionalContext = additionalContext
-        }
-        if let isUsingPersonalization = profile.isUsingPersonalization {
-            self.isUsingPersonalization = isUsingPersonalization
-        }
-        if let isUsingCustomPrompt = profile.isUsingCustomPrompt {
-            self.isUsingCustomPrompt = isUsingCustomPrompt
-        }
-        if let customSystemPrompt = profile.customSystemPrompt {
-            self.customSystemPrompt = customSystemPrompt
-        }
+        // For personalization fields, treat nil as cleared/empty to ensure cross-device erasure propagates
+        self.nickname = profile.nickname ?? ""
+        self.profession = profile.profession ?? ""
+        self.traits = profile.traits ?? []
+        self.additionalContext = profile.additionalContext ?? ""
+        self.isUsingPersonalization = profile.isUsingPersonalization ?? false
+        self.isUsingCustomPrompt = profile.isUsingCustomPrompt ?? false
+        self.customSystemPrompt = profile.customSystemPrompt ?? ""
         if let version = profile.version {
             self.lastSyncedVersion = version
         }
@@ -246,10 +233,10 @@ class ProfileManager: ObservableObject {
     
     /// Setup automatic sync timer
     private func setupAutoSync() {
-        // Sync every 30 seconds if there are pending changes
+        // Periodically perform full sync to push pending local changes once authenticated
         syncTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                await self?.syncFromCloud()
+                await self?.performFullSync()
             }
         }
     }
@@ -320,9 +307,8 @@ class ProfileManager: ObservableObject {
     
     /// Sync profile to cloud
     func syncToCloud() async {
-        // Skip if not authenticated
+        // Skip if not authenticated but keep pending flag so we can retry later
         guard await profileSync.isAuthenticated() else {
-            hasPendingChanges = false
             return
         }
         
