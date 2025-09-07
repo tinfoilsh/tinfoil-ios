@@ -176,6 +176,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(Clerk.self) private var clerk
     @ObservedObject private var settings = SettingsManager.shared
+    @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAuthView = false
     @State private var showDeleteConfirmation = false
@@ -454,7 +455,7 @@ struct SettingsView: View {
                                             .foregroundColor(.secondary)
                                     }
                                     Spacer()
-                                    if ProfileManager.shared.isUsingCustomPrompt || settings.isUsingCustomPrompt {
+                                    if profileManager.isUsingCustomPrompt {
                                         Image(systemName: "checkmark.circle.fill")
                                             .font(.caption)
                                             .foregroundColor(.green)
@@ -473,7 +474,7 @@ struct SettingsView: View {
                                             .foregroundColor(.secondary)
                                     }
                                     Spacer()
-                                    if ProfileManager.shared.isUsingPersonalization || settings.isPersonalizationEnabled {
+                                    if profileManager.isUsingPersonalization || settings.isPersonalizationEnabled {
                                         Image(systemName: "checkmark.circle.fill")
                                             .font(.caption)
                                             .foregroundColor(.green)
@@ -595,13 +596,9 @@ struct SettingsView: View {
                         settings.maxMessages = profileManager.maxPromptMessages
                     }
                     
-                    // Update custom prompt settings
-                    if profileManager.isUsingCustomPrompt {
-                        settings.isUsingCustomPrompt = profileManager.isUsingCustomPrompt
-                        if !profileManager.customSystemPrompt.isEmpty {
-                            settings.customSystemPrompt = profileManager.customSystemPrompt
-                        }
-                    }
+                    // Update custom prompt settings from single source of truth (ProfileManager)
+                    settings.isUsingCustomPrompt = profileManager.isUsingCustomPrompt
+                    settings.customSystemPrompt = profileManager.customSystemPrompt
                 }
             }
         }

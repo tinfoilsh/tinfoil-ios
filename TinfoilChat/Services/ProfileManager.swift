@@ -40,7 +40,6 @@ class ProfileManager: ObservableObject {
     private var syncTimer: Timer?
     private var syncDebounceTimer: Timer?
     private var lastSyncedVersion: Int = 0
-    private var hasPendingChanges: Bool = false
     private var lastSyncedProfile: ProfileData?
     private var cancellables = Set<AnyCancellable>()
     private var isApplyingProfile: Bool = false  // Flag to prevent observer loops
@@ -71,6 +70,8 @@ class ProfileManager: ObservableObject {
         if let version = profile.version {
             lastSyncedVersion = version
         }
+        // Treat the loaded profile as the last synced baseline
+        lastSyncedProfile = profile
     }
     
     /// Save profile to Keychain
@@ -83,14 +84,13 @@ class ProfileManager: ObservableObject {
         
         keychainHelper.save(data, for: keychainKey, service: keychainService)
         
-        // Only mark pending changes if this is a user-initiated change
-        // (not when saving from cloud sync)
-        if !isSyncing {
-            // Mark that we have pending changes for cloud sync
-            hasPendingChanges = true
-            
-            // Debounce cloud sync
-            debounceCloudSync()
+        // For user-initiated changes, schedule a debounced cloud sync
+        if !isApplyingProfile {
+            if !isSyncing {
+                debounceCloudSync()
+            } else {
+                // If a sync is running, we'll re-check after it finishes
+            }
         }
     }
     
@@ -262,13 +262,12 @@ class ProfileManager: ObservableObject {
             if let cloudProfile = try await profileSync.fetchProfile() {
                 let cloudVersion = cloudProfile.version ?? 0
                 
-                // Check if cloud profile is newer
-                if cloudVersion > lastSyncedVersion {
-                    // Cloud has newer version - apply it even if we have pending changes
-                    isSyncing = true  // Mark that we're syncing to prevent triggering upload
+                // Simplified rule: if cloud version >= local, apply it
+                if cloudVersion >= lastSyncedVersion {
+                    isSyncing = true
                     applyProfile(cloudProfile)
                     
-                    // Save to keychain without triggering sync
+                    // Save to keychain without triggering local change observers
                     let data = try? JSONEncoder().encode(cloudProfile)
                     if let data = data {
                         keychainHelper.save(data, for: keychainKey, service: keychainService)
@@ -280,24 +279,8 @@ class ProfileManager: ObservableObject {
                     syncError = nil
                     isSyncing = false
                     
-                    // Clear pending changes flag since cloud version is newer
+                    // Cloud took precedence; local pending changes no longer relevant
                     hasPendingChanges = false
-                } else if !hasPendingChanges && hasProfileChanged(cloudProfile, lastSyncedProfile) {
-                    // No local changes and cloud is different - apply cloud version
-                    isSyncing = true  // Mark that we're syncing to prevent triggering upload
-                    applyProfile(cloudProfile)
-                    
-                    // Save to keychain without triggering sync
-                    let data = try? JSONEncoder().encode(cloudProfile)
-                    if let data = data {
-                        keychainHelper.save(data, for: keychainKey, service: keychainService)
-                    }
-                    
-                    lastSyncedVersion = cloudVersion
-                    lastSyncedProfile = cloudProfile
-                    lastSyncDate = Date()
-                    syncError = nil
-                    isSyncing = false
                 }
             }
         } catch {
@@ -312,40 +295,44 @@ class ProfileManager: ObservableObject {
             return
         }
         
-        // Skip if no changes
-        guard hasPendingChanges else {
+        // Avoid re-entrancy
+        guard !isSyncing else {
             return
         }
         
         let profile = createProfileData()
         
-        // Check if profile actually changed
+        // Only push if there is a real change vs last synced baseline
         guard hasProfileChanged(profile, lastSyncedProfile) else {
-            hasPendingChanges = false
             return
         }
         
         isSyncing = true
+        let syncStartedAt = Date()
         
         do {
             let result = try await profileSync.saveProfile(profile)
             if result.success {
+                // Server returns the authoritative version; always adopt it
                 if let version = result.version {
                     lastSyncedVersion = version
+                } else {
+                    // Fallback: ensure we at least bump our local version
+                    lastSyncedVersion = (profile.version ?? lastSyncedVersion) + 1
                 }
                 lastSyncedProfile = profile
                 lastSyncDate = Date()
-                hasPendingChanges = false
                 syncError = nil
+                
+                // If local state changed during the sync, schedule another upload
+                let currentAfter = createProfileData()
+                if hasProfileChanged(currentAfter, lastSyncedProfile) {
+                    debounceCloudSync()
+                }
             }
         } catch {
             syncError = error.localizedDescription
-            // Keep pending changes flag on error
-            // Clear it after 10 seconds to prevent permanent blocking
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 10_000_000_000)
-                self.hasPendingChanges = false
-            }
+            // On error, allow future changes to trigger another attempt via debounce
         }
         
         isSyncing = false
@@ -356,10 +343,8 @@ class ProfileManager: ObservableObject {
         // First pull from cloud
         await syncFromCloud()
         
-        // Then push any local changes
-        if hasPendingChanges {
-            await syncToCloud()
-        }
+        // Then push any local changes (method will no-op if nothing changed)
+        await syncToCloud()
     }
     
     /// Retry decryption with new encryption key
@@ -455,7 +440,6 @@ class ProfileManager: ObservableObject {
         // Reset sync state
         lastSyncedVersion = 0
         lastSyncedProfile = nil
-        hasPendingChanges = false
         syncError = nil
         
         // Clear cloud cache

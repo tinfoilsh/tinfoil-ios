@@ -123,6 +123,7 @@ struct PersonalizationView: View {
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.colorScheme) private var colorScheme
+    @State private var isSaving: Bool = false
     
     var body: some View {
         ScrollView {
@@ -141,6 +142,24 @@ struct PersonalizationView: View {
         .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
         .navigationTitle("Personalization")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Save") {
+                    // Align flags and push to cloud
+                    isSaving = true
+                    let shouldEnable = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
+                    profileManager.isUsingPersonalization = shouldEnable
+                    settings.isPersonalizationEnabled = shouldEnable
+                    Task {
+                        await profileManager.syncToCloud()
+                        isSaving = false
+                        dismiss()
+                    }
+                }
+                .fontWeight(.semibold)
+                .disabled(isSaving)
+            }
+        }
         .onTapGesture {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
@@ -150,7 +169,6 @@ struct PersonalizationView: View {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
         )
-        .accentColor(Color.accentPrimary)
         .onAppear {
             // Trigger a sync from cloud when view appears
             Task {
