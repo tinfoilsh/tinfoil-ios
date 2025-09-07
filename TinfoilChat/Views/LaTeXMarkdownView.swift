@@ -38,8 +38,11 @@ struct LaTeXMarkdownView: View {
         var currentPosition = content.startIndex
         
         // Regular expressions for LaTeX patterns
-        let displayPattern = try? NSRegularExpression(pattern: "\\$\\$(.+?)\\$\\$", options: [.dotMatchesLineSeparators])
-        let inlinePattern = try? NSRegularExpression(pattern: "(?<!\\$)\\$(?!\\$)(.+?)(?<!\\$)\\$(?!\\$)", options: [])
+        // Supported delimiters:
+        //  - \\[, \\]          (display)
+        //  - \\(, \\)          (inline)
+        let displayPatternBrackets = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators])
+        let inlinePatternParens = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: [])
         
         let nsContent = content as NSString
         let fullRange = NSRange(location: 0, length: nsContent.length)
@@ -47,19 +50,18 @@ struct LaTeXMarkdownView: View {
         // Find all LaTeX expressions
         var latexRanges: [(range: NSRange, isDisplay: Bool)] = []
         
-        // Find display math first ($$...$$)
-        if let displayPattern = displayPattern {
-            let displayMatches = displayPattern.matches(in: content, options: [], range: fullRange)
+        // Find display math first
+        if let displayPatternBrackets = displayPatternBrackets {
+            let displayMatches = displayPatternBrackets.matches(in: content, options: [], range: fullRange)
             for match in displayMatches {
                 latexRanges.append((range: match.range, isDisplay: true))
             }
         }
         
-        // Find inline math ($...$)
-        if let inlinePattern = inlinePattern {
-            let inlineMatches = inlinePattern.matches(in: content, options: [], range: fullRange)
+        // Find inline math
+        if let inlinePatternParens = inlinePatternParens {
+            let inlineMatches = inlinePatternParens.matches(in: content, options: [], range: fullRange)
             for match in inlineMatches {
-                // Skip if this range overlaps with a display math range
                 let overlaps = latexRanges.contains { displayRange in
                     NSLocationInRange(match.range.location, displayRange.range) ||
                     NSLocationInRange(displayRange.range.location, match.range)
@@ -100,11 +102,19 @@ struct LaTeXMarkdownView: View {
                 let latex: String
                 
                 if isDisplay {
-                    // Remove $$ from both ends
-                    latex = String(fullMatch.dropFirst(2).dropLast(2))
+                    // Remove delimiters for display: \[...\]
+                    if fullMatch.hasPrefix("\\[") && fullMatch.hasSuffix("\\]") {
+                        latex = String(fullMatch.dropFirst(2).dropLast(2))
+                    } else {
+                        latex = fullMatch
+                    }
                 } else {
-                    // Remove $ from both ends
-                    latex = String(fullMatch.dropFirst(1).dropLast(1))
+                    // Remove delimiters for inline: \(...\)
+                    if fullMatch.hasPrefix("\\(") && fullMatch.hasSuffix("\\)") {
+                        latex = String(fullMatch.dropFirst(2).dropLast(2))
+                    } else {
+                        latex = fullMatch
+                    }
                 }
                 
                 segments.append(ContentSegment(
