@@ -61,6 +61,9 @@ struct MessageView: View {
                         if !message.content.isEmpty {
                             LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .transaction { transaction in
+                                    transaction.animation = nil
+                                }
                         }
                     }
                 }
@@ -81,6 +84,9 @@ struct MessageView: View {
                         if !parsed.remainderText.isEmpty {
                             LaTeXMarkdownView(content: parsed.remainderText, isDarkMode: isDarkMode)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .transaction { transaction in
+                                    transaction.animation = nil
+                                }
                         }
                     }
                 }
@@ -389,9 +395,8 @@ struct CollapsibleThinkingBox: View {
         VStack(alignment: .leading, spacing: 0) {
             // Header is always visible
             Button(action: {
-                withAnimation(.spring(response: 0.2, dampingFraction: 0.9)) {
-                    isCollapsed.toggle()
-                }
+                // Toggle instantly without animations
+                isCollapsed.toggle()
             }) {
                 HStack {
                     Image(systemName: "brain.head.profile")
@@ -427,22 +432,26 @@ struct CollapsibleThinkingBox: View {
             .buttonStyle(PlainButtonStyle())
             .frame(maxWidth: .infinity)
             
-            // Content area with divider - always in the view hierarchy but height is zero when collapsed
-            VStack(alignment: .leading, spacing: 0) {
-                Divider()
-                
-                // Simple text view for thoughts
-                Text(thinkingText)
-                    .font(.system(size: 14))
-                    .foregroundColor(isDarkMode ? .white.opacity(0.9) : Color.black.opacity(0.8))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+            // Content area with divider - only inserted when expanded for smoother layout
+            if !isCollapsed {
+                VStack(alignment: .leading, spacing: 0) {
+                    Divider()
+                    
+                    // Simple text view for thoughts
+                    Text(thinkingText)
+                        .font(.system(size: 14))
+                        .foregroundColor(isDarkMode ? .white.opacity(0.9) : Color.black.opacity(0.8))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                        .transaction { transaction in
+                            // Prevent text content changes from animating
+                            transaction.animation = nil
+                        }
+                }
+                .transition(.identity)
             }
-            .frame(height: isCollapsed ? 0 : nil)
-            .opacity(isCollapsed ? 0 : 1)
-            .clipped()
         }
         .background(Color.gray.opacity(0.1))
         .cornerRadius(8)
@@ -450,10 +459,8 @@ struct CollapsibleThinkingBox: View {
         .padding(.vertical, 4)
         .clipped()
         .onAppear {
-            withAnimation(.spring()) {
-                // Initialize collapsed state - always start collapsed
-                isCollapsed = true
-            }
+            // Initialize collapsed state - always start collapsed (no animation)
+            isCollapsed = true
         }
         // Set preference when thinking box expansion state changes
         .preference(key: ThinkingBoxExpansionPreferenceKey.self, value: !isCollapsed ? messageId : nil)
