@@ -137,6 +137,11 @@ struct CloudSyncSettingsView: View {
             UINavigationBar.appearance().standardAppearance = appearance
             UINavigationBar.appearance().compactAppearance = appearance
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
+
+            // Kick off a quick sync so Last Sync is fresh when opening this screen
+            Task {
+                await viewModel.performFullSync()
+            }
         }
         .onDisappear {
             // Restore dark navigation bar for main views

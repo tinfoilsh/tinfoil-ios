@@ -354,6 +354,10 @@ class ChatViewModel: ObservableObject {
                 }
             }
         }
+        // Ensure the timer fires during UI interactions (scrolling, modal sheets)
+        if let timer = autoSyncTimer {
+            RunLoop.main.add(timer, forMode: .common)
+        }
     }
     
     /// Setup observers for app lifecycle events

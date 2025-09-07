@@ -445,7 +445,8 @@ class CloudSyncService: ObservableObject {
     /// Sync all chats (upload local changes, download remote changes)
     func syncAllChats() async -> SyncResult {
         guard !isSyncing else {
-            return SyncResult(errors: ["Sync already in progress"])
+            // Already syncing; treat as a no-op without surfacing an error
+            return SyncResult()
         }
         
         isSyncing = true
