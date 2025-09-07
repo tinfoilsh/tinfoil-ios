@@ -39,10 +39,13 @@ class ProfileManager: ObservableObject {
     private let profileSync = ProfileSyncService.shared
     private var syncTimer: Timer?
     private var syncDebounceTimer: Timer?
+    private var syncLoopTask: Task<Void, Never>?
     private var lastSyncedVersion: Int = 0
     private var lastSyncedProfile: ProfileData?
     private var cancellables = Set<AnyCancellable>()
     private var isApplyingProfile: Bool = false  // Flag to prevent observer loops
+    private var isPulling: Bool = false
+    private var isPushing: Bool = false
     
     // Keychain keys
     private let keychainKey = "userProfile"
@@ -52,6 +55,10 @@ class ProfileManager: ObservableObject {
         loadFromKeychain()
         setupChangeObservers()
         setupAutoSync()
+        // Trigger an initial sync shortly after initialization
+        Task { @MainActor in
+            await performFullSync()
+        }
     }
     
     // MARK: - Local Storage
@@ -233,10 +240,15 @@ class ProfileManager: ObservableObject {
     
     /// Setup automatic sync timer
     private func setupAutoSync() {
-        // Periodically perform full sync to push pending local changes once authenticated
-        syncTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                await self?.performFullSync()
+        // Cancel any existing timers/tasks
+        syncTimer?.invalidate()
+        syncLoopTask?.cancel()
+        
+        // Use an async loop to avoid RunLoop mode issues
+        syncLoopTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                await self.performFullSync()
             }
         }
     }
@@ -244,11 +256,17 @@ class ProfileManager: ObservableObject {
     /// Debounce cloud sync after local changes
     private func debounceCloudSync() {
         syncDebounceTimer?.invalidate()
-        syncDebounceTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+        let timer = Timer(timeInterval: 2.0, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 await self?.syncToCloud()
             }
         }
+        syncDebounceTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func updateSyncingState() {
+        isSyncing = isPulling || isPushing
     }
     
     /// Sync profile from cloud
@@ -257,14 +275,17 @@ class ProfileManager: ObservableObject {
         guard await profileSync.isAuthenticated() else {
             return
         }
+        // Prevent overlapping pulls
+        guard !isPulling else { return }
+        isPulling = true
+        updateSyncingState()
         
         do {
             if let cloudProfile = try await profileSync.fetchProfile() {
                 let cloudVersion = cloudProfile.version ?? 0
                 
-                // Simplified rule: if cloud version >= local, apply it
-                if cloudVersion >= lastSyncedVersion {
-                    isSyncing = true
+                // Apply if cloud is newer by version OR content differs from our last-synced snapshot
+                if cloudVersion > lastSyncedVersion || hasProfileChanged(cloudProfile, lastSyncedProfile) {
                     applyProfile(cloudProfile)
                     
                     // Save to keychain without triggering local change observers
@@ -277,15 +298,14 @@ class ProfileManager: ObservableObject {
                     lastSyncedProfile = cloudProfile
                     lastSyncDate = Date()
                     syncError = nil
-                    isSyncing = false
-                    
-                    // Cloud took precedence; local pending changes no longer relevant
-                    hasPendingChanges = false
                 }
             }
         } catch {
             syncError = error.localizedDescription
         }
+        
+        isPulling = false
+        updateSyncingState()
     }
     
     /// Sync profile to cloud
@@ -295,10 +315,8 @@ class ProfileManager: ObservableObject {
             return
         }
         
-        // Avoid re-entrancy
-        guard !isSyncing else {
-            return
-        }
+        // Avoid overlapping uploads
+        guard !isPushing else { return }
         
         let profile = createProfileData()
         
@@ -307,8 +325,8 @@ class ProfileManager: ObservableObject {
             return
         }
         
-        isSyncing = true
-        let syncStartedAt = Date()
+        isPushing = true
+        updateSyncingState()
         
         do {
             let result = try await profileSync.saveProfile(profile)
@@ -335,7 +353,8 @@ class ProfileManager: ObservableObject {
             // On error, allow future changes to trigger another attempt via debounce
         }
         
-        isSyncing = false
+        isPushing = false
+        updateSyncingState()
     }
     
     /// Perform immediate sync (both directions)

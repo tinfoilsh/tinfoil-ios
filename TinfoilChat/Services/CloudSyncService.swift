@@ -82,13 +82,13 @@ class CloudSyncService: ObservableObject {
                 
                 // Get fresh token from session
                 if let session = Clerk.shared.session {
-                    // Always try to get a fresh token first (this refreshes if needed)
-                    do {
-                        if let token = try await session.getToken() {
-                            return token.jwt
-                        }
-                    } catch {
-                        // Token refresh failed - don't fall back to expired token
+                    // Try to get a fresh token first (refresh if needed)
+                    if let token = try? await session.getToken() {
+                        return token.jwt
+                    }
+                    // Fallback to last active token if refresh fails
+                    if let tokenResource = session.lastActiveToken {
+                        return tokenResource.jwt
                     }
                 }
                 

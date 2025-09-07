@@ -64,8 +64,13 @@ struct TinfoilChatApp: App {
                                     // Initialize authentication state
                                     await authManager.initializeAuthState()
                                     
+                                    // Initialize cloud sync services (sets robust token getter for profile sync)
+                                    try? await CloudSyncService.shared.initialize()
+                                    
                                     // Initialize ProfileManager to start auto-sync
                                     _ = ProfileManager.shared
+                                    // Kick off an initial profile sync now that auth and token getter are ready
+                                    await ProfileManager.shared.performFullSync()
                                     
                                     // Add observer for Clerk auth state changes
                                     NotificationCenter.default.addObserver(

@@ -188,6 +188,7 @@ struct SettingsView: View {
     @State private var showLanguagePicker = false
     @State private var showSignOutConfirmation = false
     @State private var showPremiumModal = false
+    @State private var profileSyncTask: Task<Void, Never>? = nil
     
     var shouldOpenCloudSync: Bool = false
     
@@ -601,8 +602,20 @@ struct SettingsView: View {
                     settings.customSystemPrompt = profileManager.customSystemPrompt
                 }
             }
+            
+            // Start a lightweight periodic pull while Settings is visible
+            profileSyncTask?.cancel()
+            profileSyncTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    await ProfileManager.shared.syncFromCloud()
+                }
+            }
         }
         .onDisappear {
+            // Stop the view-scoped profile sync loop
+            profileSyncTask?.cancel()
+            profileSyncTask = nil
             // Restore dark navigation bar for main chat view
             let appearance = UINavigationBarAppearance()
             appearance.configureWithOpaqueBackground()
@@ -612,6 +625,27 @@ struct SettingsView: View {
             UINavigationBar.appearance().standardAppearance = appearance
             UINavigationBar.appearance().compactAppearance = appearance
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        }
+        // Keep UI settings in sync with ProfileManager when remote changes arrive
+        .onReceive(ProfileManager.shared.$maxPromptMessages) { newValue in
+            if newValue > 0 && settings.maxMessages != newValue {
+                settings.maxMessages = newValue
+            }
+        }
+        .onReceive(ProfileManager.shared.$language) { newValue in
+            if !newValue.isEmpty && newValue != "English" && settings.selectedLanguage != newValue {
+                settings.selectedLanguage = newValue
+            }
+        }
+        .onReceive(ProfileManager.shared.$isUsingCustomPrompt) { newValue in
+            if settings.isUsingCustomPrompt != newValue {
+                settings.isUsingCustomPrompt = newValue
+            }
+        }
+        .onReceive(ProfileManager.shared.$customSystemPrompt) { newValue in
+            if settings.customSystemPrompt != newValue {
+                settings.customSystemPrompt = newValue
+            }
         }
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()
@@ -851,6 +885,18 @@ struct CustomSystemPromptView: View {
         AppConfig.shared.systemPrompt
     }
     
+    // Helper to strip <system> tags for editing
+    private func stripSystemTags(_ prompt: String) -> String {
+        var result = prompt
+        if result.hasPrefix("<system>") {
+            result = String(result.dropFirst(8)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if result.hasSuffix("</system>") {
+            result = String(result.dropLast(9)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return result
+    }
+    
     var body: some View {
         Form {
             Section {
@@ -858,6 +904,22 @@ struct CustomSystemPromptView: View {
                     .tint(Color.green)
                     .onChange(of: isUsingCustomPrompt) { _, newValue in
                         profileManager.isUsingCustomPrompt = newValue
+                        if newValue {
+                            // Ensure there's a prompt to propagate across devices
+                            var currentEditor = editingPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if currentEditor.isEmpty {
+                                // Seed editor with default prompt (without tags)
+                                currentEditor = stripSystemTags(defaultSystemPrompt)
+                                editingPrompt = currentEditor
+                            }
+                            if profileManager.customSystemPrompt.isEmpty {
+                                // Save with system tags so it syncs as non-empty content
+                                var promptToSave = currentEditor
+                                if !promptToSave.hasPrefix("<system>") { promptToSave = "<system>\n\(promptToSave)" }
+                                if !promptToSave.hasSuffix("</system>") { promptToSave += "\n</system>" }
+                                profileManager.customSystemPrompt = promptToSave
+                            }
+                        }
                     }
             } header: {
                 Text("Status")
@@ -930,22 +992,6 @@ struct CustomSystemPromptView: View {
             }
         }
         .onAppear {
-            // Helper function to strip system tags
-            func stripSystemTags(_ prompt: String) -> String {
-                var result = prompt
-                // Remove opening <system> tag and any whitespace after it
-                if result.hasPrefix("<system>") {
-                    result = String(result.dropFirst(8))
-                    result = result.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                // Remove closing </system> tag and any whitespace before it
-                if result.hasSuffix("</system>") {
-                    result = String(result.dropLast(9))
-                    result = result.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                return result
-            }
-            
             // Load from ProfileManager first, then fall back to SettingsManager
             if !profileManager.customSystemPrompt.isEmpty {
                 editingPrompt = stripSystemTags(profileManager.customSystemPrompt)
