@@ -16,6 +16,7 @@ struct CloudSyncSettingsView: View {
     
     @State private var showKeyInput: Bool = false
     @State private var copiedToClipboard: Bool = false
+    @State private var originalAppearance: UINavigationBarAppearance?
     
     var body: some View {
         List {
@@ -130,6 +131,9 @@ struct CloudSyncSettingsView: View {
         .navigationTitle("Cloud Sync Settings")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            // Store original appearance to restore later
+            originalAppearance = UINavigationBar.appearance().standardAppearance
+            
             // Reset navigation bar to use system colors for settings screens
             let appearance = UINavigationBarAppearance()
             appearance.configureWithDefaultBackground()
@@ -137,6 +141,14 @@ struct CloudSyncSettingsView: View {
             UINavigationBar.appearance().standardAppearance = appearance
             UINavigationBar.appearance().compactAppearance = appearance
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        }
+        .onDisappear {
+            // Restore original appearance when leaving this view
+            if let originalAppearance = originalAppearance {
+                UINavigationBar.appearance().standardAppearance = originalAppearance
+                UINavigationBar.appearance().compactAppearance = originalAppearance
+                UINavigationBar.appearance().scrollEdgeAppearance = originalAppearance
+            }
         }
             .sheet(isPresented: $showKeyInput) {
                 EncryptionKeyInputView(isPresented: $showKeyInput) { importedKey in
