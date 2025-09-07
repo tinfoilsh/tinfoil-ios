@@ -633,7 +633,7 @@ struct SettingsView: View {
             }
         }
         .onReceive(ProfileManager.shared.$language) { newValue in
-            if !newValue.isEmpty && newValue != "English" && settings.selectedLanguage != newValue {
+            if !newValue.isEmpty && settings.selectedLanguage != newValue {
                 settings.selectedLanguage = newValue
             }
         }
