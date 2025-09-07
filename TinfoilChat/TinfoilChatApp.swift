@@ -65,7 +65,11 @@ struct TinfoilChatApp: App {
                                     await authManager.initializeAuthState()
                                     
                                     // Initialize cloud sync services (sets robust token getter for profile sync)
-                                    try? await CloudSyncService.shared.initialize()
+                                    do {
+                                        try await CloudSyncService.shared.initialize()
+                                    } catch {
+                                        print("Failed to initialize CloudSyncService: \(error)")
+                                    }
                                     
                                     // Initialize ProfileManager to start auto-sync
                                     _ = ProfileManager.shared
