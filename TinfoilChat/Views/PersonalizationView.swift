@@ -180,9 +180,10 @@ struct PersonalizationView: View {
                             .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                     )
                     .onChange(of: profileManager.nickname) { _, newValue in
-                        profileManager.isUsingPersonalization = !newValue.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
+                        let shouldEnable = !newValue.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
+                        profileManager.isUsingPersonalization = shouldEnable
                         settings.nickname = newValue
-                        settings.isPersonalizationEnabled = true
+                        settings.isPersonalizationEnabled = shouldEnable
                     }
             }
             .padding(20)
@@ -209,9 +210,10 @@ struct PersonalizationView: View {
                             .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                     )
                     .onChange(of: profileManager.profession) { _, newValue in
-                        profileManager.isUsingPersonalization = !profileManager.nickname.isEmpty || !newValue.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
+                        let shouldEnable = !profileManager.nickname.isEmpty || !newValue.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
+                        profileManager.isUsingPersonalization = shouldEnable
                         settings.profession = newValue
-                        settings.isPersonalizationEnabled = true
+                        settings.isPersonalizationEnabled = shouldEnable
                     }
             }
             .padding(20)
@@ -231,9 +233,10 @@ struct PersonalizationView: View {
                     selectedTraits: $profileManager.traits
                 )
                 .onChange(of: profileManager.traits) { _, newValue in
-                    profileManager.isUsingPersonalization = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !newValue.isEmpty || !profileManager.additionalContext.isEmpty
+                    let shouldEnable = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !newValue.isEmpty || !profileManager.additionalContext.isEmpty
+                    profileManager.isUsingPersonalization = shouldEnable
                     settings.selectedTraits = newValue
-                    settings.isPersonalizationEnabled = true
+                    settings.isPersonalizationEnabled = shouldEnable
                 }
             }
             .padding(20)
@@ -261,9 +264,10 @@ struct PersonalizationView: View {
                     )
                     .lineLimit(3...6)
                     .onChange(of: profileManager.additionalContext) { _, newValue in
-                        profileManager.isUsingPersonalization = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !newValue.isEmpty
+                        let shouldEnable = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !newValue.isEmpty
+                        profileManager.isUsingPersonalization = shouldEnable
                         settings.additionalContext = newValue
-                        settings.isPersonalizationEnabled = true
+                        settings.isPersonalizationEnabled = shouldEnable
                     }
             }
             .padding(20)
@@ -283,6 +287,11 @@ struct PersonalizationView: View {
                 
                 // Reset SettingsManager
                 settings.resetPersonalization()
+                
+                // Immediately push changes to cloud to avoid being overwritten by an incoming pull
+                Task {
+                    await profileManager.syncToCloud()
+                }
             }) {
                 Text("Reset All")
                     .foregroundColor(.white)
