@@ -188,7 +188,6 @@ struct SettingsView: View {
     @State private var showLanguagePicker = false
     @State private var showSignOutConfirmation = false
     @State private var showPremiumModal = false
-    @State private var profileSyncTask: Task<Void, Never>? = nil
     
     var shouldOpenCloudSync: Bool = false
     
@@ -602,20 +601,8 @@ struct SettingsView: View {
                     settings.customSystemPrompt = profileManager.customSystemPrompt
                 }
             }
-            
-            // Start a lightweight periodic pull while Settings is visible
-            profileSyncTask?.cancel()
-            profileSyncTask = Task { @MainActor in
-                while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 5_000_000_000)
-                    await ProfileManager.shared.syncFromCloud()
-                }
-            }
         }
         .onDisappear {
-            // Stop the view-scoped profile sync loop
-            profileSyncTask?.cancel()
-            profileSyncTask = nil
             // Restore dark navigation bar for main chat view
             let appearance = UINavigationBarAppearance()
             appearance.configureWithOpaqueBackground()

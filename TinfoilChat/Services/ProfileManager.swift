@@ -247,7 +247,7 @@ class ProfileManager: ObservableObject {
         // Use an async loop to avoid RunLoop mode issues
         syncLoopTask = Task { @MainActor in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
                 await self.performFullSync()
             }
         }
