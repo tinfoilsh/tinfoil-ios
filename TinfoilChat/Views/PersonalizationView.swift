@@ -150,7 +150,7 @@ struct PersonalizationView: View {
                     let shouldEnable = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
                     profileManager.isUsingPersonalization = shouldEnable
                     settings.isPersonalizationEnabled = shouldEnable
-                    Task {
+                    Task { @MainActor in
                         await profileManager.syncToCloud()
                         isSaving = false
                         dismiss()

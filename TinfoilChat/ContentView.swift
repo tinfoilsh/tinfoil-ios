@@ -122,7 +122,9 @@ struct ContentView: View {
                     Task {
                         // Sync chats
                         await chatViewModel?.performFullSync()
-                        lastSyncTime = Date()
+                        await MainActor.run {
+                            lastSyncTime = Date()
+                        }
                     }
                 }
             }
