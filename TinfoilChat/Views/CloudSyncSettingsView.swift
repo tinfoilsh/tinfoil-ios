@@ -138,6 +138,17 @@ struct CloudSyncSettingsView: View {
             UINavigationBar.appearance().compactAppearance = appearance
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
+        .onDisappear {
+            // Restore dark navigation bar for main views
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = UIColor(Color(hex: "#111827"))
+            appearance.shadowColor = .clear
+            
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        }
             .sheet(isPresented: $showKeyInput) {
                 EncryptionKeyInputView(isPresented: $showKeyInput) { importedKey in
                     Task {
