@@ -13,7 +13,7 @@ import AVFoundation
 struct ContentView: View {
     @Environment(Clerk.self) private var clerk
     @EnvironmentObject private var authManager: AuthManager
-    @State private var chatViewModel: TinfoilChat.ChatViewModel?
+    @StateObject private var chatViewModel = TinfoilChat.ChatViewModel()
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.scenePhase) var scenePhase
     @State private var showEncryptionAlert = false
@@ -37,40 +37,26 @@ struct ContentView: View {
                             .scaleEffect(1.2)
                     }
                 }
-            } else if let chatViewModel = chatViewModel {
+            } else {
                 // Use the ChatContainer from ChatView.swift
                 ChatContainer()
                     .environmentObject(chatViewModel)
             }
         }
         .onAppear {
-            // Check for encryption key on first launch
+            // Wire AuthManager to ChatViewModel early so migration prompt state is available
+            chatViewModel.authManager = authManager
+            authManager.setChatViewModel(chatViewModel)
+
+            // Initialize encryption with existing key only (no auto-creation)
             Task {
-                // Check if we have an encryption key
-                let hasKey = EncryptionService.shared.hasEncryptionKey()
-                
+                if EncryptionService.shared.hasEncryptionKey() {
+                    _ = try? await EncryptionService.shared.initialize()
+                }
+
                 await MainActor.run {
-                    // Only show encryption setup for authenticated users without a key
-                    if !hasKey && authManager.isAuthenticated {
-                        // No key exists and user is logged in, show alert
-                        showEncryptionAlert = true
-                    } else if hasKey {
-                        // Initialize encryption with existing key if it exists
-                        Task {
-                            _ = try? await EncryptionService.shared.initialize()
-                        }
-                    }
-                    
-                    // Create ChatViewModel with authManager
-                    if chatViewModel == nil {
-                        let vm = TinfoilChat.ChatViewModel(authManager: authManager)
-                        chatViewModel = vm
-                        // Set up bidirectional reference
-                        authManager.setChatViewModel(vm)
-                    }
-                    
                     // Update available models based on current auth status
-                    chatViewModel?.updateModelBasedOnAuthStatus(
+                    chatViewModel.updateModelBasedOnAuthStatus(
                         isAuthenticated: authManager.isAuthenticated,
                         hasActiveSubscription: authManager.hasActiveSubscription
                     )
@@ -89,11 +75,29 @@ struct ContentView: View {
         } message: {
             Text("Your chats are encrypted end-to-end and backed up. Choose how to set up your encryption key.")
         }
+        // Migration prompt for legacy local chats - use sheet to avoid dismissal during transitions/keyboard
+        .sheet(isPresented: Binding(
+            get: { chatViewModel.showMigrationPrompt },
+            set: { newValue in chatViewModel.showMigrationPrompt = newValue }
+        )) {
+            MigrationPromptSheet(
+                onDelete: { chatViewModel.confirmDeleteLegacyChats() },
+                onSync: {
+                    Task { await chatViewModel.confirmMigrateLegacyChats() }
+                }
+            )
+            .interactiveDismissDisabled(true)
+        }
+        // After migration decision, show Import Encryption Key view if needed
         .sheet(isPresented: $showKeyInputModal) {
             EncryptionKeyInputView(isPresented: $showKeyInputModal) { importedKey in
                 Task {
                     do {
                         try await EncryptionService.shared.setKey(importedKey)
+                        // Continue sign-in/sync flow after a successful import
+                        await MainActor.run {
+                            chatViewModel.handleSignIn()
+                        }
                     } catch {
                         await MainActor.run {
                             let alert = UIAlertController(
@@ -112,6 +116,18 @@ struct ContentView: View {
                 }
             }
         }
+        // Relay view model's request to show key import view
+        .onChange(of: chatViewModel.shouldShowKeyImport) { _, shouldShow in
+            if shouldShow {
+                // Dismiss keyboard then present key import sheet
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                showKeyInputModal = true
+                // Reset the trigger on the next runloop to avoid re-entry
+                DispatchQueue.main.async {
+                    chatViewModel.shouldShowKeyImport = false
+                }
+            }
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active && authManager.isAuthenticated {
                 // Sync when app becomes active if authenticated
@@ -121,7 +137,7 @@ struct ContentView: View {
                 if shouldSync {
                     Task {
                         // Sync chats
-                        await chatViewModel?.performFullSync()
+                        await chatViewModel.performFullSync()
                         await MainActor.run {
                             lastSyncTime = Date()
                         }
@@ -131,25 +147,49 @@ struct ContentView: View {
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
             // Update available models when auth status changes
-            chatViewModel?.updateModelBasedOnAuthStatus(
+            chatViewModel.updateModelBasedOnAuthStatus(
                 isAuthenticated: isAuthenticated,
                 hasActiveSubscription: authManager.hasActiveSubscription
             )
             
-            // Check for encryption key when user logs in
+            // After auth becomes true, present encryption prompt only if
+            // a) no key exists and b) we're not currently showing a migration prompt
             if isAuthenticated && !EncryptionService.shared.hasEncryptionKey() {
-                showEncryptionAlert = true
+                let shouldShow = !(chatViewModel.showMigrationPrompt)
+                if shouldShow {
+                    showEncryptionAlert = true
+                }
             }
             
             // Trigger initial sync when user becomes authenticated
             if isAuthenticated {
                 print("ContentView: Calling handleSignIn because user is authenticated")
-                chatViewModel?.handleSignIn()
+                chatViewModel.handleSignIn()
+            }
+        }
+        // Ensure prompts/sync re-trigger after loading finishes (avoids dismissal during transition)
+        .onChange(of: authManager.isLoading) { _, isLoading in
+            if !isLoading {
+                // Re-run sign-in flow to re-present migration prompt post-loading
+                if authManager.isAuthenticated {
+                    chatViewModel.handleSignIn()
+                    // If still no key and not showing migration, show encryption prompt
+                    if !(chatViewModel.showMigrationPrompt) && !EncryptionService.shared.hasEncryptionKey() {
+                        showEncryptionAlert = true
+                    }
+                }
+            }
+        }
+        // When migration prompt visibility changes, handle keyboard
+        .onChange(of: chatViewModel.showMigrationPrompt) { _, isShowing in
+            if isShowing {
+                // Ensure keyboard is dismissed while sheet is visible
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             }
         }
         .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
             // Update available models when subscription status changes
-            chatViewModel?.updateModelBasedOnAuthStatus(
+            chatViewModel.updateModelBasedOnAuthStatus(
                 isAuthenticated: authManager.isAuthenticated,
                 hasActiveSubscription: hasSubscription
             )
@@ -168,6 +208,8 @@ struct ContentView: View {
             // Show alert with the key to save
             await MainActor.run {
                 showGeneratedKeyAlert(newKey)
+                // Continue sign-in/sync flow once key is set
+                chatViewModel.handleSignIn()
             }
         } catch {
             print("Failed to generate encryption key: \(error)")

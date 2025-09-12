@@ -800,18 +800,15 @@ class CloudSyncService: ObservableObject {
     // MARK: - Validation Methods
     
     /// Determines if a remote chat should be processed/stored locally
-    /// Returns false for blank chats or invalid chats that shouldn't be synced
+    /// Returns false for clearly invalid chats that shouldn't be synced
     private func shouldProcessRemoteChat(_ remoteChat: RemoteChat) async -> Bool {
         // Check if it was recently deleted locally
         if deletedChatsTracker.isDeleted(remoteChat.id) {
             return false
         }
-        
-        // Check if it's a temporary ID (UUID format without underscore)
-        if !remoteChat.id.contains("_") {
-            return false
-        }
-        
+        // Do NOT filter out temporary IDs anymore. Some legacy/migrated chats
+        // may have UUID-based IDs and must still be downloaded to avoid data loss.
+
         // Check metadata for blank chats
         // The API returns messageCount directly as a field
         if let messageCount = remoteChat.messageCount, messageCount == 0 {
@@ -821,11 +818,14 @@ class CloudSyncService: ObservableObject {
         return true
     }
     
-    /// Cleans up invalid remote chats that shouldn't exist
+    /// Previously: deleted remotely for chats deemed "invalid" (e.g., 0 messages or temp IDs).
+    /// Now: no-op to avoid unintended data loss. We never auto-delete based on metadata.
     private func cleanupInvalidRemoteChat(_ remoteChat: RemoteChat) {
-        Task {
-            try? await r2Storage.deleteChat(remoteChat.id)
-        }
+        // Intentionally left blank. We keep server state unchanged.
+        // If needed in future, handle via explicit tombstones or a confirmed delete flow.
+        #if DEBUG
+        print("[CloudSync] Skipping auto-delete of remote chat \(remoteChat.id) flagged as invalid.")
+        #endif
     }
     
     // MARK: - Retry Decryption Methods
@@ -987,6 +987,63 @@ class CloudSyncService: ObservableObject {
         
         return result
     }
+
+    /// Migrate local chats that still use temporary (UUID) IDs to server-generated IDs
+    /// Steps per chat: request new ID, upload under new ID, update local storage, delete old remote (best-effort)
+    func migrateTemporaryIdChats() async -> (migrated: Int, errors: [String]) {
+        var migrated = 0
+        var errors: [String] = []
+
+        // Require authentication to contact backend
+        guard await r2Storage.isAuthenticated() else {
+            return (0, [])
+        }
+
+        let allChats = await getAllChatsFromStorage()
+        let candidates = allChats.filter { $0.hasTemporaryId && !$0.isBlankChat }
+
+        if candidates.isEmpty { return (0, []) }
+
+        for chat in candidates {
+            do {
+                // Get a server-generated conversation ID
+                let idResponse = try await r2Storage.generateConversationId()
+
+                // Preserve content and metadata while swapping the ID
+                let migratedChat = Chat(
+                    id: idResponse.conversationId,
+                    title: chat.title,
+                    messages: chat.messages,
+                    createdAt: chat.createdAt,
+                    modelType: chat.modelType,
+                    language: chat.language,
+                    userId: chat.userId,
+                    syncVersion: chat.syncVersion,
+                    syncedAt: chat.syncedAt,
+                    locallyModified: true, // force upload
+                    updatedAt: Date(),
+                    decryptionFailed: chat.decryptionFailed,
+                    encryptedData: chat.encryptedData
+                )
+
+                // Upload under new ID
+                try await r2Storage.uploadChat(StoredChat(from: migratedChat, syncVersion: chat.syncVersion + 1))
+
+                // Save new chat locally and delete the old one
+                await saveChatToStorage(StoredChat(from: migratedChat, syncVersion: chat.syncVersion + 1))
+                await deleteChatFromStorage(chat.id)
+
+                // Best-effort: delete old remote object if it exists
+                try? await r2Storage.deleteChat(chat.id)
+
+                migrated += 1
+            } catch {
+                errors.append("Failed to migrate chat \(chat.id): \(error.localizedDescription)")
+            }
+        }
+
+        return (migrated, errors)
+    }
 }
 
 // MARK: - Cloud Sync Errors
@@ -1013,4 +1070,3 @@ enum CloudSyncError: LocalizedError {
         }
     }
 }
-
