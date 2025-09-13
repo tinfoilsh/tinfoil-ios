@@ -197,7 +197,7 @@ struct EncryptionKeyInputView: View {
             }
         }
         .sheet(isPresented: $showQRScanner) {
-            QRCodeScannerView { scannedKey in
+            QRCodeScannerView(isPresented: $showQRScanner) { scannedKey in
                 showQRScanner = false
                 keyInput = scannedKey
                 validateKey(scannedKey)

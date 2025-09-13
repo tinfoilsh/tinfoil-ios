@@ -9,8 +9,8 @@ import SwiftUI
 import AVFoundation
 
 struct QRCodeScannerView: UIViewControllerRepresentable {
+    @Binding var isPresented: Bool
     let onScanned: (String) -> Void
-    @Environment(\.dismiss) var dismiss
     
     func makeUIViewController(context: Context) -> QRScannerViewController {
         let controller = QRScannerViewController()
@@ -18,7 +18,8 @@ struct QRCodeScannerView: UIViewControllerRepresentable {
             onScanned(code)
         }
         controller.onCancel = {
-            dismiss()
+            // Dismiss only the camera sheet via the binding
+            DispatchQueue.main.async { self.isPresented = false }
         }
         return controller
     }
@@ -71,7 +72,10 @@ class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsD
         previewLayer.videoGravity = .resizeAspectFill
         view.layer.addSublayer(previewLayer)
         
-        // Add cancel button
+        // Add scan frame overlay first so controls can sit above it
+        addScannerOverlay()
+
+        // Add cancel button on top of overlay
         let cancelButton = UIButton(type: .system)
         cancelButton.setTitle("Cancel", for: .normal)
         cancelButton.setTitleColor(.white, for: .normal)
@@ -80,18 +84,15 @@ class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsD
         cancelButton.layer.cornerRadius = 8
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
         cancelButton.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
-        
+
         view.addSubview(cancelButton)
-        
+
         NSLayoutConstraint.activate([
             cancelButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
             cancelButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             cancelButton.widthAnchor.constraint(equalToConstant: 80),
             cancelButton.heightAnchor.constraint(equalToConstant: 40)
         ])
-        
-        // Add scan frame overlay
-        addScannerOverlay()
         
         DispatchQueue.global(qos: .background).async {
             self.captureSession.startRunning()
@@ -101,6 +102,8 @@ class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsD
     func addScannerOverlay() {
         let overlayView = UIView()
         overlayView.translatesAutoresizingMaskIntoConstraints = false
+        // Ensure overlay does not intercept touches intended for buttons beneath
+        overlayView.isUserInteractionEnabled = false
         view.addSubview(overlayView)
         
         NSLayoutConstraint.activate([
