@@ -587,7 +587,7 @@ struct SettingsView: View {
                     let profileManager = ProfileManager.shared
                     
                     // Update language if different
-                    if !profileManager.language.isEmpty && profileManager.language != "English" {
+                    if !profileManager.language.isEmpty && profileManager.language != "System" {
                         settings.selectedLanguage = profileManager.language
                     }
                     
