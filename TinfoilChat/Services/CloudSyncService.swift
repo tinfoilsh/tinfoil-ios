@@ -65,7 +65,7 @@ class CloudSyncService: ObservableObject {
     /// Initialize the sync service with auth token getter
     func initialize() async throws {
         // Initialize encryption service
-        _ = try await encryptionService.initialize()
+        _ = try? await encryptionService.initialize()
         
         // Set up custom token getter for R2 storage that ensures Clerk is loaded
         let tokenGetter: () async -> String? = {
@@ -282,8 +282,9 @@ class CloudSyncService: ObservableObject {
             var downloadedChats: [StoredChat] = []
             let chatsToProcess = remoteList.conversations
             
-            // Initialize encryption once before processing
-            _ = try await encryptionService.initialize()
+            // Initialize encryption if available; continue even without a key so we can at least
+            // fetch metadata and store encrypted placeholders. Decryption will be attempted per-chat.
+            _ = try? await encryptionService.initialize()
             
             await withTaskGroup(of: StoredChat?.self) { group in
                 for remoteChat in chatsToProcess {
@@ -478,8 +479,9 @@ class CloudSyncService: ObservableObject {
             
             let localChats = await getAllChatsFromStorage()
             
-            // Initialize encryption service once before processing
-            _ = try await encryptionService.initialize()
+            // Initialize encryption if available; continue even without a key so we can at least
+            // fetch metadata and store encrypted placeholders. Decryption will be attempted per-chat.
+            _ = try? await encryptionService.initialize()
             
             // Create maps for easy lookup
             let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
