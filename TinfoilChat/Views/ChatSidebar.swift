@@ -250,13 +250,19 @@ struct ChatSidebar: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
+                .padding(.bottom, 8)
             }
-            
-            Spacer()
+            .applyAlwaysBounceIfAvailable()
+            .refreshable {
+                // Ensure auth state is up-to-date, then attempt a full sync.
+                await authManager.initializeAuthState()
+                await viewModel.performFullSync()
+            }
+            .frame(maxHeight: .infinity)
             
             Divider()
                 .background(Color.gray.opacity(0.3))
-                .padding(.vertical, 8)
+                .padding(.bottom, 8)
             
             // Settings Button
             Button(action: {
@@ -279,6 +285,7 @@ struct ChatSidebar: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
         }
+        .frame(maxHeight: .infinity, alignment: .top)
     }
     
     private func startEditing(_ chat: Chat) {
@@ -288,6 +295,19 @@ struct ChatSidebar: View {
     
     private func confirmDelete(_ chat: Chat) {
         deletingChatId = chat.id
+    }
+}
+
+// MARK: - Helpers
+
+private extension View {
+    @ViewBuilder
+    func applyAlwaysBounceIfAvailable() -> some View {
+        if #available(iOS 16.0, *) {
+            self.scrollBounceBehavior(.always)
+        } else {
+            self
+        }
     }
 }
 
@@ -395,4 +415,3 @@ struct ChatListItem: View {
         )
     }
 }
-

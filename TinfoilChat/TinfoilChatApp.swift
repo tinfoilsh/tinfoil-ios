@@ -64,6 +64,18 @@ struct TinfoilChatApp: App {
                                     // Initialize authentication state
                                     await authManager.initializeAuthState()
                                     
+                                    // Initialize cloud sync services (sets robust token getter for profile sync)
+                                    do {
+                                        try await CloudSyncService.shared.initialize()
+                                    } catch {
+                                        print("Failed to initialize CloudSyncService: \(error)")
+                                    }
+                                    
+                                    // Initialize ProfileManager to start auto-sync
+                                    _ = ProfileManager.shared
+                                    // Kick off an initial profile sync now that auth and token getter are ready
+                                    await ProfileManager.shared.performFullSync()
+                                    
                                     // Add observer for Clerk auth state changes
                                     NotificationCenter.default.addObserver(
                                         forName: NSNotification.Name("ClerkUserChanged"),
@@ -72,6 +84,8 @@ struct TinfoilChatApp: App {
                                     ) { _ in
                                         Task {
                                             await authManager.initializeAuthState()
+                                            // Sync profile when auth state changes
+                                            await ProfileManager.shared.performFullSync()
                                         }
                                     }
                                 } catch {

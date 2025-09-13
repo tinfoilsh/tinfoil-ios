@@ -21,11 +21,47 @@ struct EncryptionKeyInputView: View {
     
     var body: some View {
         NavigationView {
-            VStack(spacing: 20) {
-                HStack {
-                    if isKeyVisible {
-                        TextField("Enter encryption key (key_...)", text: $keyInput)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
+            VStack(spacing: 0) {
+                // Header explanation
+                VStack(spacing: 20) {
+                    // Title and description
+                    VStack(spacing: 8) {
+                        Text(isKeyFieldFocused ? "Enter your encryption key" : "Encryption Key")
+                            .font(isKeyFieldFocused ? .headline : .title2)
+                            .fontWeight(.semibold)
+                        
+                        if !isKeyFieldFocused {
+                            Text("Your encryption key secures all your chat data. You can enter it manually or scan the QR code from your other device.")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 20)
+                }
+                
+                // Input section
+                VStack(spacing: 24) {
+                    // Manual input section
+                    VStack(alignment: .leading, spacing: 12) {
+                        if !isKeyFieldFocused {
+                            Label("Enter Key Manually", systemImage: "keyboard")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                                .textCase(.uppercase)
+                        }
+                        
+                        HStack(spacing: 8) {
+                            Group {
+                                if isKeyVisible {
+                                    TextField("key_...", text: $keyInput)
+                                } else {
+                                    SecureField("key_...", text: $keyInput)
+                                }
+                            }
+                            .textFieldStyle(.plain)
                             .autocapitalization(.none)
                             .disableAutocorrection(true)
                             .font(.system(.body, design: .monospaced))
@@ -33,64 +69,114 @@ struct EncryptionKeyInputView: View {
                             .onChange(of: keyInput) { _, newValue in
                                 validateKey(newValue)
                             }
-                    } else {
-                        SecureField("Enter encryption key (key_...)", text: $keyInput)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .autocapitalization(.none)
-                            .disableAutocorrection(true)
-                            .font(.system(.body, design: .monospaced))
-                            .focused($isKeyFieldFocused)
-                            .onChange(of: keyInput) { _, newValue in
-                                validateKey(newValue)
+                            .padding()
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color(UIColor.secondarySystemBackground))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(
+                                        keyError != nil ? Color.red.opacity(0.5) : 
+                                        isKeyFieldFocused ? Color.accentPrimary : Color.clear,
+                                        lineWidth: 1
+                                    )
+                            )
+                            
+                            Button(action: {
+                                isKeyVisible.toggle()
+                            }) {
+                                Image(systemName: isKeyVisible ? "eye.slash.fill" : "eye.fill")
+                                    .font(.body)
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 44, height: 44)
+                                    .background(Color(UIColor.secondarySystemBackground))
+                                    .cornerRadius(12)
                             }
+                        }
+                        
+                        if let error = keyError {
+                            Label(error, systemImage: "exclamationmark.circle.fill")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
                     }
                     
-                    Button(action: {
-                        isKeyVisible.toggle()
-                    }) {
-                        Image(systemName: isKeyVisible ? "eye.slash" : "eye")
-                            .foregroundColor(.secondary)
+                    // Show OR divider and QR button only when not focused
+                    if !isKeyFieldFocused {
+                        // Divider with "OR"
+                        HStack {
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.3))
+                                .frame(height: 1)
+                            
+                            Text("OR")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 12)
+                            
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.3))
+                                .frame(height: 1)
+                        }
+                        .padding(.vertical, 8)
+                        
+                        // QR Code scan button
+                        Button(action: {
+                            requestCameraPermission { granted in
+                                if granted {
+                                    showQRScanner = true
+                                }
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: "qrcode.viewfinder")
+                                    .font(.title3)
+                                Text("Scan QR Code")
+                                    .fontWeight(.medium)
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.accentPrimary)
+                            .cornerRadius(12)
+                        }
                     }
-                }
-                
-                if let error = keyError {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundColor(.red)
-                }
-                
-                HStack(spacing: 12) {
-                    Button("Import Key") {
+                    
+                    // Import button - always visible but repositioned when focused
+                    Button(action: {
                         if keyError == nil && !keyInput.isEmpty {
                             importKey()
                         }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(keyInput.isEmpty || keyError != nil ? Color.gray : Color.accentPrimary)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
-                    .disabled(keyInput.isEmpty || keyError != nil)
-                    
-                    Button(action: {
-                        requestCameraPermission { granted in
-                            if granted {
-                                showQRScanner = true
-                            }
-                        }
                     }) {
-                        Image(systemName: "qrcode.viewfinder")
-                            .font(.title2)
+                        Text("Import Key")
+                            .fontWeight(.semibold)
                             .foregroundColor(.white)
-                            .frame(width: 50, height: 50)
-                            .background(Color.accentPrimary)
-                            .cornerRadius(10)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(keyInput.isEmpty || keyError != nil ? 
+                                          Color.gray.opacity(0.5) : Color.accentPrimary)
+                            )
                     }
+                    .disabled(keyInput.isEmpty || keyError != nil)
+                    .padding(.top, isKeyFieldFocused ? 8 : 0)
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 30)
                 
                 Spacer()
+                
+                // Bottom safety text - only when not focused
+                if !isKeyFieldFocused {
+                    Text("Keep your key safe and never share it")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.bottom, 20)
+                }
             }
-            .padding()
+            .background(Color(UIColor.systemBackground))
             .navigationTitle("Import Encryption Key")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -99,15 +185,19 @@ struct EncryptionKeyInputView: View {
                         isPresented = false
                     }
                 }
-            }
-            .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isKeyFieldFocused = true
+                
+                // Add Done button when keyboard is shown
+                if isKeyFieldFocused {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") {
+                            isKeyFieldFocused = false
+                        }
+                    }
                 }
             }
         }
         .sheet(isPresented: $showQRScanner) {
-            QRCodeScannerView { scannedKey in
+            QRCodeScannerView(isPresented: $showQRScanner) { scannedKey in
                 showQRScanner = false
                 keyInput = scannedKey
                 validateKey(scannedKey)

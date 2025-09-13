@@ -28,6 +28,7 @@ struct RemoteConfig: Codable {
     struct ChatConfig: Codable {
         let maxMessagesPerRequest: Int
         let systemPrompt: String
+        let rules: String?
     }
 }
 
@@ -241,6 +242,10 @@ class AppConfig: ObservableObject {
     
     var systemPrompt: String {
         config!.chatConfig.systemPrompt
+    }
+    
+    var rules: String {
+        config?.chatConfig.rules ?? ""
     }
     
     var minSupportedVersion: String {

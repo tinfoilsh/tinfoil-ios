@@ -296,6 +296,12 @@ struct ProfileUploadRequest: Codable {
     let data: String  // JSON stringified encrypted data
 }
 
+/// Profile upload response
+struct ProfileUploadResponse: Codable {
+    let version: Int
+    let message: String?
+}
+
 // MARK: - Sync State Models
 
 /// Tracks deleted chats to prevent resurrection during sync

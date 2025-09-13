@@ -121,13 +121,9 @@ struct FlowResult {
 struct PersonalizationView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var settings = SettingsManager.shared
+    @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.colorScheme) private var colorScheme
-    
-    // Local state for form fields
-    @State private var localNickname = ""
-    @State private var localProfession = ""
-    @State private var localTraits: [String] = []
-    @State private var localAdditionalContext = ""
+    @State private var isSaving: Bool = false
     
     var body: some View {
         ScrollView {
@@ -146,6 +142,24 @@ struct PersonalizationView: View {
         .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
         .navigationTitle("Personalization")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Save") {
+                    // Align flags and push to cloud
+                    isSaving = true
+                    let shouldEnable = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
+                    profileManager.isUsingPersonalization = shouldEnable
+                    settings.isPersonalizationEnabled = shouldEnable
+                    Task { @MainActor in
+                        await profileManager.syncToCloud()
+                        isSaving = false
+                        dismiss()
+                    }
+                }
+                .fontWeight(.semibold)
+                .disabled(isSaving)
+            }
+        }
         .onTapGesture {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
@@ -155,12 +169,11 @@ struct PersonalizationView: View {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
         )
-        .accentColor(Color.accentPrimary)
         .onAppear {
-            localNickname = settings.nickname
-            localProfession = settings.profession
-            localTraits = settings.selectedTraits
-            localAdditionalContext = settings.additionalContext
+            // Trigger a sync from cloud when view appears
+            Task {
+                await profileManager.syncFromCloud()
+            }
         }
     }
     
@@ -173,7 +186,7 @@ struct PersonalizationView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.primary)
-                TextField("Nickname", text: $localNickname)
+                TextField("Nickname", text: $profileManager.nickname)
                     .textFieldStyle(.plain)
                     .padding(12)
                     .background(
@@ -184,9 +197,11 @@ struct PersonalizationView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                     )
-                    .onChange(of: localNickname) { _, newValue in
+                    .onChange(of: profileManager.nickname) { _, newValue in
+                        let shouldEnable = !newValue.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
+                        profileManager.isUsingPersonalization = shouldEnable
                         settings.nickname = newValue
-                        settings.isPersonalizationEnabled = true
+                        settings.isPersonalizationEnabled = shouldEnable
                     }
             }
             .padding(20)
@@ -201,7 +216,7 @@ struct PersonalizationView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.primary)
-                TextField("Profession", text: $localProfession)
+                TextField("Profession", text: $profileManager.profession)
                     .textFieldStyle(.plain)
                     .padding(12)
                     .background(
@@ -212,9 +227,11 @@ struct PersonalizationView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                     )
-                    .onChange(of: localProfession) { _, newValue in
+                    .onChange(of: profileManager.profession) { _, newValue in
+                        let shouldEnable = !profileManager.nickname.isEmpty || !newValue.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
+                        profileManager.isUsingPersonalization = shouldEnable
                         settings.profession = newValue
-                        settings.isPersonalizationEnabled = true
+                        settings.isPersonalizationEnabled = shouldEnable
                     }
             }
             .padding(20)
@@ -231,11 +248,13 @@ struct PersonalizationView: View {
                     .foregroundColor(.primary)
                 TraitSelectionView(
                     availableTraits: settings.availableTraits,
-                    selectedTraits: $localTraits
+                    selectedTraits: $profileManager.traits
                 )
-                .onChange(of: localTraits) { _, newValue in
+                .onChange(of: profileManager.traits) { _, newValue in
+                    let shouldEnable = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !newValue.isEmpty || !profileManager.additionalContext.isEmpty
+                    profileManager.isUsingPersonalization = shouldEnable
                     settings.selectedTraits = newValue
-                    settings.isPersonalizationEnabled = true
+                    settings.isPersonalizationEnabled = shouldEnable
                 }
             }
             .padding(20)
@@ -250,7 +269,7 @@ struct PersonalizationView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.primary)
-                TextField("Anything else Tin should know about you?", text: $localAdditionalContext, axis: .vertical)
+                TextField("Anything else Tin should know about you?", text: $profileManager.additionalContext, axis: .vertical)
                     .textFieldStyle(.plain)
                     .padding(12)
                     .background(
@@ -262,9 +281,11 @@ struct PersonalizationView: View {
                             .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                     )
                     .lineLimit(3...6)
-                    .onChange(of: localAdditionalContext) { _, newValue in
+                    .onChange(of: profileManager.additionalContext) { _, newValue in
+                        let shouldEnable = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !newValue.isEmpty
+                        profileManager.isUsingPersonalization = shouldEnable
                         settings.additionalContext = newValue
-                        settings.isPersonalizationEnabled = true
+                        settings.isPersonalizationEnabled = shouldEnable
                     }
             }
             .padding(20)
@@ -275,11 +296,20 @@ struct PersonalizationView: View {
             
             // Reset button
             Button(action: {
+                // Reset ProfileManager
+                profileManager.nickname = ""
+                profileManager.profession = ""
+                profileManager.traits = []
+                profileManager.additionalContext = ""
+                profileManager.isUsingPersonalization = false
+                
+                // Reset SettingsManager
                 settings.resetPersonalization()
-                localNickname = ""
-                localProfession = ""
-                localTraits = []
-                localAdditionalContext = ""
+                
+                // Immediately push changes to cloud to avoid being overwritten by an incoming pull
+                Task {
+                    await profileManager.syncToCloud()
+                }
             }) {
                 Text("Reset All")
                     .foregroundColor(.white)

@@ -176,6 +176,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(Clerk.self) private var clerk
     @ObservedObject private var settings = SettingsManager.shared
+    @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAuthView = false
     @State private var showDeleteConfirmation = false
@@ -412,6 +413,7 @@ struct SettingsView: View {
                                     Button(action: {
                                         if settings.maxMessages > 1 {
                                             settings.maxMessages -= 1
+                                            ProfileManager.shared.maxPromptMessages = settings.maxMessages
                                         }
                                     }) {
                                         Image(systemName: "minus.circle")
@@ -427,6 +429,7 @@ struct SettingsView: View {
                                     Button(action: {
                                         if settings.maxMessages < 50 {
                                             settings.maxMessages += 1
+                                            ProfileManager.shared.maxPromptMessages = settings.maxMessages
                                         }
                                     }) {
                                         Image(systemName: "plus.circle")
@@ -452,7 +455,7 @@ struct SettingsView: View {
                                             .foregroundColor(.secondary)
                                     }
                                     Spacer()
-                                    if settings.isUsingCustomPrompt {
+                                    if profileManager.isUsingCustomPrompt {
                                         Image(systemName: "checkmark.circle.fill")
                                             .font(.caption)
                                             .foregroundColor(.green)
@@ -471,7 +474,7 @@ struct SettingsView: View {
                                             .foregroundColor(.secondary)
                                     }
                                     Spacer()
-                                    if settings.isPersonalizationEnabled {
+                                    if profileManager.isUsingPersonalization || settings.isPersonalizationEnabled {
                                         Image(systemName: "checkmark.circle.fill")
                                             .font(.caption)
                                             .foregroundColor(.green)
@@ -498,8 +501,8 @@ struct SettingsView: View {
                                             .foregroundColor(.primary)
                                         Spacer()
                                         Image(systemName: "arrow.up.forward.square")
-                                            .font(.caption2)
-                                            .foregroundColor(Color(UIColor.quaternaryLabel))
+                                            .font(.footnote)
+                                            .foregroundColor(Color(UIColor.tertiaryLabel))
                                     }
                                 }
                             } else {
@@ -562,8 +565,73 @@ struct SettingsView: View {
             .navigationBarHidden(true)
         }
         .onAppear {
+            // Reset navigation bar to use system colors for settings screens
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithDefaultBackground()
+            
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+            
             // Auto-navigate to Cloud Sync if requested
             if shouldOpenCloudSync {
+            }
+            
+            // Sync ProfileManager settings
+            Task {
+                // Trigger sync from cloud
+                await ProfileManager.shared.syncFromCloud()
+                
+                // Update settings from ProfileManager
+                await MainActor.run {
+                    let profileManager = ProfileManager.shared
+                    
+                    // Update language if different
+                    if !profileManager.language.isEmpty && profileManager.language != "System" {
+                        settings.selectedLanguage = profileManager.language
+                    }
+                    
+                    // Update max messages if different
+                    if profileManager.maxPromptMessages > 0 && profileManager.maxPromptMessages != settings.maxMessages {
+                        settings.maxMessages = profileManager.maxPromptMessages
+                    }
+                    
+                    // Update custom prompt settings from single source of truth (ProfileManager)
+                    settings.isUsingCustomPrompt = profileManager.isUsingCustomPrompt
+                    settings.customSystemPrompt = profileManager.customSystemPrompt
+                }
+            }
+        }
+        .onDisappear {
+            // Restore dark navigation bar for main chat view
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = UIColor(Color(hex: "#111827"))
+            appearance.shadowColor = .clear
+            
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        }
+        // Keep UI settings in sync with ProfileManager when remote changes arrive
+        .onReceive(ProfileManager.shared.$maxPromptMessages) { newValue in
+            if newValue > 0 && settings.maxMessages != newValue {
+                settings.maxMessages = newValue
+            }
+        }
+        .onReceive(ProfileManager.shared.$language) { newValue in
+            if !newValue.isEmpty && settings.selectedLanguage != newValue {
+                settings.selectedLanguage = newValue
+            }
+        }
+        .onReceive(ProfileManager.shared.$isUsingCustomPrompt) { newValue in
+            if settings.isUsingCustomPrompt != newValue {
+                settings.isUsingCustomPrompt = newValue
+            }
+        }
+        .onReceive(ProfileManager.shared.$customSystemPrompt) { newValue in
+            if settings.customSystemPrompt != newValue {
+                settings.customSystemPrompt = newValue
             }
         }
         .sheet(isPresented: $showAuthView) {
@@ -676,12 +744,14 @@ struct SettingsView: View {
 struct LanguagePickerView: View {
     @Binding var selectedLanguage: String
     let languages: [String]
+    @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
         List(languages, id: \.self) { language in
             Button(action: {
                 selectedLanguage = language
+                profileManager.language = language
                 dismiss()
             }) {
                 HStack {
@@ -697,6 +767,22 @@ struct LanguagePickerView: View {
         }
         .navigationTitle("Default Language")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // Load from ProfileManager if available
+            if !profileManager.language.isEmpty && profileManager.language != "English" {
+                selectedLanguage = profileManager.language
+            }
+            
+            // Trigger sync to get latest from cloud
+            Task {
+                await profileManager.syncFromCloud()
+                await MainActor.run {
+                    if !profileManager.language.isEmpty && profileManager.language != "English" {
+                        selectedLanguage = profileManager.language
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -775,6 +861,7 @@ struct ProfileEditorView: View {
 struct CustomSystemPromptView: View {
     @Binding var isUsingCustomPrompt: Bool
     @Binding var customSystemPrompt: String
+    @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @State private var editingPrompt: String = ""
@@ -785,11 +872,42 @@ struct CustomSystemPromptView: View {
         AppConfig.shared.systemPrompt
     }
     
+    // Helper to strip <system> tags for editing
+    private func stripSystemTags(_ prompt: String) -> String {
+        var result = prompt
+        if result.hasPrefix("<system>") {
+            result = String(result.dropFirst(8)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if result.hasSuffix("</system>") {
+            result = String(result.dropLast(9)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return result
+    }
+    
     var body: some View {
         Form {
             Section {
                 Toggle("Enable Custom System Prompt", isOn: $isUsingCustomPrompt)
                     .tint(Color.green)
+                    .onChange(of: isUsingCustomPrompt) { _, newValue in
+                        profileManager.isUsingCustomPrompt = newValue
+                        if newValue {
+                            // Ensure there's a prompt to propagate across devices
+                            var currentEditor = editingPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if currentEditor.isEmpty {
+                                // Seed editor with default prompt (without tags)
+                                currentEditor = stripSystemTags(defaultSystemPrompt)
+                                editingPrompt = currentEditor
+                            }
+                            if profileManager.customSystemPrompt.isEmpty {
+                                // Save with system tags so it syncs as non-empty content
+                                var promptToSave = currentEditor
+                                if !promptToSave.hasPrefix("<system>") { promptToSave = "<system>\n\(promptToSave)" }
+                                if !promptToSave.hasSuffix("</system>") { promptToSave += "\n</system>" }
+                                profileManager.customSystemPrompt = promptToSave
+                            }
+                        }
+                    }
             } header: {
                 Text("Status")
             } footer: {
@@ -837,29 +955,67 @@ struct CustomSystemPromptView: View {
         }
         .navigationTitle("Custom System Prompt")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true)
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel") {
-                    dismiss()
-                }
-            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Save") {
-                    customSystemPrompt = editingPrompt
+                    // Add <system> tags if not present when saving
+                    var promptToSave = editingPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !promptToSave.isEmpty {
+                        if !promptToSave.hasPrefix("<system>") {
+                            promptToSave = "<system>\n\(promptToSave)"
+                        }
+                        if !promptToSave.hasSuffix("</system>") {
+                            promptToSave = "\(promptToSave)\n</system>"
+                        }
+                    }
+                    
+                    // Save to both ProfileManager and SettingsManager
+                    profileManager.customSystemPrompt = promptToSave
+                    profileManager.isUsingCustomPrompt = isUsingCustomPrompt
+                    customSystemPrompt = promptToSave
                     dismiss()
                 }
                 .fontWeight(.semibold)
             }
         }
         .onAppear {
-            // Initialize with current custom prompt or default if empty
-            editingPrompt = customSystemPrompt.isEmpty ? defaultSystemPrompt : customSystemPrompt
+            // Load from ProfileManager first, then fall back to SettingsManager
+            if !profileManager.customSystemPrompt.isEmpty {
+                editingPrompt = stripSystemTags(profileManager.customSystemPrompt)
+                isUsingCustomPrompt = profileManager.isUsingCustomPrompt
+            } else if !customSystemPrompt.isEmpty {
+                editingPrompt = stripSystemTags(customSystemPrompt)
+            } else {
+                editingPrompt = stripSystemTags(defaultSystemPrompt)
+            }
+            
+            // Trigger a sync from cloud to ensure we have latest data
+            Task {
+                await profileManager.syncFromCloud()
+                
+                // Update local state with synced data
+                await MainActor.run {
+                    if !profileManager.customSystemPrompt.isEmpty {
+                        editingPrompt = stripSystemTags(profileManager.customSystemPrompt)
+                        isUsingCustomPrompt = profileManager.isUsingCustomPrompt
+                    }
+                }
+            }
         }
         .alert("Restore Default", isPresented: $showRestoreConfirmation) {
             Button("Cancel", role: .cancel) { }
             Button("Restore", role: .destructive) {
-                editingPrompt = defaultSystemPrompt
+                // Strip system tags from default prompt when restoring
+                var strippedDefault = defaultSystemPrompt
+                if strippedDefault.hasPrefix("<system>") {
+                    strippedDefault = String(strippedDefault.dropFirst(8))
+                    strippedDefault = strippedDefault.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                if strippedDefault.hasSuffix("</system>") {
+                    strippedDefault = String(strippedDefault.dropLast(9))
+                    strippedDefault = strippedDefault.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                editingPrompt = strippedDefault
             }
         } message: {
             Text("Are you sure you want to restore the default system prompt? Your custom prompt will be replaced.")

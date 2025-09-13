@@ -71,7 +71,7 @@ struct CloudSyncSettingsView: View {
                         }
                     }) {
                         Label("Sync Now", systemImage: "arrow.clockwise")
-                            .foregroundColor(.adaptiveAccent)
+                            .foregroundColor(.primary)
                     }
                     .disabled(viewModel.isSyncing || !authManager.isAuthenticated)
                 } header: {
@@ -116,7 +116,7 @@ struct CloudSyncSettingsView: View {
                         showKeyInput = true
                     }) {
                         Label("Change Encryption Key", systemImage: "key.fill")
-                            .foregroundColor(.adaptiveAccent)
+                            .foregroundColor(.primary)
                     }
                 } header: {
                     Text("Encryption")
@@ -129,6 +129,31 @@ struct CloudSyncSettingsView: View {
         .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
         .navigationTitle("Cloud Sync Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // Reset navigation bar to use system colors for settings screens
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithDefaultBackground()
+            
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+
+            // Kick off a quick sync so Last Sync is fresh when opening this screen
+            Task {
+                await viewModel.performFullSync()
+            }
+        }
+        .onDisappear {
+            // Restore dark navigation bar for main views
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = UIColor(Color(hex: "#111827"))
+            appearance.shadowColor = .clear
+            
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        }
             .sheet(isPresented: $showKeyInput) {
                 EncryptionKeyInputView(isPresented: $showKeyInput) { importedKey in
                     Task {

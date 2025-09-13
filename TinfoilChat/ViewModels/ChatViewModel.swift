@@ -49,19 +49,42 @@ class ChatViewModel: ObservableObject {
     private var encryptionKey: String?  // Keep private for security
     @Published var isFirstTimeUser: Bool = false
     @Published var showEncryptionSetup: Bool = false
+    @Published var showMigrationPrompt: Bool = false
+    @Published var userAgreedToMigrateLegacy: Bool = false
+    @Published var shouldShowKeyImport: Bool = false
     private let cloudSync = CloudSyncService.shared
     private let streamingTracker = StreamingTracker.shared
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
     private var hasPerformedInitialSync: Bool = false  // Track if initial sync has been done
     private var hasAnonymousChatsToSync: Bool = false  // Track if we have anonymous chats to sync
+    private var isMigrationDecisionPending: Bool = false
     
     // Pagination properties
     @Published var isLoadingMore: Bool = false
-    @Published var hasMoreChats: Bool = false
-    private var paginationToken: String? = nil
+    @Published var hasMoreChats: Bool = false {
+        didSet { persistPaginationStateIfPossible() }
+    }
+    private var paginationToken: String? = nil {
+        didSet { persistPaginationStateIfPossible() }
+    }
     private var isPaginationActive: Bool = false  // Track if we're using pagination vs full load
+    {
+        didSet { persistPaginationStateIfPossible() }
+    }
     private var hasLoadedInitialPage: Bool = false  // Track if we've loaded the first page
+    {
+        didSet { persistPaginationStateIfPossible() }
+    }
     private var hasAttemptedLoadMore: Bool = false  // Track if we've tried to load more at least once
+    {
+        didSet { persistPaginationStateIfPossible() }
+    }
+    
+    // Controls when pagination state is written to storage to avoid clobbering persisted values during init
+    private var shouldPersistPaginationState: Bool = false
+    {
+        didSet { persistPaginationStateIfPossible() }
+    }
     
     // IMPORTANT: Pagination token edge cases to handle:
     // 1. Token should NOT be reset during auto-sync operations
@@ -115,6 +138,11 @@ class ChatViewModel: ObservableObject {
             } else {
                 lastSyncDate = nil
             }
+            
+            // When auth becomes available and authenticated, restore persisted pagination state immediately
+            if authManager?.isAuthenticated == true {
+                loadPersistedPaginationState()
+            }
         }
     }
     
@@ -138,6 +166,48 @@ class ChatViewModel: ObservableObject {
     // Computed property to check if speech-to-text is available
     var hasSpeechToTextAccess: Bool {
         return authManager?.isAuthenticated ?? false
+    }
+    
+    // MARK: - Pagination Persistence
+    
+    private func paginationDefaultsKey(_ suffix: String) -> String? {
+        guard let userId = currentUserId else { return nil }
+        return "pagination_\(suffix)_\(userId)"
+    }
+    
+    private func persistPaginationStateIfPossible() {
+        guard shouldPersistPaginationState else { return }
+        guard let userId = currentUserId else { return }
+        if let token = paginationToken, !token.isEmpty {
+            UserDefaults.standard.set(token, forKey: "pagination_token_\(userId)")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "pagination_token_\(userId)")
+        }
+        UserDefaults.standard.set(hasMoreChats, forKey: "pagination_hasMore_\(userId)")
+        UserDefaults.standard.set(isPaginationActive, forKey: "pagination_active_\(userId)")
+        UserDefaults.standard.set(hasLoadedInitialPage, forKey: "pagination_loadedFirst_\(userId)")
+        UserDefaults.standard.set(hasAttemptedLoadMore, forKey: "pagination_attempted_\(userId)")
+    }
+    
+    private func loadPersistedPaginationState() {
+        guard let userId = currentUserId else { return }
+        if let token = UserDefaults.standard.string(forKey: "pagination_token_\(userId)") {
+            paginationToken = token
+        }
+        if UserDefaults.standard.object(forKey: "pagination_hasMore_\(userId)") != nil {
+            hasMoreChats = UserDefaults.standard.bool(forKey: "pagination_hasMore_\(userId)")
+        }
+        if UserDefaults.standard.object(forKey: "pagination_active_\(userId)") != nil {
+            isPaginationActive = UserDefaults.standard.bool(forKey: "pagination_active_\(userId)")
+        }
+        if UserDefaults.standard.object(forKey: "pagination_loadedFirst_\(userId)") != nil {
+            hasLoadedInitialPage = UserDefaults.standard.bool(forKey: "pagination_loadedFirst_\(userId)")
+        }
+        if UserDefaults.standard.object(forKey: "pagination_attempted_\(userId)") != nil {
+            hasAttemptedLoadMore = UserDefaults.standard.bool(forKey: "pagination_attempted_\(userId)")
+        }
+        // Enable persistence after we've loaded any saved state to prevent clobbering
+        shouldPersistPaginationState = true
     }
     
     // Get current user ID from auth manager
@@ -186,11 +256,7 @@ class ChatViewModel: ObservableObject {
             currentChat = newChat
             
             // Reset pagination state for fresh app start
-            paginationToken = nil
-            hasMoreChats = false
-            isPaginationActive = false
-            hasLoadedInitialPage = false
-            hasAttemptedLoadMore = false
+            // Don't wipe persisted values here; let restoration happen via loadPersistedPaginationState()
         } else {
             // For non-authenticated users, just create a single chat without saving
             let newChat = Chat.create(modelType: currentModel)
@@ -198,8 +264,21 @@ class ChatViewModel: ObservableObject {
             chats = [newChat]
         }
         
+        // Load any previously persisted pagination state (per-user)
+        // Delay enabling persistence until after load to avoid overwriting saved values
+        loadPersistedPaginationState()
+
         // Setup app lifecycle observers
         setupAppLifecycleObservers()
+        
+        // If app opens and user is already signed in, check legacy data immediately
+        if authManager?.isAuthenticated == true {
+            if CloudMigrationService.shared.isMigrationNeeded(userId: currentUserId) {
+                // Gate all sync until the user decides
+                self.isMigrationDecisionPending = true
+                self.showMigrationPrompt = true
+            }
+        }
         
         // Initial sync will be triggered when authManager is set (see authManager didSet)
     }
@@ -227,12 +306,21 @@ class ChatViewModel: ObservableObject {
         // Invalidate existing timer if any
         autoSyncTimer?.invalidate()
         
+        // Do not start auto-sync until user decides how to handle legacy data
+        if isMigrationDecisionPending {
+            return
+        }
+        
         
         // Create timer that fires at regular intervals
         autoSyncTimer = Timer.scheduledTimer(withTimeInterval: Constants.Sync.autoSyncIntervalSeconds, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self = self else { return }
                 
+                // Gate auto-sync if migration decision is pending
+                if self.isMigrationDecisionPending {
+                    return
+                }
                 // Only sync if authenticated
                 guard self.authManager?.isAuthenticated == true else {
                     return
@@ -281,9 +369,16 @@ class ChatViewModel: ObservableObject {
                        !currentChat.hasActiveStream {
                         try await self.cloudSync.backupChat(currentChat.id)
                     }
+                    
+                    // Sync profile settings periodically
+                    await ProfileManager.shared.syncFromCloud()
                 } catch {
                 }
             }
+        }
+        // Ensure the timer fires during UI interactions (scrolling, modal sheets)
+        if let timer = autoSyncTimer {
+            RunLoop.main.add(timer, forMode: .common)
         }
     }
     
@@ -303,6 +398,10 @@ class ChatViewModel: ObservableObject {
             // Resume auto-sync timer if authenticated
             Task { @MainActor in
                 if self?.authManager?.isAuthenticated == true {
+                    // Skip any sync activity while migration decision is pending
+                    if self?.isMigrationDecisionPending == true {
+                        return
+                    }
                     self?.setupAutoSyncTimer()
                     
                     // Perform immediate sync when returning from background
@@ -332,6 +431,10 @@ class ChatViewModel: ObservableObject {
                 
                 // Do one final sync before going to background
                 if self?.authManager?.isAuthenticated == true {
+                    // Do not perform background sync if migration decision is pending
+                    if self?.isMigrationDecisionPending == true {
+                        return
+                    }
                     if let _ = await self?.cloudSync.syncAllChats() {
                         // Update last sync date
                         self?.lastSyncDate = Date()
@@ -493,7 +596,9 @@ class ChatViewModel: ObservableObject {
         if let firstChat = chats.first, firstChat.isBlankChat {
             // Just select the existing blank chat
             selectChat(firstChat)
-            shouldFocusInput = true
+            if !isMigrationDecisionPending && EncryptionService.shared.hasEncryptionKey() {
+                shouldFocusInput = true
+            }
             return
         }
         
@@ -507,7 +612,12 @@ class ChatViewModel: ObservableObject {
         
         chats.insert(newChat, at: 0)
         selectChat(newChat)
-        shouldFocusInput = true
+        if !isMigrationDecisionPending && EncryptionService.shared.hasEncryptionKey() {
+            shouldFocusInput = true
+        }
+        
+        // Preserve pagination state - adding a blank chat doesn't affect whether more chats are available
+        // The hasMoreChats flag should remain unchanged
     }
     
     /// Selects a chat as the current chat
@@ -672,10 +782,13 @@ class ChatViewModel: ObservableObject {
                 
                 // Add system message first with language preference
                 let settingsManager = SettingsManager.shared
+                let profileManager = ProfileManager.shared
                 var systemPrompt: String
                 
-                // Use custom prompt if enabled, otherwise use default
-                if settingsManager.isUsingCustomPrompt && !settingsManager.customSystemPrompt.isEmpty {
+                // Use custom prompt if enabled (from ProfileManager), otherwise use default
+                if let customPrompt = profileManager.getCustomSystemPrompt() {
+                    systemPrompt = customPrompt
+                } else if settingsManager.isUsingCustomPrompt && !settingsManager.customSystemPrompt.isEmpty {
                     systemPrompt = settingsManager.customSystemPrompt
                 } else {
                     systemPrompt = AppConfig.shared.systemPrompt
@@ -684,15 +797,31 @@ class ChatViewModel: ObservableObject {
                 // Replace MODEL_NAME placeholder with current model name
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
                 
-                // Replace language placeholder
-                if let chat = currentChat, let language = chat.language {
-                    systemPrompt = systemPrompt.replacingOccurrences(of: "{LANGUAGE}", with: language)
+                // Replace language placeholder - use ProfileManager language first, then settings preference
+                let languageToUse: String
+                if !profileManager.language.isEmpty && profileManager.language != "English" {
+                    // Use the language from ProfileManager
+                    languageToUse = profileManager.language
+                } else if settingsManager.selectedLanguage != "System" {
+                    // Use the language from settings
+                    languageToUse = settingsManager.selectedLanguage
+                } else if let chat = currentChat, let chatLanguage = chat.language {
+                    // Fall back to chat's language if set
+                    languageToUse = chatLanguage
                 } else {
-                    systemPrompt = systemPrompt.replacingOccurrences(of: "{LANGUAGE}", with: "English")
+                    // Default to English
+                    languageToUse = "English"
+                }
+                systemPrompt = systemPrompt.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
+                
+                // Add personalization - use ProfileManager first, then fall back to SettingsManager
+                var personalizationXML = ""
+                if let profilePersonalization = profileManager.getPersonalizationPrompt() {
+                    personalizationXML = "<user_preferences>\n\(profilePersonalization)\n</user_preferences>"
+                } else {
+                    personalizationXML = settingsManager.generateUserPreferencesXML()
                 }
                 
-                // Add personalization XML if enabled
-                let personalizationXML = settingsManager.generateUserPreferencesXML()
                 if !personalizationXML.isEmpty {
                     systemPrompt = systemPrompt.replacingOccurrences(of: "{USER_PREFERENCES}", with: personalizationXML)
                 } else {
@@ -708,13 +837,35 @@ class ChatViewModel: ObservableObject {
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{CURRENT_DATETIME}", with: currentDateTime)
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{TIMEZONE}", with: timezone)
                 
+                // Append rules if they exist
+                let rules = AppConfig.shared.rules
+                if !rules.isEmpty {
+                    // Apply same replacements to rules
+                    var processedRules = rules.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
+                    
+                    // Use the same language that was used for the system prompt
+                    processedRules = processedRules.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
+                    
+                    if !personalizationXML.isEmpty {
+                        processedRules = processedRules.replacingOccurrences(of: "{USER_PREFERENCES}", with: personalizationXML)
+                    } else {
+                        processedRules = processedRules.replacingOccurrences(of: "{USER_PREFERENCES}", with: "")
+                    }
+                    
+                    processedRules = processedRules.replacingOccurrences(of: "{CURRENT_DATETIME}", with: currentDateTime)
+                    processedRules = processedRules.replacingOccurrences(of: "{TIMEZONE}", with: timezone)
+                    
+                    systemPrompt += "\n" + processedRules
+                }
+                
                 // Build messages array inline
                 var messages: [ChatQuery.ChatCompletionMessageParam] = [
                     .system(.init(content: .textContent(systemPrompt)))
                 ]
                 
-                // Add conversation messages
-                let messagesForContext = Array(self.messages.suffix(settingsManager.maxMessages))
+                // Add conversation messages - use ProfileManager's maxPromptMessages if available
+                let maxMessages = profileManager.maxPromptMessages > 0 ? profileManager.maxPromptMessages : settingsManager.maxMessages
+                let messagesForContext = Array(self.messages.suffix(maxMessages))
                 for message in messagesForContext {
                     if message.role == .user {
                         messages.append(.user(.init(content: .string(message.content))))
@@ -1515,6 +1666,10 @@ class ChatViewModel: ObservableObject {
                 currentChat = updatedChat
             }
             
+            // IMPORTANT: Preserve pagination state when inserting new chats
+            // Adding a new chat doesn't affect whether more chats are available to load
+            // The hasMoreChats flag should remain unchanged
+            
             // Save chats for all authenticated users
             if hasChatAccess {
                 saveChats()
@@ -1731,6 +1886,52 @@ class ChatViewModel: ObservableObject {
             isSignInInProgress = true
             print("handleSignIn: Starting sign-in flow for user \(userId)")
             
+            // Restore pagination state immediately for better UX on cold start
+            loadPersistedPaginationState()
+            
+            // If legacy local chats are detected, handle migration path
+            if CloudMigrationService.shared.isMigrationNeeded(userId: userId) {
+                let decisionMade = CloudMigrationService.shared.hasUserMadeDecision(userId: userId)
+                let choseSync = CloudMigrationService.shared.didUserChooseSync(userId: userId) || self.userAgreedToMigrateLegacy
+
+                if decisionMade {
+                    if choseSync {
+                        // User chose sync previously: run migration automatically if we have a key;
+                        // otherwise let ContentView present the key prompt
+                        if EncryptionService.shared.hasEncryptionKey() {
+                            Task {
+                                do {
+                                    let _ = try await CloudMigrationService.shared.migrateToCloud(userId: userId)
+                                } catch {
+                                    // Ignore and continue; errors will surface in sync
+                                }
+                                await MainActor.run { self.userAgreedToMigrateLegacy = false }
+                                await self.startEncryptedSyncFlow()
+                            }
+                        } else {
+                            Task { @MainActor in
+                                self.isMigrationDecisionPending = false
+                                self.showMigrationPrompt = false
+                                self.isSignInInProgress = false
+                            }
+                        }
+                        return
+                    } else {
+                        // Decision was delete; ensure cleanup and continue
+                        CloudMigrationService.shared.deleteLegacyLocalChats(userId: userId)
+                        // fallthrough to continue normal flow
+                    }
+                } else {
+                    // No decision yet; present sheet and gate sync
+                    Task { @MainActor in
+                        self.isMigrationDecisionPending = true
+                        self.showMigrationPrompt = true
+                        self.isSignInInProgress = false
+                    }
+                    return
+                }
+            }
+            
             // Check if we have any anonymous chats to migrate
             let anonymousChats = chats.filter { chat in
                 chat.userId == nil && !chat.messages.isEmpty
@@ -1762,12 +1963,19 @@ class ChatViewModel: ObservableObject {
             setupAutoSyncTimer()
             
             // Check if we need to set up encryption first
-            // Always try to initialize encryption service which will:
-            // 1. Load existing key from keychain if available
-            // 2. Generate new key only if no key exists in keychain
+            // IMPORTANT: Do NOT auto-generate a key here; allow UI to prompt the user
             Task {
                 do {
-                    // Initialize encryption - this will load from keychain if available
+                    // If no key exists yet, let ContentView present the prompt and stop here
+                    if !EncryptionService.shared.hasEncryptionKey() {
+                        await MainActor.run {
+                            self.isFirstTimeUser = true
+                            self.isSignInInProgress = false
+                        }
+                        return
+                    }
+
+                    // Initialize encryption - this will load existing key from keychain
                     let key = try await EncryptionService.shared.initialize()
                     self.encryptionKey = key
                     
@@ -1788,6 +1996,9 @@ class ChatViewModel: ObservableObject {
                     
                     // Now proceed with cloud sync regardless of whether key was new or existing
                     await initializeCloudSync()
+                    
+                    // Sync user profile settings
+                    await ProfileManager.shared.performFullSync()
                     
                     // Update last sync date
                     await MainActor.run {
@@ -1831,14 +2042,11 @@ class ChatViewModel: ObservableObject {
             if let userId = currentUserId, CloudMigrationService.shared.isMigrationNeeded(userId: userId) {
                 do {
                     let migrationResult = try await CloudMigrationService.shared.migrateToCloud(userId: userId)
-                    print("Cloud migration completed: \(migrationResult.summary)")
                     
                     if !migrationResult.isSuccess && !migrationResult.errors.isEmpty {
-                        // Log errors but continue with normal flow
-                        print("Migration errors: \(migrationResult.errors.joined(separator: ", "))")
+                        // Migration had errors but continue with normal flow
                     }
                 } catch {
-                    print("Cloud migration failed: \(error)")
                     // Continue with normal flow even if migration fails
                 }
             }
@@ -1910,6 +2118,131 @@ class ChatViewModel: ObservableObject {
         } catch {
             await MainActor.run {
                 self.syncErrors.append(error.localizedDescription)
+            }
+        }
+    }
+
+    // MARK: - Legacy Migration Decision Actions
+    
+    /// User chose to delete legacy local chats instead of migrating
+    func confirmDeleteLegacyChats() {
+        let userId = currentUserId
+        CloudMigrationService.shared.setUserDecision("delete", userId: userId)
+        CloudMigrationService.shared.deleteLegacyLocalChats(userId: userId)
+        Task { @MainActor in
+            self.showMigrationPrompt = false
+            self.isMigrationDecisionPending = false
+            self.userAgreedToMigrateLegacy = false
+            // Always bring up Import Encryption Key view after decision
+            self.shouldShowKeyImport = true
+        }
+        // Continue with normal sign-in flow now that migration is resolved
+        Task {
+            await self.startEncryptedSyncFlow()
+        }
+    }
+    
+    /// User chose to migrate legacy local chats to cloud
+    func confirmMigrateLegacyChats() async {
+        // Record decision immediately
+        CloudMigrationService.shared.setUserDecision("sync", userId: currentUserId)
+
+        // If no encryption key yet, record intent and ask the user to set it up first
+        if !EncryptionService.shared.hasEncryptionKey() {
+            await MainActor.run {
+                self.userAgreedToMigrateLegacy = true
+                self.showMigrationPrompt = false
+                self.isMigrationDecisionPending = false
+                // Always bring up Import Encryption Key view after decision
+                self.shouldShowKeyImport = true
+            }
+            // The UI will prompt for key; after key is set, handleSignIn() will auto-run and migrate
+            return
+        }
+
+        // Dismiss the sheet immediately for better UX and show syncing state
+        await MainActor.run {
+            self.showMigrationPrompt = false
+            self.isMigrationDecisionPending = false
+            self.isSyncing = true
+            // Always bring up Import Encryption Key view after decision
+            self.shouldShowKeyImport = true
+        }
+
+        do {
+            // Initialize encryption with existing key and cloud sync
+            let key = try await EncryptionService.shared.initialize()
+            await MainActor.run { self.encryptionKey = key }
+            try await CloudSyncService.shared.initialize()
+            // Perform migration
+            let result = try await CloudMigrationService.shared.migrateToCloud(userId: currentUserId)
+            print("Migration completed: migrated=\(result.migratedCount), failed=\(result.failedCount)")
+            if !result.errors.isEmpty { print("Migration errors: \(result.errors)") }
+        } catch {
+            // Proceed regardless; errors will be surfaced in sync if needed
+            print("Migration failed to run: \(error)")
+        }
+
+        await MainActor.run {
+            self.isSyncing = false
+        }
+
+        // Continue with normal sign-in flow
+        await startEncryptedSyncFlow()
+    }
+    
+    /// Continues the sign-in flow (encryption, cloud sync, profile sync) after migration decision
+    private func startEncryptedSyncFlow() async {
+        // Avoid double starts
+        if isSignInInProgress { return }
+        isSignInInProgress = true
+        
+        // Ensure auto-sync timer is scheduled (will no-op if gated)
+        setupAutoSyncTimer()
+        
+        do {
+            // Ensure an encryption key exists before proceeding
+            guard EncryptionService.shared.hasEncryptionKey() else {
+                await MainActor.run {
+                    self.isFirstTimeUser = true
+                    self.isSignInInProgress = false
+                }
+                return
+            }
+
+            // Initialize encryption with the existing key
+            let key = try await EncryptionService.shared.initialize()
+            await MainActor.run { self.encryptionKey = key }
+            
+            // Initialize cloud sync service and perform initial sync
+            await initializeCloudSync()
+
+            // Migrate any local chats that still have temporary IDs to server IDs
+            let migrationResult = await cloudSync.migrateTemporaryIdChats()
+            if !migrationResult.errors.isEmpty {
+                await MainActor.run {
+                    self.syncErrors.append(contentsOf: migrationResult.errors)
+                }
+            }
+            
+            // Sync user profile settings
+            await ProfileManager.shared.performFullSync()
+            
+            await MainActor.run {
+                self.lastSyncDate = Date()
+                // After sync completes, ensure we have proper chat setup
+                if self.chats.isEmpty {
+                    self.createNewChat()
+                } else {
+                    self.ensureBlankChatAtTop()
+                }
+                self.isSignInInProgress = false
+            }
+        } catch {
+            await MainActor.run {
+                self.isFirstTimeUser = true
+                self.showEncryptionSetup = true
+                self.isSignInInProgress = false
             }
         }
     }
@@ -2032,10 +2365,16 @@ class ChatViewModel: ObservableObject {
         
         // Must have a token to load more
         guard let token = paginationToken else {
-            // No token means no more pages
-            await MainActor.run {
-                self.hasMoreChats = false
+            // No token but hasMoreChats might still be true after sync
+            // In this case, we should NOT set hasMoreChats to false automatically
+            // Only set it to false if we're certain there are no more
+            if !hasMoreChats {
+                // Already false, nothing to do
+                return
             }
+            
+            // If hasMoreChats is true but no token, this is likely after a sync
+            // Don't change hasMoreChats - the sync logic should have set it correctly
             return
         }
         
@@ -2076,6 +2415,10 @@ class ChatViewModel: ObservableObject {
     @MainActor
     private func updateChatsAfterSync() async {
         guard let userId = currentUserId else { return }
+        
+        // IMPORTANT: Preserve pagination token before updating
+        let savedPaginationToken = self.paginationToken
+        let savedIsPaginationActive = self.isPaginationActive
         
         // Load all chats from storage (includes newly synced ones)
         let allChats = Chat.loadFromDefaults(userId: userId)
@@ -2157,9 +2500,23 @@ class ChatViewModel: ObservableObject {
         // Ensure blank chat at top
         self.ensureBlankChatAtTop()
         
-        // Update hasMoreChats if needed (but don't reset pagination token)
-        if syncedChats.count > (chats.filter { !$0.isBlankChat && !$0.hasTemporaryId }.count) {
+        // Update hasMoreChats conservatively to preserve server-provided pagination
+        let displayedSyncedChats = chats.filter { !$0.isBlankChat && !$0.hasTemporaryId }.count
+
+        // Set to true if we clearly have more locally than are displayed
+        if syncedChats.count > displayedSyncedChats {
             self.hasMoreChats = true
+        } else if self.paginationToken == nil && syncedChats.count <= Constants.Pagination.chatsPerPage {
+            // Only set to false when not using remote pagination and we are certain the total fits on one page
+            self.hasMoreChats = false
+        }
+        // Otherwise, preserve existing hasMoreChats which may have been set from remote list
+        
+        // IMPORTANT: Restore pagination state that was saved at the beginning
+        // This ensures the pagination token doesn't get lost during sync
+        if savedIsPaginationActive {
+            self.paginationToken = savedPaginationToken
+            self.isPaginationActive = savedIsPaginationActive
         }
     }
     
@@ -2207,10 +2564,8 @@ class ChatViewModel: ObservableObject {
                 // Ensure blank chat at top
                 self.ensureBlankChatAtTop()
                 
-                // Check if there are more chats beyond the first page
-                if syncedChats.count > Constants.Pagination.chatsPerPage {
-                    self.hasMoreChats = true
-                }
+                // Update hasMoreChats based on whether there are more chats beyond the first page
+                self.hasMoreChats = syncedChats.count > Constants.Pagination.chatsPerPage
             }
         } else {
             // Not using pagination yet or pagination needs to be reset
@@ -2225,17 +2580,19 @@ class ChatViewModel: ObservableObject {
                 self.chats = Array(sortedChats.prefix(Constants.Pagination.chatsPerPage))
                 self.ensureBlankChatAtTop()
                 
-                // Set up pagination if there are more chats
-                if sortedChats.count > Constants.Pagination.chatsPerPage {
-                    self.hasMoreChats = true
-                    // Pagination token will be set by initializeCloudSync or setupPaginationForAppRestart
-                }
+                // Set up pagination based on whether there are more chats
+                self.hasMoreChats = sortedChats.count > Constants.Pagination.chatsPerPage
+                // Pagination token will be set by initializeCloudSync or setupPaginationForAppRestart
             }
         }
     }
     
     /// Perform a full sync with the cloud
     func performFullSync() async {
+        // Gate manual sync until migration choice is made
+        if isMigrationDecisionPending {
+            return
+        }
         await MainActor.run {
             self.isSyncing = true
             self.syncErrors = []
@@ -2243,22 +2600,24 @@ class ChatViewModel: ObservableObject {
         
         let result = await cloudSync.syncAllChats()
         
+        // Update chats if there were changes (await this before marking sync complete)
+        if result.downloaded > 0 || result.uploaded > 0 {
+            await self.updateChatsAfterSync()
+        }
+        
+        // Always refresh pagination token and hasMore state from the server after a sync
+        // This guards against cold-start races where the token wasn't available yet
+        await self.setupPaginationForAppRestart()
+        
+        // Also sync profile settings
+        await ProfileManager.shared.performFullSync()
+        
         await MainActor.run {
             self.isSyncing = false
             self.lastSyncDate = Date()
             
             if !result.errors.isEmpty {
                 self.syncErrors = result.errors
-                // Show error recovery UI if there are sync errors
-                // Log sync error but don't show modal
-                print("Sync error: Already in progress")
-            }
-            
-            // Use intelligent update that preserves pagination if user has loaded more pages
-            if result.downloaded > 0 || result.uploaded > 0 {
-                Task { @MainActor in
-                    await self.updateChatsAfterSync()
-                }
             }
         }
     }
@@ -2388,4 +2747,3 @@ class ChatViewModel: ObservableObject {
         }
     }
 }
-

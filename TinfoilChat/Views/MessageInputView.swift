@@ -188,6 +188,9 @@ struct CustomTextEditor: UIViewRepresentable {
         textView.isEditable = true
         textView.isSelectable = true
         textView.alwaysBounceVertical = false
+        // Prevent status bar tap from targeting the input's internal scroll view
+        // so the main chat ScrollView handles scroll-to-top immediately.
+        textView.scrollsToTop = false
         textView.textContainerInset = UIEdgeInsets(top: 16, left: 2, bottom: 8, right: 5) // Reduced left padding
         textView.textContainer.lineFragmentPadding = 0
         textView.tintColor = UIColor.systemBlue // Set cursor and selection color to blue

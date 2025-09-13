@@ -68,6 +68,11 @@ class ProfileSyncService: ObservableObject {
             throw ProfileSyncError.authenticationRequired
         }
         
+        // Check if token looks valid (basic check)
+        if token.isEmpty {
+            throw ProfileSyncError.authenticationRequired
+        }
+        
         return [
             "Authorization": "Bearer \(token)",
             "Content-Type": "application/json"
@@ -90,7 +95,12 @@ class ProfileSyncService: ObservableObject {
         request.httpMethod = "GET"
         request.allHTTPHeaderFields = try await getHeaders()
         
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw ProfileSyncError.fetchFailed(underlying: error)
+        }
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ProfileSyncError.invalidResponse
@@ -101,7 +111,8 @@ class ProfileSyncService: ObservableObject {
         }
         
         guard (200...299).contains(httpResponse.statusCode) else {
-            throw ProfileSyncError.fetchFailed
+            let error = URLError(.badServerResponse, userInfo: [NSURLErrorFailingURLErrorKey: url, "statusCode": httpResponse.statusCode])
+            throw ProfileSyncError.fetchFailed(underlying: error)
         }
         
         let profileResponse = try JSONDecoder().decode(ProfileResponse.self, from: data)
@@ -174,18 +185,31 @@ class ProfileSyncService: ObservableObject {
         let body = ProfileUploadRequest(data: jsonString)
         request.httpBody = try JSONEncoder().encode(body)
         
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw ProfileSyncError.saveFailed(underlying: error)
+        }
         
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
-            throw ProfileSyncError.saveFailed
+            let error = URLError(.badServerResponse, userInfo: [NSURLErrorFailingURLErrorKey: url, "statusCode": (response as? HTTPURLResponse)?.statusCode ?? 0])
+            throw ProfileSyncError.saveFailed(underlying: error)
         }
         
-        // Update cache
+        // Try to parse the response to get the server-assigned version
+        var serverVersion = profileWithMetadata.version
+        if let responseData = try? JSONDecoder().decode(ProfileUploadResponse.self, from: data) {
+            serverVersion = responseData.version
+        }
+        
+        // Update cache with server version
+        profileWithMetadata.version = serverVersion
         self.cachedProfile = profileWithMetadata
         
         
-        return (true, profileWithMetadata.version)
+        return (true, serverVersion)
     }
     
     /// Retry decryption with new key
@@ -233,8 +257,8 @@ class ProfileSyncService: ObservableObject {
 enum ProfileSyncError: LocalizedError {
     case authenticationRequired
     case invalidResponse
-    case fetchFailed
-    case saveFailed
+    case fetchFailed(underlying: Error)
+    case saveFailed(underlying: Error)
     case invalidDataFormat
     case encryptionFailed
     case decryptionFailed
@@ -247,10 +271,10 @@ enum ProfileSyncError: LocalizedError {
             return "Authentication required for profile sync"
         case .invalidResponse:
             return "Invalid response from server"
-        case .fetchFailed:
-            return "Failed to fetch profile from cloud"
-        case .saveFailed:
-            return "Failed to save profile to cloud"
+        case .fetchFailed(let underlying):
+            return "Failed to fetch profile from cloud: \(underlying.localizedDescription)"
+        case .saveFailed(let underlying):
+            return "Failed to save profile to cloud: \(underlying.localizedDescription)"
         case .invalidDataFormat:
             return "Invalid data format in profile response"
         case .encryptionFailed:

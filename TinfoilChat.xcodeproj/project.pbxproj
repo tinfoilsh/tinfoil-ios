@@ -10,6 +10,7 @@
 		99095BBB2DC2BC1E009C8F44 /* Clerk in Frameworks */ = {isa = PBXBuildFile; productRef = 99095BBA2DC2BC1E009C8F44 /* Clerk */; };
 		9926F7B32DBD497A002E4B00 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 9926F7B22DBD497A002E4B00 /* MarkdownUI */; };
 		998300C72E2C0B9600B5EFA8 /* TinfoilAI in Frameworks */ = {isa = PBXBuildFile; productRef = 998300C62E2C0B9600B5EFA8 /* TinfoilAI */; };
+		998397652E6657ED00A46274 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = 998397642E6657ED00A46274 /* SwiftMath */; };
 		999769632E295C1A00A570DC /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 999769622E295C1A00A570DC /* RevenueCat */; };
 		999769652E295C1A00A570DC /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 999769642E295C1A00A570DC /* RevenueCatUI */; };
 		99976A572E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit in Resources */ = {isa = PBXBuildFile; fileRef = 99976A562E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit */; };
@@ -53,6 +54,7 @@
 				999769632E295C1A00A570DC /* RevenueCat in Frameworks */,
 				9926F7B32DBD497A002E4B00 /* MarkdownUI in Frameworks */,
 				D4FD450D5DF249E2A37CA9CD /* Sentry in Frameworks */,
+				998397652E6657ED00A46274 /* SwiftMath in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -111,6 +113,7 @@
 				999769622E295C1A00A570DC /* RevenueCat */,
 				999769642E295C1A00A570DC /* RevenueCatUI */,
 				998300C62E2C0B9600B5EFA8 /* TinfoilAI */,
+				998397642E6657ED00A46274 /* SwiftMath */,
 			);
 			productName = TinfoilChat;
 			productReference = 9909E5BE2DBD460C0040357B /* TinfoilChat.app */;
@@ -124,7 +127,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1630;
-				LastUpgradeCheck = 1630;
+				LastUpgradeCheck = 1640;
 				TargetAttributes = {
 					9909E5BD2DBD460C0040357B = {
 						CreatedOnToolsVersion = 16.3;
@@ -146,6 +149,7 @@
 				265076DEC67642B78D44265D /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				999769612E295C1A00A570DC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 				998300C52E2C0B9600B5EFA8 /* XCRemoteSwiftPackageReference "tinfoil-swift" */,
+				998397632E6657ED00A46274 /* XCRemoteSwiftPackageReference "SwiftMath" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9909E5BF2DBD460C0040357B /* Products */;
@@ -232,6 +236,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 8KSH668LZT;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -295,6 +300,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 8KSH668LZT;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -326,7 +332,6 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 8KSH668LZT;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -370,7 +375,6 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 8KSH668LZT;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -460,6 +464,14 @@
 				kind = branch;
 			};
 		};
+		998397632E6657ED00A46274 /* XCRemoteSwiftPackageReference "SwiftMath" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mgriebling/SwiftMath";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.7.3;
+			};
+		};
 		999769612E295C1A00A570DC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm.git";
@@ -490,6 +502,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 998300C52E2C0B9600B5EFA8 /* XCRemoteSwiftPackageReference "tinfoil-swift" */;
 			productName = TinfoilAI;
+		};
+		998397642E6657ED00A46274 /* SwiftMath */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 998397632E6657ED00A46274 /* XCRemoteSwiftPackageReference "SwiftMath" */;
+			productName = SwiftMath;
 		};
 		999769622E295C1A00A570DC /* RevenueCat */ = {
 			isa = XCSwiftPackageProductDependency;
