@@ -1034,6 +1034,8 @@ class CloudSyncService: ObservableObject {
                 // Save new chat locally and delete the old one
                 await saveChatToStorage(StoredChat(from: migratedChat, syncVersion: chat.syncVersion + 1))
                 await deleteChatFromStorage(chat.id)
+                // Mark migrated chat as synced to prevent repeated uploads
+                await markChatAsSynced(migratedChat.id, version: chat.syncVersion + 1)
 
                 // Best-effort: delete old remote object if it exists
                 try? await r2Storage.deleteChat(chat.id)
