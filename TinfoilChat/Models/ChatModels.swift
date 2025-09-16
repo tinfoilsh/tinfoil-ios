@@ -178,7 +178,7 @@ struct Chat: Identifiable, Codable {
         id = try container.decode(String.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
         messages = try container.decode([Message].self, forKey: .messages)
-        titleState = try container.decodeIfPresent(TitleState.self, forKey: .titleState) ?? Chat.deriveTitleState(for: title, messages: messages)
+        titleState = (try? container.decode(TitleState.self, forKey: .titleState)) ?? Chat.deriveTitleState(for: title, messages: messages)
         hasActiveStream = try container.decodeIfPresent(Bool.self, forKey: .hasActiveStream) ?? false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         modelType = try container.decode(ModelType.self, forKey: .modelType)
