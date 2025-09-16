@@ -687,7 +687,7 @@ class ChatViewModel: ObservableObject {
                 updatedChat.title = Chat.placeholderTitle
                 updatedChat.titleState = .placeholder
             } else {
-                updatedChat.title = newTitle
+                updatedChat.title = trimmed
                 updatedChat.titleState = .manual
             }
             updatedChat.locallyModified = true
