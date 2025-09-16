@@ -1922,12 +1922,10 @@ class ChatViewModel: ObservableObject {
                         // fallthrough to continue normal flow
                     }
                 } else {
-                    // No decision yet; present sheet and gate sync
-                    Task { @MainActor in
-                        self.isMigrationDecisionPending = true
-                        self.showMigrationPrompt = true
-                        self.isSignInInProgress = false
-                    }
+                    // No decision yet; present sheet and gate sync immediately (avoid race with auto-sync)
+                    self.isMigrationDecisionPending = true
+                    self.showMigrationPrompt = true
+                    self.isSignInInProgress = false
                     return
                 }
             }
