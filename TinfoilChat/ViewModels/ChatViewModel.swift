@@ -1133,7 +1133,7 @@ class ChatViewModel: ObservableObject {
                                     self.updateChat(current)
                                     // Force an immediate cloud backup to propagate the new title
                                     Task {
-                                        try? await self.cloudSync.backupChat(current.id)
+                                        try? await self.cloudSync.backupChat(current.id, ensureLatestUpload: true)
                                     }
                                     Chat.triggerSuccessFeedback()
                                 }
