@@ -681,9 +681,20 @@ class ChatViewModel: ObservableObject {
         guard hasChatAccess else { return }
         
         if let index = chats.firstIndex(where: { $0.id == id }) {
-            chats[index].title = newTitle
+            var updatedChat = chats[index]
+            let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                updatedChat.title = Chat.placeholderTitle
+                updatedChat.titleState = .placeholder
+            } else {
+                updatedChat.title = newTitle
+                updatedChat.titleState = .manual
+            }
+            updatedChat.locallyModified = true
+            updatedChat.updatedAt = Date()
+            chats[index] = updatedChat
             if currentChat?.id == id {
-                currentChat?.title = newTitle
+                currentChat = updatedChat
             }
             saveChats()
         }
@@ -704,20 +715,14 @@ class ChatViewModel: ObservableObject {
         let userMessage = Message(role: .user, content: text)
         addMessage(userMessage)
         
-        // If this is the first message, update creation date and generate title
+        // If this is the first message, update creation date (title will be generated after assistant reply)
         if var chat = currentChat, chat.messages.count == 1 {
             // Update creation date to now (when first message is sent)
             chat.createdAt = Date()
             chat.updatedAt = Date()
             chat.locallyModified = true  // Ensure it's marked as modified
-            
-            // Generate title
-            let generatedTitle = Chat.generateTitle(from: text)
-            chat.title = generatedTitle
-            
+            // Keep placeholder title for now; generate via LLM after first assistant response
             updateChat(chat)
-            // Trigger success haptic feedback for title generation
-            Chat.triggerSuccessFeedback()
         }
         
         // Create initial empty assistant message as a placeholder
@@ -1084,6 +1089,30 @@ class ChatViewModel: ObservableObject {
                         }
                         
                         self.updateChat(chat)  // Final update without throttling
+
+                        // If this was the first exchange and title is still placeholder, generate via LLM
+                        if chat.needsGeneratedTitle && chat.messages.count >= 2 {
+                            Task { @MainActor in
+                                // Snapshot messages for the LLM prompt now
+                                let messagesSnapshot = self.currentChat?.messages ?? []
+                                guard !messagesSnapshot.isEmpty else { return }
+
+                                if let generated = await self.generateLLMTitle(from: messagesSnapshot) {
+                                    // Re-fetch the latest chat after await to avoid using stale IDs
+                                    guard var current = self.currentChat, current.messages.count >= 2, current.needsGeneratedTitle else { return }
+                                    current.title = generated
+                                    current.titleState = .generated
+                                    current.locallyModified = true
+                                    current.updatedAt = Date()
+                                    self.updateChat(current)
+                                    // Force an immediate cloud backup to propagate the new title
+                                    Task {
+                                        try? await self.cloudSync.backupChat(current.id)
+                                    }
+                                    Chat.triggerSuccessFeedback()
+                                }
+                            }
+                        }
                         
                         // Convert temporary ID to permanent ID after streaming completes
                         if chat.hasTemporaryId && self.authManager?.isAuthenticated == true {
@@ -1709,7 +1738,15 @@ class ChatViewModel: ObservableObject {
                 return true
             }
             
-            Chat.saveToDefaults(uniqueChatsToSave, userId: currentUserId)
+            // Always include the current chat to ensure latest changes (e.g., title) are persisted
+            var chatsToPersist = uniqueChatsToSave
+            if let current = currentChat, (!current.messages.isEmpty || current.decryptionFailed) {
+                if !chatsToPersist.contains(where: { $0.id == current.id }) {
+                    chatsToPersist.append(current)
+                }
+            }
+
+            Chat.saveToDefaults(chatsToPersist, userId: currentUserId)
             
             // Trigger cloud backup for the current chat if it has messages and permanent ID
             // Don't try to backup chats with temporary IDs or while streaming
@@ -2069,7 +2106,7 @@ class ChatViewModel: ObservableObject {
                 // Only filter out truly blank chats (not encrypted ones)
                 let displayableChats = sortedChats.filter { chat in
                     // Show if: has messages OR failed to decrypt OR has a non-blank title
-                    !chat.messages.isEmpty || chat.decryptionFailed || !chat.title.contains("New Chat")
+                    !chat.messages.isEmpty || chat.decryptionFailed || !chat.needsGeneratedTitle
                 }
                 
                 // Take first page of displayable chats
@@ -2743,5 +2780,76 @@ class ChatViewModel: ObservableObject {
                 self.syncErrors.append(contentsOf: result.errors)
             }
         }
+    }
+}
+
+// MARK: - LLM Title Generation
+extension ChatViewModel {
+    /// Generates a concise chat title using a free LLM, based on the first few messages.
+    fileprivate func generateLLMTitle(from messages: [Message]) async -> String? {
+        // Require at least one message
+        guard !messages.isEmpty else { return nil }
+
+        // Pick a free model, prefer a llama-free-like id
+        let freeModels = AppConfig.shared.availableModels.filter { $0.isFree }
+        guard !freeModels.isEmpty else { return nil }
+        let preferred = freeModels.first { $0.modelName.lowercased().contains("llama") && $0.modelName.lowercased().contains("free") }
+        let modelToUse = preferred ?? freeModels[0]
+
+        // Prepare conversation snippet (first few messages)
+        let snippet = messages.prefix(4).map { msg -> String in
+            let role = (msg.role == .user) ? "USER" : "ASSISTANT"
+            return "\(role): \(msg.content.prefix(500))"
+        }.joined(separator: "\n\n")
+
+        // Ensure client is available
+        if client == nil {
+            setupTinfoilClient()
+            let maxWait: TimeInterval = Constants.Sync.clientInitTimeoutSeconds
+            let start = Date()
+            while client == nil && Date().timeIntervalSince(start) < maxWait {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
+        guard let client else { return nil }
+
+        let titlePrompt = "You are a conversation title generator. Your job is to generate a title for the following conversation between the USER and the ASSISTANT. Generate a concise, descriptive title (max 15 tokens) for this conversation. Output ONLY the title, nothing else."
+
+        // Build messages
+        let params: [ChatQuery.ChatCompletionMessageParam] = [
+            .system(.init(content: .textContent(titlePrompt))),
+            .user(.init(content: .string("Generate a title for this conversation:\n\n\(snippet)")))
+        ]
+
+        let query = ChatQuery(
+            messages: params,
+            model: modelToUse.modelName,
+            stream: true
+        )
+
+        // Collect streamed content
+        var buffer = ""
+        do {
+            let stream: AsyncThrowingStream<ChatStreamResult, Error> = client.chatsStream(query: query)
+            for try await chunk in stream {
+                if let piece = chunk.choices.first?.delta.content, !piece.isEmpty {
+                    buffer += piece
+                }
+            }
+        } catch {
+            return nil
+        }
+
+        let raw = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+
+        // Clean quotes and clamp length
+        let clean = raw
+            .replacingOccurrences(of: "^\"|\"$", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "^'|'$", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !clean.isEmpty, clean.count <= 80 else { return nil }
+        return clean
     }
 }

@@ -13,8 +13,17 @@ import NaturalLanguage
 
 /// Represents a chat conversation
 struct Chat: Identifiable, Codable {
+    enum TitleState: String, Codable {
+        case placeholder
+        case generated
+        case manual
+    }
+
+    static let placeholderTitle = "New Chat"
+
     let id: String
     var title: String
+    var titleState: TitleState
     var messages: [Message]
     var hasActiveStream: Bool = false
     var createdAt: Date
@@ -44,9 +53,25 @@ struct Chat: Identifiable, Codable {
         return !id.contains("_")
     }
     
+    var needsGeneratedTitle: Bool {
+        return titleState == .placeholder
+    }
+
+    static func deriveTitleState(for title: String, messages: [Message]) -> TitleState {
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if messages.isEmpty {
+            return normalizedTitle.isEmpty || normalizedTitle == placeholderTitle ? .placeholder : .manual
+        }
+        if normalizedTitle.isEmpty || normalizedTitle == placeholderTitle {
+            return .placeholder
+        }
+        return .generated
+    }
+
     init(
         id: String = UUID().uuidString, 
-        title: String = "New Chat", 
+        title: String = Chat.placeholderTitle, 
+        titleState: TitleState? = nil,
         messages: [Message] = [], 
         createdAt: Date = Date(),
         modelType: ModelType,
@@ -59,8 +84,11 @@ struct Chat: Identifiable, Codable {
         decryptionFailed: Bool = false,
         encryptedData: String? = nil) 
     {
+        let resolvedTitleState = titleState ?? Chat.deriveTitleState(for: title, messages: messages)
+
         self.id = id
         self.title = title
+        self.titleState = resolvedTitleState
         self.messages = messages
         self.createdAt = createdAt
         self.modelType = modelType
@@ -81,7 +109,8 @@ struct Chat: Identifiable, Codable {
     @MainActor
     static func create(
         id: String = UUID().uuidString,
-        title: String = "New Chat",
+        title: String = Chat.placeholderTitle,
+        titleState: TitleState? = nil,
         messages: [Message] = [],
         createdAt: Date = Date(),
         modelType: ModelType? = nil,
@@ -96,6 +125,7 @@ struct Chat: Identifiable, Codable {
         return Chat(
             id: id,
             title: title,
+            titleState: titleState,
             messages: messages,
             createdAt: createdAt,
             modelType: model,
@@ -111,7 +141,8 @@ struct Chat: Identifiable, Codable {
     /// Creates a new chat with a server-generated timestamp ID for proper cloud sync
     @MainActor
     static func createWithTimestampId(
-        title: String = "New Chat",
+        title: String = Chat.placeholderTitle,
+        titleState: TitleState? = nil,
         messages: [Message] = [],
         createdAt: Date = Date(),
         modelType: ModelType? = nil,
@@ -124,6 +155,7 @@ struct Chat: Identifiable, Codable {
         return create(
             id: idResponse.conversationId,
             title: title,
+            titleState: titleState,
             messages: messages,
             createdAt: createdAt,
             modelType: modelType,
@@ -135,7 +167,7 @@ struct Chat: Identifiable, Codable {
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, title, messages, hasActiveStream, createdAt, modelType, language, userId
+        case id, title, titleState, messages, hasActiveStream, createdAt, modelType, language, userId
         case syncVersion, syncedAt, locallyModified, updatedAt
         case decryptionFailed, encryptedData
     }
@@ -146,6 +178,7 @@ struct Chat: Identifiable, Codable {
         id = try container.decode(String.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
         messages = try container.decode([Message].self, forKey: .messages)
+        titleState = try container.decodeIfPresent(TitleState.self, forKey: .titleState) ?? Chat.deriveTitleState(for: title, messages: messages)
         hasActiveStream = try container.decodeIfPresent(Bool.self, forKey: .hasActiveStream) ?? false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         modelType = try container.decode(ModelType.self, forKey: .modelType)
@@ -167,6 +200,7 @@ struct Chat: Identifiable, Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(title, forKey: .title)
+        try container.encode(titleState, forKey: .titleState)
         try container.encode(messages, forKey: .messages)
         try container.encode(hasActiveStream, forKey: .hasActiveStream)
         try container.encode(createdAt, forKey: .createdAt)
@@ -224,13 +258,7 @@ struct Chat: Identifiable, Codable {
         return []
     }
     
-    // MARK: - Title Generation
-    
-    /// Generates a title for a chat based on the first user message
-    static func generateTitle(from text: String) -> String {
-        // Use the TextRank algorithm to generate a title
-        return TextRankTitleGenerator.shared.generateTitle(from: text)
-    }
+    // MARK: - Title Generation handled via LLM (see ChatViewModel.generateLLMTitle)
 }
 
 /// Represents a message role
@@ -471,10 +499,9 @@ class APIKeyManager {
 /// 2. Running PageRank to identify the most important words
 /// 3. Extracting the top-ranked words as keywords for the title
 ///
-/// This implementation filters out common words and uses a sliding window approach
-/// to determine word co-occurrence relationships.
+/// Title generation is handled via ChatViewModel.generateLLMTitle.
+/* TextRankTitleGenerator is kept disabled below.
 class TextRankTitleGenerator {
-    // Common words to exclude from titles
     private static let commonWords: Set<String> = [
         // Articles
         "the", "a", "an",
@@ -773,8 +800,6 @@ class TextRankTitleGenerator {
     }
     
     /// Capitalize the first letter of a word
-    private func capitalizeFirstLetter(_ word: String) -> String {
-        guard !word.isEmpty else { return word }
-        return word.prefix(1).uppercased() + word.dropFirst()
-    }
-} 
+    private func capitalizeFirstLetter(_ word: String) -> String { "" }
+}
+*/
