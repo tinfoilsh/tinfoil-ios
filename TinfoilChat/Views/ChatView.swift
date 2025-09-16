@@ -164,7 +164,7 @@ struct ChatContainer: View {
                 Image("navbar-logo")
                     .resizable()
                     .scaledToFit()
-                    .frame(height: 28)
+                    .frame(height: 22)
             }
             // Only show toolbar items when chat has messages (not a new/blank chat)
             if authManager.isAuthenticated && !(viewModel.currentChat?.isBlankChat ?? true) {

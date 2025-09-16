@@ -1,17 +1,17 @@
 {
   "images" : [
     {
-      "filename" : "tinfoill-logo@1x.png",
+      "filename" : "tinfoill-logo-white.png",
       "idiom" : "universal",
       "scale" : "1x"
     },
     {
-      "filename" : "tinfoill-logo@2x.png",
+      "filename" : "tinfoill-logo-white@2x.png",
       "idiom" : "universal",
       "scale" : "2x"
     },
     {
-      "filename" : "tinfoill-logo@3x.png",
+      "filename" : "tinfoill-logo-white@3x.png",
       "idiom" : "universal",
       "scale" : "3x"
     }
