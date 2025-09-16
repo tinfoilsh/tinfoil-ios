@@ -1863,9 +1863,18 @@ class ChatViewModel: ObservableObject {
         if isAuthenticated && hasActiveSubscription && chats.count <= 1 {
             let savedChats = Chat.loadFromDefaults(userId: currentUserId)
             if !savedChats.isEmpty {
+                let previouslySelectedId = currentChat?.id
                 chats = savedChats
-                // Create a new chat instead of selecting from saved chats
-                createNewChat()
+
+                // Preserve existing selection when possible so we don't jump to a blank chat
+                if let chatId = previouslySelectedId,
+                   let restoredChat = chats.first(where: { $0.id == chatId }) {
+                    currentChat = restoredChat
+                } else if currentChat == nil {
+                    currentChat = chats.first
+                }
+
+                ensureBlankChatAtTop()
             }
         }
     }

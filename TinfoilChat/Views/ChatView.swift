@@ -525,7 +525,7 @@ struct ChatScrollView: View {
                         }
                 }
                 // Reset scroll state when switching chats
-                .id(viewModel.currentChat?.id ?? "no-chat")
+                .id(viewModel.currentChat?.createdAt ?? Date.distantPast)
                 .ignoresSafeArea(.keyboard)
                 .simultaneousGesture(
                     DragGesture()
@@ -551,10 +551,11 @@ struct ChatScrollView: View {
                 .onChange(of: messages) { _, newMessages in
                     // If this is a new message (not just an update to the last message)
                     let targetId: AnyHashable = newMessages.last?.id ?? "bottom"
+                    let suppressAutoScroll = shouldSuppressAutoScrollForInitialAssistantReply(newMessages)
                     if newMessages.count > lastMessageCount {
                         lastMessageCount = newMessages.count
                         userHasScrolled = false // Reset scroll state for new messages
-                        
+
                         // When a new message arrives and we're at the bottom, keep showing limited messages
                         if isAtBottom {
                             visibleMessageCount = min(initialMessageCount, newMessages.count)
@@ -568,21 +569,23 @@ struct ChatScrollView: View {
                                 scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
                             }
                         }
-                    } else if !userHasScrolled && !(viewModel.currentChat?.hasActiveStream ?? false) {
-                        // Only scroll if user hasn't manually scrolled up
-                        scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                    } else if !userHasScrolled && !(viewModel.currentChat?.hasActiveStream ?? false) && !suppressAutoScroll {
+                        if isAtBottom {
+                            // Only auto-scroll after updates when still viewing bottom
+                            scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                                }
                             }
                         }
                     }
                 }
                 // When the selected chat changes, reset state and jump to bottom
-                .onChange(of: viewModel.currentChat?.id) { _, _ in
+                .onChange(of: viewModel.currentChat?.createdAt) { _, _ in
+                    lastMessageCount = messages.count
                     didInitialScrollToBottom = false
                     userHasScrolled = false
-                    lastMessageCount = messages.count
                     // Reset to initial message count when switching chats
                     visibleMessageCount = min(initialMessageCount, messages.count)
                     DispatchQueue.main.async {
@@ -698,8 +701,20 @@ struct ChatScrollView: View {
         }
     }
     
+    // MARK: - Auto-Scroll Helpers
+
+    private func shouldSuppressAutoScrollForInitialAssistantReply(_ messages: [Message]) -> Bool {
+        guard let lastMessage = messages.last, lastMessage.role == .assistant else {
+            return false
+        }
+
+        let hasEarlierAssistantMessage = messages.dropLast().contains { $0.role == .assistant }
+        let hasUserMessage = messages.contains { $0.role == .user }
+        return hasUserMessage && !hasEarlierAssistantMessage
+    }
+
     // MARK: - Keyboard Handling
-    
+
     private func setupKeyboardObservers() {
         NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { notification in
             guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
