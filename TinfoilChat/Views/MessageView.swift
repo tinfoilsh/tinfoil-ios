@@ -9,6 +9,7 @@
 import SwiftUI
 import MarkdownUI
 import SwiftMath
+import UIKit
 
 /// Preference key for tracking which thinking box is expanded
 struct ThinkingBoxExpansionPreferenceKey: PreferenceKey {
@@ -26,6 +27,7 @@ struct MessageView: View {
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
     @State private var showCopyFeedback = false
     @State private var cachedParsedContent: (thinkingText: String, remainderText: String, contentHash: Int)? = nil
+    @State private var showLongMessageSheet = false
     
     var body: some View {
         HStack {
@@ -91,6 +93,13 @@ struct MessageView: View {
                     }
                 }
                 
+                // Display long user messages as an attachment-style preview that expands on tap
+                else if message.role == .user && message.shouldDisplayAsAttachment {
+                    LongMessageAttachmentView(message: message, isDarkMode: isDarkMode) {
+                        showLongMessageSheet = true
+                    }
+                }
+
                 // Otherwise display the message as before using Markdown rendering
                 else if !message.content.isEmpty {
                     if message.streamError != nil {
@@ -166,6 +175,12 @@ struct MessageView: View {
             }
         }
         .padding(.horizontal, 4)
+        .sheet(isPresented: $showLongMessageSheet) {
+            LongMessageDetailView(
+                message: message
+            )
+            .presentationDetents([.medium, .large])
+        }
     }
     
     
@@ -235,6 +250,113 @@ struct MessageView: View {
             // If the closing tag hasn't been received, treat all text after <think> as the thinking text.
             let thinkingText = String(message.content[start...])
             return (thinkingText, "")
+        }
+    }
+}
+
+private struct LongMessageAttachmentView: View {
+    let message: Message
+    let isDarkMode: Bool
+    let openAction: () -> Void
+
+    private var wordCountText: String {
+        let words = message.content.split { $0.isWhitespace || $0.isNewline }
+        return "\(words.count) words"
+    }
+
+    private var previewText: String {
+        let trimmed = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let preview = trimmed.prefix(180)
+        return preview + (trimmed.count > 180 ? "…" : "")
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "doc.text")
+                .font(.system(size: 22, weight: .medium))
+                .foregroundColor(.white.opacity(0.85))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Long Message")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+
+                Text(wordCountText)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.6))
+
+                Text(previewText)
+                    .font(.system(size: 14))
+                    .foregroundColor(.white.opacity(0.85))
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.white.opacity(0.5))
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: openAction)
+    }
+}
+
+private struct LongMessageDetailView: View {
+    let message: Message
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                SelectableTextView(text: message.content)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(Color(hex: "#111827"))
+            .navigationTitle("Long Message")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Close") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+private struct SelectableTextView: UIViewRepresentable {
+    let text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.backgroundColor = .clear
+        textView.textColor = UIColor(white: 1.0, alpha: 0.92)
+        textView.font = UIFont.systemFont(ofSize: 15)
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        textView.alwaysBounceVertical = true
+        textView.isScrollEnabled = true
+        textView.showsVerticalScrollIndicator = true
+        textView.textContainer.lineBreakMode = .byWordWrapping
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return textView
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        if uiView.text != text {
+            uiView.text = text
         }
     }
 }

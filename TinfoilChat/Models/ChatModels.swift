@@ -279,7 +279,13 @@ struct Message: Identifiable, Codable, Equatable {
     var isStreaming: Bool = false
     var streamError: String? = nil
     var generationTimeSeconds: Double? = nil
-    
+
+    // User messages at or above this size present as attachment previews.
+    static let longMessageAttachmentThreshold = 1200
+    var shouldDisplayAsAttachment: Bool {
+        role == .user && content.count >= Message.longMessageAttachmentThreshold
+    }
+
     private static let iso8601Formatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
