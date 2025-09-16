@@ -568,7 +568,7 @@ struct ChatScrollView: View {
                                 scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
                             }
                         }
-                    } else if !userHasScrolled {
+                    } else if !userHasScrolled && !(viewModel.currentChat?.hasActiveStream ?? false) {
                         // Only scroll if user hasn't manually scrolled up
                         scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -1242,4 +1242,3 @@ extension Animation {
         }
     }
 }
-
