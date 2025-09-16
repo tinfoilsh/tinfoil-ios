@@ -107,7 +107,7 @@ class CloudSyncService: ObservableObject {
     // MARK: - Single Chat Backup
     
     /// Backup a single chat to the cloud with rate limiting
-    func backupChat(_ chatId: String) async throws {
+    func backupChat(_ chatId: String, ensureLatestUpload: Bool = false) async throws {
         // Don't attempt backup if not authenticated
         guard await r2Storage.isAuthenticated() else {
             return
@@ -115,10 +115,16 @@ class CloudSyncService: ObservableObject {
         
         // Check if there's already an upload in progress for this chat
         if let existingUpload = uploadQueue[chatId] {
+            // Wait for the in-flight upload to finish before continuing
             try await existingUpload.value
+
+            // Trigger a fresh upload if the caller needs to ensure the latest data is synced
+            if ensureLatestUpload {
+                try await backupChat(chatId, ensureLatestUpload: false)
+            }
             return
         }
-        
+
         // Create the upload task
         let uploadTask = Task<Void, Error> { [weak self] in
             try await self?.doBackupChat(chatId)

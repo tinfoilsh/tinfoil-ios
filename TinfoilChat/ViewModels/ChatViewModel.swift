@@ -681,9 +681,20 @@ class ChatViewModel: ObservableObject {
         guard hasChatAccess else { return }
         
         if let index = chats.firstIndex(where: { $0.id == id }) {
-            chats[index].title = newTitle
+            var updatedChat = chats[index]
+            let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                updatedChat.title = Chat.placeholderTitle
+                updatedChat.titleState = .placeholder
+            } else {
+                updatedChat.title = trimmed
+                updatedChat.titleState = .manual
+            }
+            updatedChat.locallyModified = true
+            updatedChat.updatedAt = Date()
+            chats[index] = updatedChat
             if currentChat?.id == id {
-                currentChat?.title = newTitle
+                currentChat = updatedChat
             }
             saveChats()
         }
@@ -704,26 +715,20 @@ class ChatViewModel: ObservableObject {
         let userMessage = Message(role: .user, content: text)
         addMessage(userMessage)
         
-        // If this is the first message, update creation date and generate title
+        // If this is the first message, update creation date (title will be generated after assistant reply)
         if var chat = currentChat, chat.messages.count == 1 {
             // Update creation date to now (when first message is sent)
             chat.createdAt = Date()
             chat.updatedAt = Date()
             chat.locallyModified = true  // Ensure it's marked as modified
-            
-            // Generate title
-            let generatedTitle = Chat.generateTitle(from: text)
-            chat.title = generatedTitle
-            
+            // Keep placeholder title for now; generate via LLM after first assistant response
             updateChat(chat)
-            // Trigger success haptic feedback for title generation
-            Chat.triggerSuccessFeedback()
         }
-        
+
         // Create initial empty assistant message as a placeholder
-        let assistantMessage = Message(role: .assistant, content: "")
+        let assistantMessage = Message(role: .assistant, content: "", isCollapsed: true)
         addMessage(assistantMessage)
-        
+
         // Set the chat as having an active stream
         if var chat = currentChat {
             chat.hasActiveStream = true
@@ -882,7 +887,7 @@ class ChatViewModel: ObservableObject {
                 
                 // Use the OpenAI client's chatsStream method through TinfoilAI
                 let stream: AsyncThrowingStream<ChatStreamResult, Error> = client.chatsStream(query: chatQuery)
-                
+
                 // Process the stream
                 var thinkStartTime: Date? = nil
                 var hasThinkTag = false
@@ -891,184 +896,210 @@ class ChatViewModel: ObservableObject {
                 var isUsingReasoningFormat = false
                 var initialContentBuffer = ""
                 var isFirstChunk = true
-                
-                for try await chunk in stream {
-                    // Get the content from the delta
-                    let content = chunk.choices.first?.delta.content ?? ""
-                    
-                    // Check for reasoning content (supports both reasoning and reasoning_content fields)
-                    let hasReasoningContent = chunk.choices.first?.delta.reasoning != nil
-                    let reasoningContent = chunk.choices.first?.delta.reasoning ?? ""
-                    
-                    // Update UI on main thread
-                    await MainActor.run {
-                        // Verify we're still on the same chat
-                        guard self.currentChat?.id == streamChatId else { return }
-                        
-                        // Get current chat and validate it has messages
+                var responseContent = ""
+                var currentThoughts: String? = nil
+                var generationTimeSeconds: TimeInterval? = nil
+                let minStreamUpdateInterval: TimeInterval = 0.08
+                var lastStreamUpdateTime = Date.distantPast
+                var hasPendingUIUpdate = false
+                var throttledFlushTask: Task<Void, Never>? = nil
+
+                await MainActor.run {
+                    if let chat = self.currentChat,
+                       !chat.messages.isEmpty,
+                       let lastIndex = chat.messages.indices.last {
+                        responseContent = chat.messages[lastIndex].content
+                        currentThoughts = chat.messages[lastIndex].thoughts
+                        generationTimeSeconds = chat.messages[lastIndex].generationTimeSeconds
+                        isInThinkingMode = chat.messages[lastIndex].isThinking
+                    }
+                }
+
+                func updateCurrentThoughts() {
+                    currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                }
+
+                func appendToResponse(_ newContent: String) {
+                    if responseContent.isEmpty {
+                        responseContent = newContent
+                    } else {
+                        responseContent += newContent
+                    }
+                }
+
+                func flushPendingUpdate(throttle: Bool) async {
+                    guard hasPendingUIUpdate else { return }
+                    let didApply = await MainActor.run { () -> Bool in
+                        guard self.currentChat?.id == streamChatId else { return false }
                         guard var chat = self.currentChat,
                               !chat.messages.isEmpty,
-                              let lastIndex = chat.messages.indices.last else { 
-                            return 
+                              let lastIndex = chat.messages.indices.last else {
+                            return false
                         }
-                        
-                        // Detect start of reasoning_content format
-                        if hasReasoningContent && !isUsingReasoningFormat && !isInThinkingMode {
-                            isUsingReasoningFormat = true
+                        chat.messages[lastIndex].content = responseContent
+                        chat.messages[lastIndex].thoughts = currentThoughts
+                        chat.messages[lastIndex].isThinking = isInThinkingMode
+                        chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
+                        self.updateChat(chat, throttleForStreaming: throttle)
+                        return true
+                    }
+                    if didApply {
+                        hasPendingUIUpdate = false
+                        lastStreamUpdateTime = Date()
+                    }
+                }
+
+                defer {
+                    throttledFlushTask?.cancel()
+                    throttledFlushTask = nil
+                }
+
+                for try await chunk in stream {
+                    if Task.isCancelled { break }
+
+                    let content = chunk.choices.first?.delta.content ?? ""
+                    let hasReasoningContent = chunk.choices.first?.delta.reasoning != nil
+                    let reasoningContent = chunk.choices.first?.delta.reasoning ?? ""
+                    var forceImmediateUpdate = false
+                    var didMutateState = false
+
+                    if hasReasoningContent && !isUsingReasoningFormat && !isInThinkingMode {
+                        isUsingReasoningFormat = true
+                        isInThinkingMode = true
+                        isFirstChunk = false
+                        thinkStartTime = Date()
+                        thoughtsBuffer = reasoningContent
+                        updateCurrentThoughts()
+                        didMutateState = true
+                        forceImmediateUpdate = true
+                    } else if isUsingReasoningFormat {
+                        if !reasoningContent.isEmpty {
+                            thoughtsBuffer += reasoningContent
+                            updateCurrentThoughts()
                             isInThinkingMode = true
-                            isFirstChunk = false
-                            thinkStartTime = Date() // Track when thinking started
-                            
-                            if !reasoningContent.isEmpty {
-                                thoughtsBuffer = reasoningContent
-                                chat.messages[lastIndex].thoughts = thoughtsBuffer
-                                chat.messages[lastIndex].isThinking = true
-                                self.updateChat(chat, throttleForStreaming: true)
+                            didMutateState = true
+                        }
+
+                        if !content.isEmpty && isInThinkingMode {
+                            if let startTime = thinkStartTime {
+                                generationTimeSeconds = Date().timeIntervalSince(startTime)
                             }
-                        } else if isUsingReasoningFormat {
-                            // Continue with reasoning format
-                            if !reasoningContent.isEmpty {
-                                thoughtsBuffer += reasoningContent
-                                // Update thoughts in real-time for streaming
-                                chat.messages[lastIndex].thoughts = thoughtsBuffer
-                                chat.messages[lastIndex].isThinking = true
-                            }
-                            
-                            // Check if regular content has appeared - this signals end of thinking
-                            if !content.isEmpty && isInThinkingMode {
-                                // Calculate generation time before clearing thinkStartTime
-                                if let startTime = thinkStartTime {
-                                    chat.messages[lastIndex].generationTimeSeconds = Date().timeIntervalSince(startTime)
-                                }
-                                
-                                isInThinkingMode = false
-                                thinkStartTime = nil
-                                
-                                // Finalize thoughts and start regular content
-                                chat.messages[lastIndex].thoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                                chat.messages[lastIndex].isThinking = false
-                                chat.messages[lastIndex].content = content
-                            } else if !content.isEmpty {
-                                // Regular content after thinking has ended
-                                chat.messages[lastIndex].content += content
-                                chat.messages[lastIndex].isThinking = false
-                            }
-                            
-                            // Always update if we got any new content
-                            if !reasoningContent.isEmpty || !content.isEmpty {
-                                self.updateChat(chat, throttleForStreaming: true)
-                            }
-                        } else if !isUsingReasoningFormat && !content.isEmpty {
-                            // Handle original <think> tag format
-                            if isFirstChunk {
-                                initialContentBuffer += content
-                                
-                                // Check if we have enough content to determine format
-                                if initialContentBuffer.contains("<think>") || initialContentBuffer.count > 5 {
-                                    isFirstChunk = false
-                                    let processContent = initialContentBuffer
-                                    initialContentBuffer = ""
-                                    
-                                    // Check for think tag
-                                    if processContent.contains("<think>") {
-                                        isInThinkingMode = true
-                                        hasThinkTag = true
-                                        thinkStartTime = Date()
-                                        
-                                        // Extract thoughts from <think> tags
-                                        if let thinkRange = processContent.range(of: "<think>") {
-                                            let afterThink = String(processContent[thinkRange.upperBound...])
-                                            thoughtsBuffer = afterThink
-                                            chat.messages[lastIndex].thoughts = thoughtsBuffer
-                                            chat.messages[lastIndex].isThinking = true
-                                        }
-                                    } else {
-                                        // Regular content
-                                        chat.messages[lastIndex].content += processContent
-                                    }
-                                    self.updateChat(chat, throttleForStreaming: true)
-                                }
-                            } else if hasThinkTag {
-                                // Continue processing think tag content
-                                if content.contains("</think>") {
-                                    // End of thinking
-                                    if let endRange = content.range(of: "</think>") {
-                                        let beforeEnd = String(content[..<endRange.lowerBound])
-                                        thoughtsBuffer += beforeEnd
-                                        
-                                        chat.messages[lastIndex].thoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                                        chat.messages[lastIndex].isThinking = false
-                                        
-                                        // Add content after </think>
-                                        let afterEnd = String(content[endRange.upperBound...])
-                                        chat.messages[lastIndex].content = afterEnd
-                                        
-                                        // Calculate generation time
-                                        if let startTime = thinkStartTime {
-                                            chat.messages[lastIndex].generationTimeSeconds = Date().timeIntervalSince(startTime)
-                                        }
-                                        
-                                        hasThinkTag = false
-                                        isInThinkingMode = false
-                                        thinkStartTime = nil
-                                        thoughtsBuffer = ""
-                                    }
+                            isInThinkingMode = false
+                            thinkStartTime = nil
+                            updateCurrentThoughts()
+                            appendToResponse(content)
+                            didMutateState = true
+                            forceImmediateUpdate = true
+                        } else if !content.isEmpty {
+                            appendToResponse(content)
+                            isInThinkingMode = false
+                            didMutateState = true
+                        }
+                    } else if !isUsingReasoningFormat && !content.isEmpty {
+                        if isFirstChunk {
+                            initialContentBuffer += content
+
+                            if initialContentBuffer.contains("<think>") || initialContentBuffer.count > 5 {
+                                isFirstChunk = false
+                                let processContent = initialContentBuffer
+                                initialContentBuffer = ""
+
+                                if let thinkRange = processContent.range(of: "<think>") {
+                                    isInThinkingMode = true
+                                    hasThinkTag = true
+                                    thinkStartTime = Date()
+                                    let afterThink = String(processContent[thinkRange.upperBound...])
+                                    thoughtsBuffer = afterThink
+                                    updateCurrentThoughts()
+                                    didMutateState = true
+                                    forceImmediateUpdate = true
                                 } else {
-                                    // Continue accumulating thoughts
-                                    thoughtsBuffer += content
-                                    chat.messages[lastIndex].thoughts = thoughtsBuffer
+                                    appendToResponse(processContent)
+                                    didMutateState = true
                                 }
-                                self.updateChat(chat, throttleForStreaming: true)
+                            }
+                        } else if hasThinkTag {
+                            if let endRange = content.range(of: "</think>") {
+                                let beforeEnd = String(content[..<endRange.lowerBound])
+                                thoughtsBuffer += beforeEnd
+                                updateCurrentThoughts()
+                                isInThinkingMode = false
+
+                                let afterEnd = String(content[endRange.upperBound...])
+                                appendToResponse(afterEnd)
+
+                                if let startTime = thinkStartTime {
+                                    generationTimeSeconds = Date().timeIntervalSince(startTime)
+                                }
+
+                                hasThinkTag = false
+                                thinkStartTime = nil
+                                thoughtsBuffer = ""
+                                didMutateState = true
+                                forceImmediateUpdate = true
                             } else {
-                                // Regular content (no thinking)
-                                chat.messages[lastIndex].content += content
-                                self.updateChat(chat, throttleForStreaming: true)
+                                thoughtsBuffer += content
+                                updateCurrentThoughts()
+                                isInThinkingMode = true
+                                didMutateState = true
+                            }
+                        } else {
+                            appendToResponse(content)
+                            didMutateState = true
+                        }
+                    }
+
+                    if didMutateState {
+                        hasPendingUIUpdate = true
+                        let now = Date()
+                        let elapsed = now.timeIntervalSince(lastStreamUpdateTime)
+                        if forceImmediateUpdate || elapsed >= minStreamUpdateInterval {
+                            throttledFlushTask?.cancel()
+                            throttledFlushTask = nil
+                            await flushPendingUpdate(throttle: true)
+                        } else {
+                            let remainingDelay = max(minStreamUpdateInterval - elapsed, 0)
+                            throttledFlushTask?.cancel()
+                            throttledFlushTask = Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: UInt64((remainingDelay * 1_000_000_000).rounded()))
+                                if Task.isCancelled { return }
+                                await flushPendingUpdate(throttle: true)
                             }
                         }
                     }
                 }
-                
+
+                if isInThinkingMode && !thoughtsBuffer.isEmpty {
+                    if isUsingReasoningFormat {
+                        updateCurrentThoughts()
+                    } else {
+                        updateCurrentThoughts()
+                        if responseContent.isEmpty {
+                            responseContent = thoughtsBuffer
+                            currentThoughts = nil
+                        }
+                    }
+                    if let startTime = thinkStartTime {
+                        generationTimeSeconds = Date().timeIntervalSince(startTime)
+                    }
+                    isInThinkingMode = false
+                    hasPendingUIUpdate = true
+                } else if isFirstChunk && !initialContentBuffer.isEmpty {
+                    appendToResponse(initialContentBuffer)
+                    isInThinkingMode = false
+                    currentThoughts = nil
+                    hasPendingUIUpdate = true
+                }
+
+                throttledFlushTask?.cancel()
+                throttledFlushTask = nil
+
+                await flushPendingUpdate(throttle: false)
+
                 // Mark as complete
                 await MainActor.run {
                     self.isLoading = false
-                    
-                    // Handle any remaining buffered content when stream ends
-                    if var chat = self.currentChat,
-                       !chat.messages.isEmpty,
-                       let lastIndex = chat.messages.indices.last {
-                        
-                        // If we're still in thinking mode when stream ends
-                        if isInThinkingMode && !thoughtsBuffer.isEmpty {
-                            isInThinkingMode = false
-                            
-                            if isUsingReasoningFormat {
-                                // For reasoning_content format, keep thoughts as thoughts
-                                chat.messages[lastIndex].thoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                                chat.messages[lastIndex].isThinking = false
-                            } else {
-                                // For <think> format without closing tag, convert thoughts to content
-                                chat.messages[lastIndex].thoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                                chat.messages[lastIndex].isThinking = false
-                                // If there's no content yet, move thoughts to content
-                                if chat.messages[lastIndex].content.isEmpty {
-                                    chat.messages[lastIndex].content = thoughtsBuffer
-                                    chat.messages[lastIndex].thoughts = nil
-                                }
-                            }
-                            
-                            // Calculate generation time
-                            if let startTime = thinkStartTime {
-                                chat.messages[lastIndex].generationTimeSeconds = Date().timeIntervalSince(startTime)
-                            }
-                            
-                            self.updateChat(chat, throttleForStreaming: false)  // Final update, don't throttle
-                        } else if isFirstChunk && !initialContentBuffer.isEmpty {
-                            // Process any buffered content that wasn't processed
-                            chat.messages[lastIndex].content = initialContentBuffer
-                            self.updateChat(chat, throttleForStreaming: false)  // Final update, don't throttle
-                        }
-                    }
-                    
+
                     // Mark the chat as no longer having an active stream
                     if var chat = self.currentChat {
                         chat.hasActiveStream = false
@@ -1084,6 +1115,30 @@ class ChatViewModel: ObservableObject {
                         }
                         
                         self.updateChat(chat)  // Final update without throttling
+
+                        // If this was the first exchange and title is still placeholder, generate via LLM
+                        if chat.needsGeneratedTitle && chat.messages.count >= 2 {
+                            Task { @MainActor in
+                                // Snapshot messages for the LLM prompt now
+                                let messagesSnapshot = self.currentChat?.messages ?? []
+                                guard !messagesSnapshot.isEmpty else { return }
+
+                                if let generated = await self.generateLLMTitle(from: messagesSnapshot) {
+                                    // Re-fetch the latest chat after await to avoid using stale IDs
+                                    guard var current = self.currentChat, current.messages.count >= 2, current.needsGeneratedTitle else { return }
+                                    current.title = generated
+                                    current.titleState = .generated
+                                    current.locallyModified = true
+                                    current.updatedAt = Date()
+                                    self.updateChat(current)
+                                    // Force an immediate cloud backup to propagate the new title
+                                    Task {
+                                        try? await self.cloudSync.backupChat(current.id, ensureLatestUpload: true)
+                                    }
+                                    Chat.triggerSuccessFeedback()
+                                }
+                            }
+                        }
                         
                         // Convert temporary ID to permanent ID after streaming completes
                         if chat.hasTemporaryId && self.authManager?.isAuthenticated == true {
@@ -1598,11 +1653,26 @@ class ChatViewModel: ObservableObject {
             // The calling code will handle saving
         }
     }
-    
+
+    /// Persist the collapse state for a message's thinking box
+    func setThoughtsCollapsed(for messageId: String, collapsed: Bool) {
+        guard var chat = currentChat,
+              let messageIndex = chat.messages.firstIndex(where: { $0.id == messageId }) else {
+            return
+        }
+
+        if chat.messages[messageIndex].isCollapsed == collapsed {
+            return
+        }
+
+        chat.messages[messageIndex].isCollapsed = collapsed
+        updateChat(chat)
+    }
+
     /// Adds a message to the current chat
     private func addMessage(_ message: Message) {
-        guard var chat = currentChat else { 
-            return 
+        guard var chat = currentChat else {
+            return
         }
         
         
@@ -1709,7 +1779,15 @@ class ChatViewModel: ObservableObject {
                 return true
             }
             
-            Chat.saveToDefaults(uniqueChatsToSave, userId: currentUserId)
+            // Always include the current chat to ensure latest changes (e.g., title) are persisted
+            var chatsToPersist = uniqueChatsToSave
+            if let current = currentChat, (!current.messages.isEmpty || current.decryptionFailed) {
+                if !chatsToPersist.contains(where: { $0.id == current.id }) {
+                    chatsToPersist.append(current)
+                }
+            }
+
+            Chat.saveToDefaults(chatsToPersist, userId: currentUserId)
             
             // Trigger cloud backup for the current chat if it has messages and permanent ID
             // Don't try to backup chats with temporary IDs or while streaming
@@ -1800,9 +1878,18 @@ class ChatViewModel: ObservableObject {
         if isAuthenticated && hasActiveSubscription && chats.count <= 1 {
             let savedChats = Chat.loadFromDefaults(userId: currentUserId)
             if !savedChats.isEmpty {
+                let previouslySelectedId = currentChat?.id
                 chats = savedChats
-                // Create a new chat instead of selecting from saved chats
-                createNewChat()
+
+                // Preserve existing selection when possible so we don't jump to a blank chat
+                if let chatId = previouslySelectedId,
+                   let restoredChat = chats.first(where: { $0.id == chatId }) {
+                    currentChat = restoredChat
+                } else if currentChat == nil {
+                    currentChat = chats.first
+                }
+
+                ensureBlankChatAtTop()
             }
         }
     }
@@ -1922,12 +2009,10 @@ class ChatViewModel: ObservableObject {
                         // fallthrough to continue normal flow
                     }
                 } else {
-                    // No decision yet; present sheet and gate sync
-                    Task { @MainActor in
-                        self.isMigrationDecisionPending = true
-                        self.showMigrationPrompt = true
-                        self.isSignInInProgress = false
-                    }
+                    // No decision yet; present sheet and gate sync immediately (avoid race with auto-sync)
+                    self.isMigrationDecisionPending = true
+                    self.showMigrationPrompt = true
+                    self.isSignInInProgress = false
                     return
                 }
             }
@@ -2071,7 +2156,7 @@ class ChatViewModel: ObservableObject {
                 // Only filter out truly blank chats (not encrypted ones)
                 let displayableChats = sortedChats.filter { chat in
                     // Show if: has messages OR failed to decrypt OR has a non-blank title
-                    !chat.messages.isEmpty || chat.decryptionFailed || !chat.title.contains("New Chat")
+                    !chat.messages.isEmpty || chat.decryptionFailed || !chat.needsGeneratedTitle
                 }
                 
                 // Take first page of displayable chats
@@ -2745,5 +2830,76 @@ class ChatViewModel: ObservableObject {
                 self.syncErrors.append(contentsOf: result.errors)
             }
         }
+    }
+}
+
+// MARK: - LLM Title Generation
+extension ChatViewModel {
+    /// Generates a concise chat title using a free LLM, based on the first few messages.
+    fileprivate func generateLLMTitle(from messages: [Message]) async -> String? {
+        // Require at least one message
+        guard !messages.isEmpty else { return nil }
+
+        // Pick a free model, prefer a llama-free-like id
+        let freeModels = AppConfig.shared.availableModels.filter { $0.isFree }
+        guard !freeModels.isEmpty else { return nil }
+        let preferred = freeModels.first { $0.modelName.lowercased().contains("llama") && $0.modelName.lowercased().contains("free") }
+        let modelToUse = preferred ?? freeModels[0]
+
+        // Prepare conversation snippet (first few messages)
+        let snippet = messages.prefix(4).map { msg -> String in
+            let role = (msg.role == .user) ? "USER" : "ASSISTANT"
+            return "\(role): \(msg.content.prefix(500))"
+        }.joined(separator: "\n\n")
+
+        // Ensure client is available
+        if client == nil {
+            setupTinfoilClient()
+            let maxWait: TimeInterval = Constants.Sync.clientInitTimeoutSeconds
+            let start = Date()
+            while client == nil && Date().timeIntervalSince(start) < maxWait {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
+        guard let client else { return nil }
+
+        let titlePrompt = "You are a conversation title generator. Your job is to generate a title for the following conversation between the USER and the ASSISTANT. Generate a concise, descriptive title (max 15 tokens) for this conversation. Output ONLY the title, nothing else."
+
+        // Build messages
+        let params: [ChatQuery.ChatCompletionMessageParam] = [
+            .system(.init(content: .textContent(titlePrompt))),
+            .user(.init(content: .string("Generate a title for this conversation:\n\n\(snippet)")))
+        ]
+
+        let query = ChatQuery(
+            messages: params,
+            model: modelToUse.modelName,
+            stream: true
+        )
+
+        // Collect streamed content
+        var buffer = ""
+        do {
+            let stream: AsyncThrowingStream<ChatStreamResult, Error> = client.chatsStream(query: query)
+            for try await chunk in stream {
+                if let piece = chunk.choices.first?.delta.content, !piece.isEmpty {
+                    buffer += piece
+                }
+            }
+        } catch {
+            return nil
+        }
+
+        let raw = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+
+        // Clean quotes and clamp length
+        let clean = raw
+            .replacingOccurrences(of: "^\"|\"$", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "^'|'$", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !clean.isEmpty, clean.count <= 80 else { return nil }
+        return clean
     }
 }

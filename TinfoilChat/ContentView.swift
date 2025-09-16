@@ -93,8 +93,10 @@ struct ContentView: View {
             EncryptionKeyInputView(isPresented: $showKeyInputModal) { importedKey in
                 Task {
                     do {
-                        try await EncryptionService.shared.setKey(importedKey)
-                        // Continue sign-in/sync flow after a successful import
+                        // Use ChatViewModel API so it retries decryption of failed chats immediately
+                        try await chatViewModel.setEncryptionKey(importedKey)
+                        
+                        // After setting key and decrypting, continue sign-in/sync flow
                         await MainActor.run {
                             chatViewModel.handleSignIn()
                         }
@@ -202,8 +204,8 @@ struct ContentView: View {
         do {
             // Generate new key
             let newKey = EncryptionService.shared.generateKey()
-            try EncryptionService.shared.saveKeyToKeychain(newKey)
-            try await EncryptionService.shared.setKey(newKey)
+            // Use ChatViewModel API so it initializes encryption and retries any needed decryption flows
+            try await chatViewModel.setEncryptionKey(newKey)
             
             // Show alert with the key to save
             await MainActor.run {
