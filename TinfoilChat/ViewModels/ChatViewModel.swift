@@ -724,11 +724,11 @@ class ChatViewModel: ObservableObject {
             // Keep placeholder title for now; generate via LLM after first assistant response
             updateChat(chat)
         }
-        
+
         // Create initial empty assistant message as a placeholder
-        let assistantMessage = Message(role: .assistant, content: "")
+        let assistantMessage = Message(role: .assistant, content: "", isCollapsed: true)
         addMessage(assistantMessage)
-        
+
         // Set the chat as having an active stream
         if var chat = currentChat {
             chat.hasActiveStream = true
@@ -887,7 +887,7 @@ class ChatViewModel: ObservableObject {
                 
                 // Use the OpenAI client's chatsStream method through TinfoilAI
                 let stream: AsyncThrowingStream<ChatStreamResult, Error> = client.chatsStream(query: chatQuery)
-                
+
                 // Process the stream
                 var thinkStartTime: Date? = nil
                 var hasThinkTag = false
@@ -1653,11 +1653,26 @@ class ChatViewModel: ObservableObject {
             // The calling code will handle saving
         }
     }
-    
+
+    /// Persist the collapse state for a message's thinking box
+    func setThoughtsCollapsed(for messageId: String, collapsed: Bool) {
+        guard var chat = currentChat,
+              let messageIndex = chat.messages.firstIndex(where: { $0.id == messageId }) else {
+            return
+        }
+
+        if chat.messages[messageIndex].isCollapsed == collapsed {
+            return
+        }
+
+        chat.messages[messageIndex].isCollapsed = collapsed
+        updateChat(chat)
+    }
+
     /// Adds a message to the current chat
     private func addMessage(_ message: Message) {
-        guard var chat = currentChat else { 
-            return 
+        guard var chat = currentChat else {
+            return
         }
         
         

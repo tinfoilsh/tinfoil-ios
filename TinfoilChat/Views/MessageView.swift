@@ -56,7 +56,8 @@ struct MessageView: View {
                             isDarkMode: isDarkMode,
                             isCollapsible: !message.isThinking,
                             isStreaming: message.isThinking && viewModel.isLoading && message.id == viewModel.messages.last?.id,
-                            generationTimeSeconds: message.generationTimeSeconds
+                            generationTimeSeconds: message.generationTimeSeconds,
+                            messageCollapsed: message.isCollapsed
                         )
                         
                         // Display regular content if present
@@ -79,7 +80,8 @@ struct MessageView: View {
                             isDarkMode: isDarkMode,
                             isCollapsible: message.content.contains("</think>"),
                             isStreaming: viewModel.isLoading && message.id == viewModel.messages.last?.id,
-                            generationTimeSeconds: message.generationTimeSeconds
+                            generationTimeSeconds: message.generationTimeSeconds,
+                            messageCollapsed: message.isCollapsed
                         )
                         
                         // Remainder: text after </think> if present
@@ -509,16 +511,37 @@ struct CollapsibleThinkingBox: View {
     let isCollapsible: Bool
     let isStreaming: Bool
     let generationTimeSeconds: Double?
-    
-    @State private var isCollapsed: Bool = true
+    let messageCollapsed: Bool
+
+    @State private var isCollapsed: Bool
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
-    
+
+    init(
+        messageId: String,
+        thinkingText: String,
+        isDarkMode: Bool,
+        isCollapsible: Bool,
+        isStreaming: Bool,
+        generationTimeSeconds: Double?,
+        messageCollapsed: Bool
+    ) {
+        self.messageId = messageId
+        self.thinkingText = thinkingText
+        self.isDarkMode = isDarkMode
+        self.isCollapsible = isCollapsible
+        self.isStreaming = isStreaming
+        self.generationTimeSeconds = generationTimeSeconds
+        self.messageCollapsed = messageCollapsed
+        _isCollapsed = State(initialValue: messageCollapsed)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header is always visible
             Button(action: {
                 // Toggle instantly without animations
                 isCollapsed.toggle()
+                viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
             }) {
                 HStack {
                     Image(systemName: "brain.head.profile")
@@ -580,15 +603,16 @@ struct CollapsibleThinkingBox: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
         .clipped()
-        .onAppear {
-            // Initialize collapsed state - always start collapsed (no animation)
-            isCollapsed = true
-        }
         // Set preference when thinking box expansion state changes
         .preference(key: ThinkingBoxExpansionPreferenceKey.self, value: !isCollapsed ? messageId : nil)
         .onChange(of: isStreaming) { oldValue, newValue in
             // Keep the box collapsed regardless of streaming state changes
             // User can manually expand/collapse as needed
+        }
+        .onChange(of: messageCollapsed) { _, newValue in
+            if newValue != isCollapsed {
+                isCollapsed = newValue
+            }
         }
     }
 }
