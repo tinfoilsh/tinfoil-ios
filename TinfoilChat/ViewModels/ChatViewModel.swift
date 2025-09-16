@@ -899,9 +899,10 @@ class ChatViewModel: ObservableObject {
                 var responseContent = ""
                 var currentThoughts: String? = nil
                 var generationTimeSeconds: TimeInterval? = nil
-                let minStreamUpdateInterval: TimeInterval = 0.12
+                let minStreamUpdateInterval: TimeInterval = 0.08
                 var lastStreamUpdateTime = Date.distantPast
                 var hasPendingUIUpdate = false
+                var throttledFlushTask: Task<Void, Never>? = nil
 
                 await MainActor.run {
                     if let chat = self.currentChat,
@@ -946,6 +947,11 @@ class ChatViewModel: ObservableObject {
                         hasPendingUIUpdate = false
                         lastStreamUpdateTime = Date()
                     }
+                }
+
+                defer {
+                    throttledFlushTask?.cancel()
+                    throttledFlushTask = nil
                 }
 
                 for try await chunk in stream {
@@ -1046,8 +1052,19 @@ class ChatViewModel: ObservableObject {
                     if didMutateState {
                         hasPendingUIUpdate = true
                         let now = Date()
-                        if forceImmediateUpdate || now.timeIntervalSince(lastStreamUpdateTime) >= minStreamUpdateInterval {
+                        let elapsed = now.timeIntervalSince(lastStreamUpdateTime)
+                        if forceImmediateUpdate || elapsed >= minStreamUpdateInterval {
+                            throttledFlushTask?.cancel()
+                            throttledFlushTask = nil
                             await flushPendingUpdate(throttle: true)
+                        } else {
+                            let remainingDelay = max(minStreamUpdateInterval - elapsed, 0)
+                            throttledFlushTask?.cancel()
+                            throttledFlushTask = Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: UInt64((remainingDelay * 1_000_000_000).rounded()))
+                                if Task.isCancelled { return }
+                                await flushPendingUpdate(throttle: true)
+                            }
                         }
                     }
                 }
@@ -1073,6 +1090,9 @@ class ChatViewModel: ObservableObject {
                     currentThoughts = nil
                     hasPendingUIUpdate = true
                 }
+
+                throttledFlushTask?.cancel()
+                throttledFlushTask = nil
 
                 await flushPendingUpdate(throttle: false)
 
