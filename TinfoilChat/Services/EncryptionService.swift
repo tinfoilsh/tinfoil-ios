@@ -19,7 +19,6 @@ struct EncryptedData: Codable {
 struct DecryptionResult<T> {
     let value: T
     let usedFallbackKey: Bool
-    let keyIdentifier: String?
 }
 
 /// Service for handling end-to-end encryption of chat data
@@ -148,12 +147,11 @@ class EncryptionService: ObservableObject {
         
         let sealedBox = try prepareSealedBox(from: encryptedData)
         let decoder = JSONDecoder()
-        let currentKeyIdentifier = loadKeyFromKeychain()
         
         do {
             let decryptedData = try AES.GCM.open(sealedBox, using: defaultKey)
             let value = try decoder.decode(type, from: decryptedData)
-            return DecryptionResult(value: value, usedFallbackKey: false, keyIdentifier: currentKeyIdentifier)
+            return DecryptionResult(value: value, usedFallbackKey: false)
         } catch {
             var lastError = error
             let history = loadKeyHistory()
@@ -162,7 +160,7 @@ class EncryptionService: ObservableObject {
                     let legacySymmetricKey = try symmetricKey(from: legacyKey)
                     let decryptedData = try AES.GCM.open(sealedBox, using: legacySymmetricKey)
                     let value = try decoder.decode(type, from: decryptedData)
-                    return DecryptionResult(value: value, usedFallbackKey: true, keyIdentifier: legacyKey)
+                    return DecryptionResult(value: value, usedFallbackKey: true)
                 } catch {
                     lastError = error
                 }
