@@ -131,7 +131,7 @@ class ProfileSyncService: ObservableObject {
             let encrypted = try JSONDecoder().decode(EncryptedData.self, from: encryptedData)
             
             
-            let decrypted = try await EncryptionService.shared.decrypt(encrypted, as: ProfileData.self)
+            let decrypted = try await EncryptionService.shared.decrypt(encrypted, as: ProfileData.self).value
             
             // Cache the decrypted profile
             self.cachedProfile = decrypted
@@ -227,7 +227,7 @@ class ProfileSyncService: ObservableObject {
             }
             
             let encrypted = try JSONDecoder().decode(EncryptedData.self, from: encryptedData)
-            let decrypted = try await EncryptionService.shared.decrypt(encrypted, as: ProfileData.self)
+            let decrypted = try await EncryptionService.shared.decrypt(encrypted, as: ProfileData.self).value
             
             // Cache the successfully decrypted profile
             self.cachedProfile = decrypted

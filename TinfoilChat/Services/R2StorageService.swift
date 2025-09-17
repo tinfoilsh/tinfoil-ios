@@ -162,7 +162,7 @@ class R2StorageService: ObservableObject {
         
         // Try to decrypt the chat data
         do {
-            return try await EncryptionService.shared.decrypt(encrypted, as: StoredChat.self)
+            return try await EncryptionService.shared.decrypt(encrypted, as: StoredChat.self).value
         } catch {
             // If decryption fails, create a placeholder with encrypted data
             let timestamp = chatId.split(separator: "_").first.map(String.init) ?? ""
