@@ -24,7 +24,7 @@ struct ContentView: View {
         Group {
             if authManager.isLoading {
                 ZStack {
-                    Color(hex: "111827")
+                    Color.backgroundPrimary
                         .ignoresSafeArea()
                     VStack(spacing: 24) {
                         Image("navbar-logo")

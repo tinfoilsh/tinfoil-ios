@@ -279,10 +279,10 @@ struct VerifierView: View {
         }
         .disabled(isVerifying)
         .buttonStyle(.borderedProminent)
-        .tint(colorScheme == .dark ? Color.gray.opacity(0.3) : Color(hex: "#111827"))
+        .tint(colorScheme == .dark ? Color.gray.opacity(0.3) : Color.tinfoilDark)
         .shadow(color: colorScheme == .dark ? 
                 Color.gray.opacity(0.15) : 
-                Color(hex: "#111827").opacity(0.2), 
+                Color.tinfoilDark.opacity(0.2), 
                 radius: 3, x: 0, y: 2)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .center)

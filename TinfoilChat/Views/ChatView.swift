@@ -129,7 +129,7 @@ struct ChatContainer: View {
         appearance.configureWithOpaqueBackground()
         
         // Always use dark navigation bar for main chat view since logo is white
-        appearance.backgroundColor = UIColor(Color(hex: "#111827"))
+        appearance.backgroundColor = UIColor(Color.backgroundPrimary)
         appearance.shadowColor = .clear
         
         UINavigationBar.appearance().standardAppearance = appearance

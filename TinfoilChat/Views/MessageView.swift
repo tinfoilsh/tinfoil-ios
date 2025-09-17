@@ -140,7 +140,7 @@ struct MessageView: View {
             }
             .padding(.vertical, 8)
             .padding(.horizontal, message.role == .user ? 12 : 0)
-            .background(message.role == .user ? (isDarkMode ? Color.gray.opacity(0.3) : Color(hex: "#111827")) : nil)
+            .background(message.role == .user ? (isDarkMode ? Color.gray.opacity(0.3) : Color.tinfoilDark) : nil)
             .cornerRadius(16)
             .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
             .contextMenu {
@@ -320,7 +320,7 @@ private struct LongMessageDetailView: View {
             }
             .padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Color(hex: "#111827"))
+            .background(Color.backgroundPrimary)
             .navigationTitle("Long Message")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

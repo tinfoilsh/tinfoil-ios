@@ -147,7 +147,7 @@ struct CloudSyncSettingsView: View {
             // Restore dark navigation bar for main views
             let appearance = UINavigationBarAppearance()
             appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = UIColor(Color(hex: "#111827"))
+            appearance.backgroundColor = UIColor(Color.backgroundPrimary)
             appearance.shadowColor = .clear
             
             UINavigationBar.appearance().standardAppearance = appearance

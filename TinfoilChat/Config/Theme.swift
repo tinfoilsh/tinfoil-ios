@@ -13,7 +13,7 @@ enum Theme {
     
     // MARK: - Colors
     enum Colors {
-        static let backgroundPrimary = Color(hex: "#111827")    // Dark navy
+        static let backgroundPrimary = Color.tinfoilDark    // Dark green
         static let backgroundSecondary = Color(hex: "#2C2C2E")  // Dark gray
         static let backgroundTertiary = Color(hex: "#F2F2F7")   // Light gray
     }

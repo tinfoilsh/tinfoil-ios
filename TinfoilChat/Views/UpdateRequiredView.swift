@@ -16,7 +16,7 @@ struct UpdateRequiredView: View {
     var body: some View {
         ZStack {
             // Background
-            (colorScheme == .dark ? Color(hex: "111827") : Color.white)
+            (colorScheme == .dark ? Color.backgroundPrimary : Color.white)
                 .ignoresSafeArea()
             
             VStack(spacing: 32) {

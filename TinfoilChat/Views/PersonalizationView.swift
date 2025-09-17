@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 // Trait selection view for personality traits
 struct TraitSelectionView: View {
@@ -170,10 +171,27 @@ struct PersonalizationView: View {
                 }
         )
         .onAppear {
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithDefaultBackground()
+
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+
             // Trigger a sync from cloud when view appears
             Task {
                 await profileManager.syncFromCloud()
             }
+        }
+        .onDisappear {
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = UIColor(Color.backgroundPrimary)
+            appearance.shadowColor = .clear
+
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
     }
     

@@ -8,10 +8,6 @@
 import SwiftUI
 
 extension Color {
-    // App theme colors
-    static let backgroundPrimary = Color(hex: "111827")
-    static let backgroundSecondary = Color(hex: "1F2937")
-    
     // Accent colors
     static let accentPrimary = Color(red: 16/255, green: 185/255, blue: 129/255) // #10B981
     
@@ -20,6 +16,10 @@ extension Color {
     static let tinfoilLight = Color(hex: "EEF3F3")
     static let tinfoilAccentDark = Color(hex: "004444")
     static let tinfoilAccentLight = Color(hex: "68C7AC")
+    
+    // App theme colors
+    static let backgroundPrimary = Color.tinfoilDark
+    static let backgroundSecondary = Color(hex: "1F2937")
     
     // Additional brand color variations
     static let tealDark = Color(hex: "003333")

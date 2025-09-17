@@ -606,7 +606,7 @@ struct SettingsView: View {
             // Restore dark navigation bar for main chat view
             let appearance = UINavigationBarAppearance()
             appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = UIColor(Color(hex: "#111827"))
+            appearance.backgroundColor = UIColor(Color.backgroundPrimary)
             appearance.shadowColor = .clear
             
             UINavigationBar.appearance().standardAppearance = appearance
@@ -746,7 +746,8 @@ struct LanguagePickerView: View {
     let languages: [String]
     @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.dismiss) private var dismiss
-    
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         List(languages, id: \.self) { language in
             Button(action: {
@@ -765,9 +766,18 @@ struct LanguagePickerView: View {
             }
             .foregroundColor(.primary)
         }
+        .scrollContentBackground(.hidden)
+        .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
         .navigationTitle("Default Language")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithDefaultBackground()
+
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+
             // Load from ProfileManager if available
             if !profileManager.language.isEmpty && profileManager.language != "English" {
                 selectedLanguage = profileManager.language
@@ -782,6 +792,16 @@ struct LanguagePickerView: View {
                     }
                 }
             }
+        }
+        .onDisappear {
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = UIColor(Color.backgroundPrimary)
+            appearance.shadowColor = .clear
+
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
     }
 }
@@ -867,12 +887,10 @@ struct CustomSystemPromptView: View {
     @State private var editingPrompt: String = ""
     @State private var showRestoreConfirmation = false
     
-    // Get default system prompt from AppConfig
     private var defaultSystemPrompt: String {
         AppConfig.shared.systemPrompt
     }
     
-    // Helper to strip <system> tags for editing
     private func stripSystemTags(_ prompt: String) -> String {
         var result = prompt
         if result.hasPrefix("<system>") {
@@ -892,15 +910,12 @@ struct CustomSystemPromptView: View {
                     .onChange(of: isUsingCustomPrompt) { _, newValue in
                         profileManager.isUsingCustomPrompt = newValue
                         if newValue {
-                            // Ensure there's a prompt to propagate across devices
                             var currentEditor = editingPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
                             if currentEditor.isEmpty {
-                                // Seed editor with default prompt (without tags)
                                 currentEditor = stripSystemTags(defaultSystemPrompt)
                                 editingPrompt = currentEditor
                             }
                             if profileManager.customSystemPrompt.isEmpty {
-                                // Save with system tags so it syncs as non-empty content
                                 var promptToSave = currentEditor
                                 if !promptToSave.hasPrefix("<system>") { promptToSave = "<system>\n\(promptToSave)" }
                                 if !promptToSave.hasSuffix("</system>") { promptToSave += "\n</system>" }
@@ -953,12 +968,13 @@ struct CustomSystemPromptView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
         .navigationTitle("Custom System Prompt")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Save") {
-                    // Add <system> tags if not present when saving
                     var promptToSave = editingPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !promptToSave.isEmpty {
                         if !promptToSave.hasPrefix("<system>") {
@@ -969,7 +985,6 @@ struct CustomSystemPromptView: View {
                         }
                     }
                     
-                    // Save to both ProfileManager and SettingsManager
                     profileManager.customSystemPrompt = promptToSave
                     profileManager.isUsingCustomPrompt = isUsingCustomPrompt
                     customSystemPrompt = promptToSave
@@ -979,7 +994,13 @@ struct CustomSystemPromptView: View {
             }
         }
         .onAppear {
-            // Load from ProfileManager first, then fall back to SettingsManager
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithDefaultBackground()
+            
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+            
             if !profileManager.customSystemPrompt.isEmpty {
                 editingPrompt = stripSystemTags(profileManager.customSystemPrompt)
                 isUsingCustomPrompt = profileManager.isUsingCustomPrompt
@@ -989,11 +1010,8 @@ struct CustomSystemPromptView: View {
                 editingPrompt = stripSystemTags(defaultSystemPrompt)
             }
             
-            // Trigger a sync from cloud to ensure we have latest data
             Task {
                 await profileManager.syncFromCloud()
-                
-                // Update local state with synced data
                 await MainActor.run {
                     if !profileManager.customSystemPrompt.isEmpty {
                         editingPrompt = stripSystemTags(profileManager.customSystemPrompt)
@@ -1002,10 +1020,19 @@ struct CustomSystemPromptView: View {
                 }
             }
         }
+        .onDisappear {
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = UIColor(Color.backgroundPrimary)
+            appearance.shadowColor = .clear
+            
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        }
         .alert("Restore Default", isPresented: $showRestoreConfirmation) {
             Button("Cancel", role: .cancel) { }
             Button("Restore", role: .destructive) {
-                // Strip system tags from default prompt when restoring
                 var strippedDefault = defaultSystemPrompt
                 if strippedDefault.hasPrefix("<system>") {
                     strippedDefault = String(strippedDefault.dropFirst(8))
