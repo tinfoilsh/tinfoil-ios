@@ -78,6 +78,8 @@ class EncryptionService: ObservableObject {
         
         // Store the key in Keychain with prefix
         try saveKeyToKeychain(normalizedKey)
+        // Mark that first-launch cleanup already happened so initialize() keeps this key
+        UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
         try updateKeyHistory(withNewKey: normalizedKey, previousKey: previousKey)
     }
     
