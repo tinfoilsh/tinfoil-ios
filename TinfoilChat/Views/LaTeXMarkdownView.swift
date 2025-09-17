@@ -133,11 +133,13 @@ struct LaTeXMarkdownView: View {
                     }
                 }
 
+                let sanitizedLatex = sanitizeLatex(latex)
+
                 segments.append(ContentSegment(
                     id: UUID().uuidString,
                     view: AnyView(
                         LaTeXView(
-                            latex: latex,
+                            latex: sanitizedLatex,
                             isDisplay: isDisplay,
                             isDarkMode: isDarkMode
                         )
@@ -186,6 +188,89 @@ struct LaTeXMarkdownView: View {
         }
 
         return segments
+    }
+
+    private func sanitizeLatex(_ latex: String) -> String {
+        let trimmed = latex.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = trimmed.isEmpty ? latex : trimmed
+
+        guard base.contains("\\text{") else { return base }
+
+        return normalizeTextCommands(in: base)
+    }
+
+    private func normalizeTextCommands(in latex: String) -> String {
+        var result = ""
+        var index = latex.startIndex
+
+        while index < latex.endIndex {
+            if latex[index...].hasPrefix("\\text{") {
+                let contentStart = latex.index(index, offsetBy: 6)
+                var cursor = contentStart
+                var depth = 1
+
+                while cursor < latex.endIndex && depth > 0 {
+                    let character = latex[cursor]
+                    if character == "{" {
+                        depth += 1
+                    } else if character == "}" {
+                        depth -= 1
+                        if depth == 0 { break }
+                    }
+                    cursor = latex.index(after: cursor)
+                }
+
+                if depth == 0 {
+                    let content = String(latex[contentStart..<cursor])
+                    result += rewriteTextContent(content)
+                    index = latex.index(after: cursor)
+                } else {
+                    result += String(latex[index...])
+                    break
+                }
+            } else {
+                result.append(latex[index])
+                index = latex.index(after: index)
+            }
+        }
+
+        return result
+    }
+
+    private func rewriteTextContent(_ content: String) -> String {
+        guard content.contains("\\(") else {
+            return "\\text{\(content)}"
+        }
+
+        var result = ""
+        var currentIndex = content.startIndex
+
+        while let openRange = content.range(of: "\\(", range: currentIndex..<content.endIndex) {
+            let textSegment = String(content[currentIndex..<openRange.lowerBound])
+            if !textSegment.isEmpty {
+                result += "\\text{\(textSegment)}"
+            }
+
+            let mathStart = openRange.upperBound
+            guard let closeRange = content.range(of: "\\)", range: mathStart..<content.endIndex) else {
+                let remainder = String(content[openRange.lowerBound..<content.endIndex])
+                if !remainder.isEmpty {
+                    result += "\\text{\(remainder)}"
+                }
+                return result
+            }
+
+            let mathContent = String(content[mathStart..<closeRange.lowerBound])
+            result += mathContent
+            currentIndex = closeRange.upperBound
+        }
+
+        let trailingText = String(content[currentIndex..<content.endIndex])
+        if !trailingText.isEmpty {
+            result += "\\text{\(trailingText)}"
+        }
+
+        return result
     }
     
     private struct ContentSegment {
