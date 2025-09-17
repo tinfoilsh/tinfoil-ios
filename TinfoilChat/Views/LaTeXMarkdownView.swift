@@ -9,17 +9,20 @@
 import SwiftUI
 import MarkdownUI
 import SwiftMath
+import UIKit
 
 /// A view that renders mixed Markdown and LaTeX content
 struct LaTeXMarkdownView: View {
     let content: String
     let isDarkMode: Bool
     let horizontalPadding: CGFloat
+    let maxWidthAlignment: Alignment
     
-    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0) {
+    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0, maxWidthAlignment: Alignment = .leading) {
         self.content = content
         self.isDarkMode = isDarkMode
         self.horizontalPadding = horizontalPadding
+        self.maxWidthAlignment = maxWidthAlignment
     }
     
     var body: some View {
@@ -29,7 +32,7 @@ struct LaTeXMarkdownView: View {
             }
         }
         .padding(.horizontal, horizontalPadding)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: maxWidthAlignment)
     }
     
     /// Parse content into segments of markdown and LaTeX
@@ -50,6 +53,9 @@ struct LaTeXMarkdownView: View {
                 excludedRanges.append(match.range)
             }
         }
+
+        let tableSegments = findMarkdownTables(in: content)
+        excludedRanges.append(contentsOf: tableSegments.map(\.range))
 
         func isExcluded(_ range: NSRange) -> Bool {
             excludedRanges.contains { NSIntersectionRange($0, range).length > 0 }
@@ -79,11 +85,19 @@ struct LaTeXMarkdownView: View {
 
         latexRanges.sort { $0.range.location < $1.range.location }
 
+        var specialSegments: [SpecialSegment] = latexRanges.map { match in
+            SpecialSegment(range: match.range, kind: .latex(isDisplay: match.isDisplay))
+        }
+        specialSegments.append(contentsOf: tableSegments.map { table in
+            SpecialSegment(range: table.range, kind: .table(table.table))
+        })
+        specialSegments.sort { $0.range.location < $1.range.location }
+
         var segments: [ContentSegment] = []
         var lastIndex = content.startIndex
 
-        for (range, isDisplay) in latexRanges {
-            guard let swiftRange = Range(range, in: content) else { continue }
+        for special in specialSegments {
+            guard let swiftRange = Range(special.range, in: content) else { continue }
 
             if lastIndex < swiftRange.lowerBound {
                 let markdownText = String(content[lastIndex..<swiftRange.lowerBound])
@@ -100,33 +114,46 @@ struct LaTeXMarkdownView: View {
                 }
             }
 
-            let fullMatch = String(content[swiftRange])
-            let latex: String
+            switch special.kind {
+            case let .latex(isDisplay):
+                let fullMatch = String(content[swiftRange])
+                let latex: String
 
-            if isDisplay {
-                if fullMatch.hasPrefix("\\[") && fullMatch.hasSuffix("\\]") {
-                    latex = String(fullMatch.dropFirst(2).dropLast(2))
+                if isDisplay {
+                    if fullMatch.hasPrefix("\\[") && fullMatch.hasSuffix("\\]") {
+                        latex = String(fullMatch.dropFirst(2).dropLast(2))
+                    } else {
+                        latex = fullMatch
+                    }
                 } else {
-                    latex = fullMatch
+                    if fullMatch.hasPrefix("\\(") && fullMatch.hasSuffix("\\)") {
+                        latex = String(fullMatch.dropFirst(2).dropLast(2))
+                    } else {
+                        latex = fullMatch
+                    }
                 }
-            } else {
-                if fullMatch.hasPrefix("\\(") && fullMatch.hasSuffix("\\)") {
-                    latex = String(fullMatch.dropFirst(2).dropLast(2))
-                } else {
-                    latex = fullMatch
-                }
-            }
 
-            segments.append(ContentSegment(
-                id: UUID().uuidString,
-                view: AnyView(
-                    LaTeXView(
-                        latex: latex,
-                        isDisplay: isDisplay,
-                        isDarkMode: isDarkMode
+                segments.append(ContentSegment(
+                    id: UUID().uuidString,
+                    view: AnyView(
+                        LaTeXView(
+                            latex: latex,
+                            isDisplay: isDisplay,
+                            isDarkMode: isDarkMode
+                        )
                     )
-                )
-            ))
+                ))
+            case let .table(table):
+                segments.append(ContentSegment(
+                    id: UUID().uuidString,
+                    view: AnyView(
+                        MarkdownTableView(
+                            table: table,
+                            isDarkMode: isDarkMode
+                        )
+                    )
+                ))
+            }
 
             lastIndex = swiftRange.upperBound
         }
@@ -164,6 +191,312 @@ struct LaTeXMarkdownView: View {
     private struct ContentSegment {
         let id: String
         let view: AnyView
+    }
+
+    private struct SpecialSegment {
+        let range: NSRange
+        let kind: Kind
+
+        enum Kind {
+            case latex(isDisplay: Bool)
+            case table(ParsedTable)
+        }
+    }
+
+    private struct TableMatch {
+        let range: NSRange
+        let table: ParsedTable
+    }
+
+    private struct LineInfo {
+        let text: String
+        let enclosingRange: Range<String.Index>
+    }
+
+    private func findMarkdownTables(in content: String) -> [TableMatch] {
+        guard content.contains("|") else { return [] }
+
+        var lines: [LineInfo] = []
+        content.enumerateSubstrings(in: content.startIndex..<content.endIndex, options: .byLines) { substring, _, enclosingRange, _ in
+            let line = substring ?? ""
+            lines.append(LineInfo(text: line, enclosingRange: enclosingRange))
+        }
+
+        var matches: [TableMatch] = []
+        var index = 0
+
+        while index < lines.count {
+            let headerLine = lines[index].text.trimmingCharacters(in: .whitespaces)
+            guard headerLine.hasPrefix("|") && headerLine.contains("|") else {
+                index += 1
+                continue
+            }
+
+            let alignmentIndex = index + 1
+            guard alignmentIndex < lines.count else {
+                index += 1
+                continue
+            }
+
+            let alignmentLine = lines[alignmentIndex].text
+            guard isAlignmentLine(alignmentLine) else {
+                index += 1
+                continue
+            }
+
+            var collected = [lines[index].text, alignmentLine]
+            var lastIndex = alignmentIndex
+            var rowIndex = alignmentIndex + 1
+
+            while rowIndex < lines.count {
+                let candidate = lines[rowIndex].text.trimmingCharacters(in: .whitespaces)
+                if candidate.isEmpty { break }
+                guard candidate.hasPrefix("|") && candidate.contains("|") else { break }
+                collected.append(lines[rowIndex].text)
+                lastIndex = rowIndex
+                rowIndex += 1
+            }
+
+            if let parsed = parseTable(lines: collected) {
+                let lowerBound = lines[index].enclosingRange.lowerBound
+                let upperBound = lines[lastIndex].enclosingRange.upperBound
+                let range = NSRange(lowerBound..<upperBound, in: content)
+                matches.append(TableMatch(range: range, table: parsed))
+                index = lastIndex + 1
+            } else {
+                index += 1
+            }
+        }
+
+        return matches
+    }
+
+    private func parseTable(lines: [String]) -> ParsedTable? {
+        guard lines.count >= 2 else { return nil }
+
+        let headerCells = parseTableCells(from: lines[0])
+        let alignmentCells = parseAlignmentRow(from: lines[1], columnCount: headerCells.count)
+        guard !headerCells.isEmpty else { return nil }
+
+        let columnCount = max(headerCells.count, alignmentCells.count)
+        let normalizedHeader = normalizeRow(headerCells, targetCount: columnCount)
+        let normalizedAlignments = alignmentCells.count == columnCount ? alignmentCells : normalizeAlignments(alignmentCells, targetCount: columnCount)
+
+        var rows: [[String]] = []
+        for line in lines.dropFirst(2) {
+            let cells = parseTableCells(from: line)
+            rows.append(normalizeRow(cells, targetCount: columnCount))
+        }
+
+        return ParsedTable(headers: normalizedHeader, alignments: normalizedAlignments, rows: rows)
+    }
+
+    private func parseAlignmentRow(from line: String, columnCount: Int) -> [TableAlignment] {
+        let cells = parseTableCells(from: line)
+        guard !cells.isEmpty else { return Array(repeating: .leading, count: columnCount) }
+
+        let alignments = cells.map { cell -> TableAlignment in
+            let trimmed = cell.trimmingCharacters(in: .whitespaces)
+            let leading = trimmed.hasPrefix(":")
+            let trailing = trimmed.hasSuffix(":")
+
+            switch (leading, trailing) {
+            case (true, true):
+                return .center
+            case (false, true):
+                return .trailing
+            default:
+                return .leading
+            }
+        }
+
+        return normalizeAlignments(alignments, targetCount: max(columnCount, alignments.count))
+    }
+
+    private func normalizeAlignments(_ alignments: [TableAlignment], targetCount: Int) -> [TableAlignment] {
+        if alignments.count == targetCount {
+            return alignments
+        } else if alignments.count < targetCount {
+            return alignments + Array(repeating: .leading, count: targetCount - alignments.count)
+        } else {
+            return Array(alignments.prefix(targetCount))
+        }
+    }
+
+    private func normalizeRow(_ cells: [String], targetCount: Int) -> [String] {
+        if cells.count == targetCount {
+            return cells
+        } else if cells.count < targetCount {
+            return cells + Array(repeating: "", count: targetCount - cells.count)
+        } else {
+            return Array(cells.prefix(targetCount))
+        }
+    }
+
+    private func parseTableCells(from line: String) -> [String] {
+        let placeholder = "__ESCAPED_PIPE__"
+        var working = line.trimmingCharacters(in: .whitespaces)
+
+        while working.hasPrefix("|") {
+            working.removeFirst()
+        }
+        while working.hasSuffix("|") {
+            working.removeLast()
+        }
+
+        working = working.replacingOccurrences(of: "\\|", with: placeholder)
+
+        let parts = working.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        return parts.map { part in
+            part.replacingOccurrences(of: placeholder, with: "|").trimmingCharacters(in: .whitespaces)
+        }
+    }
+
+    private func isAlignmentLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("|") else { return false }
+
+        let cells = parseTableCells(from: line)
+        guard !cells.isEmpty else { return false }
+
+        let allowed = CharacterSet(charactersIn: "-: ")
+        return cells.allSatisfy { cell in
+            let cellTrimmed = cell.trimmingCharacters(in: .whitespaces)
+            guard cellTrimmed.contains("-") else { return false }
+            return cellTrimmed.unicodeScalars.allSatisfy { allowed.contains($0) }
+        }
+    }
+}
+
+private struct ParsedTable {
+    let headers: [String]
+    let alignments: [TableAlignment]
+    let rows: [[String]]
+}
+
+private enum TableAlignment {
+    case leading
+    case center
+    case trailing
+
+    var viewAlignment: Alignment {
+        switch self {
+        case .leading:
+            return .leading
+        case .center:
+            return .center
+        case .trailing:
+            return .trailing
+        }
+    }
+}
+
+private struct MarkdownTableView: View {
+    let table: ParsedTable
+    let isDarkMode: Bool
+
+    private var borderColor: Color {
+        isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2)
+    }
+
+    private var headerBackground: Color {
+        isDarkMode ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
+    }
+
+    private var alternatingRowBackground: Color {
+        isDarkMode ? Color.white.opacity(0.03) : Color.black.opacity(0.03)
+    }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: true) {
+            VStack(spacing: 0) {
+                if !table.headers.isEmpty {
+                    MarkdownTableRowView(
+                        cells: table.headers,
+                        alignments: table.alignments,
+                        isHeader: true,
+                        isDarkMode: isDarkMode,
+                        borderColor: borderColor,
+                        background: headerBackground
+                    )
+                    Rectangle()
+                        .fill(borderColor)
+                        .frame(height: 1)
+                }
+
+                ForEach(table.rows.indices, id: \.self) { index in
+                    MarkdownTableRowView(
+                        cells: table.rows[index],
+                        alignments: table.alignments,
+                        isHeader: false,
+                        isDarkMode: isDarkMode,
+                        borderColor: borderColor,
+                        background: index.isMultiple(of: 2) ? alternatingRowBackground : Color.clear
+                    )
+
+                    if index < table.rows.count - 1 {
+                        Rectangle()
+                            .fill(borderColor)
+                            .frame(height: 1)
+                    }
+                }
+            }
+            .background(isDarkMode ? Color.white.opacity(0.015) : Color.black.opacity(0.015))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(borderColor, lineWidth: 1)
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
+    }
+}
+
+private struct MarkdownTableRowView: View {
+    let cells: [String]
+    let alignments: [TableAlignment]
+    let isHeader: Bool
+    let isDarkMode: Bool
+    let borderColor: Color
+    let background: Color
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(cells.indices, id: \.self) { index in
+                MarkdownTableCell(
+                    content: cells[index],
+                    alignment: alignments.indices.contains(index) ? alignments[index] : .leading,
+                    isHeader: isHeader,
+                    isDarkMode: isDarkMode
+                )
+
+                if index < cells.count - 1 {
+                    Rectangle()
+                        .fill(borderColor)
+                        .frame(width: 1)
+                }
+            }
+        }
+        .background(background)
+    }
+}
+
+private struct MarkdownTableCell: View {
+    let content: String
+    let alignment: TableAlignment
+    let isHeader: Bool
+    let isDarkMode: Bool
+
+    var body: some View {
+        LaTeXMarkdownView(
+            content: content.isEmpty ? " " : content,
+            isDarkMode: isDarkMode,
+            horizontalPadding: 0,
+            maxWidthAlignment: alignment.viewAlignment
+        )
+        .padding(.vertical, isHeader ? 10 : 8)
+        .padding(.horizontal, 12)
     }
 }
 
@@ -218,6 +551,10 @@ struct MathView: UIViewRepresentable {
         label.textAlignment = displayMode ? .center : .left
         label.backgroundColor = .clear
         label.isUserInteractionEnabled = true
+        label.contentInsets = UIEdgeInsets(top: 6, left: 2, bottom: 6, right: 2)
+        label.setContentCompressionResistancePriority(.required, for: .vertical)
+        label.setContentHuggingPriority(.required, for: .vertical)
+        label.sizeToFit()
         return label
     }
     
@@ -227,6 +564,10 @@ struct MathView: UIViewRepresentable {
         uiView.textColor = isDarkMode ? .white : .black.withAlphaComponent(0.8)
         uiView.fontSize = displayMode ? 18 : 16
         uiView.textAlignment = displayMode ? .center : .left
+        uiView.contentInsets = UIEdgeInsets(top: 6, left: 2, bottom: 6, right: 2)
+        uiView.setContentCompressionResistancePriority(.required, for: .vertical)
+        uiView.setContentHuggingPriority(.required, for: .vertical)
+        uiView.sizeToFit()
     }
 }
 
