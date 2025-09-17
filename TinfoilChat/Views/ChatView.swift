@@ -34,8 +34,20 @@ struct ChatContainer: View {
     
     // Sidebar constants
     private let sidebarWidth: CGFloat = 300
-    
+
     private let backgroundTimeThreshold: TimeInterval = 300 // 5 minutes in seconds
+
+    private var toolbarButtonFill: Color {
+        colorScheme == .dark ? Color.white.opacity(0.1) : Color.white
+    }
+
+    private var toolbarButtonStroke: Color {
+        colorScheme == .dark ? Color.white.opacity(0.2) : Color.white
+    }
+
+    private var toolbarContentColor: Color {
+        colorScheme == .dark ? Color.white : Color.black
+    }
     
     var body: some View {
         NavigationView {
@@ -176,16 +188,16 @@ struct ChatContainer: View {
                         Button(action: createNewChat) {
                             ZStack {
                                 RoundedRectangle(cornerRadius: 6)
-                                    .fill(.white)
+                                    .fill(toolbarButtonFill)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 6)
-                                            .strokeBorder(.white, lineWidth: 1)
+                                            .strokeBorder(toolbarButtonStroke, lineWidth: 1)
                                     )
                                     .frame(width: 24, height: 24)
-                                
+
                                 Image(systemName: "plus")
                                     .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.black)
+                                    .foregroundColor(toolbarContentColor)
                             }
                         }
                     }
@@ -197,15 +209,15 @@ struct ChatContainer: View {
                     Button(action: showAuthenticationView) {
                         Text("Sign in")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.black)
+                            .foregroundColor(toolbarContentColor)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
-                                    .fill(.white)
+                                    .fill(toolbarButtonFill)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 6)
-                                            .strokeBorder(.white, lineWidth: 1)
+                                            .strokeBorder(toolbarButtonStroke, lineWidth: 1)
                                     )
                             )
                     }
@@ -1150,8 +1162,17 @@ extension View {
 struct ModelPicker: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @EnvironmentObject private var authManager: AuthManager
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showModelPicker = false
     @State private var refreshID = UUID()
+
+    private var buttonFill: Color {
+        colorScheme == .dark ? Color.white.opacity(0.1) : Color.white
+    }
+
+    private var buttonStroke: Color {
+        colorScheme == .dark ? Color.white.opacity(0.2) : Color.white
+    }
     
     var body: some View {
         Button(action: {
@@ -1159,10 +1180,10 @@ struct ModelPicker: View {
         }) {
             ZStack {
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(.white)
+                    .fill(buttonFill)
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(.white, lineWidth: 1)
+                            .strokeBorder(buttonStroke, lineWidth: 1)
                     )
                     .frame(width: 24, height: 24)
                 
