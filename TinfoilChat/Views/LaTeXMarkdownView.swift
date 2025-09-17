@@ -480,6 +480,8 @@ private struct MarkdownTableView: View {
     let table: ParsedTable
     let isDarkMode: Bool
 
+    @State private var columnWidths: [Int: CGFloat] = [:]
+
     private var borderColor: Color {
         isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2)
     }
@@ -493,48 +495,67 @@ private struct MarkdownTableView: View {
     }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            VStack(spacing: 0) {
-                if !table.headers.isEmpty {
-                    MarkdownTableRowView(
-                        cells: table.headers,
-                        alignments: table.alignments,
-                        isHeader: true,
-                        isDarkMode: isDarkMode,
-                        borderColor: borderColor,
-                        background: headerBackground
-                    )
+        ViewThatFits(in: .horizontal) {
+            tableContainer(mode: .wrapping)
+            ScrollView(.horizontal, showsIndicators: true) {
+                tableContainer(mode: .scrollable)
+            }
+        }
+        .padding(.vertical, 8)
+        .onPreferenceChange(ColumnWidthPreferenceKey.self) { newValues in
+            if columnWidths != newValues {
+                columnWidths = newValues
+            }
+        }
+    }
+
+    private func tableContainer(mode: TableRenderMode) -> some View {
+        let useIntrinsic = mode == .scrollable
+        let widths = mode == .scrollable ? columnWidths : [:]
+
+        return VStack(spacing: 0) {
+            if !table.headers.isEmpty {
+                MarkdownTableRowView(
+                    cells: table.headers,
+                    alignments: table.alignments,
+                    isHeader: true,
+                    isDarkMode: isDarkMode,
+                    borderColor: borderColor,
+                    background: headerBackground,
+                    columnWidths: widths,
+                    mode: mode
+                )
+                Rectangle()
+                    .fill(borderColor)
+                    .frame(height: 1)
+            }
+
+            ForEach(table.rows.indices, id: \.self) { index in
+                MarkdownTableRowView(
+                    cells: table.rows[index],
+                    alignments: table.alignments,
+                    isHeader: false,
+                    isDarkMode: isDarkMode,
+                    borderColor: borderColor,
+                    background: index.isMultiple(of: 2) ? alternatingRowBackground : Color.clear,
+                    columnWidths: widths,
+                    mode: mode
+                )
+
+                if index < table.rows.count - 1 {
                     Rectangle()
                         .fill(borderColor)
                         .frame(height: 1)
                 }
-
-                ForEach(table.rows.indices, id: \.self) { index in
-                    MarkdownTableRowView(
-                        cells: table.rows[index],
-                        alignments: table.alignments,
-                        isHeader: false,
-                        isDarkMode: isDarkMode,
-                        borderColor: borderColor,
-                        background: index.isMultiple(of: 2) ? alternatingRowBackground : Color.clear
-                    )
-
-                    if index < table.rows.count - 1 {
-                        Rectangle()
-                            .fill(borderColor)
-                            .frame(height: 1)
-                    }
-                }
             }
-            .background(isDarkMode ? Color.white.opacity(0.015) : Color.black.opacity(0.015))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(borderColor, lineWidth: 1)
-            )
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
+        .background(isDarkMode ? Color.white.opacity(0.015) : Color.black.opacity(0.015))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(borderColor, lineWidth: 1)
+        )
+        .frame(maxWidth: useIntrinsic ? nil : .infinity, alignment: .leading)
     }
 }
 
@@ -545,15 +566,20 @@ private struct MarkdownTableRowView: View {
     let isDarkMode: Bool
     let borderColor: Color
     let background: Color
+    let columnWidths: [Int: CGFloat]
+    let mode: TableRenderMode
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 0) {
             ForEach(cells.indices, id: \.self) { index in
                 MarkdownTableCell(
                     content: cells[index],
                     alignment: alignments.indices.contains(index) ? alignments[index] : .leading,
                     isHeader: isHeader,
-                    isDarkMode: isDarkMode
+                    isDarkMode: isDarkMode,
+                    columnIndex: index,
+                    columnWidths: columnWidths,
+                    mode: mode
                 )
 
                 if index < cells.count - 1 {
@@ -563,6 +589,7 @@ private struct MarkdownTableRowView: View {
                 }
             }
         }
+        .frame(maxWidth: mode == .scrollable ? nil : .infinity, alignment: .leading)
         .background(background)
     }
 }
@@ -572,16 +599,78 @@ private struct MarkdownTableCell: View {
     let alignment: TableAlignment
     let isHeader: Bool
     let isDarkMode: Bool
+    let columnIndex: Int
+    let columnWidths: [Int: CGFloat]
+    let mode: TableRenderMode
 
     var body: some View {
-        LaTeXMarkdownView(
+        let cellAlignment = alignment.viewAlignment
+        let measuredWidth = columnWidths[columnIndex]
+
+        let base = LaTeXMarkdownView(
             content: content.isEmpty ? " " : content,
             isDarkMode: isDarkMode,
             horizontalPadding: 0,
-            maxWidthAlignment: alignment.viewAlignment
+            maxWidthAlignment: cellAlignment
         )
+        .layoutPriority(1)
         .padding(.vertical, isHeader ? 10 : 8)
         .padding(.horizontal, 12)
+
+        switch mode {
+        case .scrollable:
+            if let width = measuredWidth {
+                base
+                    .frame(width: width, alignment: cellAlignment)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .background(ColumnWidthReader(columnIndex: columnIndex))
+            } else {
+                base
+                    .fixedSize(horizontal: true, vertical: true)
+                    .background(ColumnWidthReader(columnIndex: columnIndex))
+            }
+        case .wrapping:
+            if let width = measuredWidth {
+                base
+                    .frame(width: width, alignment: cellAlignment)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                base
+                    .frame(maxWidth: .infinity, alignment: cellAlignment)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+private enum TableRenderMode {
+    case wrapping
+    case scrollable
+}
+
+private struct ColumnWidthReader: View {
+    let columnIndex: Int
+
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .preference(key: ColumnWidthPreferenceKey.self, value: [columnIndex: proxy.size.width])
+        }
+    }
+}
+
+private struct ColumnWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: [Int: CGFloat] = [:]
+
+    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+        let newValue = nextValue()
+        for (index, width) in newValue {
+            if let existing = value[index] {
+                value[index] = max(existing, width)
+            } else {
+                value[index] = width
+            }
+        }
     }
 }
 
