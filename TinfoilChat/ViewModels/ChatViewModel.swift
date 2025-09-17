@@ -935,7 +935,7 @@ class ChatViewModel: ObservableObject {
                         throttledFlushTask?.cancel()
                         throttledFlushTask = Task { @MainActor in
                             defer { throttledFlushTask = nil }
-                            while self.isScrollInteractionActive {
+                            while !Task.isCancelled && self.isScrollInteractionActive {
                                 try? await Task.sleep(nanoseconds: 50_000_000)
                             }
                             await flushPendingUpdate(throttle: throttle)
