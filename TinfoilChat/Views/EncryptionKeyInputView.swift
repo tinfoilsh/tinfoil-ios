@@ -56,9 +56,9 @@ struct EncryptionKeyInputView: View {
                         HStack(spacing: 8) {
                             Group {
                                 if isKeyVisible {
-                                    TextField("key_...", text: $keyInput)
+                                    TextField("key_abcdef...", text: $keyInput)
                                 } else {
-                                    SecureField("key_...", text: $keyInput)
+                                    SecureField("key_abcdef...", text: $keyInput)
                                 }
                             }
                             .textFieldStyle(.plain)
