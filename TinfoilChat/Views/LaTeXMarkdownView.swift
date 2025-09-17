@@ -34,55 +34,59 @@ struct LaTeXMarkdownView: View {
     
     /// Parse content into segments of markdown and LaTeX
     private func parseContent() -> [ContentSegment] {
-        var segments: [ContentSegment] = []
-        var currentPosition = content.startIndex
-        
-        // Regular expressions for LaTeX patterns
-        // Supported delimiters:
-        //  - \\[, \\]          (display)
-        //  - \\(, \\)          (inline)
-        let displayPatternBrackets = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators])
-        let inlinePatternParens = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: [])
-        
         let nsContent = content as NSString
         let fullRange = NSRange(location: 0, length: nsContent.length)
-        
-        // Find all LaTeX expressions
-        var latexRanges: [(range: NSRange, isDisplay: Bool)] = []
-        
-        // Find display math first
-        if let displayPatternBrackets = displayPatternBrackets {
-            let displayMatches = displayPatternBrackets.matches(in: content, options: [], range: fullRange)
-            for match in displayMatches {
-                latexRanges.append((range: match.range, isDisplay: true))
+
+        var excludedRanges: [NSRange] = []
+
+        if let codeBlockRegex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```", options: []) {
+            let matches = codeBlockRegex.matches(in: content, options: [], range: fullRange)
+            excludedRanges.append(contentsOf: matches.map(\.range))
+        }
+
+        if let inlineCodeRegex = try? NSRegularExpression(pattern: "`[^`]+`", options: []) {
+            let matches = inlineCodeRegex.matches(in: content, options: [], range: fullRange)
+            for match in matches where !excludedRanges.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {
+                excludedRanges.append(match.range)
             }
         }
-        
-        // Find inline math
-        if let inlinePatternParens = inlinePatternParens {
-            let inlineMatches = inlinePatternParens.matches(in: content, options: [], range: fullRange)
-            for match in inlineMatches {
-                let overlaps = latexRanges.contains { displayRange in
-                    NSLocationInRange(match.range.location, displayRange.range) ||
-                    NSLocationInRange(displayRange.range.location, match.range)
+
+        func isExcluded(_ range: NSRange) -> Bool {
+            excludedRanges.contains { NSIntersectionRange($0, range).length > 0 }
+        }
+
+        var latexRanges: [(range: NSRange, isDisplay: Bool)] = []
+
+        if let displayRegex = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators]) {
+            let matches = displayRegex.matches(in: content, options: [], range: fullRange)
+            for match in matches where !isExcluded(match.range) {
+                latexRanges.append((match.range, true))
+            }
+        }
+
+        if let inlineRegex = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: []) {
+            let matches = inlineRegex.matches(in: content, options: [], range: fullRange)
+            for match in matches where !isExcluded(match.range) {
+                let overlaps = latexRanges.contains { existing in
+                    NSLocationInRange(match.range.location, existing.range) ||
+                    NSLocationInRange(existing.range.location, match.range)
                 }
                 if !overlaps {
-                    latexRanges.append((range: match.range, isDisplay: false))
+                    latexRanges.append((match.range, false))
                 }
             }
         }
-        
-        // Sort ranges by location
+
         latexRanges.sort { $0.range.location < $1.range.location }
-        
-        // Build segments
+
+        var segments: [ContentSegment] = []
+        var lastIndex = content.startIndex
+
         for (range, isDisplay) in latexRanges {
-            // Add markdown segment before this LaTeX expression
-            if let swiftRange = Range(NSRange(location: NSLocationInRange(currentPosition.utf16Offset(in: content), fullRange) ? currentPosition.utf16Offset(in: content) : 0,
-                                               length: range.location - (currentPosition.utf16Offset(in: content))),
-                                       in: content),
-               swiftRange.lowerBound < swiftRange.upperBound {
-                let markdownText = String(content[swiftRange])
+            guard let swiftRange = Range(range, in: content) else { continue }
+
+            if lastIndex < swiftRange.lowerBound {
+                let markdownText = String(content[lastIndex..<swiftRange.lowerBound])
                 if !markdownText.isEmpty {
                     segments.append(ContentSegment(
                         id: UUID().uuidString,
@@ -95,47 +99,40 @@ struct LaTeXMarkdownView: View {
                     ))
                 }
             }
-            
-            // Add LaTeX segment
-            if let swiftRange = Range(range, in: content) {
-                let fullMatch = String(content[swiftRange])
-                let latex: String
-                
-                if isDisplay {
-                    // Remove delimiters for display: \[...\]
-                    if fullMatch.hasPrefix("\\[") && fullMatch.hasSuffix("\\]") {
-                        latex = String(fullMatch.dropFirst(2).dropLast(2))
-                    } else {
-                        latex = fullMatch
-                    }
+
+            let fullMatch = String(content[swiftRange])
+            let latex: String
+
+            if isDisplay {
+                if fullMatch.hasPrefix("\\[") && fullMatch.hasSuffix("\\]") {
+                    latex = String(fullMatch.dropFirst(2).dropLast(2))
                 } else {
-                    // Remove delimiters for inline: \(...\)
-                    if fullMatch.hasPrefix("\\(") && fullMatch.hasSuffix("\\)") {
-                        latex = String(fullMatch.dropFirst(2).dropLast(2))
-                    } else {
-                        latex = fullMatch
-                    }
+                    latex = fullMatch
                 }
-                
-                segments.append(ContentSegment(
-                    id: UUID().uuidString,
-                    view: AnyView(
-                        LaTeXView(
-                            latex: latex,
-                            isDisplay: isDisplay,
-                            isDarkMode: isDarkMode
-                        )
-                    )
-                ))
-                
-                // Update current position
-                currentPosition = swiftRange.upperBound
+            } else {
+                if fullMatch.hasPrefix("\\(") && fullMatch.hasSuffix("\\)") {
+                    latex = String(fullMatch.dropFirst(2).dropLast(2))
+                } else {
+                    latex = fullMatch
+                }
             }
+
+            segments.append(ContentSegment(
+                id: UUID().uuidString,
+                view: AnyView(
+                    LaTeXView(
+                        latex: latex,
+                        isDisplay: isDisplay,
+                        isDarkMode: isDarkMode
+                    )
+                )
+            ))
+
+            lastIndex = swiftRange.upperBound
         }
-        
-        // Add remaining markdown after last LaTeX expression
-        if currentPosition < content.endIndex {
-            let remainingText = String(content[currentPosition...])
+
+        if lastIndex < content.endIndex {
+            let remainingText = String(content[lastIndex...])
             if !remainingText.isEmpty {
                 segments.append(ContentSegment(
                     id: UUID().uuidString,
@@ -148,8 +145,7 @@ struct LaTeXMarkdownView: View {
                 ))
             }
         }
-        
-        // If no LaTeX was found, just render as pure markdown
+
         if segments.isEmpty {
             segments.append(ContentSegment(
                 id: UUID().uuidString,
@@ -161,7 +157,7 @@ struct LaTeXMarkdownView: View {
                 )
             ))
         }
-        
+
         return segments
     }
     
@@ -178,13 +174,32 @@ struct LaTeXView: View {
     let isDarkMode: Bool
     
     var body: some View {
-        MathView(
-            latex: latex,
-            displayMode: isDisplay,
-            isDarkMode: isDarkMode
-        )
-        .frame(maxWidth: .infinity, alignment: isDisplay ? .center : .leading)
-        .padding(.vertical, isDisplay ? 8 : 2)
+        if isDisplay {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    MathView(
+                        latex: latex,
+                        displayMode: true,
+                        isDarkMode: isDarkMode
+                    )
+                    .fixedSize()
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 4)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        } else {
+            MathView(
+                latex: latex,
+                displayMode: false,
+                isDarkMode: isDarkMode
+            )
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 2)
+        }
     }
 }
 
