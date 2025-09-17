@@ -23,6 +23,7 @@ class ChatViewModel: ObservableObject {
     @Published var scrollTargetOffset: CGFloat = 0 
     /// When set to true, the input field should become first responder (focus keyboard)
     @Published var shouldFocusInput: Bool = false
+    @Published var isScrollInteractionActive: Bool = false
     
     // Verification properties - consolidated to reduce update frequency
     struct VerificationInfo {
@@ -929,6 +930,18 @@ class ChatViewModel: ObservableObject {
 
                 func flushPendingUpdate(throttle: Bool) async {
                     guard hasPendingUIUpdate else { return }
+                    let shouldDefer = await MainActor.run { self.isScrollInteractionActive }
+                    if shouldDefer {
+                        throttledFlushTask?.cancel()
+                        throttledFlushTask = Task { @MainActor in
+                            defer { throttledFlushTask = nil }
+                            while self.isScrollInteractionActive {
+                                try? await Task.sleep(nanoseconds: 50_000_000)
+                            }
+                            await flushPendingUpdate(throttle: throttle)
+                        }
+                        return
+                    }
                     let didApply = await MainActor.run { () -> Bool in
                         guard self.currentChat?.id == streamChatId else { return false }
                         guard var chat = self.currentChat,

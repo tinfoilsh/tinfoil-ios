@@ -18,9 +18,6 @@ struct MessageInputView: View {
     @State private var textHeight: CGFloat = Layout.defaultHeight
     @ObservedObject private var settings = SettingsManager.shared
     
-    // Haptic feedback generator
-    private let softHaptic = UIImpactFeedbackGenerator(style: .soft)
-    
     private var isDarkMode: Bool { colorScheme == .dark }
     
     // Check for subscription status
@@ -115,9 +112,6 @@ struct MessageInputView: View {
             }
             .padding(.vertical, 8)
         }
-        .onAppear {
-            softHaptic.prepare()
-        }
         .onChange(of: viewModel.transcribedText) { oldValue, newValue in
             if !newValue.isEmpty && newValue != oldValue {
                 // Check if it's an error message (don't auto-send these)
@@ -132,17 +126,6 @@ struct MessageInputView: View {
                 
                 // Clear the transcribed text to prevent it from being processed again
                 viewModel.transcribedText = ""
-            }
-        }
-        .onChange(of: viewModel.messages.last?.content) { oldContent, newContent in
-            if settings.hapticFeedbackEnabled,
-               let old = oldContent,
-               let new = newContent,
-               old != new {
-                let addedContent = String(new.dropFirst(old.count))
-                if addedContent.count > 1 {
-                    softHaptic.impactOccurred(intensity: 0.3)
-                }
             }
         }
     }

@@ -374,9 +374,8 @@ struct ChatScrollView: View {
     // Scroll management
     @State private var scrollViewProxy: ScrollViewProxy?
     @State private var userHasScrolled = false
-    @State private var lastMessageCount = 0
     @State private var isAtBottom = false
-    
+
     // Progressive loading
     @State private var visibleMessageCount = 30
     private let initialMessageCount = 30
@@ -385,10 +384,6 @@ struct ChatScrollView: View {
     // Keyboard handling
     @State private var keyboardHeight: CGFloat = 0
     @State private var isKeyboardVisible = false
-    
-    // Haptic feedback generator
-    private let softHaptic = UIImpactFeedbackGenerator(style: .soft)
-    @State private var lastHapticTime: Date = Date()
     
     // Computed property for context messages
     private var contextMessages: ArraySlice<Message> {
@@ -399,9 +394,13 @@ struct ChatScrollView: View {
     private var archivedMessagesStartIndex: Int {
         max(0, messages.count - SettingsManager.shared.maxMessages)
     }
-    
-    @State private var isScrolling = false
-    @State private var didInitialScrollToBottom = false
+
+    private let scrollCoordinateSpaceName = "ChatScrollCoordinateSpace"
+    private let scrollMovementThreshold: CGFloat = 0.1
+    private let scrollSettleDelay: TimeInterval = 0.3
+
+    @State private var scrollEndWorkItem: DispatchWorkItem?
+    @State private var lastObservedScrollOffset: CGFloat = 0
     
     // MARK: - Body
     
@@ -410,6 +409,14 @@ struct ChatScrollView: View {
             // Messages ScrollView
             ScrollViewReader { proxy in
                 ScrollView {
+                    GeometryReader { geo -> Color in
+                        let offset = geo.frame(in: .named(scrollCoordinateSpaceName)).minY
+                        DispatchQueue.main.async {
+                            updateScrollActivity(with: offset)
+                        }
+                        return Color.clear
+                    }
+                    .frame(height: 0)
                     VStack(spacing: 0) {
                         if messages.isEmpty {
                             if let authManager = viewModel.authManager {
@@ -497,32 +504,18 @@ struct ChatScrollView: View {
                             GeometryReader { geometry -> Color in
                                 let isCurrentlyAtBottom = isViewFullyVisible(geometry)
                                 if isAtBottom != isCurrentlyAtBottom {
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    DispatchQueue.main.async {
                                         isAtBottom = isCurrentlyAtBottom
                                         if isCurrentlyAtBottom {
                                             userHasScrolled = false
+                                            viewModel.isScrollInteractionActive = false
+                                            cancelScrollSettlingWork()
                                         }
                                     }
                                 }
                                 return Color.clear
                             }
                         )
-                        .onAppear {
-                            // As a final guarantee, when the bottom anchor appears, force a scroll
-                            // after layout has settled so we are exactly at the end.
-                            if !didInitialScrollToBottom {
-                                didInitialScrollToBottom = true
-                                DispatchQueue.main.async {
-                                    let targetId: AnyHashable = messages.last?.id ?? "bottom"
-                                    scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                                    DispatchQueue.main.async {
-                                        withAnimation(.easeOut(duration: 0.2)) {
-                                            scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                                        }
-                                    }
-                                }
-                            }
-                        }
                 }
                 // Reset scroll state when switching chats
                 .id(viewModel.currentChat?.createdAt ?? Date.distantPast)
@@ -530,7 +523,7 @@ struct ChatScrollView: View {
                 .simultaneousGesture(
                     DragGesture()
                         .onChanged { value in
-                            isScrolling = true
+                            cancelScrollSettlingWork()
                             if value.translation.height > 0 && isLoading {
                                 userHasScrolled = true
                             }
@@ -538,9 +531,13 @@ struct ChatScrollView: View {
                             if value.translation.height > 10 && isKeyboardVisible {
                                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                             }
+                            if !viewModel.isScrollInteractionActive {
+                                viewModel.isScrollInteractionActive = true
+                            }
+                            scheduleScrollSettlingCheck()
                         }
                         .onEnded { _ in
-                            isScrolling = false
+                            scheduleScrollSettlingCheck()
                         }
                 )
                 .onTapGesture {
@@ -548,76 +545,46 @@ struct ChatScrollView: View {
                         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                     }
                 }
-                .onChange(of: messages) { _, newMessages in
-                    // If this is a new message (not just an update to the last message)
-                    let targetId: AnyHashable = newMessages.last?.id ?? "bottom"
-                    let suppressAutoScroll = shouldSuppressAutoScrollForInitialAssistantReply(newMessages)
-                    if newMessages.count > lastMessageCount {
-                        lastMessageCount = newMessages.count
-                        userHasScrolled = false // Reset scroll state for new messages
+                .onChange(of: messages) { oldMessages, newMessages in
+                    let previousCount = oldMessages.count
+                    let newCount = newMessages.count
 
-                        // When a new message arrives and we're at the bottom, keep showing limited messages
-                        if isAtBottom {
-                            visibleMessageCount = min(initialMessageCount, newMessages.count)
-                        }
-                        
-                        // Immediate scroll to prevent blank screen
-                        scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                        // Then animated scroll for smooth effect
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                            }
-                        }
-                    } else if !userHasScrolled && !(viewModel.currentChat?.hasActiveStream ?? false) && !suppressAutoScroll {
-                        if isAtBottom {
-                            // Only auto-scroll after updates when still viewing bottom
+                    if newCount > previousCount {
+                        let appendedMessages = newMessages.suffix(newCount - previousCount)
+                        let includesUserMessage = appendedMessages.contains { $0.role == .user }
+
+                        if includesUserMessage {
+                            userHasScrolled = false
+                            visibleMessageCount = min(initialMessageCount, newCount)
+                            let targetId: AnyHashable = newMessages.last?.id ?? "bottom"
                             scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                                }
-                            }
+                            viewModel.isScrollInteractionActive = false
+                            cancelScrollSettlingWork()
                         }
                     }
                 }
-                // When the selected chat changes, reset state and jump to bottom
+                // When the selected chat changes, just reset bookkeeping
                 .onChange(of: viewModel.currentChat?.createdAt) { _, _ in
-                    lastMessageCount = messages.count
-                    didInitialScrollToBottom = false
                     userHasScrolled = false
-                    // Reset to initial message count when switching chats
                     visibleMessageCount = min(initialMessageCount, messages.count)
-                    DispatchQueue.main.async {
-                        let targetId: AnyHashable = messages.last?.id ?? "bottom"
-                        proxy.scrollTo(targetId, anchor: .bottom)
-                        DispatchQueue.main.async {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo(targetId, anchor: .bottom)
-                            }
-                        }
-                    }
+                    viewModel.isScrollInteractionActive = false
+                    cancelScrollSettlingWork()
                 }
                 .onAppear {
                     scrollViewProxy = proxy
-                    lastMessageCount = messages.count
-                    // Defer then perform a two-phase scroll to ensure accurate final position
-                    DispatchQueue.main.async {
-                        let targetId: AnyHashable = messages.last?.id ?? "bottom"
-                        // Instant jump first
-                        proxy.scrollTo(targetId, anchor: .bottom)
-                        // Then animated pass after one more runloop
-                        DispatchQueue.main.async {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo(targetId, anchor: .bottom)
-                            }
-                        }
-                    }
+                    viewModel.isScrollInteractionActive = false
+                    cancelScrollSettlingWork()
                 }
-                
+                .onDisappear {
+                    cancelScrollSettlingWork()
+                    viewModel.isScrollInteractionActive = false
+                }
+                .coordinateSpace(name: scrollCoordinateSpaceName)
+
                 .overlay(alignment: .bottom) {
                     if !isAtBottom && !messages.isEmpty && !isKeyboardVisible {
                         Button(action: {
+                            cancelScrollSettlingWork()
                             // Re-enable auto-follow for streaming updates
                             userHasScrolled = false
                             // Reset to show only recent messages when going back to bottom
@@ -630,6 +597,8 @@ struct ChatScrollView: View {
                                 withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
                                     proxy.scrollTo(targetId, anchor: .bottom)
                                 }
+                                isAtBottom = true
+                                viewModel.isScrollInteractionActive = false
                             }
                         }) {
                             Image(systemName: "arrow.down.circle.fill")
@@ -680,37 +649,39 @@ struct ChatScrollView: View {
         }
         .onAppear {
             setupKeyboardObservers()
-            softHaptic.prepare()
         }
         .onDisappear {
             removeKeyboardObservers()
         }
-        .onChange(of: messages.last?.content) { oldContent, newContent in
-            if settings.hapticFeedbackEnabled,
-               let old = oldContent,
-               let new = newContent,
-               old != new {
-                let addedContent = String(new.dropFirst(old.count))
-                // Throttle haptic feedback to max once per 150ms to reduce CPU usage
-                let now = Date()
-                if addedContent.count > 1 && now.timeIntervalSince(lastHapticTime) > 0.15 {
-                    softHaptic.impactOccurred(intensity: 0.3)
-                    lastHapticTime = now
-                }
+    }
+
+    private func updateScrollActivity(with offset: CGFloat) {
+        let delta = abs(offset - lastObservedScrollOffset)
+        lastObservedScrollOffset = offset
+
+        if delta > scrollMovementThreshold {
+            if !viewModel.isScrollInteractionActive {
+                viewModel.isScrollInteractionActive = true
             }
+            scheduleScrollSettlingCheck()
+        } else if viewModel.isScrollInteractionActive {
+            scheduleScrollSettlingCheck()
         }
     }
-    
-    // MARK: - Auto-Scroll Helpers
 
-    private func shouldSuppressAutoScrollForInitialAssistantReply(_ messages: [Message]) -> Bool {
-        guard let lastMessage = messages.last, lastMessage.role == .assistant else {
-            return false
+    private func scheduleScrollSettlingCheck() {
+        cancelScrollSettlingWork()
+        let workItem = DispatchWorkItem {
+            viewModel.isScrollInteractionActive = false
+            scrollEndWorkItem = nil
         }
+        scrollEndWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + scrollSettleDelay, execute: workItem)
+    }
 
-        let hasEarlierAssistantMessage = messages.dropLast().contains { $0.role == .assistant }
-        let hasUserMessage = messages.contains { $0.role == .user }
-        return hasUserMessage && !hasEarlierAssistantMessage
+    private func cancelScrollSettlingWork() {
+        scrollEndWorkItem?.cancel()
+        scrollEndWorkItem = nil
     }
 
     // MARK: - Keyboard Handling
