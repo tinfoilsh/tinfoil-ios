@@ -127,19 +127,15 @@ struct PersonalizationView: View {
     @State private var isSaving: Bool = false
     
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                Text("Help Tin personalize your conversations")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 24)
-                
-                personalizationContent
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 24)
-            }
+        List {
+            nicknameSection
+            professionSection
+            traitsSection
+            additionalContextSection
+            resetSection
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
         .background(Color.settingsBackground(for: colorScheme))
         .navigationTitle("Personalization")
         .navigationBarTitleDisplayMode(.inline)
@@ -195,150 +191,93 @@ struct PersonalizationView: View {
         }
     }
     
-    // Personalization content view
-    private var personalizationContent: some View {
-        VStack(spacing: 24) {
-            // Nickname section
-            VStack(alignment: .leading, spacing: 12) {
-                Text("What should Tin call you?")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundColor(.primary)
-                TextField("Nickname", text: $profileManager.nickname)
-                    .textFieldStyle(.plain)
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(colorScheme == .dark ? Color(UIColor.systemGray5) : Color(UIColor.systemGray6))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                    )
-                    .onChange(of: profileManager.nickname) { _, newValue in
-                        let shouldEnable = !newValue.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
-                        profileManager.isUsingPersonalization = shouldEnable
-                        settings.nickname = newValue
-                        settings.isPersonalizationEnabled = shouldEnable
-                    }
-            }
-            .padding(20)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.cardSurface(for: colorScheme))
-            )
-            
-            // Profession section
-            VStack(alignment: .leading, spacing: 12) {
-                Text("What's your occupation?")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundColor(.primary)
-                TextField("Profession", text: $profileManager.profession)
-                    .textFieldStyle(.plain)
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(colorScheme == .dark ? Color(UIColor.systemGray5) : Color(UIColor.systemGray6))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                    )
-                    .onChange(of: profileManager.profession) { _, newValue in
-                        let shouldEnable = !profileManager.nickname.isEmpty || !newValue.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
-                        profileManager.isUsingPersonalization = shouldEnable
-                        settings.profession = newValue
-                        settings.isPersonalizationEnabled = shouldEnable
-                    }
-            }
-            .padding(20)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.cardSurface(for: colorScheme))
-            )
-            
-            // Traits section
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Conversational traits")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundColor(.primary)
-                TraitSelectionView(
-                    availableTraits: settings.availableTraits,
-                    selectedTraits: $profileManager.traits
-                )
-                .onChange(of: profileManager.traits) { _, newValue in
-                    let shouldEnable = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !newValue.isEmpty || !profileManager.additionalContext.isEmpty
+    private var nicknameSection: some View {
+        Section {
+            TextField("Nickname", text: $profileManager.nickname)
+                .onChange(of: profileManager.nickname) { _, newValue in
+                    let shouldEnable = !newValue.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
                     profileManager.isUsingPersonalization = shouldEnable
-                    settings.selectedTraits = newValue
+                    settings.nickname = newValue
                     settings.isPersonalizationEnabled = shouldEnable
                 }
-            }
-            .padding(20)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.cardSurface(for: colorScheme))
+        } header: {
+            Text("What should Tin call you?")
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+
+    private var professionSection: some View {
+        Section {
+            TextField("Profession", text: $profileManager.profession)
+                .onChange(of: profileManager.profession) { _, newValue in
+                    let shouldEnable = !profileManager.nickname.isEmpty || !newValue.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
+                    profileManager.isUsingPersonalization = shouldEnable
+                    settings.profession = newValue
+                    settings.isPersonalizationEnabled = shouldEnable
+                }
+        } header: {
+            Text("What's your occupation?")
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+
+    private var traitsSection: some View {
+        Section {
+            TraitSelectionView(
+                availableTraits: settings.availableTraits,
+                selectedTraits: $profileManager.traits
             )
-            
-            // Additional context section
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Additional context")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundColor(.primary)
-                TextField("Anything else Tin should know about you?", text: $profileManager.additionalContext, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(colorScheme == .dark ? Color(UIColor.systemGray5) : Color(UIColor.systemGray6))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                    )
-                    .lineLimit(3...6)
-                    .onChange(of: profileManager.additionalContext) { _, newValue in
-                        let shouldEnable = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !newValue.isEmpty
-                        profileManager.isUsingPersonalization = shouldEnable
-                        settings.additionalContext = newValue
-                        settings.isPersonalizationEnabled = shouldEnable
-                    }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
+            .onChange(of: profileManager.traits) { _, newValue in
+                let shouldEnable = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !newValue.isEmpty || !profileManager.additionalContext.isEmpty
+                profileManager.isUsingPersonalization = shouldEnable
+                settings.selectedTraits = newValue
+                settings.isPersonalizationEnabled = shouldEnable
             }
-            .padding(20)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.cardSurface(for: colorScheme))
-            )
-            
-            // Reset button
-            Button(action: {
-                // Reset ProfileManager
+        } header: {
+            Text("Conversational traits")
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+
+    private var additionalContextSection: some View {
+        Section {
+            TextField("Anything else Tin should know about you?", text: $profileManager.additionalContext, axis: .vertical)
+                .lineLimit(3...6)
+                .onChange(of: profileManager.additionalContext) { _, newValue in
+                    let shouldEnable = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !newValue.isEmpty
+                    profileManager.isUsingPersonalization = shouldEnable
+                    settings.additionalContext = newValue
+                    settings.isPersonalizationEnabled = shouldEnable
+                }
+        } header: {
+            Text("Additional context")
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+
+    private var resetSection: some View {
+        Section {
+            Button(role: .destructive) {
                 profileManager.nickname = ""
                 profileManager.profession = ""
                 profileManager.traits = []
                 profileManager.additionalContext = ""
                 profileManager.isUsingPersonalization = false
-                
-                // Reset SettingsManager
+
                 settings.resetPersonalization()
-                
-                // Immediately push changes to cloud to avoid being overwritten by an incoming pull
+
                 Task {
                     await profileManager.syncToCloud()
                 }
-            }) {
-                Text("Reset All")
-                    .foregroundColor(.white)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.red)
-                    .cornerRadius(8)
+            } label: {
+                HStack {
+                    Text("Reset All")
+                    Spacer()
+                }
             }
-            .buttonStyle(BorderlessButtonStyle())
         }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
     }
 }
