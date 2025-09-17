@@ -555,7 +555,7 @@ struct ChatScrollView: View {
                         let appendedMessages = newMessages.suffix(newCount - previousCount)
                         let includesUserMessage = appendedMessages.contains { $0.role == .user }
                         let wasInitialLoad = previousCount == 0
-                        let shouldAutoFollow = includesUserMessage || wasInitialLoad || (!userHasScrolled && isAtBottom)
+                        let shouldAutoFollow = includesUserMessage || wasInitialLoad
 
                         if shouldAutoFollow {
                             userHasScrolled = false
@@ -564,8 +564,6 @@ struct ChatScrollView: View {
                             viewModel.isScrollInteractionActive = false
                             cancelScrollSettlingWork()
                         }
-                    } else if !userHasScrolled && isAtBottom {
-                        requestJumpToBottom(animated: false)
                     }
                 }
                 // When the selected chat changes, just reset bookkeeping
@@ -592,7 +590,7 @@ struct ChatScrollView: View {
                     if !isAtBottom && !messages.isEmpty && !isKeyboardVisible {
                         Button(action: {
                             cancelScrollSettlingWork()
-                            // Re-enable auto-follow for streaming updates
+                            // Reset scroll tracking so future user messages can snap to the latest entry
                             userHasScrolled = false
                             // Reset to show only recent messages when going back to bottom
                             visibleMessageCount = min(initialMessageCount, messages.count)
