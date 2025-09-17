@@ -549,18 +549,23 @@ struct ChatScrollView: View {
                     let previousCount = oldMessages.count
                     let newCount = newMessages.count
 
+                    guard newCount >= previousCount else { return }
+
                     if newCount > previousCount {
                         let appendedMessages = newMessages.suffix(newCount - previousCount)
                         let includesUserMessage = appendedMessages.contains { $0.role == .user }
+                        let wasInitialLoad = previousCount == 0
+                        let shouldAutoFollow = includesUserMessage || wasInitialLoad || (!userHasScrolled && isAtBottom)
 
-                        if includesUserMessage {
+                        if shouldAutoFollow {
                             userHasScrolled = false
                             visibleMessageCount = min(initialMessageCount, newCount)
-                            let targetId: AnyHashable = newMessages.last?.id ?? "bottom"
-                            scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
+                            requestJumpToBottom(animated: false)
                             viewModel.isScrollInteractionActive = false
                             cancelScrollSettlingWork()
                         }
+                    } else if !userHasScrolled && isAtBottom {
+                        requestJumpToBottom(animated: false)
                     }
                 }
                 // When the selected chat changes, just reset bookkeeping
@@ -569,11 +574,13 @@ struct ChatScrollView: View {
                     visibleMessageCount = min(initialMessageCount, messages.count)
                     viewModel.isScrollInteractionActive = false
                     cancelScrollSettlingWork()
+                    requestJumpToBottom(animated: false)
                 }
                 .onAppear {
                     scrollViewProxy = proxy
                     viewModel.isScrollInteractionActive = false
                     cancelScrollSettlingWork()
+                    requestJumpToBottom(animated: false)
                 }
                 .onDisappear {
                     cancelScrollSettlingWork()
@@ -682,6 +689,38 @@ struct ChatScrollView: View {
     private func cancelScrollSettlingWork() {
         scrollEndWorkItem?.cancel()
         scrollEndWorkItem = nil
+    }
+
+    private func requestJumpToBottom(animated: Bool) {
+        guard let proxy = scrollViewProxy else { return }
+        let bottomAnchor: AnyHashable = "bottom"
+        let lastMessageId = messages.last?.id
+        cancelScrollSettlingWork()
+
+        let performScroll = {
+            proxy.scrollTo(bottomAnchor, anchor: .bottom)
+            if let lastMessageId {
+                proxy.scrollTo(lastMessageId, anchor: .bottom)
+            }
+        }
+
+        DispatchQueue.main.async {
+            if animated {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    performScroll()
+                }
+            } else {
+                performScroll()
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                performScroll()
+            }
+
+            userHasScrolled = false
+            isAtBottom = true
+            viewModel.isScrollInteractionActive = false
+        }
     }
 
     // MARK: - Keyboard Handling
