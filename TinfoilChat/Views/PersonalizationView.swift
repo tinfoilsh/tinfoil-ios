@@ -225,7 +225,7 @@ struct PersonalizationView: View {
             .padding(20)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(colorScheme == .dark ? Color(hex: "1C1C1E") : Color(UIColor.systemGray6))
+                    .fill(Color.cardSurface(for: colorScheme))
             )
             
             // Profession section
@@ -255,7 +255,7 @@ struct PersonalizationView: View {
             .padding(20)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(colorScheme == .dark ? Color(hex: "1C1C1E") : Color(UIColor.systemGray6))
+                    .fill(Color.cardSurface(for: colorScheme))
             )
             
             // Traits section
@@ -278,7 +278,7 @@ struct PersonalizationView: View {
             .padding(20)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(colorScheme == .dark ? Color(hex: "1C1C1E") : Color(UIColor.systemGray6))
+                    .fill(Color.cardSurface(for: colorScheme))
             )
             
             // Additional context section
@@ -309,7 +309,7 @@ struct PersonalizationView: View {
             .padding(20)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(colorScheme == .dark ? Color(hex: "1C1C1E") : Color(UIColor.systemGray6))
+                    .fill(Color.cardSurface(for: colorScheme))
             )
             
             // Reset button

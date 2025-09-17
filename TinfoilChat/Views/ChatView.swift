@@ -52,7 +52,7 @@ struct ChatContainer: View {
     var body: some View {
         NavigationView {
             mainContent
-                .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
+                .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
         }
         .navigationViewStyle(.stack)
         .environmentObject(viewModel)
@@ -272,7 +272,7 @@ struct ChatContainer: View {
             viewModel: viewModel,
             messageText: $messageText,
         )
-        .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)     
+        .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
     }
     
     /// The sliding sidebar and dimming overlay
@@ -630,7 +630,7 @@ struct ChatScrollView: View {
                         .transition(.opacity)
                     }
                 }
-                .background(isDarkMode ? Color.backgroundPrimary : Color.white)
+                .background(Color.chatBackground(isDarkMode: isDarkMode))
             }
             
             // Message input view
@@ -639,7 +639,7 @@ struct ChatScrollView: View {
                 MessageInputView(messageText: $messageText, viewModel: viewModel)
                     .background(
                         RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
-                            .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                            .fill(Color.chatSurface(isDarkMode: isDarkMode))
                             .edgesIgnoringSafeArea(.bottom)
                     )
                     .environmentObject(viewModel.authManager ?? AuthManager())
@@ -651,7 +651,7 @@ struct ChatScrollView: View {
                         .frame(maxWidth: 600)
                         .background(
                             RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
-                                .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                                .fill(Color.chatSurface(isDarkMode: isDarkMode))
                         )
                         .environmentObject(viewModel.authManager ?? AuthManager())
                     Spacer(minLength: 0)
@@ -1058,7 +1058,7 @@ struct ModelTab: View {
                 ZStack {
                     // Base background
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                        .fill(Color.chatSurface(isDarkMode: isDarkMode))
                         .opacity(isEnabled ? 1.0 : 0.7)
                     
                     // Selected state background

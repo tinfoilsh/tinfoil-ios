@@ -937,9 +937,7 @@ struct ProviderIconsView: View {
                         .padding(8)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(colorScheme == .dark ? 
-                                      Color(hex: "1C1C1E") : 
-                                      Color(.systemGray6))
+                                .fill(Color.cardSurface(for: colorScheme))
                         )
                     }
                 }

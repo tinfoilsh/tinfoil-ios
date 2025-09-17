@@ -144,7 +144,7 @@ struct ChatSidebar: View {
                     }
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color.white)
+                    .background(Color.sidebarButtonBackground(for: colorScheme))
                     .foregroundColor(colorScheme == .dark ? .white : .black)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
@@ -274,7 +274,7 @@ struct ChatSidebar: View {
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .center)
-                .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color.white)
+                .background(Color.sidebarButtonBackground(for: colorScheme))
                 .foregroundColor(colorScheme == .dark ? .white : .black)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)

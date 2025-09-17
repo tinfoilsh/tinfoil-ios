@@ -6,6 +6,7 @@
 //  Copyright © 2025 Tinfoil. All rights reserved.
 
 import SwiftUI
+import UIKit
 
 extension Color {
     // Accent colors
@@ -17,14 +18,18 @@ extension Color {
     static let tinfoilAccentDark = Color(hex: "004444")
     static let tinfoilAccentLight = Color(hex: "68C7AC")
     
-    // App theme colors
+    // App surface colors
     static let backgroundPrimary = Color.tinfoilDark
-    static let backgroundSecondary = Color(hex: "1F2937")
+    static let chatSurfaceDark = Color(hex: "2C2C2E")
+    static let chatSurfaceLight = Color(hex: "F2F2F7")
+    static let sidebarButtonBackgroundDark = Color(hex: "121212")
+    static let sidebarButtonBackgroundLight = Color.white
+    static let cardSurfaceDark = Color(hex: "121212")
+    static let cardSurfaceLight = Color(UIColor.systemGray6)
+    static let chatBackgroundDark = Color(hex: "121212")
+    static let chatBackgroundLight = Color.white
     
-    // Additional brand color variations
-    static let tealDark = Color(hex: "003333")
-    static let mintDark = Color(hex: "5AB39A")
-    
+
     // Adaptive accent color for buttons/links that works in both light and dark mode
     static let adaptiveAccent = Color(UIColor { traitCollection in
         if traitCollection.userInterfaceStyle == .dark {
@@ -35,4 +40,21 @@ extension Color {
             return UIColor(Color.accentPrimary)
         }
     })
-} 
+
+    // Convenience helpers for common surfaces
+    static func chatSurface(isDarkMode: Bool) -> Color {
+        isDarkMode ? chatSurfaceDark : chatSurfaceLight
+    }
+    
+    static func sidebarButtonBackground(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? sidebarButtonBackgroundDark : sidebarButtonBackgroundLight
+    }
+    
+    static func cardSurface(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? cardSurfaceDark : cardSurfaceLight
+    }
+    
+    static func chatBackground(isDarkMode: Bool) -> Color {
+        isDarkMode ? chatBackgroundDark : chatBackgroundLight
+    }
+}
