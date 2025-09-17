@@ -22,6 +22,10 @@ enum Theme {
         static let cardSurfaceLight = Color.cardSurfaceLight
         static let chatBackgroundDark = Color.chatBackgroundDark
         static let chatBackgroundLight = Color.chatBackgroundLight
+        static let sidebarBackgroundDark = Color.sidebarBackgroundDark
+        static let sidebarBackgroundLight = Color.sidebarBackgroundLight
+        static let settingsBackgroundDark = Color.settingsBackgroundDark
+        static let settingsBackgroundLight = Color.settingsBackgroundLight
     }
     
     // MARK: - Dimensions

@@ -243,7 +243,7 @@ struct SettingsView: View {
         NavigationStack {
             ZStack {
                 // Background
-                (colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+                Color.settingsBackground(for: colorScheme)
                     .ignoresSafeArea()
                 
                 VStack(spacing: 0) {
@@ -365,6 +365,7 @@ struct SettingsView: View {
                         } header: {
                             Text("Account")
                         }
+                        .listRowBackground(Color.cardSurface(for: colorScheme))
                         
                         // Preferences Section
                         Section {
@@ -396,6 +397,7 @@ struct SettingsView: View {
                         } header: {
                             Text("Preferences")
                         }
+                        .listRowBackground(Color.cardSurface(for: colorScheme))
                         
                         // Chat Settings Section
                         Section {
@@ -484,6 +486,7 @@ struct SettingsView: View {
                         } header: {
                             Text("Chat Settings")
                         }
+                        .listRowBackground(Color.cardSurface(for: colorScheme))
                         
                         // Subscription Section
                         Section {
@@ -527,6 +530,7 @@ struct SettingsView: View {
                         } header: {
                             Text("Subscription")
                         }
+                        .listRowBackground(Color.cardSurface(for: colorScheme))
                         
                         // Legal Section
                         Section {
@@ -558,8 +562,10 @@ struct SettingsView: View {
                         } header: {
                             Text("Legal")
                         }
+                        .listRowBackground(Color.cardSurface(for: colorScheme))
                     }
                     .scrollContentBackground(.hidden)
+                    .background(Color.settingsBackground(for: colorScheme))
                 }
             }
             .navigationBarHidden(true)
@@ -765,9 +771,10 @@ struct LanguagePickerView: View {
                 }
             }
             .foregroundColor(.primary)
+            .listRowBackground(Color.cardSurface(for: colorScheme))
         }
         .scrollContentBackground(.hidden)
-        .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+        .background(Color.settingsBackground(for: colorScheme))
         .navigationTitle("Default Language")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -838,6 +845,7 @@ struct ProfileEditorView: View {
                 } header: {
                     Text("Name")
                 }
+                .listRowBackground(Color.cardSurface(for: colorScheme))
                 
                 if let error = errorMessage {
                     Section {
@@ -845,8 +853,11 @@ struct ProfileEditorView: View {
                             .foregroundColor(.red)
                             .font(.caption)
                     }
+                    .listRowBackground(Color.cardSurface(for: colorScheme))
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color.settingsBackground(for: colorScheme))
             .navigationTitle("Edit Profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -938,6 +949,7 @@ struct CustomSystemPromptView: View {
                     }
                 }
             }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
             
             if isUsingCustomPrompt {
                 Section {
@@ -966,10 +978,11 @@ struct CustomSystemPromptView: View {
                         }
                     }
                 }
+                .listRowBackground(Color.cardSurface(for: colorScheme))
             }
         }
         .scrollContentBackground(.hidden)
-        .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+        .background(Color.settingsBackground(for: colorScheme))
         .navigationTitle("Custom System Prompt")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

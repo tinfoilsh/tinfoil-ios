@@ -140,7 +140,7 @@ struct PersonalizationView: View {
                     .padding(.bottom, 24)
             }
         }
-        .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+        .background(Color.settingsBackground(for: colorScheme))
         .navigationTitle("Personalization")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

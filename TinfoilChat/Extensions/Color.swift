@@ -22,13 +22,20 @@ extension Color {
     static let backgroundPrimary = Color.tinfoilDark
     static let chatSurfaceDark = Color(hex: "2C2C2E")
     static let chatSurfaceLight = Color(hex: "F2F2F7")
-    static let sidebarButtonBackgroundDark = Color(hex: "121212")
+    static let sidebarButtonBackgroundDark = Color(hex: "2C2C2E")
     static let sidebarButtonBackgroundLight = Color.white
-    static let cardSurfaceDark = Color(hex: "121212")
+    static let cardSurfaceDark = Color(hex: "1C1C1E")
     static let cardSurfaceLight = Color(UIColor.systemGray6)
     static let chatBackgroundDark = Color(hex: "121212")
     static let chatBackgroundLight = Color.white
-    
+    static let sidebarBackgroundDark = Color(hex: "121212")
+    static let sidebarBackgroundLight = Color.white
+    static let settingsBackgroundDark = Color(hex: "121212")
+    static let settingsBackgroundLight = Color(UIColor.systemGroupedBackground)
+
+    // Additional brand color variations
+    static let tealDark = Color(hex: "003333")
+    static let mintDark = Color(hex: "5AB39A")
 
     // Adaptive accent color for buttons/links that works in both light and dark mode
     static let adaptiveAccent = Color(UIColor { traitCollection in
@@ -56,5 +63,13 @@ extension Color {
     
     static func chatBackground(isDarkMode: Bool) -> Color {
         isDarkMode ? chatBackgroundDark : chatBackgroundLight
+    }
+
+    static func sidebarBackground(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? sidebarBackgroundDark : sidebarBackgroundLight
+    }
+
+    static func settingsBackground(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? settingsBackgroundDark : settingsBackgroundLight
     }
 }

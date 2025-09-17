@@ -55,7 +55,7 @@ struct ChatSidebar: View {
     var body: some View {
         sidebarContent
             .frame(width: 300)
-            .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
+            .background(Color.sidebarBackground(for: colorScheme))
             .onReceive(timeUpdateTimer) { _ in
                 // Update the current time to trigger view refresh
                 currentTime = Date()
@@ -175,7 +175,7 @@ struct ChatSidebar: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 16)
-            .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
+            .background(Color.sidebarBackground(for: colorScheme))
             
             // Chat List - shows multiple chats for all authenticated users
             ScrollView {
