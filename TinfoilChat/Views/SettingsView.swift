@@ -511,6 +511,10 @@ struct SettingsView: View {
                             } else {
                                 // Subscribe to Premium
                                 Button(action: {
+                                    guard authManager.isAuthenticated else {
+                                        showAuthView = true
+                                        return
+                                    }
                                     // Set clerk_user_id attribute right before showing paywall
                                     if let clerkUserId = authManager.localUserData?["id"] as? String {
                                         Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
