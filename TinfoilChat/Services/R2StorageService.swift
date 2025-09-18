@@ -162,7 +162,14 @@ class R2StorageService: ObservableObject {
         
         // Try to decrypt the chat data
         do {
-            return try await EncryptionService.shared.decrypt(encrypted, as: StoredChat.self).value
+            let decryptionResult = try await EncryptionService.shared.decrypt(encrypted, as: StoredChat.self)
+            let chat = decryptionResult.value
+            
+            if decryptionResult.usedFallbackKey {
+                scheduleReencryption(for: chat)
+            }
+            
+            return chat
         } catch {
             // If decryption fails, create a placeholder with encrypted data
             let timestamp = chatId.split(separator: "_").first.map(String.init) ?? ""
@@ -177,6 +184,26 @@ class R2StorageService: ObservableObject {
                     createdAt: Date(timeIntervalSince1970: Double(createdAtMs) / 1000.0)
                 )
             )
+        }
+    }
+
+    // Re-encrypt with the current key when a legacy key was needed for decryption.
+    private func scheduleReencryption(for chat: StoredChat) {
+        Task { [weak self] in
+            guard let self else { return }
+            guard await self.isAuthenticated() else { return }
+            guard !chat.messages.isEmpty else { return }
+
+            do {
+                var chatForUpload = chat
+                chatForUpload.decryptionFailed = false
+                chatForUpload.encryptedData = nil
+                try await self.uploadChat(chatForUpload)
+            } catch {
+#if DEBUG
+                print("[R2StorageService] Failed to re-encrypt chat \(chat.id): \(error)")
+#endif
+            }
         }
     }
     
