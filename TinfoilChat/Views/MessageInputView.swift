@@ -96,7 +96,7 @@ struct MessageInputView: View {
                         Circle()
                             .fill(shouldShowMicrophone ? 
                                   (viewModel.isRecording ? Color.red : (isDarkMode ? Color.white : Color.primary)) :
-                                  (isDarkMode ? Color.white : Color.primary))
+                                  (isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight))
                             .frame(width: 32, height: 32)
                         
                         Image(systemName: shouldShowMicrophone ? 
@@ -105,7 +105,7 @@ struct MessageInputView: View {
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(shouldShowMicrophone ? 
                                            (viewModel.isRecording ? .white : (isDarkMode ? .black : .white)) :
-                                           (isDarkMode ? .black : .white))
+                                           (isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
                     }
                 }
                 .padding(.trailing, 16)

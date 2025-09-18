@@ -32,10 +32,11 @@ extension Color {
     static let sidebarBackgroundLight = Color.white
     static let settingsBackgroundDark = Color(hex: "121212")
     static let settingsBackgroundLight = Color(UIColor.systemGroupedBackground)
+    static let sendButtonBackgroundDark = Color.white
+    static let sendButtonBackgroundLight = Color.tinfoilDark
+    static let sendButtonForegroundDark = Color.tinfoilDark
+    static let sendButtonForegroundLight = Color.white
 
-    // Additional brand color variations
-    static let tealDark = Color(hex: "003333")
-    static let mintDark = Color(hex: "5AB39A")
 
     // Adaptive accent color for buttons/links that works in both light and dark mode
     static let adaptiveAccent = Color(UIColor { traitCollection in

@@ -254,7 +254,7 @@ struct ModularAuthenticationView: View {
           Image(colorScheme == .dark ? "logo-white" : "logo-dark")
             .resizable()
             .scaledToFit()
-            .frame(height: 40)
+            .frame(height: 22)
           Spacer()
         }
         
@@ -553,4 +553,3 @@ struct ModularAuthenticationView: View {
     .environment(Clerk.shared)
     .environmentObject(AuthManager())
 } 
-
