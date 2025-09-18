@@ -19,8 +19,8 @@ struct CloudSyncSettingsView: View {
     
     var body: some View {
         List {
-                // Sync Status Section
-                Section {
+            // Sync Status Section
+            Section {
                     HStack {
                         Text("Sync Status")
                         Spacer()
@@ -76,10 +76,11 @@ struct CloudSyncSettingsView: View {
                     .disabled(viewModel.isSyncing || !authManager.isAuthenticated)
                 } header: {
                     Text("Synchronization")
-                }
-                
-                // Encryption Key Section
-                Section {
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+            
+            // Encryption Key Section
+            Section {
                     if let key = viewModel.getCurrentEncryptionKey() {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Current Key")
@@ -118,15 +119,16 @@ struct CloudSyncSettingsView: View {
                         Label("Change Encryption Key", systemImage: "key.fill")
                             .foregroundColor(.primary)
                     }
-                } header: {
-                    Text("Encryption")
-                } footer: {
+            } header: {
+                Text("Encryption")
+            } footer: {
                     Text("Your encryption key is used to secure all your chat data. Keep it safe and never share it with anyone.")
                         .font(.caption)
-                }
             }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+        }
         .scrollContentBackground(.hidden)
-        .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+        .background(Color.settingsBackground(for: colorScheme))
         .navigationTitle("Cloud Sync Settings")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -147,7 +149,7 @@ struct CloudSyncSettingsView: View {
             // Restore dark navigation bar for main views
             let appearance = UINavigationBarAppearance()
             appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = UIColor(Color(hex: "#111827"))
+            appearance.backgroundColor = UIColor(Color.backgroundPrimary)
             appearance.shadowColor = .clear
             
             UINavigationBar.appearance().standardAppearance = appearance

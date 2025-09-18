@@ -37,6 +37,22 @@ private func parseISODate(_ dateString: String) -> Date? {
     return nil
 }
 
+private actor ReencryptionTracker {
+    private var inProgress: Set<String> = []
+
+    func startIfNeeded(for chatId: String) -> Bool {
+        if inProgress.contains(chatId) {
+            return false
+        }
+        inProgress.insert(chatId)
+        return true
+    }
+
+    func finish(for chatId: String) {
+        inProgress.remove(chatId)
+    }
+}
+
 /// Main service for managing cloud synchronization of chats
 @MainActor
 class CloudSyncService: ObservableObject {
@@ -55,6 +71,7 @@ class CloudSyncService: ObservableObject {
     private let encryptionService = EncryptionService.shared
     private let deletedChatsTracker = DeletedChatsTracker.shared
     private let streamingTracker = StreamingTracker.shared
+    private let reencryptionTracker = ReencryptionTracker()
     
     // Constants
     
@@ -292,7 +309,9 @@ class CloudSyncService: ObservableObject {
             // fetch metadata and store encrypted placeholders. Decryption will be attempted per-chat.
             _ = try? await encryptionService.initialize()
             
-            await withTaskGroup(of: StoredChat?.self) { group in
+            var chatsNeedingReencryption: [StoredChat] = []
+
+            await withTaskGroup(of: (StoredChat, Bool)?.self) { group in
                 for remoteChat in chatsToProcess {
                     group.addTask { [weak self] in
                         guard let self = self else { return nil }
@@ -321,7 +340,8 @@ class CloudSyncService: ObservableObject {
                             
                             // Try to decrypt
                             do {
-                                var decryptedChat = try await self.encryptionService.decrypt(encrypted, as: StoredChat.self)
+                                let decryptionResult = try await self.encryptionService.decrypt(encrypted, as: StoredChat.self)
+                                var decryptedChat = decryptionResult.value
                                 
                                 // Use dates from metadata for consistency
                                 if let createdDate = parseISODate(remoteChat.createdAt) {
@@ -338,32 +358,41 @@ class CloudSyncService: ObservableObject {
                                     }
                                 }
                                 
-                                return decryptedChat
+                                return (decryptedChat, decryptionResult.usedFallbackKey)
                             } catch {
                                 // Decryption failed - return encrypted placeholder
-                                return await self.createEncryptedPlaceholder(
+                                let placeholder = await self.createEncryptedPlaceholder(
                                     remoteChat: remoteChat,
                                     encryptedContent: content
                                 )
+                                return (placeholder, false)
                             }
                         } catch {
                             // Failed to parse encrypted data
-                            return await self.createEncryptedPlaceholder(
+                            let placeholder = await self.createEncryptedPlaceholder(
                                 remoteChat: remoteChat,
                                 encryptedContent: content
                             )
+                            return (placeholder, false)
                         }
                     }
                 }
                 
                 // Collect results
-                for await chat in group {
-                    if let chat = chat {
+                for await result in group {
+                    if let (chat, needsReencryption) = result {
                         downloadedChats.append(chat)
+                        if needsReencryption {
+                            chatsNeedingReencryption.append(chat)
+                        }
                     }
                 }
             }
             
+            for chat in chatsNeedingReencryption {
+                queueReencryption(for: chat, persistLocal: false)
+            }
+
             // Sort by creation date (newest first)
             downloadedChats.sort { $0.createdAt > $1.createdAt }
             
@@ -495,16 +524,18 @@ class CloudSyncService: ObservableObject {
             let remoteChatMap = Dictionary(uniqueKeysWithValues: remoteConversations.map { ($0.id, $0) })
             
             // Process remote chats
-            await withTaskGroup(of: (Bool, String?).self) { group in
+            var chatsNeedingReencryption: [StoredChat] = []
+
+            await withTaskGroup(of: (Bool, String?, StoredChat?).self) { group in
                 for remoteChat in remoteConversations {
                     group.addTask { @MainActor [weak self] in
-                        guard let self = self else { return (false, nil) }
+                        guard let self = self else { return (false, nil, nil) }
                         
                         // First validate if this remote chat should be processed
                         if !(await self.shouldProcessRemoteChat(remoteChat)) {
                             // Clean up invalid chats from cloud
                             self.cleanupInvalidRemoteChat(remoteChat)
-                            return (false, nil)
+                            return (false, nil, nil)
                         }
                         
                         let localChat = localChatMap[remoteChat.id]
@@ -520,12 +551,12 @@ class CloudSyncService: ObservableObject {
                         if let localChat = localChat {
                             if localChat.locallyModified || localChat.hasActiveStream {
                                 // Don't overwrite locally modified chats or chats with active streams
-                                return (false, nil)
+                                return (false, nil, nil)
                             }
                             
                             // Also check if chat is currently streaming using the tracker
                             if self.streamingTracker.isStreaming(localChat.id) {
-                                return (false, nil)
+                                return (false, nil, nil)
                             }
                         }
                         
@@ -544,13 +575,14 @@ class CloudSyncService: ObservableObject {
                                 
                                 // Try to decrypt the chat data
                                 do {
-                                    var decryptedChat = try await self.encryptionService.decrypt(encrypted, as: StoredChat.self)
+                                    let decryptionResult = try await self.encryptionService.decrypt(encrypted, as: StoredChat.self)
+                                    var decryptedChat = decryptionResult.value
                                     
                                     // Double-check: Even if decryption succeeded, validate the content
                                     if decryptedChat.messages.isEmpty {
                                         // Empty chat that shouldn't be synced
                                         self.cleanupInvalidRemoteChat(remoteChat)
-                                        return (false, nil)
+                                        return (false, nil, nil)
                                     }
                                     
                                     // IMPORTANT: Use dates from metadata, not from decrypted data
@@ -571,7 +603,8 @@ class CloudSyncService: ObservableObject {
                                     
                                     await self.saveChatToStorage(decryptedChat)
                                     await self.markChatAsSynced(decryptedChat.id, version: decryptedChat.syncVersion)
-                                    return (true, nil)
+                                    let chatForReencryption = decryptionResult.usedFallbackKey ? decryptedChat : nil
+                                    return (true, nil, chatForReencryption)
                                 } catch {
                                     // Decryption failed - store as encrypted placeholder for later retry
                                     // Use dates from metadata
@@ -592,7 +625,7 @@ class CloudSyncService: ObservableObject {
                                     placeholderChat.updatedAt = updatedDate
                                     
                                     await self.saveChatToStorage(placeholderChat)
-                                    return (true, nil)
+                                    return (true, nil, nil)
                                 }
                             } catch {
                                 // Even if we can't parse the encrypted data, store it for later
@@ -624,22 +657,25 @@ class CloudSyncService: ObservableObject {
                                 placeholderChat.updatedAt = updatedDate
                                 
                                 await self.saveChatToStorage(placeholderChat)
-                                return (true, nil)  // Don't fail the sync
+                                return (true, nil, nil)  // Don't fail the sync
                             }
                         }
                         
-                        return (false, nil)
+                        return (false, nil, nil)
                     }
                 }
                 
                 // Collect results
-                for await (success, error) in group {
+                for await (success, error, chatForReencryption) in group {
                     if success {
                         result = SyncResult(
                             uploaded: result.uploaded,
                             downloaded: result.downloaded + 1,
                             errors: result.errors
                         )
+                        if let chatForReencryption = chatForReencryption {
+                            chatsNeedingReencryption.append(chatForReencryption)
+                        }
                     } else if let error = error {
                         result = SyncResult(
                             uploaded: result.uploaded,
@@ -648,6 +684,10 @@ class CloudSyncService: ObservableObject {
                         )
                     }
                 }
+            }
+
+            for chat in chatsNeedingReencryption {
+                queueReencryption(for: chat, persistLocal: true)
             }
             
             // Delete local chats that were deleted remotely (only for first page)
@@ -785,7 +825,51 @@ class CloudSyncService: ObservableObject {
             Chat.saveToDefaults(chatsToSave, userId: await getCurrentUserId())
         }
     }
-    
+
+    private func queueReencryption(for chat: StoredChat, persistLocal: Bool) {
+        Task { [weak self] in
+            guard let self = self else { return }
+            let shouldStart = await self.reencryptionTracker.startIfNeeded(for: chat.id)
+            guard shouldStart else { return }
+            await self.performReencryption(for: chat, persistLocal: persistLocal)
+            await self.reencryptionTracker.finish(for: chat.id)
+        }
+    }
+
+    private func performReencryption(for chat: StoredChat, persistLocal: Bool) async {
+        guard await r2Storage.isAuthenticated() else { return }
+
+        // Ensure encryption service is initialized with the current default key
+        _ = try? await encryptionService.initialize()
+
+        // Skip placeholder chats that still lack content
+        guard !chat.messages.isEmpty else { return }
+
+        var chatForUpload = chat.toChat()
+        chatForUpload.decryptionFailed = false
+        chatForUpload.encryptedData = nil
+        chatForUpload.locallyModified = true
+        chatForUpload.updatedAt = Date()
+
+        let newVersion = chatForUpload.syncVersion + 1
+        chatForUpload.syncVersion = newVersion
+
+        let storedForUpload = StoredChat(from: chatForUpload, syncVersion: newVersion)
+
+        if persistLocal {
+            await saveChatToStorage(storedForUpload)
+        }
+
+        do {
+            try await r2Storage.uploadChat(storedForUpload)
+            await markChatAsSynced(chatForUpload.id, version: newVersion)
+        } catch {
+            #if DEBUG
+            print("[CloudSync] Failed to re-encrypt chat \(chat.id): \(error)")
+            #endif
+        }
+    }
+
     private func deleteChatFromStorage(_ chatId: String) async {
         // TODO: Replace with Core Data delete
         var chats = await getAllChatsFromStorage()
@@ -869,9 +953,10 @@ class CloudSyncService: ObservableObject {
                             let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
                             
                             // Decrypt the chat data
-                            let decryptedData = try await self?.encryptionService.decrypt(encrypted, as: StoredChat.self)
-                            
-                            guard let decryptedData = decryptedData else { return false }
+                            guard let decryptionResult = try await self?.encryptionService.decrypt(encrypted, as: StoredChat.self) else {
+                                return false
+                            }
+                            let decryptedData = decryptionResult.value
                             
                             
                             // Create properly decrypted chat with original data, preserving the original ID
@@ -910,6 +995,12 @@ class CloudSyncService: ObservableObject {
                             )
                             
                             await self?.saveChatToStorage(updatedChat)
+                            if decryptionResult.usedFallbackKey {
+                                let chatForReencryption = updatedChat
+                                await MainActor.run { [weak self] in
+                                    self?.queueReencryption(for: chatForReencryption, persistLocal: true)
+                                }
+                            }
                             return true
                         } catch {
                             return false

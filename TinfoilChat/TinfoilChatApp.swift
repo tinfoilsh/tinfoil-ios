@@ -122,7 +122,7 @@ struct TinfoilChatApp: App {
                     }
                 } else {
                     ZStack {
-                        Color(hex: "111827")
+                        Color.backgroundPrimary
                             .ignoresSafeArea()
                         VStack(spacing: 24) {
                             Image("navbar-logo")
@@ -201,4 +201,3 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // Called when the user discards a scene session
     }
 }
-

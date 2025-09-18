@@ -6,12 +6,9 @@
 //  Copyright © 2025 Tinfoil. All rights reserved.
 
 import SwiftUI
+import UIKit
 
 extension Color {
-    // App theme colors
-    static let backgroundPrimary = Color(hex: "111827")
-    static let backgroundSecondary = Color(hex: "1F2937")
-    
     // Accent colors
     static let accentPrimary = Color(red: 16/255, green: 185/255, blue: 129/255) // #10B981
     
@@ -21,10 +18,26 @@ extension Color {
     static let tinfoilAccentDark = Color(hex: "004444")
     static let tinfoilAccentLight = Color(hex: "68C7AC")
     
-    // Additional brand color variations
-    static let tealDark = Color(hex: "003333")
-    static let mintDark = Color(hex: "5AB39A")
-    
+    // App surface colors
+    static let backgroundPrimary = Color.tinfoilDark
+    static let chatSurfaceDark = Color(hex: "2C2C2E")
+    static let chatSurfaceLight = Color(hex: "F2F2F7")
+    static let sidebarButtonBackgroundDark = Color(hex: "2C2C2E")
+    static let sidebarButtonBackgroundLight = Color.white
+    static let cardSurfaceDark = Color(hex: "1C1C1E")
+    static let cardSurfaceLight = Color.white
+    static let chatBackgroundDark = Color(hex: "121212")
+    static let chatBackgroundLight = Color.white
+    static let sidebarBackgroundDark = Color(hex: "121212")
+    static let sidebarBackgroundLight = Color.white
+    static let settingsBackgroundDark = Color(hex: "121212")
+    static let settingsBackgroundLight = Color(UIColor.systemGroupedBackground)
+    static let sendButtonBackgroundDark = Color.white
+    static let sendButtonBackgroundLight = Color.tinfoilDark
+    static let sendButtonForegroundDark = Color.tinfoilDark
+    static let sendButtonForegroundLight = Color.white
+
+
     // Adaptive accent color for buttons/links that works in both light and dark mode
     static let adaptiveAccent = Color(UIColor { traitCollection in
         if traitCollection.userInterfaceStyle == .dark {
@@ -35,4 +48,29 @@ extension Color {
             return UIColor(Color.accentPrimary)
         }
     })
-} 
+
+    // Convenience helpers for common surfaces
+    static func chatSurface(isDarkMode: Bool) -> Color {
+        isDarkMode ? chatSurfaceDark : chatSurfaceLight
+    }
+    
+    static func sidebarButtonBackground(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? sidebarButtonBackgroundDark : sidebarButtonBackgroundLight
+    }
+    
+    static func cardSurface(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? cardSurfaceDark : cardSurfaceLight
+    }
+    
+    static func chatBackground(isDarkMode: Bool) -> Color {
+        isDarkMode ? chatBackgroundDark : chatBackgroundLight
+    }
+
+    static func sidebarBackground(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? sidebarBackgroundDark : sidebarBackgroundLight
+    }
+
+    static func settingsBackground(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? settingsBackgroundDark : settingsBackgroundLight
+    }
+}

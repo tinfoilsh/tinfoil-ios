@@ -34,13 +34,25 @@ struct ChatContainer: View {
     
     // Sidebar constants
     private let sidebarWidth: CGFloat = 300
-    
+
     private let backgroundTimeThreshold: TimeInterval = 300 // 5 minutes in seconds
+
+    private var toolbarButtonFill: Color {
+        colorScheme == .dark ? Color.white.opacity(0.1) : Color.white
+    }
+
+    private var toolbarButtonStroke: Color {
+        colorScheme == .dark ? Color.white.opacity(0.2) : Color.white
+    }
+
+    private var toolbarContentColor: Color {
+        colorScheme == .dark ? Color.white : Color.black
+    }
     
     var body: some View {
         NavigationView {
             mainContent
-                .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
+                .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
         }
         .navigationViewStyle(.stack)
         .environmentObject(viewModel)
@@ -117,7 +129,7 @@ struct ChatContainer: View {
         appearance.configureWithOpaqueBackground()
         
         // Always use dark navigation bar for main chat view since logo is white
-        appearance.backgroundColor = UIColor(Color(hex: "#111827"))
+        appearance.backgroundColor = UIColor(Color.backgroundPrimary)
         appearance.shadowColor = .clear
         
         UINavigationBar.appearance().standardAppearance = appearance
@@ -176,16 +188,16 @@ struct ChatContainer: View {
                         Button(action: createNewChat) {
                             ZStack {
                                 RoundedRectangle(cornerRadius: 6)
-                                    .fill(.white)
+                                    .fill(toolbarButtonFill)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 6)
-                                            .strokeBorder(.white, lineWidth: 1)
+                                            .strokeBorder(toolbarButtonStroke, lineWidth: 1)
                                     )
                                     .frame(width: 24, height: 24)
-                                
+
                                 Image(systemName: "plus")
                                     .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.black)
+                                    .foregroundColor(toolbarContentColor)
                             }
                         }
                     }
@@ -197,15 +209,15 @@ struct ChatContainer: View {
                     Button(action: showAuthenticationView) {
                         Text("Sign in")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.black)
+                            .foregroundColor(toolbarContentColor)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
-                                    .fill(.white)
+                                    .fill(toolbarButtonFill)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 6)
-                                            .strokeBorder(.white, lineWidth: 1)
+                                            .strokeBorder(toolbarButtonStroke, lineWidth: 1)
                                     )
                             )
                     }
@@ -257,10 +269,11 @@ struct ChatContainer: View {
             messages: viewModel.messages,
             isDarkMode: colorScheme == .dark,
             isLoading: viewModel.isLoading,
+            onRequestSignIn: showAuthenticationView,
             viewModel: viewModel,
             messageText: $messageText,
         )
-        .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)     
+        .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
     }
     
     /// The sliding sidebar and dimming overlay
@@ -367,6 +380,7 @@ struct ChatScrollView: View {
     let messages: [Message]
     let isDarkMode: Bool
     let isLoading: Bool
+    let onRequestSignIn: () -> Void
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @ObservedObject private var settings = SettingsManager.shared
     @Binding var messageText: String
@@ -374,9 +388,8 @@ struct ChatScrollView: View {
     // Scroll management
     @State private var scrollViewProxy: ScrollViewProxy?
     @State private var userHasScrolled = false
-    @State private var lastMessageCount = 0
     @State private var isAtBottom = false
-    
+
     // Progressive loading
     @State private var visibleMessageCount = 30
     private let initialMessageCount = 30
@@ -385,10 +398,6 @@ struct ChatScrollView: View {
     // Keyboard handling
     @State private var keyboardHeight: CGFloat = 0
     @State private var isKeyboardVisible = false
-    
-    // Haptic feedback generator
-    private let softHaptic = UIImpactFeedbackGenerator(style: .soft)
-    @State private var lastHapticTime: Date = Date()
     
     // Computed property for context messages
     private var contextMessages: ArraySlice<Message> {
@@ -399,9 +408,13 @@ struct ChatScrollView: View {
     private var archivedMessagesStartIndex: Int {
         max(0, messages.count - SettingsManager.shared.maxMessages)
     }
-    
-    @State private var isScrolling = false
-    @State private var didInitialScrollToBottom = false
+
+    private let scrollCoordinateSpaceName = "ChatScrollCoordinateSpace"
+    private let scrollMovementThreshold: CGFloat = 0.1
+    private let scrollSettleDelay: TimeInterval = 0.3
+
+    @State private var scrollEndWorkItem: DispatchWorkItem?
+    @State private var lastObservedScrollOffset: CGFloat = 0
     
     // MARK: - Body
     
@@ -410,10 +423,22 @@ struct ChatScrollView: View {
             // Messages ScrollView
             ScrollViewReader { proxy in
                 ScrollView {
+                    GeometryReader { geo -> Color in
+                        let offset = geo.frame(in: .named(scrollCoordinateSpaceName)).minY
+                        DispatchQueue.main.async {
+                            updateScrollActivity(with: offset)
+                        }
+                        return Color.clear
+                    }
+                    .frame(height: 0)
                     VStack(spacing: 0) {
                         if messages.isEmpty {
                             if let authManager = viewModel.authManager {
-                                WelcomeView(isDarkMode: isDarkMode, authManager: authManager)
+                                WelcomeView(
+                                    isDarkMode: isDarkMode,
+                                    authManager: authManager,
+                                    onRequestSignIn: onRequestSignIn
+                                )
                                     .padding(.vertical, 16)
                                     .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 0)
                                     .frame(maxWidth: 900)
@@ -497,32 +522,18 @@ struct ChatScrollView: View {
                             GeometryReader { geometry -> Color in
                                 let isCurrentlyAtBottom = isViewFullyVisible(geometry)
                                 if isAtBottom != isCurrentlyAtBottom {
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    DispatchQueue.main.async {
                                         isAtBottom = isCurrentlyAtBottom
                                         if isCurrentlyAtBottom {
                                             userHasScrolled = false
+                                            viewModel.isScrollInteractionActive = false
+                                            cancelScrollSettlingWork()
                                         }
                                     }
                                 }
                                 return Color.clear
                             }
                         )
-                        .onAppear {
-                            // As a final guarantee, when the bottom anchor appears, force a scroll
-                            // after layout has settled so we are exactly at the end.
-                            if !didInitialScrollToBottom {
-                                didInitialScrollToBottom = true
-                                DispatchQueue.main.async {
-                                    let targetId: AnyHashable = messages.last?.id ?? "bottom"
-                                    scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                                    DispatchQueue.main.async {
-                                        withAnimation(.easeOut(duration: 0.2)) {
-                                            scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                                        }
-                                    }
-                                }
-                            }
-                        }
                 }
                 // Reset scroll state when switching chats
                 .id(viewModel.currentChat?.createdAt ?? Date.distantPast)
@@ -530,7 +541,7 @@ struct ChatScrollView: View {
                 .simultaneousGesture(
                     DragGesture()
                         .onChanged { value in
-                            isScrolling = true
+                            cancelScrollSettlingWork()
                             if value.translation.height > 0 && isLoading {
                                 userHasScrolled = true
                             }
@@ -538,9 +549,13 @@ struct ChatScrollView: View {
                             if value.translation.height > 10 && isKeyboardVisible {
                                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                             }
+                            if !viewModel.isScrollInteractionActive {
+                                viewModel.isScrollInteractionActive = true
+                            }
+                            scheduleScrollSettlingCheck()
                         }
                         .onEnded { _ in
-                            isScrolling = false
+                            scheduleScrollSettlingCheck()
                         }
                 )
                 .onTapGesture {
@@ -548,77 +563,52 @@ struct ChatScrollView: View {
                         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                     }
                 }
-                .onChange(of: messages) { _, newMessages in
-                    // If this is a new message (not just an update to the last message)
-                    let targetId: AnyHashable = newMessages.last?.id ?? "bottom"
-                    let suppressAutoScroll = shouldSuppressAutoScrollForInitialAssistantReply(newMessages)
-                    if newMessages.count > lastMessageCount {
-                        lastMessageCount = newMessages.count
-                        userHasScrolled = false // Reset scroll state for new messages
+                .onChange(of: messages) { oldMessages, newMessages in
+                    let previousCount = oldMessages.count
+                    let newCount = newMessages.count
 
-                        // When a new message arrives and we're at the bottom, keep showing limited messages
-                        if isAtBottom {
-                            visibleMessageCount = min(initialMessageCount, newMessages.count)
-                        }
-                        
-                        // Immediate scroll to prevent blank screen
-                        scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                        // Then animated scroll for smooth effect
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                            }
-                        }
-                    } else if !userHasScrolled && !(viewModel.currentChat?.hasActiveStream ?? false) && !suppressAutoScroll {
-                        if isAtBottom {
-                            // Only auto-scroll after updates when still viewing bottom
-                            scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    scrollViewProxy?.scrollTo(targetId, anchor: .bottom)
-                                }
-                            }
+                    guard newCount >= previousCount else { return }
+
+                    if newCount > previousCount {
+                        let appendedMessages = newMessages.suffix(newCount - previousCount)
+                        let includesUserMessage = appendedMessages.contains { $0.role == .user }
+                        let wasInitialLoad = previousCount == 0
+                        let shouldAutoFollow = includesUserMessage || wasInitialLoad
+
+                        if shouldAutoFollow {
+                            userHasScrolled = false
+                            visibleMessageCount = min(initialMessageCount, newCount)
+                            requestJumpToBottom(animated: false)
+                            viewModel.isScrollInteractionActive = false
+                            cancelScrollSettlingWork()
                         }
                     }
                 }
-                // When the selected chat changes, reset state and jump to bottom
+                // When the selected chat changes, just reset bookkeeping
                 .onChange(of: viewModel.currentChat?.createdAt) { _, _ in
-                    lastMessageCount = messages.count
-                    didInitialScrollToBottom = false
                     userHasScrolled = false
-                    // Reset to initial message count when switching chats
                     visibleMessageCount = min(initialMessageCount, messages.count)
-                    DispatchQueue.main.async {
-                        let targetId: AnyHashable = messages.last?.id ?? "bottom"
-                        proxy.scrollTo(targetId, anchor: .bottom)
-                        DispatchQueue.main.async {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo(targetId, anchor: .bottom)
-                            }
-                        }
-                    }
+                    viewModel.isScrollInteractionActive = false
+                    cancelScrollSettlingWork()
+                    requestJumpToBottom(animated: false)
                 }
                 .onAppear {
                     scrollViewProxy = proxy
-                    lastMessageCount = messages.count
-                    // Defer then perform a two-phase scroll to ensure accurate final position
-                    DispatchQueue.main.async {
-                        let targetId: AnyHashable = messages.last?.id ?? "bottom"
-                        // Instant jump first
-                        proxy.scrollTo(targetId, anchor: .bottom)
-                        // Then animated pass after one more runloop
-                        DispatchQueue.main.async {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo(targetId, anchor: .bottom)
-                            }
-                        }
-                    }
+                    viewModel.isScrollInteractionActive = false
+                    cancelScrollSettlingWork()
+                    requestJumpToBottom(animated: false)
                 }
-                
+                .onDisappear {
+                    cancelScrollSettlingWork()
+                    viewModel.isScrollInteractionActive = false
+                }
+                .coordinateSpace(name: scrollCoordinateSpaceName)
+
                 .overlay(alignment: .bottom) {
                     if !isAtBottom && !messages.isEmpty && !isKeyboardVisible {
                         Button(action: {
-                            // Re-enable auto-follow for streaming updates
+                            cancelScrollSettlingWork()
+                            // Reset scroll tracking so future user messages can snap to the latest entry
                             userHasScrolled = false
                             // Reset to show only recent messages when going back to bottom
                             visibleMessageCount = min(initialMessageCount, messages.count)
@@ -630,6 +620,8 @@ struct ChatScrollView: View {
                                 withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
                                     proxy.scrollTo(targetId, anchor: .bottom)
                                 }
+                                isAtBottom = true
+                                viewModel.isScrollInteractionActive = false
                             }
                         }) {
                             Image(systemName: "arrow.down.circle.fill")
@@ -644,7 +636,7 @@ struct ChatScrollView: View {
                         .transition(.opacity)
                     }
                 }
-                .background(isDarkMode ? Color.backgroundPrimary : Color.white)
+                .background(Color.chatBackground(isDarkMode: isDarkMode))
             }
             
             // Message input view
@@ -653,7 +645,7 @@ struct ChatScrollView: View {
                 MessageInputView(messageText: $messageText, viewModel: viewModel)
                     .background(
                         RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
-                            .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                            .fill(Color.chatSurface(isDarkMode: isDarkMode))
                             .edgesIgnoringSafeArea(.bottom)
                     )
                     .environmentObject(viewModel.authManager ?? AuthManager())
@@ -665,7 +657,7 @@ struct ChatScrollView: View {
                         .frame(maxWidth: 600)
                         .background(
                             RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
-                                .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                                .fill(Color.chatSurface(isDarkMode: isDarkMode))
                         )
                         .environmentObject(viewModel.authManager ?? AuthManager())
                     Spacer(minLength: 0)
@@ -680,37 +672,71 @@ struct ChatScrollView: View {
         }
         .onAppear {
             setupKeyboardObservers()
-            softHaptic.prepare()
         }
         .onDisappear {
             removeKeyboardObservers()
         }
-        .onChange(of: messages.last?.content) { oldContent, newContent in
-            if settings.hapticFeedbackEnabled,
-               let old = oldContent,
-               let new = newContent,
-               old != new {
-                let addedContent = String(new.dropFirst(old.count))
-                // Throttle haptic feedback to max once per 150ms to reduce CPU usage
-                let now = Date()
-                if addedContent.count > 1 && now.timeIntervalSince(lastHapticTime) > 0.15 {
-                    softHaptic.impactOccurred(intensity: 0.3)
-                    lastHapticTime = now
-                }
+    }
+
+    private func updateScrollActivity(with offset: CGFloat) {
+        let delta = abs(offset - lastObservedScrollOffset)
+        lastObservedScrollOffset = offset
+
+        if delta > scrollMovementThreshold {
+            if !viewModel.isScrollInteractionActive {
+                viewModel.isScrollInteractionActive = true
             }
+            scheduleScrollSettlingCheck()
+        } else if viewModel.isScrollInteractionActive {
+            scheduleScrollSettlingCheck()
         }
     }
-    
-    // MARK: - Auto-Scroll Helpers
 
-    private func shouldSuppressAutoScrollForInitialAssistantReply(_ messages: [Message]) -> Bool {
-        guard let lastMessage = messages.last, lastMessage.role == .assistant else {
-            return false
+    private func scheduleScrollSettlingCheck() {
+        cancelScrollSettlingWork()
+        let workItem = DispatchWorkItem {
+            viewModel.isScrollInteractionActive = false
+            scrollEndWorkItem = nil
+        }
+        scrollEndWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + scrollSettleDelay, execute: workItem)
+    }
+
+    private func cancelScrollSettlingWork() {
+        scrollEndWorkItem?.cancel()
+        scrollEndWorkItem = nil
+    }
+
+    private func requestJumpToBottom(animated: Bool) {
+        guard let proxy = scrollViewProxy else { return }
+        let bottomAnchor: AnyHashable = "bottom"
+        let lastMessageId = messages.last?.id
+        cancelScrollSettlingWork()
+
+        let performScroll = {
+            proxy.scrollTo(bottomAnchor, anchor: .bottom)
+            if let lastMessageId {
+                proxy.scrollTo(lastMessageId, anchor: .bottom)
+            }
         }
 
-        let hasEarlierAssistantMessage = messages.dropLast().contains { $0.role == .assistant }
-        let hasUserMessage = messages.contains { $0.role == .user }
-        return hasUserMessage && !hasEarlierAssistantMessage
+        DispatchQueue.main.async {
+            if animated {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    performScroll()
+                }
+            } else {
+                performScroll()
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                performScroll()
+            }
+
+            userHasScrolled = false
+            isAtBottom = true
+            viewModel.isScrollInteractionActive = false
+        }
     }
 
     // MARK: - Keyboard Handling
@@ -801,9 +827,14 @@ struct ChatScrollView: View {
 struct WelcomeView: View {
     let isDarkMode: Bool
     @ObservedObject var authManager: AuthManager
+    let onRequestSignIn: () -> Void
     
     var body: some View {
-        TabbedWelcomeView(isDarkMode: isDarkMode, authManager: authManager)
+        TabbedWelcomeView(
+            isDarkMode: isDarkMode,
+            authManager: authManager,
+            onRequestSignIn: onRequestSignIn
+        )
     }
 }
 
@@ -811,6 +842,7 @@ struct WelcomeView: View {
 struct TabbedWelcomeView: View {
     let isDarkMode: Bool
     @ObservedObject var authManager: AuthManager
+    let onRequestSignIn: () -> Void
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
     @State private var selectedModelId: String = ""
     @ObservedObject private var settings = SettingsManager.shared
@@ -873,6 +905,10 @@ struct TabbedWelcomeView: View {
                                     showPricingLabel: !(authManager.isAuthenticated && authManager.hasActiveSubscription)
                                 ) {
                                     if !canUseModel(model) {
+                                        guard authManager.isAuthenticated else {
+                                            onRequestSignIn()
+                                            return
+                                        }
                                         // Set clerk_user_id attribute right before showing paywall
                                         if authManager.isAuthenticated, let clerkUserId = authManager.localUserData?["id"] as? String {
                                             Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
@@ -962,6 +998,10 @@ struct TabbedWelcomeView: View {
         guard model.id != viewModel.currentModel.id else { return }
         
         if !canUseModel(model) {
+            guard authManager.isAuthenticated else {
+                onRequestSignIn()
+                return
+            }
             // Set clerk_user_id attribute right before showing paywall
             if authManager.isAuthenticated, let clerkUserId = authManager.localUserData?["id"] as? String {
                 Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
@@ -1038,7 +1078,7 @@ struct ModelTab: View {
                 ZStack {
                     // Base background
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(isDarkMode ? Color(hex: "2C2C2E") : Color(hex: "F2F2F7"))
+                        .fill(Color.chatSurface(isDarkMode: isDarkMode))
                         .opacity(isEnabled ? 1.0 : 0.7)
                     
                     // Selected state background
@@ -1142,8 +1182,17 @@ extension View {
 struct ModelPicker: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @EnvironmentObject private var authManager: AuthManager
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showModelPicker = false
     @State private var refreshID = UUID()
+
+    private var buttonFill: Color {
+        colorScheme == .dark ? Color.white.opacity(0.1) : Color.white
+    }
+
+    private var buttonStroke: Color {
+        colorScheme == .dark ? Color.white.opacity(0.2) : Color.white
+    }
     
     var body: some View {
         Button(action: {
@@ -1151,10 +1200,10 @@ struct ModelPicker: View {
         }) {
             ZStack {
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(.white)
+                    .fill(buttonFill)
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(.white, lineWidth: 1)
+                            .strokeBorder(buttonStroke, lineWidth: 1)
                     )
                     .frame(width: 24, height: 24)
                 

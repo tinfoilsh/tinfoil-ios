@@ -399,7 +399,9 @@ enum HapticFeedback {
         // Determine feedback style based on type
         let generator: Any
         switch type {
-        case .messageSent, .messageReceived:
+        case .messageReceived:
+            return
+        case .messageSent:
             generator = UIImpactFeedbackGenerator(style: .medium)
             (generator as! UIImpactFeedbackGenerator).impactOccurred()
         case .error:

@@ -51,7 +51,7 @@ enum Constants {
     }
     
     enum Pagination {
-        static let chatsPerPage = 10
+        static let chatsPerPage = 20
         static let recentChatThresholdSeconds: TimeInterval = 120  // 2 minutes
         static let cleanupThresholdSeconds: TimeInterval = 60     // 1 minute
     }

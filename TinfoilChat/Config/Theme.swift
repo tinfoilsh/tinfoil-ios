@@ -13,9 +13,19 @@ enum Theme {
     
     // MARK: - Colors
     enum Colors {
-        static let backgroundPrimary = Color(hex: "#111827")    // Dark navy
-        static let backgroundSecondary = Color(hex: "#2C2C2E")  // Dark gray
-        static let backgroundTertiary = Color(hex: "#F2F2F7")   // Light gray
+        static let backgroundPrimary = Color.backgroundPrimary
+        static let chatSurfaceDark = Color.chatSurfaceDark
+        static let chatSurfaceLight = Color.chatSurfaceLight
+        static let sidebarButtonDark = Color.sidebarButtonBackgroundDark
+        static let sidebarButtonLight = Color.sidebarButtonBackgroundLight
+        static let cardSurfaceDark = Color.cardSurfaceDark
+        static let cardSurfaceLight = Color.cardSurfaceLight
+        static let chatBackgroundDark = Color.chatBackgroundDark
+        static let chatBackgroundLight = Color.chatBackgroundLight
+        static let sidebarBackgroundDark = Color.sidebarBackgroundDark
+        static let sidebarBackgroundLight = Color.sidebarBackgroundLight
+        static let settingsBackgroundDark = Color.settingsBackgroundDark
+        static let settingsBackgroundLight = Color.settingsBackgroundLight
     }
     
     // MARK: - Dimensions

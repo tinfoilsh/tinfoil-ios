@@ -55,7 +55,7 @@ struct ChatSidebar: View {
     var body: some View {
         sidebarContent
             .frame(width: 300)
-            .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
+            .background(Color.sidebarBackground(for: colorScheme))
             .onReceive(timeUpdateTimer) { _ in
                 // Update the current time to trigger view refresh
                 currentTime = Date()
@@ -144,7 +144,7 @@ struct ChatSidebar: View {
                     }
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color.white)
+                    .background(Color.sidebarButtonBackground(for: colorScheme))
                     .foregroundColor(colorScheme == .dark ? .white : .black)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
@@ -175,7 +175,7 @@ struct ChatSidebar: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 16)
-            .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
+            .background(Color.sidebarBackground(for: colorScheme))
             
             // Chat List - shows multiple chats for all authenticated users
             ScrollView {
@@ -274,7 +274,7 @@ struct ChatSidebar: View {
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .center)
-                .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color.white)
+                .background(Color.sidebarButtonBackground(for: colorScheme))
                 .foregroundColor(colorScheme == .dark ? .white : .black)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)

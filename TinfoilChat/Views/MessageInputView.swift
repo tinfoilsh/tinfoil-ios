@@ -18,9 +18,6 @@ struct MessageInputView: View {
     @State private var textHeight: CGFloat = Layout.defaultHeight
     @ObservedObject private var settings = SettingsManager.shared
     
-    // Haptic feedback generator
-    private let softHaptic = UIImpactFeedbackGenerator(style: .soft)
-    
     private var isDarkMode: Bool { colorScheme == .dark }
     
     // Check for subscription status
@@ -99,7 +96,7 @@ struct MessageInputView: View {
                         Circle()
                             .fill(shouldShowMicrophone ? 
                                   (viewModel.isRecording ? Color.red : (isDarkMode ? Color.white : Color.primary)) :
-                                  (isDarkMode ? Color.white : Color.primary))
+                                  (isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight))
                             .frame(width: 32, height: 32)
                         
                         Image(systemName: shouldShowMicrophone ? 
@@ -108,15 +105,12 @@ struct MessageInputView: View {
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(shouldShowMicrophone ? 
                                            (viewModel.isRecording ? .white : (isDarkMode ? .black : .white)) :
-                                           (isDarkMode ? .black : .white))
+                                           (isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
                     }
                 }
                 .padding(.trailing, 16)
             }
             .padding(.vertical, 8)
-        }
-        .onAppear {
-            softHaptic.prepare()
         }
         .onChange(of: viewModel.transcribedText) { oldValue, newValue in
             if !newValue.isEmpty && newValue != oldValue {
@@ -132,17 +126,6 @@ struct MessageInputView: View {
                 
                 // Clear the transcribed text to prevent it from being processed again
                 viewModel.transcribedText = ""
-            }
-        }
-        .onChange(of: viewModel.messages.last?.content) { oldContent, newContent in
-            if settings.hapticFeedbackEnabled,
-               let old = oldContent,
-               let new = newContent,
-               old != new {
-                let addedContent = String(new.dropFirst(old.count))
-                if addedContent.count > 1 {
-                    softHaptic.impactOccurred(intensity: 0.3)
-                }
             }
         }
     }

@@ -131,11 +131,16 @@ class ProfileSyncService: ObservableObject {
             let encrypted = try JSONDecoder().decode(EncryptedData.self, from: encryptedData)
             
             
-            let decrypted = try await EncryptionService.shared.decrypt(encrypted, as: ProfileData.self)
+            let decryptionResult = try await EncryptionService.shared.decrypt(encrypted, as: ProfileData.self)
+            let decrypted = decryptionResult.value
             
             // Cache the decrypted profile
             self.cachedProfile = decrypted
             self.failedDecryptionData = nil
+            
+            if decryptionResult.usedFallbackKey {
+                queueProfileReencryption(for: decrypted, remoteVersion: profileResponse.version)
+            }
             
             
             return decrypted
@@ -212,6 +217,30 @@ class ProfileSyncService: ObservableObject {
         return (true, serverVersion)
     }
     
+    private func queueProfileReencryption(for profile: ProfileData, remoteVersion: String?) {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.reencryptProfileWithActiveKey(profile, remoteVersion: remoteVersion)
+        }
+    }
+    
+    @MainActor
+    private func reencryptProfileWithActiveKey(_ profile: ProfileData, remoteVersion: String?) async {
+        var profileForUpload = profile
+        if let remoteVersion,
+           let remoteVersionInt = Int(remoteVersion) {
+            let currentVersion = profileForUpload.version ?? 0
+            profileForUpload.version = max(currentVersion, remoteVersionInt)
+        }
+        do {
+            _ = try await saveProfile(profileForUpload)
+        } catch {
+#if DEBUG
+            print("[ProfileSync] Failed to re-encrypt profile with active key: \(error)")
+#endif
+        }
+    }
+    
     /// Retry decryption with new key
     func retryDecryptionWithNewKey() async throws -> ProfileData? {
         guard let failedDecryptionData = failedDecryptionData else {
@@ -227,11 +256,16 @@ class ProfileSyncService: ObservableObject {
             }
             
             let encrypted = try JSONDecoder().decode(EncryptedData.self, from: encryptedData)
-            let decrypted = try await EncryptionService.shared.decrypt(encrypted, as: ProfileData.self)
+            let decryptionResult = try await EncryptionService.shared.decrypt(encrypted, as: ProfileData.self)
+            let decrypted = decryptionResult.value
             
             // Cache the successfully decrypted profile
             self.cachedProfile = decrypted
             self.failedDecryptionData = nil
+            
+            if decryptionResult.usedFallbackKey {
+                queueProfileReencryption(for: decrypted, remoteVersion: nil)
+            }
             
             
             return decrypted
