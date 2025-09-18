@@ -166,28 +166,11 @@ struct PersonalizationView: View {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
         )
-        .onAppear {
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithDefaultBackground()
-
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().compactAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
-
-            // Trigger a sync from cloud when view appears
-            Task {
-                await profileManager.syncFromCloud()
-            }
-        }
-        .onDisappear {
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = UIColor(Color.backgroundPrimary)
-            appearance.shadowColor = .clear
-
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().compactAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        .toolbarBackground(Color(UIColor.systemBackground), for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
+        .task {
+            await profileManager.syncFromCloud()
         }
     }
     
