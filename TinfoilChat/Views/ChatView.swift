@@ -269,6 +269,7 @@ struct ChatContainer: View {
             messages: viewModel.messages,
             isDarkMode: colorScheme == .dark,
             isLoading: viewModel.isLoading,
+            onRequestSignIn: showAuthenticationView,
             viewModel: viewModel,
             messageText: $messageText,
         )
@@ -379,6 +380,7 @@ struct ChatScrollView: View {
     let messages: [Message]
     let isDarkMode: Bool
     let isLoading: Bool
+    let onRequestSignIn: () -> Void
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @ObservedObject private var settings = SettingsManager.shared
     @Binding var messageText: String
@@ -432,7 +434,11 @@ struct ChatScrollView: View {
                     VStack(spacing: 0) {
                         if messages.isEmpty {
                             if let authManager = viewModel.authManager {
-                                WelcomeView(isDarkMode: isDarkMode, authManager: authManager)
+                                WelcomeView(
+                                    isDarkMode: isDarkMode,
+                                    authManager: authManager,
+                                    onRequestSignIn: onRequestSignIn
+                                )
                                     .padding(.vertical, 16)
                                     .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 0)
                                     .frame(maxWidth: 900)
@@ -821,9 +827,14 @@ struct ChatScrollView: View {
 struct WelcomeView: View {
     let isDarkMode: Bool
     @ObservedObject var authManager: AuthManager
+    let onRequestSignIn: () -> Void
     
     var body: some View {
-        TabbedWelcomeView(isDarkMode: isDarkMode, authManager: authManager)
+        TabbedWelcomeView(
+            isDarkMode: isDarkMode,
+            authManager: authManager,
+            onRequestSignIn: onRequestSignIn
+        )
     }
 }
 
@@ -831,6 +842,7 @@ struct WelcomeView: View {
 struct TabbedWelcomeView: View {
     let isDarkMode: Bool
     @ObservedObject var authManager: AuthManager
+    let onRequestSignIn: () -> Void
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
     @State private var selectedModelId: String = ""
     @ObservedObject private var settings = SettingsManager.shared
@@ -893,6 +905,10 @@ struct TabbedWelcomeView: View {
                                     showPricingLabel: !(authManager.isAuthenticated && authManager.hasActiveSubscription)
                                 ) {
                                     if !canUseModel(model) {
+                                        guard authManager.isAuthenticated else {
+                                            onRequestSignIn()
+                                            return
+                                        }
                                         // Set clerk_user_id attribute right before showing paywall
                                         if authManager.isAuthenticated, let clerkUserId = authManager.localUserData?["id"] as? String {
                                             Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
@@ -982,6 +998,10 @@ struct TabbedWelcomeView: View {
         guard model.id != viewModel.currentModel.id else { return }
         
         if !canUseModel(model) {
+            guard authManager.isAuthenticated else {
+                onRequestSignIn()
+                return
+            }
             // Set clerk_user_id attribute right before showing paywall
             if authManager.isAuthenticated, let clerkUserId = authManager.localUserData?["id"] as? String {
                 Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
