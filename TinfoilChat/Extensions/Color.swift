@@ -25,7 +25,7 @@ extension Color {
     static let sidebarButtonBackgroundDark = Color(hex: "2C2C2E")
     static let sidebarButtonBackgroundLight = Color.white
     static let cardSurfaceDark = Color(hex: "1C1C1E")
-    static let cardSurfaceLight = Color(UIColor.systemGray6)
+    static let cardSurfaceLight = Color.white
     static let chatBackgroundDark = Color(hex: "121212")
     static let chatBackgroundLight = Color.white
     static let sidebarBackgroundDark = Color(hex: "121212")
