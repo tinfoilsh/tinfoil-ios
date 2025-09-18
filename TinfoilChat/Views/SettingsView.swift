@@ -536,6 +536,27 @@ struct SettingsView: View {
                         }
                         .listRowBackground(Color.cardSurface(for: colorScheme))
                         
+                        // Contact Section
+                        Section {
+                            Button(action: {
+                                if let url = URL(string: "mailto:contact@tinfoil.sh") {
+                                    UIApplication.shared.open(url)
+                                }
+                            }) {
+                                HStack {
+                                    Text("Send Email")
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    Text("contact@tinfoil.sh")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        } header: {
+                            Text("Contact Us")
+                        }
+                        .listRowBackground(Color.cardSurface(for: colorScheme))
+
                         // Legal Section
                         Section {
                             Button(action: {
