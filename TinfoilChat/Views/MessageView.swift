@@ -140,7 +140,7 @@ struct MessageView: View {
             }
             .padding(.vertical, 8)
             .padding(.horizontal, message.role == .user ? 12 : 0)
-            .background(message.role == .user ? (isDarkMode ? Color.gray.opacity(0.3) : Color.tinfoilDark) : nil)
+            .background(message.role == .user ? Color.userMessageBackground(isDarkMode: isDarkMode) : nil)
             .cornerRadius(16)
             .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
             .contextMenu {
@@ -387,17 +387,29 @@ struct MessageBubbleModifier: ViewModifier {
 private struct MarkdownThemeCache {
     static let darkTheme = createTheme(isDarkMode: true)
     static let lightTheme = createTheme(isDarkMode: false)
+    static let userDarkTheme = createTheme(
+        isDarkMode: true,
+        textColor: Color.userMessageForegroundDark
+    )
+    static let userLightTheme = createTheme(
+        isDarkMode: true,
+        textColor: Color.userMessageForegroundLight
+    )
     
     static func getTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
         isDarkMode ? darkTheme : lightTheme
     }
     
-    private static func createTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
+    static func getUserTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
+        isDarkMode ? userDarkTheme : userLightTheme
+    }
+    
+    private static func createTheme(isDarkMode: Bool, textColor: Color? = nil) -> MarkdownUI.Theme {
         MarkdownUI.Theme.gitHub
             .text {
                 FontFamily(.system(.default))
                 FontSize(.em(1.0))
-                ForegroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
+                ForegroundColor(textColor ?? (isDarkMode ? .white : Color.black.opacity(0.8)))
             }
             .code {
                 FontFamilyVariant(.monospaced)
@@ -495,7 +507,7 @@ struct AdaptiveMarkdownText: View {
 
     var body: some View {
         Markdown(content)
-            .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: true)) // Always use dark theme for user messages
+            .markdownTheme(MarkdownThemeCache.getUserTheme(isDarkMode: isDarkMode))
             .padding(.horizontal, horizontalPadding)
             .environment(\.colorScheme, .dark)
             .fixedSize(horizontal: false, vertical: true)
@@ -598,8 +610,8 @@ struct CollapsibleThinkingBox: View {
                 .transition(.identity)
             }
         }
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(8)
+        .background(Color.thinkingBackground(isDarkMode: isDarkMode))
+        .cornerRadius(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
         .clipped()
