@@ -1,5 +1,5 @@
 {
-  "originHash" : "fea1d50256ea23d2f5f0312cf5f4b833a5490663de87eba159d689c79d12aa71",
+  "originHash" : "587f063c0bcab7c4a270d0de08fb13425ccd2376c4d718fd3b532a26d25055a6",
   "pins" : [
     {
       "identity" : "clerk-ios",
@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/MacPaw/OpenAI.git",
       "state" : {
-        "branch" : "main",
-        "revision" : "eafa1557f8fd7c82ef02c75cbc72f051698fca44"
+        "revision" : "bb283b2ac48c1e90121d73d6bfb45f961dc0b7a3",
+        "version" : "0.4.5"
       }
     },
     {
@@ -124,7 +124,7 @@
       "location" : "https://github.com/tinfoilsh/tinfoil-swift",
       "state" : {
         "branch" : "main",
-        "revision" : "57445bfd9538b661d06e9393434a4213edeaa125"
+        "revision" : "33aadd307acc91e480a599907b63bf4515c68a94"
       }
     }
   ],

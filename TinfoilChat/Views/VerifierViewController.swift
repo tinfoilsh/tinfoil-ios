@@ -335,7 +335,7 @@ struct VerifierView: View {
                         if let enclaveMeasurement = groundTruth.enclaveMeasurement {
                             self.verificationState.runtime.status = .success
                             self.verificationState.runtime.digest = enclaveMeasurement.registers.first ?? ""
-                            self.verificationState.runtime.tlsCertificateFingerprint = groundTruth.publicKeyFP
+                            self.verificationState.runtime.tlsCertificateFingerprint = groundTruth.tlsPublicKey
                         } else {
                             self.verificationState.runtime.status = .error
                             self.verificationState.runtime.error = "Runtime measurement not available"
@@ -351,7 +351,7 @@ struct VerifierView: View {
                         updatedVerification.isVerifying = false
                         updatedVerification.error = nil
                         self.chatViewModel.verification = updatedVerification
-                        
+                    
                     case .failure(let error):
                         // All verifications fail on error
                         self.verificationState.code.status = .error
@@ -372,11 +372,9 @@ struct VerifierView: View {
                 }
             }
         )
-        
+
         // Create a secure client instance using proxy constants
         let secureClient = SecureClient(
-            githubRepo: Constants.Proxy.githubRepo,
-            enclaveURL: Constants.Proxy.enclaveURL,
             callbacks: callbacks
         )
         
