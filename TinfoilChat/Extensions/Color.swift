@@ -37,6 +37,14 @@ extension Color {
     static let sendButtonForegroundDark = Color.tinfoilDark
     static let sendButtonForegroundLight = Color.white
 
+    // Reasoning and messaging surfaces
+    static let thinkingBackgroundDark = chatSurfaceDark
+    static let thinkingBackgroundLight = chatSurfaceLight
+    static let userMessageBackgroundDark = chatSurfaceDark
+    static let userMessageBackgroundLight = chatSurfaceLight
+    static let userMessageForegroundDark = Color.white
+    static let userMessageForegroundLight = Color.black
+
 
     // Adaptive accent color for buttons/links that works in both light and dark mode
     static let adaptiveAccent = Color(UIColor { traitCollection in
@@ -72,5 +80,17 @@ extension Color {
 
     static func settingsBackground(for colorScheme: ColorScheme) -> Color {
         colorScheme == .dark ? settingsBackgroundDark : settingsBackgroundLight
+    }
+
+    static func thinkingBackground(isDarkMode: Bool) -> Color {
+        isDarkMode ? thinkingBackgroundDark : thinkingBackgroundLight
+    }
+
+    static func userMessageBackground(isDarkMode: Bool) -> Color {
+        isDarkMode ? userMessageBackgroundDark : userMessageBackgroundLight
+    }
+
+    static func userMessageForeground(isDarkMode: Bool) -> Color {
+        isDarkMode ? userMessageForegroundDark : userMessageForegroundLight
     }
 }

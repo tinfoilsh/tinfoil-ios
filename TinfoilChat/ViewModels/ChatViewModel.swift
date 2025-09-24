@@ -508,15 +508,15 @@ class ChatViewModel: ObservableObject {
             onVerificationComplete: { [weak self] result in
                 Task { @MainActor in
                     guard let self = self else { return }
-                    
+
                     self.verification.isVerifying = false
                     self.hasRunInitialVerification = true
-                    
+
                     switch result {
                     case .success(let groundTruth):
                         // Store measurements from ground truth
                         // Always try to format measurements, even if not in expected format
-                        
+
                         // Handle code measurement - extract first register value
                         if let codeMeasurement = groundTruth.codeMeasurement {
                             self.verificationCodeDigest = codeMeasurement.registers.first ?? ""
@@ -528,11 +528,11 @@ class ChatViewModel: ObservableObject {
                         }
                         
                         // Store the public key (this is already a string)
-                        self.verificationTlsCertFingerprint = groundTruth.publicKeyFP
+                        self.verificationTlsCertFingerprint = groundTruth.tlsPublicKey
                         
                         self.verification.isVerified = true
                         self.verification.error = nil
-                        
+
                     case .failure(let error):
                         self.verification.isVerified = false
                         self.verification.error = error.localizedDescription
@@ -540,14 +540,12 @@ class ChatViewModel: ObservableObject {
                 }
             }
         )
-        
+
         // Create secure client and run verification
         let secureClient = SecureClient(
-            githubRepo: Constants.Proxy.githubRepo,
-            enclaveURL: Constants.Proxy.enclaveURL,
             callbacks: callbacks
         )
-        
+
         do {
             _ = try await secureClient.verify()
         } catch {
