@@ -130,7 +130,7 @@ struct MessageInputView: View {
                         }
                     }
                 }
-                .padding(.trailing, 16)
+                .padding(.trailing, 8)
             }
             .padding(.vertical, 8)
         }
