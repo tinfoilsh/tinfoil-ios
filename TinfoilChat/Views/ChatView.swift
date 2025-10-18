@@ -390,11 +390,6 @@ struct ChatScrollView: View {
     @State private var userHasScrolled = false
     @State private var isAtBottom = false
 
-    // Progressive loading
-    @State private var visibleMessageCount = 30
-    private let initialMessageCount = 30
-    private let loadMoreIncrement = 30
-    
     // Keyboard handling
     @State private var keyboardHeight: CGFloat = 0
     @State private var isKeyboardVisible = false
@@ -431,7 +426,7 @@ struct ChatScrollView: View {
                         return Color.clear
                     }
                     .frame(height: 0)
-                    VStack(spacing: 0) {
+                    LazyVStack(spacing: 0) {
                         if messages.isEmpty {
                             if let authManager = viewModel.authManager {
                                 WelcomeView(
@@ -445,39 +440,8 @@ struct ChatScrollView: View {
                                     .frame(maxWidth: .infinity)
                             }
                         } else {
-                            // Progressive loading: only render visible messages
-                            let totalMessageCount = messages.count
-                            let actualVisibleCount = min(visibleMessageCount, totalMessageCount)
-                            let visibleStartIndex = max(0, totalMessageCount - actualVisibleCount)
-                            let visibleMessages = Array(messages[visibleStartIndex..<totalMessageCount])
-                            
-                            // Load more button if there are more messages
-                            if visibleStartIndex > 0 {
-                                Button(action: {
-                                    loadMoreMessages()
-                                }) {
-                                    VStack(spacing: 8) {
-                                        Image(systemName: "arrow.up.circle.fill")
-                                            .font(.system(size: 24))
-                                        Text("Load \(min(loadMoreIncrement, visibleStartIndex)) more messages")
-                                            .font(.caption)
-                                    }
-                                    .foregroundColor(.accentColor)
-                                    .padding(.vertical, 16)
-                                    .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                .id("loadMore")
-                                .onAppear {
-                                    // Auto-load more when scrolling up to the top
-                                    if userHasScrolled && !isLoading {
-                                        loadMoreMessages()
-                                    }
-                                }
-                            }
-                            
-                            ForEach(Array(visibleMessages.enumerated()), id: \.element.id) { index, message in
-                                let actualIndex = visibleStartIndex + index
+                            ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+                                let actualIndex = index
                                 
                                 // Check if we should show the archived divider
                                 if actualIndex != 0 && actualIndex == archivedMessagesStartIndex {
@@ -577,7 +541,6 @@ struct ChatScrollView: View {
 
                         if shouldAutoFollow {
                             userHasScrolled = false
-                            visibleMessageCount = min(initialMessageCount, newCount)
                             requestJumpToBottom(animated: false)
                             viewModel.isScrollInteractionActive = false
                             cancelScrollSettlingWork()
@@ -587,7 +550,6 @@ struct ChatScrollView: View {
                 // When the selected chat changes, just reset bookkeeping
                 .onChange(of: viewModel.currentChat?.createdAt) { _, _ in
                     userHasScrolled = false
-                    visibleMessageCount = min(initialMessageCount, messages.count)
                     viewModel.isScrollInteractionActive = false
                     cancelScrollSettlingWork()
                     requestJumpToBottom(animated: false)
@@ -608,14 +570,9 @@ struct ChatScrollView: View {
                     if !isAtBottom && !messages.isEmpty && !isKeyboardVisible {
                         Button(action: {
                             cancelScrollSettlingWork()
-                            // Reset scroll tracking so future user messages can snap to the latest entry
                             userHasScrolled = false
-                            // Reset to show only recent messages when going back to bottom
-                            visibleMessageCount = min(initialMessageCount, messages.count)
                             let targetId: AnyHashable = messages.last?.id ?? "bottom"
-                            // First scroll without animation to override momentum
                             proxy.scrollTo(targetId, anchor: .bottom)
-                            // Then immediately scroll again with animation for smooth finish
                             DispatchQueue.main.async {
                                 withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
                                     proxy.scrollTo(targetId, anchor: .bottom)
@@ -770,29 +727,7 @@ struct ChatScrollView: View {
     }
     
     // MARK: - Helper Methods
-    
-    /// Load more messages when scrolling up
-    private func loadMoreMessages() {
-        // Get the first message that was previously visible (right after the load more button)
-        let totalMessageCount = messages.count
-        let previousStartIndex = max(0, totalMessageCount - visibleMessageCount)
-        
-        // Store the ID of the first previously visible message
-        let anchorMessageId = previousStartIndex < messages.count ? messages[previousStartIndex].id : nil
-        
-        // Update the visible message count
-        visibleMessageCount = min(visibleMessageCount + loadMoreIncrement, messages.count)
-        
-        // After the view updates, scroll to maintain position
-        if let anchorId = anchorMessageId {
-            // We need a small delay to let SwiftUI update the view with new messages
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                // Try using center anchor with an offset to keep the message near the top
-                scrollViewProxy?.scrollTo(anchorId, anchor: .center)
-            }
-        }
-    }
-    
+
     /// Checks if a view is fully visible in the scroll view
     private func isViewFullyVisible(_ geometry: GeometryProxy) -> Bool {
         // Get the key window using the new API for iOS 15+
