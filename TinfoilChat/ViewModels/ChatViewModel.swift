@@ -901,7 +901,7 @@ class ChatViewModel: ObservableObject {
                 let hapticEnabled = SettingsManager.shared.hapticFeedbackEnabled
                 var hapticGenerator: UIImpactFeedbackGenerator?
                 var lastHapticTime = Date.distantPast
-                let minHapticInterval: TimeInterval = 0.05
+                let minHapticInterval: TimeInterval = 0.1
 
                 await MainActor.run {
                     if let chat = self.currentChat,
