@@ -941,7 +941,7 @@ class ChatViewModel: ObservableObject {
                     }
                 }
 
-                func updateUI() async {
+                func updateUI(force: Bool = false) async {
                     await MainActor.run {
                         guard self.currentChat?.id == streamChatId else { return }
                         guard var chat = self.currentChat,
@@ -950,22 +950,30 @@ class ChatViewModel: ObservableObject {
                             return
                         }
 
-                        triggerHaptic()
-
-                        if !self.isAtBottom {
-                            return
-                        }
-
                         chat.messages[lastIndex].content = responseContent
                         chat.messages[lastIndex].thoughts = currentThoughts
                         chat.messages[lastIndex].isThinking = isInThinkingMode
                         chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
-                        self.updateChat(chat, throttleForStreaming: false)
+
+                        let shouldRefreshUI = force || self.isAtBottom
+
+                        if shouldRefreshUI {
+                            self.updateChat(chat, throttleForStreaming: false)
+                        } else {
+                            if let index = self.chats.firstIndex(where: { $0.id == chat.id }) {
+                                self.chats[index] = chat
+                                if self.currentChat?.id == chat.id {
+                                    self.currentChat = chat
+                                }
+                            }
+                        }
                     }
                 }
 
                 for try await chunk in stream {
                     if Task.isCancelled { break }
+
+                    triggerHaptic()
 
                     let content = chunk.choices.first?.delta.content ?? ""
                     let hasReasoningContent = chunk.choices.first?.delta.reasoning != nil
@@ -1073,12 +1081,12 @@ class ChatViewModel: ObservableObject {
                         generationTimeSeconds = Date().timeIntervalSince(startTime)
                     }
                     isInThinkingMode = false
-                    await updateUI()
+                    await updateUI(force: true)
                 } else if isFirstChunk && !initialContentBuffer.isEmpty {
                     appendToResponse(initialContentBuffer)
                     isInThinkingMode = false
                     currentThoughts = nil
-                    await updateUI()
+                    await updateUI(force: true)
                 }
 
                 // Mark as complete
