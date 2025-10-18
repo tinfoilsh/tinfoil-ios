@@ -1822,9 +1822,6 @@ class ChatViewModel: ObservableObject {
             chat.modelType = modelType
             updateChat(chat)
         }
-        
-        // Notify of successful model change with haptic feedback
-        Chat.triggerSuccessFeedback()
     }
     
     // MARK: - Authentication & Model Access
