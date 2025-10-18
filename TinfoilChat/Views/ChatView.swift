@@ -478,7 +478,9 @@ struct ChatScrollView: View {
                                 
                                 MessageView(
                                     message: message,
-                                    isDarkMode: isDarkMode
+                                    isDarkMode: isDarkMode,
+                                    isLastMessage: index == messages.count - 1,
+                                    isLoading: isLoading
                                 )
                                 .id(message.id)
                                 .padding(.vertical, 8)
@@ -503,6 +505,7 @@ struct ChatScrollView: View {
                                 if isAtBottom != isCurrentlyAtBottom {
                                     DispatchQueue.main.async {
                                         isAtBottom = isCurrentlyAtBottom
+                                        viewModel.isAtBottom = isCurrentlyAtBottom
                                         if isCurrentlyAtBottom {
                                             userHasScrolled = false
                                             viewModel.isScrollInteractionActive = false
@@ -518,20 +521,21 @@ struct ChatScrollView: View {
                 .id(viewModel.currentChat?.createdAt ?? Date.distantPast)
                 .ignoresSafeArea(.keyboard)
                 .simultaneousGesture(
-                    DragGesture()
+                    DragGesture(minimumDistance: 10)
                         .onChanged { value in
-                            cancelScrollSettlingWork()
-                            if value.translation.height > 0 && isLoading {
-                                userHasScrolled = true
+                            if abs(value.translation.height) > abs(value.translation.width) {
+                                cancelScrollSettlingWork()
+                                if value.translation.height > 0 && isLoading {
+                                    userHasScrolled = true
+                                }
+                                if value.translation.height > 10 && isKeyboardVisible {
+                                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                }
+                                if !viewModel.isScrollInteractionActive {
+                                    viewModel.isScrollInteractionActive = true
+                                }
+                                scheduleScrollSettlingCheck()
                             }
-                            // Dismiss keyboard when scrolling up
-                            if value.translation.height > 10 && isKeyboardVisible {
-                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                            }
-                            if !viewModel.isScrollInteractionActive {
-                                viewModel.isScrollInteractionActive = true
-                            }
-                            scheduleScrollSettlingCheck()
                         }
                         .onEnded { _ in
                             scheduleScrollSettlingCheck()
@@ -795,9 +799,8 @@ struct ChatScrollView: View {
         // Calculate visible screen height excluding keyboard and input view
         // We don't add keyboard height here to avoid creating extra scrollable space
         let visibleHeight = UIScreen.main.bounds.height - safeAreaInsets.top - safeAreaInsets.bottom
-        
-        // Add some slack to the visibility check (allow 20 points overflow)
-        let slack: CGFloat = 40
+
+        let slack: CGFloat = 150
         let isVisible = globalFrame.minY >= -slack && globalFrame.maxY <= (visibleHeight + slack)
         
         return isVisible

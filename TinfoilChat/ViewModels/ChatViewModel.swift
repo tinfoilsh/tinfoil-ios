@@ -24,6 +24,7 @@ class ChatViewModel: ObservableObject {
     /// When set to true, the input field should become first responder (focus keyboard)
     @Published var shouldFocusInput: Bool = false
     @Published var isScrollInteractionActive: Bool = false
+    @Published var isAtBottom: Bool = true
     
     // Verification properties - consolidated to reduce update frequency
     struct VerificationInfo {
@@ -930,6 +931,16 @@ class ChatViewModel: ObservableObject {
                     }
                 }
 
+                func triggerHaptic() {
+                    if hapticEnabled, let generator = hapticGenerator {
+                        let now = Date()
+                        if now.timeIntervalSince(lastHapticTime) >= minHapticInterval {
+                            generator.impactOccurred(intensity: 0.5)
+                            lastHapticTime = now
+                        }
+                    }
+                }
+
                 func updateUI() async {
                     await MainActor.run {
                         guard self.currentChat?.id == streamChatId else { return }
@@ -938,19 +949,18 @@ class ChatViewModel: ObservableObject {
                               let lastIndex = chat.messages.indices.last else {
                             return
                         }
+
+                        triggerHaptic()
+
+                        if !self.isAtBottom {
+                            return
+                        }
+
                         chat.messages[lastIndex].content = responseContent
                         chat.messages[lastIndex].thoughts = currentThoughts
                         chat.messages[lastIndex].isThinking = isInThinkingMode
                         chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
                         self.updateChat(chat, throttleForStreaming: false)
-
-                        if hapticEnabled, let generator = hapticGenerator {
-                            let now = Date()
-                            if now.timeIntervalSince(lastHapticTime) >= minHapticInterval {
-                                generator.impactOccurred(intensity: 0.5)
-                                lastHapticTime = now
-                            }
-                        }
                     }
                 }
 
@@ -1078,7 +1088,7 @@ class ChatViewModel: ObservableObject {
                     // Mark the chat as no longer having an active stream
                     if var chat = self.currentChat {
                         chat.hasActiveStream = false
-                        
+
                         // Force any pending stream updates to save immediately
                         self.streamUpdateTimer?.invalidate()
                         self.streamUpdateTimer = nil
@@ -1088,7 +1098,7 @@ class ChatViewModel: ObservableObject {
                                 self.saveChats()
                             }
                         }
-                        
+
                         self.updateChat(chat)  // Final update without throttling
 
                         // If this was the first exchange and title is still placeholder, generate via LLM
@@ -1414,7 +1424,7 @@ class ChatViewModel: ObservableObject {
         currentTask?.cancel()
         currentTask = nil
         isLoading = false
-        
+
         // Reset the hasActiveStream property
         if var chat = currentChat {
             chat.hasActiveStream = false
@@ -1422,9 +1432,10 @@ class ChatViewModel: ObservableObject {
             // End streaming tracking for cloud sync
             streamingTracker.endStreaming(chat.id)
         }
-        
+
         self.showVerifierSheet = false
     }
+
     
     /// Shows the verifier sheet with current verification state
     func showVerifier() {

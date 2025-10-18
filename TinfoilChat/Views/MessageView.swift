@@ -24,11 +24,13 @@ struct ThinkingBoxExpansionPreferenceKey: PreferenceKey {
 struct MessageView: View {
     let message: Message
     let isDarkMode: Bool
+    let isLastMessage: Bool
+    let isLoading: Bool
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
     @State private var showCopyFeedback = false
     @State private var cachedParsedContent: (thinkingText: String, remainderText: String, contentHash: Int)? = nil
     @State private var showLongMessageSheet = false
-    
+
     var body: some View {
         HStack {
             if message.role == .user {
@@ -40,8 +42,8 @@ struct MessageView: View {
                 if message.role == .assistant &&
                     message.content.isEmpty &&
                     message.thoughts == nil &&
-                    viewModel.isLoading &&
-                    message.id == viewModel.messages.last?.id {
+                    isLoading &&
+                    isLastMessage {
                     LoadingDotsView(isDarkMode: isDarkMode)
                         .padding(.horizontal)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -55,7 +57,7 @@ struct MessageView: View {
                             thinkingText: message.thoughts ?? "",
                             isDarkMode: isDarkMode,
                             isCollapsible: !message.isThinking,
-                            isStreaming: message.isThinking && viewModel.isLoading && message.id == viewModel.messages.last?.id,
+                            isStreaming: message.isThinking && isLoading && isLastMessage,
                             generationTimeSeconds: message.generationTimeSeconds,
                             messageCollapsed: message.isCollapsed
                         )
@@ -63,6 +65,7 @@ struct MessageView: View {
                         // Display regular content if present
                         if !message.content.isEmpty {
                             LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
+                                .equatable()
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .transaction { transaction in
                                     transaction.animation = nil
@@ -79,7 +82,7 @@ struct MessageView: View {
                             thinkingText: parsed.thinkingText,
                             isDarkMode: isDarkMode,
                             isCollapsible: message.content.contains("</think>"),
-                            isStreaming: viewModel.isLoading && message.id == viewModel.messages.last?.id,
+                            isStreaming: isLoading && isLastMessage,
                             generationTimeSeconds: message.generationTimeSeconds,
                             messageCollapsed: message.isCollapsed
                         )
@@ -87,6 +90,7 @@ struct MessageView: View {
                         // Remainder: text after </think> if present
                         if !parsed.remainderText.isEmpty {
                             LaTeXMarkdownView(content: parsed.remainderText, isDarkMode: isDarkMode)
+                                .equatable()
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .transaction { transaction in
                                     transaction.animation = nil
@@ -111,14 +115,15 @@ struct MessageView: View {
                         AdaptiveMarkdownText(content: message.content, isDarkMode: isDarkMode)
                     } else {
                         LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
+                            .equatable()
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 
                 // Add copy button for assistant messages (only when not streaming)
-                if message.role == .assistant && 
+                if message.role == .assistant &&
                    (!message.content.isEmpty || message.thoughts != nil) &&
-                   !(viewModel.isLoading && message.id == viewModel.messages.last?.id) {
+                   !(isLoading && isLastMessage) {
                     HStack {
                         Button(action: copyMessage) {
                             HStack(spacing: 4) {

@@ -12,27 +12,38 @@ import SwiftMath
 import UIKit
 
 /// A view that renders mixed Markdown and LaTeX content
-struct LaTeXMarkdownView: View {
+struct LaTeXMarkdownView: View, Equatable {
     let content: String
     let isDarkMode: Bool
     let horizontalPadding: CGFloat
     let maxWidthAlignment: Alignment
-    
+
+    static func == (lhs: LaTeXMarkdownView, rhs: LaTeXMarkdownView) -> Bool {
+        lhs.content == rhs.content &&
+        lhs.isDarkMode == rhs.isDarkMode &&
+        lhs.horizontalPadding == rhs.horizontalPadding &&
+        lhs.maxWidthAlignment == rhs.maxWidthAlignment
+    }
+
     init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0, maxWidthAlignment: Alignment = .leading) {
         self.content = content
         self.isDarkMode = isDarkMode
         self.horizontalPadding = horizontalPadding
         self.maxWidthAlignment = maxWidthAlignment
     }
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(parseContent(), id: \.id) { segment in
                 segment.view
+                    .id(segment.id)
             }
         }
         .padding(.horizontal, horizontalPadding)
         .frame(maxWidth: .infinity, alignment: maxWidthAlignment)
+        .transaction { transaction in
+            transaction.animation = nil
+        }
     }
     
     /// Parse content into segments of markdown and LaTeX
@@ -103,7 +114,7 @@ struct LaTeXMarkdownView: View {
                 let markdownText = String(content[lastIndex..<swiftRange.lowerBound])
                 if !markdownText.isEmpty {
                     segments.append(ContentSegment(
-                        id: UUID().uuidString,
+                        id: "md_\(special.range.location)_\(markdownText.hashValue)",
                         view: AnyView(
                             Markdown(markdownText)
                                 .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
@@ -136,7 +147,7 @@ struct LaTeXMarkdownView: View {
                 let sanitizedLatex = sanitizeLatex(latex)
 
                 segments.append(ContentSegment(
-                    id: UUID().uuidString,
+                    id: "latex_\(special.range.location)_\(sanitizedLatex.hashValue)",
                     view: AnyView(
                         LaTeXView(
                             latex: sanitizedLatex,
@@ -147,7 +158,7 @@ struct LaTeXMarkdownView: View {
                 ))
             case let .table(table):
                 segments.append(ContentSegment(
-                    id: UUID().uuidString,
+                    id: "table_\(special.range.location)",
                     view: AnyView(
                         MarkdownTableView(
                             table: table,
@@ -164,7 +175,7 @@ struct LaTeXMarkdownView: View {
             let remainingText = String(content[lastIndex...])
             if !remainingText.isEmpty {
                 segments.append(ContentSegment(
-                    id: UUID().uuidString,
+                    id: "md_end_\(remainingText.hashValue)",
                     view: AnyView(
                         Markdown(remainingText)
                             .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
@@ -177,7 +188,7 @@ struct LaTeXMarkdownView: View {
 
         if segments.isEmpty {
             segments.append(ContentSegment(
-                id: UUID().uuidString,
+                id: "md_full_\(content.hashValue)",
                 view: AnyView(
                     Markdown(content)
                         .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
