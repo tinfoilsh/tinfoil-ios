@@ -339,6 +339,7 @@ struct SettingsView: View {
                         // Preferences Section
                         Section {
                             Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
+                                .tint(Color.accentPrimary)
                             
                             NavigationLink(destination: LanguagePickerView(
                                 selectedLanguage: $settings.selectedLanguage,
@@ -507,18 +508,14 @@ struct SettingsView: View {
                         
                         // Contact Section
                         Section {
-                            Button(action: {
-                                if let url = URL(string: "mailto:contact@tinfoil.sh") {
-                                    UIApplication.shared.open(url)
-                                }
-                            }) {
+                            Link(destination: URL(string: "mailto:contact@tinfoil.sh")!) {
                                 HStack {
                                     Text("Send Email")
                                         .foregroundColor(.primary)
                                     Spacer()
                                     Text("contact@tinfoil.sh")
                                         .font(.caption)
-                                        .foregroundColor(.secondary)
+                                        .foregroundColor(colorScheme == .dark ? .white : .black)
                                 }
                             }
                         } header: {

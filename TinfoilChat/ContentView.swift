@@ -24,16 +24,16 @@ struct ContentView: View {
         Group {
             if authManager.isLoading {
                 ZStack {
-                    Color.backgroundPrimary
+                    (colorScheme == .dark ? Color.backgroundPrimary : Color.white)
                         .ignoresSafeArea()
                     VStack(spacing: 24) {
-                        Image("navbar-logo")
+                        Image(colorScheme == .dark ? "logo-white" : "logo-dark")
                             .resizable()
                             .scaledToFit()
                             .frame(height: 48)
-                        
+
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .white : .gray))
                             .scaleEffect(1.2)
                     }
                 }

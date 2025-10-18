@@ -111,42 +111,52 @@ struct VerifierView: View {
     }
     
     var body: some View {
-        VStack(spacing: 10) {
-            panelHeader
-            VerificationStatusView(verificationState: verificationState)
-                .padding(.horizontal)
-            
-            expandedContent
-        }
-        .padding(.top)
-        .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
-    }
-    
-    // MARK: - Subviews
-    
-    // Improved header with better styling
-    private var panelHeader: some View {
-        HStack {
-            Text("Verification Center")
-                .font(.title2)
-                .fontWeight(.bold)
-                .foregroundColor(colorScheme == .dark ? .white : .primary)
-            Spacer()
-            
-            Button(action: {
-                chatViewModel.dismissVerifier()
-            }) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(colorScheme == .dark ? .gray : .secondary)
-                    .padding(8)
-                    .contentShape(Rectangle())
+        NavigationView {
+            VStack(spacing: 10) {
+                VerificationStatusView(verificationState: verificationState)
+                    .padding(.horizontal)
+
+                expandedContent
             }
-            .buttonStyle(PlainButtonStyle())
-            .accessibilityLabel("Close verification screen")
+            .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
+            .navigationTitle("Verification Center")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: {
+                        chatViewModel.dismissVerifier()
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 18, weight: .medium))
+                    }
+                    .accessibilityLabel("Close verification screen")
+                }
+            }
+            .onAppear {
+                setupNavigationBarAppearance()
+            }
         }
-        .padding()
     }
+
+    private func setupNavigationBarAppearance() {
+        let appearance = UINavigationBarAppearance()
+        if #available(iOS 26, *) {
+            appearance.configureWithTransparentBackground()
+        } else {
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = colorScheme == .dark ? UIColor(Color.backgroundPrimary) : .white
+        }
+        appearance.shadowColor = .clear
+
+        let tintColor: UIColor = colorScheme == .dark ? .white : .black
+
+        UINavigationBar.appearance().standardAppearance = appearance
+        UINavigationBar.appearance().compactAppearance = appearance
+        UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        UINavigationBar.appearance().tintColor = tintColor
+    }
+
+    // MARK: - Subviews
     
     /// The main panel when expanded, including instructions, steps, etc.
     private var expandedContent: some View {

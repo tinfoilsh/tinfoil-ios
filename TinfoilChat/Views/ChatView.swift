@@ -146,9 +146,12 @@ struct ChatContainer: View {
 
     /// Update all navigation bars in the app with the given appearance
     private func updateAllNavigationBars(with appearance: UINavigationBarAppearance) {
+        let tintColor: UIColor = colorScheme == .dark ? .white : .black
+
         UINavigationBar.appearance().standardAppearance = appearance
         UINavigationBar.appearance().compactAppearance = appearance
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        UINavigationBar.appearance().tintColor = tintColor
 
         for scene in UIApplication.shared.connectedScenes {
             if let windowScene = scene as? UIWindowScene {
@@ -161,6 +164,7 @@ struct ChatContainer: View {
                         navigationBar.standardAppearance = appearance
                         navigationBar.compactAppearance = appearance
                         navigationBar.scrollEdgeAppearance = appearance
+                        navigationBar.tintColor = tintColor
                     }
                 }
             }
@@ -229,10 +233,9 @@ struct ChatContainer: View {
             }
             if !authManager.isAuthenticated {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Sign in", systemImage: "person.crop.circle") {
-                        showAuthenticationView()
+                    Button(action: showAuthenticationView) {
+                        Text("Sign in")
                     }
-                    .foregroundColor(toolbarContentColor)
                 }
             }
         }

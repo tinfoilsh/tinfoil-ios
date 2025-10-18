@@ -20,17 +20,17 @@ struct TinfoilChatApp: App {
     @StateObject private var appConfig = AppConfig.shared
     @StateObject private var authManager = AuthManager()
     @State private var isClerkConfigured = false
-    @Environment(\.colorScheme) var colorScheme
     
     var body: some Scene {
         WindowGroup {
             Group {
                 if appConfig.isInitialized {
                     if appConfig.isAppVersionSupported {
-                        ContentView()
-                            .environment(clerk)
-                            .environmentObject(authManager)
-                            .accentColor(Color.accentPrimary)
+                        AdaptiveTintContainer {
+                            ContentView()
+                                .environment(clerk)
+                                .environmentObject(authManager)
+                        }
                             .onOpenURL { url in
                                 // Handle URL redirects from authentication
                                 // Immediately check auth state when app reopens from OAuth
@@ -121,20 +121,7 @@ struct TinfoilChatApp: App {
                         }
                     }
                 } else {
-                    ZStack {
-                        Color.backgroundPrimary
-                            .ignoresSafeArea()
-                        VStack(spacing: 24) {
-                            Image("navbar-logo")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(height: 48)
-                            
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                .scaleEffect(1.2)
-                        }
-                    }
+                    LoadingScreen()
                 }
             }
         }
@@ -172,22 +159,8 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // Remove the next line after confirming that your Sentry integration is working.
         SentrySDK.capture(message: "This app uses Sentry! :)")
 
-        // Set navigation bar appearance
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithTransparentBackground()
-        appearance.backgroundEffect = UIBlurEffect(style: .dark)
-        
-        // Set text and icon colors to white for better contrast
-        appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
-        appearance.buttonAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor.white]
-        
-        // Add styling for navigation bar buttons
-        appearance.buttonAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor.white]
-        appearance.doneButtonAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor.white]
-        
-        UINavigationBar.appearance().standardAppearance = appearance
-        UINavigationBar.appearance().scrollEdgeAppearance = appearance
-        UINavigationBar.appearance().compactAppearance = appearance
+        // Navigation bar appearance will be configured per-view to support light/dark mode
+        // Individual views (ChatView, SettingsView, etc.) handle their own appearance
         
         return true
     }
@@ -199,5 +172,42 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didDiscardSceneSessions sceneSessions: Set<UISceneSession>) {
         // Called when the user discards a scene session
+    }
+}
+
+// MARK: - Adaptive Tint Container
+struct AdaptiveTintContainer<Content: View>: View {
+    @Environment(\.colorScheme) var colorScheme
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .tint(colorScheme == .dark ? .white : .black)
+    }
+}
+
+// MARK: - Loading Screen
+struct LoadingScreen: View {
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        ZStack {
+            (colorScheme == .dark ? Color.backgroundPrimary : Color.white)
+                .ignoresSafeArea()
+            VStack(spacing: 24) {
+                Image(colorScheme == .dark ? "logo-white" : "logo-dark")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 48)
+
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .white : .gray))
+                    .scaleEffect(1.2)
+            }
+        }
     }
 }
