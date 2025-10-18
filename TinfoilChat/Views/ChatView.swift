@@ -186,7 +186,7 @@ struct ChatContainer: View {
 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: createNewChat) {
-                        Image(systemName: "square.and.pencil")
+                        Image(systemName: "plus")
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(toolbarContentColor)
                     }
@@ -545,25 +545,49 @@ struct ChatScrollView: View {
 
                 .overlay(alignment: .bottom) {
                     if !isAtBottom && !messages.isEmpty && !isKeyboardVisible {
-                        Button(action: {
-                            cancelScrollSettlingWork()
-                            userHasScrolled = false
-                            let targetId: AnyHashable = messages.last?.id ?? "bottom"
-                            proxy.scrollTo(targetId, anchor: .bottom)
-                            DispatchQueue.main.async {
-                                withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
+                        Group {
+                            if #available(iOS 26, *) {
+                                Button(action: {
+                                    cancelScrollSettlingWork()
+                                    userHasScrolled = false
+                                    let targetId: AnyHashable = messages.last?.id ?? "bottom"
                                     proxy.scrollTo(targetId, anchor: .bottom)
+                                    DispatchQueue.main.async {
+                                        withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
+                                            proxy.scrollTo(targetId, anchor: .bottom)
+                                        }
+                                        isAtBottom = true
+                                        viewModel.isScrollInteractionActive = false
+                                    }
+                                }) {
+                                    Image(systemName: "arrow.down")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .frame(width: 40, height: 40)
                                 }
-                                isAtBottom = true
-                                viewModel.isScrollInteractionActive = false
-                            }
-                        }) {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .font(.system(size: 24))
-                                .foregroundColor(.white)
-                                .padding(8)
-                                .background(Color.gray.opacity(0.8))
+                                .buttonStyle(.glass)
                                 .clipShape(Circle())
+                            } else {
+                                Button(action: {
+                                    cancelScrollSettlingWork()
+                                    userHasScrolled = false
+                                    let targetId: AnyHashable = messages.last?.id ?? "bottom"
+                                    proxy.scrollTo(targetId, anchor: .bottom)
+                                    DispatchQueue.main.async {
+                                        withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
+                                            proxy.scrollTo(targetId, anchor: .bottom)
+                                        }
+                                        isAtBottom = true
+                                        viewModel.isScrollInteractionActive = false
+                                    }
+                                }) {
+                                    Image(systemName: "arrow.down.circle.fill")
+                                        .font(.system(size: 24))
+                                        .foregroundColor(.white)
+                                        .padding(8)
+                                        .background(Color.gray.opacity(0.8))
+                                        .clipShape(Circle())
+                                }
+                            }
                         }
                         .padding(.bottom, 16)
                         .padding(.trailing, 16)
@@ -989,10 +1013,16 @@ struct ModelTab: View {
             .background(
                 ZStack {
                     // Base background
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.chatSurface(isDarkMode: isDarkMode))
-                        .opacity(isEnabled ? 1.0 : 0.7)
-                    
+                    if #available(iOS 26, *) {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(.thinMaterial)
+                            .opacity(isEnabled ? 1.0 : 0.7)
+                    } else {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.chatSurface(isDarkMode: isDarkMode))
+                            .opacity(isEnabled ? 1.0 : 0.7)
+                    }
+
                     // Selected state background
                     if isSelected {
                         RoundedRectangle(cornerRadius: 12)
@@ -1094,100 +1124,36 @@ extension View {
 struct ModelPicker: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @EnvironmentObject private var authManager: AuthManager
-    @Environment(\.colorScheme) private var colorScheme
     @State private var showModelPicker = false
-    @State private var refreshID = UUID()
 
-    private var buttonFill: Color {
-        colorScheme == .dark ? Color.white.opacity(0.1) : Color.white
-    }
-
-    private var buttonStroke: Color {
-        colorScheme == .dark ? Color.white.opacity(0.2) : Color.white
-    }
-    
     var body: some View {
-        Button(action: {
-            showModelPicker.toggle()
-        }) {
+        Menu {
+            let availableModels = AppConfig.shared.filteredModelTypes(
+                isAuthenticated: authManager.isAuthenticated,
+                hasActiveSubscription: authManager.hasActiveSubscription
+            )
+
+            ForEach(availableModels) { model in
+                Button(action: {
+                    viewModel.changeModel(to: model)
+                }) {
+                    Label {
+                        Text(model.modelNameSimple)
+                    } icon: {
+                        Image(model.iconName)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 20, height: 20)
+                    }
+                }
+                .disabled(viewModel.currentModel == model)
+            }
+        } label: {
             Image(viewModel.currentModel.iconName)
                 .resizable()
                 .scaledToFit()
                 .frame(width: 22, height: 22)
         }
-        .popover(isPresented: $showModelPicker) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Select Model")
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                    .padding(.top, 16)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
-                
-                Divider()
-                
-                // Get filtered models based on authentication and subscription status
-                let availableModels = AppConfig.shared.filteredModelTypes(
-                    isAuthenticated: authManager.isAuthenticated, 
-                    hasActiveSubscription: authManager.hasActiveSubscription
-                )
-                
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(availableModels) { model in
-                            Button(action: {
-                                viewModel.changeModel(to: model)
-                                showModelPicker = false
-                            }) {
-                                HStack(alignment: .center, spacing: 12) {
-                                    Image(model.iconName)
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(width: 24, height: 24)
-                                    
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(model.modelNameSimple)
-                                            .fontWeight(.medium)
-                                            .foregroundColor(.primary)
-                                        
-                                        Text(model.description)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                            .lineLimit(2)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                    
-                                    Spacer()
-                                    
-                                    if viewModel.currentModel == model {
-                                        Image(systemName: "checkmark")
-                                            .foregroundColor(Color.accentPrimary)
-                                            .font(.system(size: 14, weight: .bold))
-                                    }
-                                }
-                                .contentShape(Rectangle())
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            .background(viewModel.currentModel == model ? Color.gray.opacity(0.1) : Color.clear)
-                            
-                            if model != availableModels.last {
-                                Divider()
-                                    .padding(.leading, 52)
-                            }
-                        }
-                    }
-                }
-            }
-            .frame(width: 320)
-            .presentationCompactAdaptation(.popover)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SubscriptionStatusUpdated"))) { _ in
-            // Force refresh model picker when subscription changes
-            refreshID = UUID()
-        }
-        .id(refreshID)
     }
 }
 

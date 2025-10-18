@@ -241,38 +241,7 @@ struct SettingsView: View {
     
     var body: some View {
         NavigationStack {
-            ZStack {
-                // Background
-                Color.settingsBackground(for: colorScheme)
-                    .ignoresSafeArea()
-                
-                VStack(spacing: 0) {
-                    // Custom header
-                    HStack {
-                        Text("Settings")
-                            .font(.title)
-                            .fontWeight(.bold)
-                        Spacer()
-                        
-                        Button(action: { dismiss() }) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(Color(.systemGray))
-                                .padding(8)
-                                .background(Color(.systemGray6))
-                                .clipShape(Circle())
-                        }
-                        .accessibilityLabel("Close settings")
-                    }
-                    .padding()
-                    .background(Color(UIColor.systemBackground))
-                    .overlay(
-                        Divider().opacity(0.2),
-                        alignment: .bottom
-                    )
-                    
-                    // Main content
-                    Form {
+            Form {
                         // Account Section
                         Section {
                             if authManager.isAuthenticated {
@@ -588,12 +557,19 @@ struct SettingsView: View {
                             Text("Legal")
                         }
                         .listRowBackground(Color.cardSurface(for: colorScheme))
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.settingsBackground(for: colorScheme))
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 18, weight: .medium))
                     }
-                    .scrollContentBackground(.hidden)
-                    .background(Color.settingsBackground(for: colorScheme))
                 }
             }
-            .navigationBarHidden(true)
         }
         .onAppear {
             // Reset navigation bar to use system colors for settings screens

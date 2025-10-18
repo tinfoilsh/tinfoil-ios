@@ -91,21 +91,36 @@ struct MessageInputView: View {
                 Spacer()
                 
                 // Send/Microphone button
-                Button(action: handleButtonPress) {
-                    ZStack {
-                        Circle()
-                            .fill(shouldShowMicrophone ? 
-                                  (viewModel.isRecording ? Color.red : (isDarkMode ? Color.white : Color.primary)) :
-                                  (isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight))
-                            .frame(width: 32, height: 32)
-                        
-                        Image(systemName: shouldShowMicrophone ? 
-                              (viewModel.isRecording ? "mic.fill" : "mic") : 
-                              (viewModel.isLoading ? "stop.fill" : "arrow.up"))
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(shouldShowMicrophone ? 
-                                           (viewModel.isRecording ? .white : (isDarkMode ? .black : .white)) :
-                                           (isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
+                Group {
+                    if #available(iOS 26, *) {
+                        Button(action: handleButtonPress) {
+                            Image(systemName: shouldShowMicrophone ?
+                                  (viewModel.isRecording ? "mic.fill" : "mic") :
+                                  (viewModel.isLoading ? "stop.fill" : "arrow.up"))
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.glass)
+                        .tint(.white)
+                        .clipShape(Circle())
+                    } else {
+                        Button(action: handleButtonPress) {
+                            ZStack {
+                                Circle()
+                                    .fill(shouldShowMicrophone ?
+                                          (viewModel.isRecording ? Color.red : (isDarkMode ? Color.white : Color.primary)) :
+                                          (isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight))
+                                    .frame(width: 32, height: 32)
+
+                                Image(systemName: shouldShowMicrophone ?
+                                      (viewModel.isRecording ? "mic.fill" : "mic") :
+                                      (viewModel.isLoading ? "stop.fill" : "arrow.up"))
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(shouldShowMicrophone ?
+                                                   (viewModel.isRecording ? .white : (isDarkMode ? .black : .white)) :
+                                                   (isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
+                            }
+                        }
                     }
                 }
                 .padding(.trailing, 16)
