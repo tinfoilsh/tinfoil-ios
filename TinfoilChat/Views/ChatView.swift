@@ -637,32 +637,41 @@ struct ChatScrollView: View {
             
             // Message input view
             if UIDevice.current.userInterfaceIdiom == .phone {
-                // iPhone: Full width input
-                MessageInputView(messageText: $messageText, viewModel: viewModel)
-                    .background(
-                        RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
-                            .fill(Color.chatSurface(isDarkMode: isDarkMode))
-                            .edgesIgnoringSafeArea(.bottom)
-                    )
-                    .environmentObject(viewModel.authManager ?? AuthManager())
-            } else {
-                // iPad/Mac: Centered input with max width
-                HStack {
-                    Spacer(minLength: 0)
-                    MessageInputView(messageText: $messageText, viewModel: viewModel)
-                        .frame(maxWidth: 600)
+                if #available(iOS 26, *) {
+                    MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
+                        .environmentObject(viewModel.authManager ?? AuthManager())
+                } else {
+                    MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
                         .background(
                             RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
                                 .fill(Color.chatSurface(isDarkMode: isDarkMode))
+                                .edgesIgnoringSafeArea(.bottom)
                         )
                         .environmentObject(viewModel.authManager ?? AuthManager())
-                    Spacer(minLength: 0)
                 }
-                .background(
-                    Color.clear
-                        .frame(height: 1)
-                        .edgesIgnoringSafeArea(.bottom)
-                )
+            } else {
+                if #available(iOS 26, *) {
+                    MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
+                        .frame(maxWidth: 600)
+                        .environmentObject(viewModel.authManager ?? AuthManager())
+                } else {
+                    HStack {
+                        Spacer(minLength: 0)
+                        MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
+                            .frame(maxWidth: 600)
+                            .background(
+                                RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
+                                    .fill(Color.chatSurface(isDarkMode: isDarkMode))
+                            )
+                            .environmentObject(viewModel.authManager ?? AuthManager())
+                        Spacer(minLength: 0)
+                    }
+                    .background(
+                        Color.clear
+                            .frame(height: 1)
+                            .edgesIgnoringSafeArea(.bottom)
+                    )
+                }
             }
             
         }
@@ -1053,7 +1062,7 @@ struct ModelTab: View {
                     // Base background
                     if #available(iOS 26, *) {
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(.thinMaterial)
+                            .fill(.thickMaterial)
                             .opacity(isEnabled ? 1.0 : 0.7)
                     } else {
                         RoundedRectangle(cornerRadius: 12)

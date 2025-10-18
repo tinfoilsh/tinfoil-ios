@@ -144,7 +144,7 @@ struct MessageView: View {
                 if message.role == .user {
                     if #available(iOS 26, *) {
                         RoundedRectangle(cornerRadius: 16)
-                            .fill(.thinMaterial)
+                            .fill(.thickMaterial)
                     } else {
                         Color.userMessageBackground(isDarkMode: isDarkMode)
                     }
@@ -622,7 +622,7 @@ struct CollapsibleThinkingBox: View {
         .background {
             if #available(iOS 26, *) {
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(.thinMaterial)
+                    .fill(.thickMaterial)
             } else {
                 Color.thinkingBackground(isDarkMode: isDarkMode)
             }

@@ -17,9 +17,10 @@ struct MessageInputView: View {
     @State private var showErrorPopover = false
     @State private var textHeight: CGFloat = Layout.defaultHeight
     @ObservedObject private var settings = SettingsManager.shared
-    
+    var isKeyboardVisible: Bool = false
+
     private var isDarkMode: Bool { colorScheme == .dark }
-    
+
     // Check for subscription status
     private var hasPremiumAccess: Bool {
         authManager.isAuthenticated && authManager.hasActiveSubscription
@@ -40,8 +41,8 @@ struct MessageInputView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Text input area
-            CustomTextEditor(text: $messageText, 
-                             textHeight: $textHeight, 
+            CustomTextEditor(text: $messageText,
+                             textHeight: $textHeight,
                              placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message")
                 .frame(height: textHeight)
                 .padding(.horizontal)
@@ -98,11 +99,14 @@ struct MessageInputView: View {
                                   (viewModel.isRecording ? "mic.fill" : "mic") :
                                   (viewModel.isLoading ? "stop.fill" : "arrow.up"))
                                 .font(.system(size: 16, weight: .semibold))
-                                .frame(width: 32, height: 32)
+                                .frame(width: 24, height: 24)
+                                .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
                         }
-                        .buttonStyle(.glass)
-                        .tint(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
-                        .clipShape(Circle())
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.circle)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                        .clipShape(.circle)
+                        .tint(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
                     } else {
                         Button(action: handleButtonPress) {
                             ZStack {
@@ -126,6 +130,20 @@ struct MessageInputView: View {
                 .padding(.trailing, 16)
             }
             .padding(.vertical, 8)
+        }
+        .background {
+            if #available(iOS 26, *) {
+                RoundedRectangle(cornerRadius: 26)
+                    .fill(.thickMaterial)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, isKeyboardVisible ? 12 : 0)
+        .background {
+            if #available(iOS 26, *) {
+                Color.chatBackground(isDarkMode: isDarkMode)
+                    .ignoresSafeArea()
+            }
         }
         .onChange(of: viewModel.transcribedText) { oldValue, newValue in
             if !newValue.isEmpty && newValue != oldValue {
