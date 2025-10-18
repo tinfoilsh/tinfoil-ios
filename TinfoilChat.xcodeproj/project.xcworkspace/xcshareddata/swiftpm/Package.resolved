@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/MacPaw/OpenAI.git",
       "state" : {
-        "revision" : "bb283b2ac48c1e90121d73d6bfb45f961dc0b7a3",
-        "version" : "0.4.5"
+        "branch" : "main",
+        "revision" : "c8b02fc5e3ec1df6925158b52c64959408f86b84"
       }
     },
     {
@@ -124,7 +124,7 @@
       "location" : "https://github.com/tinfoilsh/tinfoil-swift",
       "state" : {
         "branch" : "main",
-        "revision" : "8746f3a7bb517d28ad9aba9f1f69e7a45858606d"
+        "revision" : "9dd2785afc54cd659f2dd2a29bef87a874c75094"
       }
     }
   ],
