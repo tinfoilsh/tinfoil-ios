@@ -55,7 +55,7 @@ struct ChatSidebar: View {
     var body: some View {
         sidebarContent
             .frame(width: 300)
-            .background(.ultraThinMaterial)
+            .background(colorScheme == .dark ? Color.sidebarBackground(for: colorScheme) : Color.white)
             .ignoresSafeArea(edges: .bottom)
             .onReceive(timeUpdateTimer) { _ in
                 currentTime = Date()

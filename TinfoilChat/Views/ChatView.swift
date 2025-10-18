@@ -58,10 +58,13 @@ struct ChatContainer: View {
         .environmentObject(viewModel)
         .onAppear {
             setupNavigationBarAppearance()
-            
+
             // Ensure sidebar is closed on initial appearance
             isSidebarOpen = false
             dragOffset = 0
+        }
+        .onChange(of: colorScheme) { _, _ in
+            setupNavigationBarAppearance()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // App is going to background, record the time
@@ -127,11 +130,10 @@ struct ChatContainer: View {
     private func setupNavigationBarAppearance() {
         let appearance = UINavigationBarAppearance()
         appearance.configureWithOpaqueBackground()
-        
-        // Always use dark navigation bar for main chat view since logo is white
-        appearance.backgroundColor = UIColor(Color.backgroundPrimary)
+
+        appearance.backgroundColor = colorScheme == .dark ? UIColor(Color.backgroundPrimary) : .white
         appearance.shadowColor = .clear
-        
+
         UINavigationBar.appearance().standardAppearance = appearance
         UINavigationBar.appearance().compactAppearance = appearance
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
@@ -169,11 +171,11 @@ struct ChatContainer: View {
                 Button(action: toggleSidebar) {
                     MenuToXButton(isX: isSidebarOpen)
                         .frame(width: 24, height: 24)
-                        .foregroundColor(.white)
+                        .foregroundColor(toolbarContentColor)
                 }
             }
             ToolbarItem(placement: .principal) {
-                Image("navbar-logo")
+                Image(colorScheme == .dark ? "logo-white" : "logo-dark")
                     .resizable()
                     .scaledToFit()
                     .frame(height: 22)
@@ -1067,8 +1069,7 @@ struct ModelTab: View {
 /// Animated button that transforms between a menu icon and an X
 struct MenuToXButton: View {
     let isX: Bool
-    @Environment(\.colorScheme) var colorScheme
-    
+
     var body: some View {
         ZStack {
             // Top line
@@ -1076,19 +1077,18 @@ struct MenuToXButton: View {
                 .frame(width: 18, height: 2)
                 .rotationEffect(.degrees(isX ? 45 : 0))
                 .offset(y: isX ? 0 : -6)
-            
+
             // Middle line
             Rectangle()
                 .frame(width: 18, height: 2)
                 .opacity(isX ? 0 : 1)
-            
+
             // Bottom line
             Rectangle()
                 .frame(width: 18, height: 2)
                 .rotationEffect(.degrees(isX ? -45 : 0))
                 .offset(y: isX ? 0 : 6)
         }
-        .foregroundColor(.white)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isX)
     }
 }

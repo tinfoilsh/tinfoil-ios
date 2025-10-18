@@ -32,10 +32,10 @@ extension Color {
     static let sidebarBackgroundLight = Color.white
     static let settingsBackgroundDark = Color(hex: "121212")
     static let settingsBackgroundLight = Color(UIColor.systemGroupedBackground)
-    static let sendButtonBackgroundDark = Color.white
-    static let sendButtonBackgroundLight = Color.tinfoilDark
-    static let sendButtonForegroundDark = Color.tinfoilDark
-    static let sendButtonForegroundLight = Color.white
+    static let sendButtonBackgroundDark = Color.tinfoilDark
+    static let sendButtonBackgroundLight = Color.white
+    static let sendButtonForegroundDark = Color.white
+    static let sendButtonForegroundLight = Color.black
 
     // Reasoning and messaging surfaces
     static let thinkingBackgroundDark = chatSurfaceDark

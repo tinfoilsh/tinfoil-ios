@@ -101,7 +101,7 @@ struct MessageInputView: View {
                                 .frame(width: 32, height: 32)
                         }
                         .buttonStyle(.glass)
-                        .tint(.white)
+                        .tint(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
                         .clipShape(Circle())
                     } else {
                         Button(action: handleButtonPress) {
