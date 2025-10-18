@@ -29,6 +29,8 @@ enum Constants {
     enum UI {
         static let modelIconPath = "/model-icons/"
         static let modelIconExtension = ".png"
+        static let scrollToBottomButtonSize: CGFloat = 27
+        static let scrollToBottomIconSize: CGFloat = 16
     }
     
     enum API {

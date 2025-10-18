@@ -599,8 +599,8 @@ struct ChatScrollView: View {
                                     }
                                 }) {
                                     Image(systemName: "arrow.down")
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .frame(width: 40, height: 40)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .frame(width: Constants.UI.scrollToBottomButtonSize, height: Constants.UI.scrollToBottomButtonSize)
                                 }
                                 .buttonStyle(.glass)
                                 .clipShape(Circle())
