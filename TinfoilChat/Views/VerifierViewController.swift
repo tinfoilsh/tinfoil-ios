@@ -133,15 +133,13 @@ struct VerifierView: View {
                 .foregroundColor(colorScheme == .dark ? .white : .primary)
             Spacer()
             
-            // Dismiss button
             Button(action: {
-                // Dismiss the view controller
                 chatViewModel.dismissVerifier()
             }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 24))
+                Image(systemName: "xmark")
+                    .font(.system(size: 18, weight: .medium))
                     .foregroundColor(colorScheme == .dark ? .gray : .secondary)
-                    .padding(4)
+                    .padding(8)
                     .contentShape(Rectangle())
             }
             .buttonStyle(PlainButtonStyle())

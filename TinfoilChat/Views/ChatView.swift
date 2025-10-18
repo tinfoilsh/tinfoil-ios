@@ -181,46 +181,23 @@ struct ChatContainer: View {
             // Only show toolbar items when chat has messages (not a new/blank chat)
             if authManager.isAuthenticated && !(viewModel.currentChat?.isBlankChat ?? true) {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 8) {
-                        ModelPicker(viewModel: viewModel)
-                        
-                        // New chat button
-                        Button(action: createNewChat) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(toolbarButtonFill)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .strokeBorder(toolbarButtonStroke, lineWidth: 1)
-                                    )
-                                    .frame(width: 24, height: 24)
+                    ModelPicker(viewModel: viewModel)
+                }
 
-                                Image(systemName: "plus")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(toolbarContentColor)
-                            }
-                        }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: createNewChat) {
+                        Image(systemName: "square.and.pencil")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(toolbarContentColor)
                     }
                 }
             }
             if !authManager.isAuthenticated {
-                // Show sign in button for non-authenticated users
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: showAuthenticationView) {
-                        Text("Sign in")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(toolbarContentColor)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(toolbarButtonFill)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .strokeBorder(toolbarButtonStroke, lineWidth: 1)
-                                    )
-                            )
+                    Button("Sign in", systemImage: "person.crop.circle") {
+                        showAuthenticationView()
                     }
+                    .foregroundColor(toolbarContentColor)
                 }
             }
         }
@@ -1133,20 +1110,10 @@ struct ModelPicker: View {
         Button(action: {
             showModelPicker.toggle()
         }) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(buttonFill)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(buttonStroke, lineWidth: 1)
-                    )
-                    .frame(width: 24, height: 24)
-                
-                Image(viewModel.currentModel.iconName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 20, height: 20)
-            }
+            Image(viewModel.currentModel.iconName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 22, height: 22)
         }
         .popover(isPresented: $showModelPicker) {
             VStack(alignment: .leading, spacing: 0) {
