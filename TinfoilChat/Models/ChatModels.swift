@@ -279,8 +279,8 @@ struct Message: Identifiable, Codable, Equatable {
     var isStreaming: Bool = false
     var streamError: String? = nil
     var generationTimeSeconds: Double? = nil
+    var contentChunks: [ContentChunk] = []
 
-    // User messages at or above this size present as attachment previews.
     static let longMessageAttachmentThreshold = 1200
     var shouldDisplayAsAttachment: Bool {
         role == .user && content.count >= Message.longMessageAttachmentThreshold
@@ -298,7 +298,7 @@ struct Message: Identifiable, Codable, Equatable {
         return formatter
     }()
     
-    init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = false, generationTimeSeconds: Double? = nil) {
+    init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = false, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = []) {
         self.id = id
         self.role = role
         self.content = content
@@ -307,12 +307,13 @@ struct Message: Identifiable, Codable, Equatable {
         self.timestamp = timestamp
         self.isCollapsed = isCollapsed
         self.generationTimeSeconds = generationTimeSeconds
+        self.contentChunks = contentChunks
     }
     
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, generationTimeSeconds
+        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, generationTimeSeconds, contentChunks
     }
     
     init(from decoder: Decoder) throws {
@@ -341,6 +342,7 @@ struct Message: Identifiable, Codable, Equatable {
         isStreaming = try container.decodeIfPresent(Bool.self, forKey: .isStreaming) ?? false
         streamError = try container.decodeIfPresent(String.self, forKey: .streamError)
         generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)
+        contentChunks = try container.decodeIfPresent([ContentChunk].self, forKey: .contentChunks) ?? []
     }
     
     func encode(to encoder: Encoder) throws {
@@ -355,6 +357,7 @@ struct Message: Identifiable, Codable, Equatable {
         try container.encode(isStreaming, forKey: .isStreaming)
         try container.encodeIfPresent(streamError, forKey: .streamError)
         try container.encodeIfPresent(generationTimeSeconds, forKey: .generationTimeSeconds)
+        try container.encode(contentChunks, forKey: .contentChunks)
     }
     
     // MARK: - Haptic Feedback Methods

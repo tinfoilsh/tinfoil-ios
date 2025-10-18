@@ -106,13 +106,14 @@ struct MessageView: View {
                     }
                 }
 
-                // Otherwise display the message as before using Markdown rendering
                 else if !message.content.isEmpty {
                     if message.streamError != nil {
-                        // Error message display
                         ErrorMessageView(errorMessage: message.streamError!, isDarkMode: isDarkMode)
                     } else if message.role == .user {
                         AdaptiveMarkdownText(content: message.content, isDarkMode: isDarkMode)
+                    } else if !message.contentChunks.isEmpty {
+                        ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
                             .equatable()
@@ -800,7 +801,48 @@ extension CodeBlockConfiguration: @retroactive Equatable {
     }
 }
 
-// At the end of the file, add the ErrorMessageView
+struct ChunkedContentView: View {
+    let chunks: [ContentChunk]
+    let isDarkMode: Bool
+
+    var body: some View {
+        LazyVStack(alignment: .leading, spacing: 8, pinnedViews: []) {
+            ForEach(chunks) { chunk in
+                ChunkView(chunk: chunk, isDarkMode: isDarkMode)
+                    .equatable()
+            }
+        }
+        .textSelection(.enabled)
+    }
+}
+
+struct ChunkView: View, Equatable {
+    let chunk: ContentChunk
+    let isDarkMode: Bool
+    @State private var opacity: Double = 0
+
+    static func == (lhs: ChunkView, rhs: ChunkView) -> Bool {
+        if lhs.chunk.isComplete && rhs.chunk.isComplete {
+            return lhs.chunk.id == rhs.chunk.id && lhs.isDarkMode == rhs.isDarkMode
+        }
+        return lhs.chunk.id == rhs.chunk.id &&
+               lhs.chunk.isComplete == rhs.chunk.isComplete &&
+               lhs.chunk.content == rhs.chunk.content &&
+               lhs.isDarkMode == rhs.isDarkMode
+    }
+
+    var body: some View {
+        LaTeXMarkdownView(content: chunk.content, isDarkMode: isDarkMode)
+            .opacity(opacity)
+            .onAppear {
+                withAnimation(.easeIn(duration: 0.2)) {
+                    opacity = 1.0
+                }
+            }
+            .id(chunk.isComplete ? "\(chunk.id)_\(chunk.content.hashValue)" : "\(chunk.id)_streaming")
+    }
+}
+
 struct ErrorMessageView: View {
     let errorMessage: String
     let isDarkMode: Bool
