@@ -2166,12 +2166,12 @@ class ChatViewModel: ObservableObject {
                             self.currentChat = newChat
                         }
                     }
-                    
-                    // Select the first chat
-                    if let first = self.chats.first {
+
+                    // Only select the first chat if we don't have a current chat selected
+                    if self.currentChat == nil, let first = self.chats.first {
                         self.currentChat = first
                     }
-                    
+
                     // Mark that we've loaded the initial page
                     self.hasLoadedInitialPage = true
                     self.isPaginationActive = displayableChats.count > 0
@@ -2483,11 +2483,14 @@ class ChatViewModel: ObservableObject {
     @MainActor
     private func updateChatsAfterSync() async {
         guard let userId = currentUserId else { return }
-        
+
         // IMPORTANT: Preserve pagination token before updating
         let savedPaginationToken = self.paginationToken
         let savedIsPaginationActive = self.isPaginationActive
-        
+
+        // IMPORTANT: Preserve the current chat ID so it stays in the array even if beyond first page
+        let currentChatId = self.currentChat?.id
+
         // Load all chats from storage (includes newly synced ones)
         let allChats = Chat.loadFromDefaults(userId: userId)
         
@@ -2531,13 +2534,21 @@ class ChatViewModel: ObservableObject {
         if hasAttemptedLoadMore && currentlyLoadedIds.count > Constants.Pagination.chatsPerPage {
             // User has loaded more pages - preserve all currently loaded synced chats
             let syncedChatsToShow = syncedChats.filter { chat in
-                // Keep if it was already loaded OR if it's in the first page positions
-                currentlyLoadedIds.contains(chat.id) || syncedChats.firstIndex(where: { $0.id == chat.id }) ?? Int.max < Constants.Pagination.chatsPerPage
+                // Keep if it was already loaded OR if it's in the first page positions OR if it's the current chat
+                currentlyLoadedIds.contains(chat.id) ||
+                syncedChats.firstIndex(where: { $0.id == chat.id }) ?? Int.max < Constants.Pagination.chatsPerPage ||
+                (currentChatId != nil && chat.id == currentChatId)
             }
             updatedChats.append(contentsOf: syncedChatsToShow)
         } else {
-            // Only first page loaded - update just the first page
-            updatedChats.append(contentsOf: Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)))
+            // Only first page loaded - include first page AND current chat if it exists
+            var syncedChatsToShow = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage))
+            if let currentChatId = currentChatId,
+               let currentChat = syncedChats.first(where: { $0.id == currentChatId }),
+               !syncedChatsToShow.contains(where: { $0.id == currentChatId }) {
+                syncedChatsToShow.append(currentChat)
+            }
+            updatedChats.append(contentsOf: syncedChatsToShow)
         }
         
         // Remove duplicates based on chat ID
@@ -2552,21 +2563,17 @@ class ChatViewModel: ObservableObject {
         
         // Update the chats array
         self.chats = uniqueChats.sorted { $0.createdAt > $1.createdAt }
-        
-        // Update currentChat if it was synced with new messages
-        if let currentChat = self.currentChat,
-           !currentChat.locallyModified,
-           !currentChat.hasActiveStream,
-           let updatedChat = self.chats.first(where: { $0.id == currentChat.id }) {
-            // Check if the chat actually changed (different message count or updated timestamp)
-            if updatedChat.messages.count != currentChat.messages.count ||
-               updatedChat.updatedAt != currentChat.updatedAt {
-                self.currentChat = updatedChat
-            }
-        }
-        
-        // Ensure blank chat at top
+
+        // Ensure blank chat at top BEFORE updating currentChat
+        // This way currentChat will point to the fresh instance after any array modifications
         self.ensureBlankChatAtTop()
+
+        // IMPORTANT: Always update currentChat to point to the instance in the chats array
+        // This ensures currentChat is never stale and always references a chat that's in the array
+        if let currentChatId = currentChatId,
+           let updatedChat = self.chats.first(where: { $0.id == currentChatId }) {
+            self.currentChat = updatedChat
+        }
         
         // Update hasMoreChats conservatively to preserve server-provided pagination
         let displayedSyncedChats = chats.filter { !$0.isBlankChat && !$0.hasTemporaryId }.count
