@@ -126,17 +126,45 @@ struct ChatContainer: View {
         }
     }
     
-    /// Configure navigation bar appearance to be solid color
+    /// Configure navigation bar appearance
     private func setupNavigationBarAppearance() {
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithOpaqueBackground()
+        if #available(iOS 26, *) {
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithTransparentBackground()
+            appearance.shadowColor = .clear
 
-        appearance.backgroundColor = colorScheme == .dark ? UIColor(Color.backgroundPrimary) : .white
-        appearance.shadowColor = .clear
+            updateAllNavigationBars(with: appearance)
+        } else {
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = colorScheme == .dark ? UIColor(Color.backgroundPrimary) : .white
+            appearance.shadowColor = .clear
 
+            updateAllNavigationBars(with: appearance)
+        }
+    }
+
+    /// Update all navigation bars in the app with the given appearance
+    private func updateAllNavigationBars(with appearance: UINavigationBarAppearance) {
         UINavigationBar.appearance().standardAppearance = appearance
         UINavigationBar.appearance().compactAppearance = appearance
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
+
+        for scene in UIApplication.shared.connectedScenes {
+            if let windowScene = scene as? UIWindowScene {
+                for window in windowScene.windows {
+                    for view in window.subviews {
+                        view.removeFromSuperview()
+                        window.addSubview(view)
+                    }
+                    if let navigationBar = window.rootViewController?.navigationController?.navigationBar {
+                        navigationBar.standardAppearance = appearance
+                        navigationBar.compactAppearance = appearance
+                        navigationBar.scrollEdgeAppearance = appearance
+                    }
+                }
+            }
+        }
     }
     
     /// The main content layout including chat area and sidebar
@@ -166,6 +194,7 @@ struct ChatContainer: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .applyTransparentToolbarIfAvailable()
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button(action: toggleSidebar) {
@@ -175,10 +204,14 @@ struct ChatContainer: View {
                 }
             }
             ToolbarItem(placement: .principal) {
-                Image(colorScheme == .dark ? "logo-white" : "logo-dark")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 22)
+                if #available(iOS 26, *) {
+                    EmptyView()
+                } else {
+                    Image(colorScheme == .dark ? "logo-white" : "logo-dark")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 22)
+                }
             }
             // Only show toolbar items when chat has messages (not a new/blank chat)
             if authManager.isAuthenticated && !(viewModel.currentChat?.isBlankChat ?? true) {
@@ -1109,11 +1142,20 @@ extension View {
     func corners(_ corners: UIRectCorner) -> some View {
         clipShape(RoundedCorner(radius: 15, corners: corners))
     }
-    
+
     /// Conditionally apply a modifier
     @ViewBuilder func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
         if condition {
             transform(self)
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func applyTransparentToolbarIfAvailable() -> some View {
+        if #available(iOS 26, *) {
+            self.toolbarBackground(.hidden, for: .navigationBar)
         } else {
             self
         }
