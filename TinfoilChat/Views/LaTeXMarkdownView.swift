@@ -769,7 +769,7 @@ private struct MarkdownThemeCache {
         MarkdownUI.Theme.gitHub
             .text {
                 FontFamily(.system(.default))
-                FontSize(.em(1.0))
+                FontSize(15)
                 ForegroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
             }
             .code {
