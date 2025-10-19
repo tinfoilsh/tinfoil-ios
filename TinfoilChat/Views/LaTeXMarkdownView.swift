@@ -33,14 +33,14 @@ struct LaTeXMarkdownView: View, Equatable {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(parseContent(), id: \.id) { segment in
                 segment.view
                     .id(segment.id)
             }
         }
         .padding(.horizontal, horizontalPadding)
-        .frame(maxWidth: .infinity, alignment: maxWidthAlignment)
+        .frame(maxWidth: horizontalPadding > 0 ? .infinity : nil, alignment: maxWidthAlignment)
         .transaction { transaction in
             transaction.animation = nil
         }
@@ -120,6 +120,7 @@ struct LaTeXMarkdownView: View, Equatable {
                                 .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
                                 .environment(\.colorScheme, isDarkMode ? .dark : .light)
                                 .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
                         )
                     ))
                 }
@@ -181,6 +182,7 @@ struct LaTeXMarkdownView: View, Equatable {
                             .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
                             .environment(\.colorScheme, isDarkMode ? .dark : .light)
                             .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
                     )
                 ))
             }
@@ -194,6 +196,7 @@ struct LaTeXMarkdownView: View, Equatable {
                         .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
                         .environment(\.colorScheme, isDarkMode ? .dark : .light)
                         .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                 )
             ))
         }
@@ -498,33 +501,34 @@ private struct MarkdownTableView: View {
     }
 
     private var headerBackground: Color {
-        isDarkMode ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
+        Color.clear
     }
 
     private var alternatingRowBackground: Color {
-        isDarkMode ? Color.white.opacity(0.03) : Color.black.opacity(0.03)
+        Color.clear
     }
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            tableContainer(mode: .wrapping)
+            tableContainer(useColumnWidths: true)
             ScrollView(.horizontal, showsIndicators: true) {
-                tableContainer(mode: .scrollable)
+                tableContainer(useColumnWidths: true)
             }
         }
         .padding(.vertical, 8)
-        .onPreferenceChange(ColumnWidthPreferenceKey.self) { newValues in
-            if columnWidths != newValues {
-                columnWidths = newValues
-            }
-        }
+        .background(
+            tableContainer(useColumnWidths: false)
+                .hidden()
+                .onPreferenceChange(ColumnWidthPreferenceKey.self) { newValues in
+                    if columnWidths != newValues {
+                        columnWidths = newValues
+                    }
+                }
+        )
     }
 
-    private func tableContainer(mode: TableRenderMode) -> some View {
-        let useIntrinsic = mode == .scrollable
-        let widths = mode == .scrollable ? columnWidths : [:]
-
-        return VStack(spacing: 0) {
+    private func tableContainer(useColumnWidths: Bool) -> some View {
+        VStack(spacing: 0) {
             if !table.headers.isEmpty {
                 MarkdownTableRowView(
                     cells: table.headers,
@@ -533,8 +537,8 @@ private struct MarkdownTableView: View {
                     isDarkMode: isDarkMode,
                     borderColor: borderColor,
                     background: headerBackground,
-                    columnWidths: widths,
-                    mode: mode
+                    columnWidths: useColumnWidths ? columnWidths : [:],
+                    measureColumns: !useColumnWidths
                 )
                 Rectangle()
                     .fill(borderColor)
@@ -549,8 +553,8 @@ private struct MarkdownTableView: View {
                     isDarkMode: isDarkMode,
                     borderColor: borderColor,
                     background: index.isMultiple(of: 2) ? alternatingRowBackground : Color.clear,
-                    columnWidths: widths,
-                    mode: mode
+                    columnWidths: useColumnWidths ? columnWidths : [:],
+                    measureColumns: !useColumnWidths
                 )
 
                 if index < table.rows.count - 1 {
@@ -560,13 +564,11 @@ private struct MarkdownTableView: View {
                 }
             }
         }
-        .background(isDarkMode ? Color.white.opacity(0.015) : Color.black.opacity(0.015))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(borderColor, lineWidth: 1)
         )
-        .frame(maxWidth: useIntrinsic ? nil : .infinity, alignment: .leading)
     }
 }
 
@@ -578,7 +580,7 @@ private struct MarkdownTableRowView: View {
     let borderColor: Color
     let background: Color
     let columnWidths: [Int: CGFloat]
-    let mode: TableRenderMode
+    let measureColumns: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -589,9 +591,11 @@ private struct MarkdownTableRowView: View {
                     isHeader: isHeader,
                     isDarkMode: isDarkMode,
                     columnIndex: index,
-                    columnWidths: columnWidths,
-                    mode: mode
+                    columnWidth: columnWidths[index],
+                    measureColumn: measureColumns,
+                    background: background
                 )
+                .frame(maxHeight: .infinity, alignment: .top)
 
                 if index < cells.count - 1 {
                     Rectangle()
@@ -600,8 +604,8 @@ private struct MarkdownTableRowView: View {
                 }
             }
         }
-        .frame(maxWidth: mode == .scrollable ? nil : .infinity, alignment: .leading)
-        .background(background)
+        .frame(minHeight: 0, maxHeight: .infinity)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -611,52 +615,36 @@ private struct MarkdownTableCell: View {
     let isHeader: Bool
     let isDarkMode: Bool
     let columnIndex: Int
-    let columnWidths: [Int: CGFloat]
-    let mode: TableRenderMode
+    let columnWidth: CGFloat?
+    let measureColumn: Bool
+    let background: Color
 
     var body: some View {
-        let cellAlignment = alignment.viewAlignment
-        let measuredWidth = columnWidths[columnIndex]
-
-        let base = LaTeXMarkdownView(
+        let cellContent = LaTeXMarkdownView(
             content: content.isEmpty ? " " : content,
             isDarkMode: isDarkMode,
             horizontalPadding: 0,
-            maxWidthAlignment: cellAlignment
+            maxWidthAlignment: alignment.viewAlignment
         )
-        .layoutPriority(1)
-        .padding(.vertical, isHeader ? 6 : 4)
-        .padding(.horizontal, 8)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.vertical, isHeader ? 6 : 5)
+        .padding(.horizontal, 12)
 
-        switch mode {
-        case .scrollable:
-            if let width = measuredWidth {
-                base
-                    .frame(width: width, alignment: cellAlignment)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .background(ColumnWidthReader(columnIndex: columnIndex))
-            } else {
-                base
-                    .fixedSize(horizontal: true, vertical: true)
-                    .background(ColumnWidthReader(columnIndex: columnIndex))
-            }
-        case .wrapping:
-            if let width = measuredWidth {
-                base
-                    .frame(width: width, alignment: cellAlignment)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                base
-                    .frame(maxWidth: .infinity, alignment: cellAlignment)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        if measureColumn {
+            cellContent
+                .fixedSize(horizontal: true, vertical: true)
+                .background(ColumnWidthReader(columnIndex: columnIndex))
+        } else if let width = columnWidth {
+            cellContent
+                .frame(width: width, alignment: alignment.viewAlignment)
+                .frame(maxHeight: .infinity)
+                .background(background)
+        } else {
+            cellContent
+                .frame(maxHeight: .infinity)
+                .background(background)
         }
     }
-}
-
-private enum TableRenderMode {
-    case wrapping
-    case scrollable
 }
 
 private struct ColumnWidthReader: View {
@@ -766,11 +754,15 @@ private struct MarkdownThemeCache {
     }
     
     private static func createTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
-        MarkdownUI.Theme.gitHub
+        let baseTheme = MarkdownUI.Theme.gitHub
             .text {
                 FontFamily(.system(.default))
                 FontSize(15)
                 ForegroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
+            }
+            .paragraph { configuration in
+                configuration.label
+                    .markdownMargin(top: 0, bottom: 0)
             }
             .code {
                 FontFamilyVariant(.monospaced)
@@ -783,6 +775,8 @@ private struct MarkdownThemeCache {
                     .background(isDarkMode ? Color.black.opacity(0.2) : Color.gray.opacity(0.05))
                     .cornerRadius(8)
             }
+
+        let withHeadings = baseTheme
             .heading1 { configuration in
                 configuration.label
                     .markdownMargin(top: 20, bottom: 10)
@@ -807,15 +801,18 @@ private struct MarkdownThemeCache {
                         FontSize(.em(1.25))
                     }
             }
+
+        let withBlockElements = withHeadings
             .blockquote { configuration in
-                configuration.label
+                let paddedLabel = configuration.label
                     .markdownTextStyle {
                         FontStyle(.italic)
                         ForegroundColor(.secondary)
                     }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
                     .markdownMargin(top: 8, bottom: 8)
+
+                return paddedLabel
+                    .padding(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
                     .background(Color.secondary.opacity(0.1))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
@@ -823,10 +820,12 @@ private struct MarkdownThemeCache {
                 configuration.label
                     .markdownMargin(top: 4, bottom: 4)
             }
+
+        return withBlockElements
             .table { configuration in
                 ScrollView(.horizontal, showsIndicators: true) {
                     configuration.label
-                        .markdownTableBorderStyle(.init(color: isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2)))
+                        .markdownTableBorderStyle(MarkdownUI.TableBorderStyle(color: isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2)))
                 }
             }
     }
