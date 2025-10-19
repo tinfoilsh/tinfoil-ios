@@ -842,47 +842,30 @@ class ChatViewModel: ObservableObject {
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{CURRENT_DATETIME}", with: currentDateTime)
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{TIMEZONE}", with: timezone)
                 
-                // Append rules if they exist
-                let rules = AppConfig.shared.rules
-                if !rules.isEmpty {
-                    // Apply same replacements to rules
-                    var processedRules = rules.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
-                    
-                    // Use the same language that was used for the system prompt
+                // Process rules with same replacements
+                var processedRules = AppConfig.shared.rules
+                if !processedRules.isEmpty {
+                    processedRules = processedRules.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
                     processedRules = processedRules.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
-                    
+
                     if !personalizationXML.isEmpty {
                         processedRules = processedRules.replacingOccurrences(of: "{USER_PREFERENCES}", with: personalizationXML)
                     } else {
                         processedRules = processedRules.replacingOccurrences(of: "{USER_PREFERENCES}", with: "")
                     }
-                    
+
                     processedRules = processedRules.replacingOccurrences(of: "{CURRENT_DATETIME}", with: currentDateTime)
                     processedRules = processedRules.replacingOccurrences(of: "{TIMEZONE}", with: timezone)
-                    
-                    systemPrompt += "\n" + processedRules
                 }
-                
-                // Build messages array inline
-                var messages: [ChatQuery.ChatCompletionMessageParam] = [
-                    .system(.init(content: .textContent(systemPrompt)))
-                ]
-                
-                // Add conversation messages - use ProfileManager's maxPromptMessages if available
+
+                // Use ChatQueryBuilder to create query with model-specific system prompt handling
                 let maxMessages = profileManager.maxPromptMessages > 0 ? profileManager.maxPromptMessages : settingsManager.maxMessages
-                let messagesForContext = Array(self.messages.suffix(maxMessages))
-                for message in messagesForContext {
-                    if message.role == .user {
-                        messages.append(.user(.init(content: .string(message.content))))
-                    } else if !message.content.isEmpty {
-                        messages.append(.assistant(.init(content: .textContent(message.content))))
-                    }
-                }
-                
-                let chatQuery = ChatQuery(
-                    messages: messages,
-                    model: modelId,
-                    stream: true
+                let chatQuery = ChatQueryBuilder.buildQuery(
+                    modelId: modelId,
+                    systemPrompt: systemPrompt,
+                    rules: processedRules,
+                    conversationMessages: self.messages,
+                    maxMessages: maxMessages
                 )
                 
                 // Use the OpenAI client's chatsStream method through TinfoilAI
@@ -3003,16 +2986,18 @@ extension ChatViewModel {
 
         let titlePrompt = "You are a conversation title generator. Your job is to generate a title for the following conversation between the USER and the ASSISTANT. Generate a concise, descriptive title (max 15 tokens) for this conversation. Output ONLY the title, nothing else."
 
-        // Build messages
-        let params: [ChatQuery.ChatCompletionMessageParam] = [
-            .system(.init(content: .textContent(titlePrompt))),
-            .user(.init(content: .string("Generate a title for this conversation:\n\n\(snippet)")))
-        ]
+        // Create a single user message for the query (system prompt will be handled by ChatQueryBuilder)
+        let userMessage = Message(
+            role: .user,
+            content: "Generate a title for this conversation:\n\n\(snippet)"
+        )
 
-        let query = ChatQuery(
-            messages: params,
-            model: modelToUse.modelName,
-            stream: true
+        let query = ChatQueryBuilder.buildQuery(
+            modelId: modelToUse.modelName,
+            systemPrompt: titlePrompt,
+            rules: "",
+            conversationMessages: [userMessage],
+            maxMessages: 1
         )
 
         // Collect streamed content
