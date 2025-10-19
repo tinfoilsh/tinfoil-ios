@@ -837,18 +837,9 @@ struct ChunkView: View, Equatable {
     }
 
     var body: some View {
-        if !chunk.isComplete && isStreaming {
-            Text(chunk.content)
-                .font(.system(size: 15))
-                .foregroundColor(isDarkMode ? .white.opacity(0.9) : .black.opacity(0.9))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-                .id(chunk.id)
-        } else {
-            LaTeXMarkdownView(content: chunk.content, isDarkMode: isDarkMode)
-                .equatable()
-                .id(chunk.id)
-        }
+        LaTeXMarkdownView(content: chunk.content, isDarkMode: isDarkMode)
+            .equatable()
+            .id(chunk.id)
     }
 }
 

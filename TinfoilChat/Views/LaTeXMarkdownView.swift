@@ -625,8 +625,8 @@ private struct MarkdownTableCell: View {
             maxWidthAlignment: cellAlignment
         )
         .layoutPriority(1)
-        .padding(.vertical, isHeader ? 10 : 8)
-        .padding(.horizontal, 12)
+        .padding(.vertical, isHeader ? 6 : 4)
+        .padding(.horizontal, 8)
 
         switch mode {
         case .scrollable:
