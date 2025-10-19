@@ -138,26 +138,23 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         SentrySDK.start { options in
             options.dsn = "https://6f1fb6f77a16359e4d05acd52bbb2b93@o4509288836694016.ingest.us.sentry.io/4509290148069376"
             options.tracesSampleRate = 1.0
-            options.profilesSampleRate = 1.0
             // options.debug = true // Commented out for production
             options.enableAutoSessionTracking = true
 
-            // Adds IP for users.
+            // Disable PII collection for privacy
             // For more information, visit: https://docs.sentry.io/platforms/apple/data-management/data-collected/
-            options.sendDefaultPii = true
+            options.sendDefaultPii = false
 
             // Configure profiling. Visit https://docs.sentry.io/platforms/apple/profiling/ to learn more.
-            options.configureProfiling = {
-                $0.sessionSampleRate = 1.0 // We recommend adjusting this value in production.
-                $0.lifecycle = .trace
+            options.configureProfiling = { profileOptions in
+                profileOptions.sessionSampleRate = 1.0 // We recommend adjusting this value in production.
+                profileOptions.lifecycle = .trace
             }
 
             // Uncomment the following lines to add more data to your events
             // options.attachScreenshot = true // This adds a screenshot to the error events
             // options.attachViewHierarchy = true // This adds the view hierarchy to the error events
         }
-        // Remove the next line after confirming that your Sentry integration is working.
-        SentrySDK.capture(message: "This app uses Sentry! :)")
 
         // Navigation bar appearance will be configured per-view to support light/dark mode
         // Individual views (ChatView, SettingsView, etc.) handle their own appearance
