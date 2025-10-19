@@ -566,7 +566,11 @@ struct ChatScrollView: View {
                         }
                     }
                 }
-                // When the selected chat changes, just reset bookkeeping
+                .onChange(of: messages.last?.isThinking) { _, isThinking in
+                    if isThinking == true && isAtBottom && !userHasScrolled {
+                        requestJumpToBottom(animated: true)
+                    }
+                }
                 .onChange(of: viewModel.currentChat?.createdAt) { _, _ in
                     userHasScrolled = false
                     viewModel.isScrollInteractionActive = false
