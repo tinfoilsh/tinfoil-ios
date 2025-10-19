@@ -5,8 +5,8 @@ import UIKit
 struct MessageInputView: View {
     // MARK: - Constants
     fileprivate enum Layout {
-        static let defaultHeight: CGFloat = 80
-        static let minimumHeight: CGFloat = 80
+        static let defaultHeight: CGFloat = 72
+        static let minimumHeight: CGFloat = 72
         static let maximumHeight: CGFloat = 180
     }
     
