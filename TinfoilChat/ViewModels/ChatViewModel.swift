@@ -906,6 +906,7 @@ class ChatViewModel: ObservableObject {
                 var contentChunks: [ContentChunk] = []
                 var hapticChunkCount = 0
                 var hasStartedResponse = false
+                var hasShownFirstChunk = false
 
                 await MainActor.run {
                     if let chat = self.currentChat,
@@ -944,6 +945,10 @@ class ChatViewModel: ObservableObject {
                         } else {
                             contentChunks.append(chunk)
                         }
+                    }
+
+                    if hasNewCompletedChunks && !hasShownFirstChunk {
+                        hasShownFirstChunk = true
                     }
 
                     return hasNewCompletedChunks
@@ -993,7 +998,7 @@ class ChatViewModel: ObservableObject {
                         chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
                         chat.messages[lastIndex].contentChunks = contentChunks
 
-                        let shouldRefreshUI = force || self.isAtBottom
+                        let shouldRefreshUI = force || self.isAtBottom || hasShownFirstChunk && contentChunks.count == 1
 
                         if shouldRefreshUI {
                             self.updateChat(chat, throttleForStreaming: true)

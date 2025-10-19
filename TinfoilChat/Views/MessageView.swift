@@ -62,14 +62,24 @@ struct MessageView: View {
                             messageCollapsed: message.isCollapsed
                         )
                         
-                        // Display regular content if present
-                        if !message.content.isEmpty {
-                            LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
-                                .equatable()
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .transaction { transaction in
-                                    transaction.animation = nil
+                                if !message.content.isEmpty {
+                            if !message.contentChunks.isEmpty {
+                                ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                if isLoading && isLastMessage {
+                                    LoadingDotsView(isDarkMode: isDarkMode)
+                                        .padding(.top, 4)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
+                            } else {
+                                LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
+                                    .equatable()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .transaction { transaction in
+                                        transaction.animation = nil
+                                    }
+                            }
                         }
                     }
                 }
@@ -112,8 +122,16 @@ struct MessageView: View {
                     } else if message.role == .user {
                         AdaptiveMarkdownText(content: message.content, isDarkMode: isDarkMode)
                     } else if !message.contentChunks.isEmpty {
-                        ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 4) {
+                            ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            if isLoading && isLastMessage {
+                                LoadingDotsView(isDarkMode: isDarkMode)
+                                    .padding(.top, 4)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
                     } else {
                         LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
                             .equatable()
@@ -806,10 +824,9 @@ struct ChunkedContentView: View {
     let isDarkMode: Bool
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 8, pinnedViews: []) {
+        VStack(alignment: .leading, spacing: 8) {
             ForEach(chunks) { chunk in
                 ChunkView(chunk: chunk, isDarkMode: isDarkMode)
-                    .equatable()
             }
         }
         .textSelection(.enabled)
@@ -819,7 +836,6 @@ struct ChunkedContentView: View {
 struct ChunkView: View, Equatable {
     let chunk: ContentChunk
     let isDarkMode: Bool
-    @State private var opacity: Double = 0
 
     static func == (lhs: ChunkView, rhs: ChunkView) -> Bool {
         if lhs.chunk.isComplete && rhs.chunk.isComplete {
@@ -833,13 +849,7 @@ struct ChunkView: View, Equatable {
 
     var body: some View {
         LaTeXMarkdownView(content: chunk.content, isDarkMode: isDarkMode)
-            .opacity(opacity)
-            .onAppear {
-                withAnimation(.easeIn(duration: 0.2)) {
-                    opacity = 1.0
-                }
-            }
-            .id(chunk.isComplete ? "\(chunk.id)_\(chunk.content.hashValue)" : "\(chunk.id)_streaming")
+            .id(chunk.id)
     }
 }
 
