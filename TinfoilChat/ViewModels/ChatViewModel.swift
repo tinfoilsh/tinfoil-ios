@@ -903,7 +903,6 @@ class ChatViewModel: ObservableObject {
                 var lastHapticTime = Date.distantPast
                 let minHapticInterval: TimeInterval = 0.1
                 var chunker = StreamingMarkdownChunker()
-                var contentChunks: [ContentChunk] = []
                 var hapticChunkCount = 0
                 var hasStartedResponse = false
                 var hasShownFirstChunk = false
@@ -916,7 +915,6 @@ class ChatViewModel: ObservableObject {
                         currentThoughts = chat.messages[lastIndex].thoughts
                         generationTimeSeconds = chat.messages[lastIndex].generationTimeSeconds
                         isInThinkingMode = chat.messages[lastIndex].isThinking
-                        contentChunks = chat.messages[lastIndex].contentChunks
                     }
                     if hapticEnabled {
                         hapticGenerator = UIImpactFeedbackGenerator(style: .light)
@@ -935,23 +933,13 @@ class ChatViewModel: ObservableObject {
                         responseContent += newContent
                     }
 
-                    let result = chunker.appendToken(newContent)
-                    var hasNewCompletedChunks = false
-
-                    for chunk in result.completed {
-                        hasNewCompletedChunks = true
-                        if let existingIndex = contentChunks.firstIndex(where: { $0.id == chunk.id }) {
-                            contentChunks[existingIndex] = chunk
-                        } else {
-                            contentChunks.append(chunk)
-                        }
-                    }
+                    let hasNewCompletedChunks = chunker.appendToken(newContent)
 
                     if hasNewCompletedChunks && !hasShownFirstChunk {
                         hasShownFirstChunk = true
                     }
 
-                    return hasNewCompletedChunks
+                    return true
                 }
 
                 func triggerHaptic() {
@@ -996,9 +984,9 @@ class ChatViewModel: ObservableObject {
                         chat.messages[lastIndex].thoughts = currentThoughts
                         chat.messages[lastIndex].isThinking = isInThinkingMode
                         chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
-                        chat.messages[lastIndex].contentChunks = contentChunks
+                        chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
 
-                        let shouldRefreshUI = force || self.isAtBottom || hasShownFirstChunk && contentChunks.count == 1
+                        let shouldRefreshUI = force || self.isAtBottom
 
                         if shouldRefreshUI {
                             self.updateChat(chat, throttleForStreaming: true)
@@ -1148,18 +1136,11 @@ class ChatViewModel: ObservableObject {
                         }
 
                         if !chat.messages.isEmpty, let lastIndex = chat.messages.indices.last {
-                            let finalChunks = chunker.finalize()
-                            for chunk in finalChunks {
-                                if let existingIndex = contentChunks.firstIndex(where: { $0.id == chunk.id }) {
-                                    contentChunks[existingIndex] = chunk
-                                } else {
-                                    contentChunks.append(chunk)
-                                }
-                            }
-                            chat.messages[lastIndex].contentChunks = contentChunks
+                            chunker.finalize()
+                            chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
                         }
 
-                        self.updateChat(chat)  // Final update without throttling
+                        self.updateChat(chat)
 
                         // If this was the first exchange and title is still placeholder, generate via LLM
                         if chat.needsGeneratedTitle && chat.messages.count >= 2 {

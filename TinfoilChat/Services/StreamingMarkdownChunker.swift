@@ -34,7 +34,9 @@ struct ContentChunk: Codable, Equatable, Identifiable {
 
 class StreamingMarkdownChunker {
     private var buffer: String = ""
-    private var chunks: [ContentChunk] = []
+    private var completedChunks: [ContentChunk] = []
+    private var currentChunk: ContentChunk? = nil
+
     private var currentChunkType: ContentChunkType = .paragraph
     private var currentChunkContent: String = ""
     private var currentChunkId: String = UUID().uuidString
@@ -46,57 +48,58 @@ class StreamingMarkdownChunker {
     private var inTable: Bool = false
     private var tableContent: String = ""
 
-    func appendToken(_ token: String) -> (completed: [ContentChunk], current: ContentChunk?) {
-        buffer += token
-        let completedChunks = processBuffer()
+    func getAllChunks() -> [ContentChunk] {
+        var result = completedChunks
+        if let current = currentChunk {
+            result.append(current)
+        }
+        return result
+    }
 
-        let currentChunk: ContentChunk? = if !currentChunkContent.isEmpty {
-            ContentChunk(
+    func appendToken(_ token: String) -> Bool {
+        buffer += token
+        let hasNewCompletedChunks = processBuffer()
+
+        if !currentChunkContent.isEmpty {
+            currentChunk = ContentChunk(
                 id: currentChunkId,
                 type: currentChunkType,
                 content: currentChunkContent,
                 isComplete: false
             )
         } else {
-            nil
+            currentChunk = nil
         }
 
-        return (completed: completedChunks, current: currentChunk)
+        return hasNewCompletedChunks
     }
 
-    func finalize() -> [ContentChunk] {
+    func finalize() {
         if !currentChunkContent.isEmpty {
-            finalizeCurrentChunk()
+            completedChunks.append(ContentChunk(
+                id: currentChunkId,
+                type: currentChunkType,
+                content: currentChunkContent,
+                isComplete: true
+            ))
+            currentChunk = nil
+            currentChunkContent = ""
         }
 
         if !buffer.isEmpty {
-            if chunks.isEmpty || chunks.last?.isComplete == true {
-                chunks.append(ContentChunk(
-                    type: .paragraph,
-                    content: buffer,
-                    isComplete: true
-                ))
-            } else if var lastChunk = chunks.last {
-                chunks.removeLast()
-                lastChunk = ContentChunk(
-                    id: lastChunk.id,
-                    type: lastChunk.type,
-                    content: lastChunk.content + buffer,
-                    isComplete: true
-                )
-                chunks.append(lastChunk)
-            }
+            completedChunks.append(ContentChunk(
+                type: .paragraph,
+                content: buffer,
+                isComplete: true
+            ))
             buffer = ""
         }
-
-        let result = chunks
-        chunks = []
-        return result
     }
 
     func reset() {
         buffer = ""
-        chunks = []
+        completedChunks = []
+        currentChunk = nil
         currentChunkType = .paragraph
         currentChunkContent = ""
         currentChunkId = UUID().uuidString
@@ -107,8 +110,8 @@ class StreamingMarkdownChunker {
         tableContent = ""
     }
 
-    private func processBuffer() -> [ContentChunk] {
-        var newChunks: [ContentChunk] = []
+    private func processBuffer() -> Bool {
+        var hasNewCompletedChunks = false
 
         while !buffer.isEmpty {
             if inCodeBlock {
@@ -116,8 +119,13 @@ class StreamingMarkdownChunker {
                     let beforeClosing = String(buffer[..<closingRange.lowerBound])
                     currentChunkContent += beforeClosing + "```"
 
-                    finalizeCurrentChunk()
-                    newChunks.append(chunks.removeLast())
+                    completedChunks.append(ContentChunk(
+                        id: currentChunkId,
+                        type: currentChunkType,
+                        content: currentChunkContent,
+                        isComplete: true
+                    ))
+                    hasNewCompletedChunks = true
 
                     inCodeBlock = false
                     codeBlockLanguage = nil
@@ -130,16 +138,6 @@ class StreamingMarkdownChunker {
                 } else {
                     currentChunkContent += buffer
                     buffer = ""
-
-                    if !chunks.isEmpty && chunks.last?.id == currentChunkId {
-                        chunks.removeLast()
-                    }
-                    chunks.append(ContentChunk(
-                        id: currentChunkId,
-                        type: currentChunkType,
-                        content: currentChunkContent,
-                        isComplete: false
-                    ))
                     break
                 }
             } else if inTable {
@@ -147,8 +145,13 @@ class StreamingMarkdownChunker {
                     let tableRows = String(buffer[..<doubleNewlineRange.lowerBound])
                     currentChunkContent += tableRows
 
-                    finalizeCurrentChunk()
-                    newChunks.append(chunks.removeLast())
+                    completedChunks.append(ContentChunk(
+                        id: currentChunkId,
+                        type: currentChunkType,
+                        content: currentChunkContent,
+                        isComplete: true
+                    ))
+                    hasNewCompletedChunks = true
 
                     inTable = false
                     tableContent = ""
@@ -168,8 +171,13 @@ class StreamingMarkdownChunker {
                     buffer = lines.last ?? ""
 
                     if let lastLine = completedLines.last, !lastLine.contains("|") {
-                        finalizeCurrentChunk()
-                        newChunks.append(chunks.removeLast())
+                        completedChunks.append(ContentChunk(
+                            id: currentChunkId,
+                            type: currentChunkType,
+                            content: currentChunkContent,
+                            isComplete: true
+                        ))
+                        hasNewCompletedChunks = true
 
                         inTable = false
                         tableContent = ""
@@ -177,16 +185,6 @@ class StreamingMarkdownChunker {
                         currentChunkType = .paragraph
                         currentChunkContent = lastLine + "\n"
                         currentChunkId = UUID().uuidString
-                    } else {
-                        if !chunks.isEmpty && chunks.last?.id == currentChunkId {
-                            chunks.removeLast()
-                        }
-                        chunks.append(ContentChunk(
-                            id: currentChunkId,
-                            type: currentChunkType,
-                            content: currentChunkContent,
-                            isComplete: false
-                        ))
                     }
                 } else {
                     break
@@ -194,8 +192,13 @@ class StreamingMarkdownChunker {
             } else {
                 if buffer.hasPrefix("```") {
                     if !currentChunkContent.isEmpty {
-                        finalizeCurrentChunk()
-                        newChunks.append(chunks.removeLast())
+                        completedChunks.append(ContentChunk(
+                            id: currentChunkId,
+                            type: currentChunkType,
+                            content: currentChunkContent,
+                            isComplete: true
+                        ))
+                        hasNewCompletedChunks = true
                     }
 
                     if let newlineRange = buffer.range(of: "\n") {
@@ -221,8 +224,13 @@ class StreamingMarkdownChunker {
                     }
                 } else if buffer.hasPrefix("|") && !inTable {
                     if !currentChunkContent.isEmpty {
-                        finalizeCurrentChunk()
-                        newChunks.append(chunks.removeLast())
+                        completedChunks.append(ContentChunk(
+                            id: currentChunkId,
+                            type: currentChunkType,
+                            content: currentChunkContent,
+                            isComplete: true
+                        ))
+                        hasNewCompletedChunks = true
                     }
 
                     currentChunkType = .table
@@ -234,8 +242,13 @@ class StreamingMarkdownChunker {
                     let paragraph = String(buffer[..<doubleNewlineRange.lowerBound])
                     currentChunkContent += paragraph
 
-                    finalizeCurrentChunk()
-                    newChunks.append(chunks.removeLast())
+                    completedChunks.append(ContentChunk(
+                        id: currentChunkId,
+                        type: currentChunkType,
+                        content: currentChunkContent,
+                        isComplete: true
+                    ))
+                    hasNewCompletedChunks = true
 
                     buffer = String(buffer[doubleNewlineRange.upperBound...])
 
@@ -245,32 +258,11 @@ class StreamingMarkdownChunker {
                 } else {
                     currentChunkContent += buffer
                     buffer = ""
-
-                    if !chunks.isEmpty && chunks.last?.id == currentChunkId {
-                        chunks.removeLast()
-                    }
-                    chunks.append(ContentChunk(
-                        id: currentChunkId,
-                        type: currentChunkType,
-                        content: currentChunkContent,
-                        isComplete: false
-                    ))
                     break
                 }
             }
         }
 
-        return newChunks
-    }
-
-    private func finalizeCurrentChunk() {
-        if !currentChunkContent.isEmpty {
-            chunks.append(ContentChunk(
-                id: currentChunkId,
-                type: currentChunkType,
-                content: currentChunkContent,
-                isComplete: true
-            ))
-        }
+        return hasNewCompletedChunks
     }
 }

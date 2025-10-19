@@ -64,14 +64,8 @@ struct MessageView: View {
                         
                                 if !message.content.isEmpty {
                             if !message.contentChunks.isEmpty {
-                                ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode)
+                                ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-
-                                if isLoading && isLastMessage {
-                                    LoadingDotsView(isDarkMode: isDarkMode)
-                                        .padding(.top, 4)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
                             } else {
                                 LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
                                     .equatable()
@@ -122,16 +116,8 @@ struct MessageView: View {
                     } else if message.role == .user {
                         AdaptiveMarkdownText(content: message.content, isDarkMode: isDarkMode)
                     } else if !message.contentChunks.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            if isLoading && isLastMessage {
-                                LoadingDotsView(isDarkMode: isDarkMode)
-                                    .padding(.top, 4)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
+                        ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
                             .equatable()
@@ -822,11 +808,12 @@ extension CodeBlockConfiguration: @retroactive Equatable {
 struct ChunkedContentView: View {
     let chunks: [ContentChunk]
     let isDarkMode: Bool
+    let isStreaming: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(chunks) { chunk in
-                ChunkView(chunk: chunk, isDarkMode: isDarkMode)
+                ChunkView(chunk: chunk, isDarkMode: isDarkMode, isStreaming: isStreaming)
             }
         }
         .textSelection(.enabled)
@@ -836,20 +823,32 @@ struct ChunkedContentView: View {
 struct ChunkView: View, Equatable {
     let chunk: ContentChunk
     let isDarkMode: Bool
+    let isStreaming: Bool
 
     static func == (lhs: ChunkView, rhs: ChunkView) -> Bool {
         if lhs.chunk.isComplete && rhs.chunk.isComplete {
-            return lhs.chunk.id == rhs.chunk.id && lhs.isDarkMode == rhs.isDarkMode
+            return lhs.chunk.id == rhs.chunk.id && lhs.isDarkMode == rhs.isDarkMode && lhs.isStreaming == rhs.isStreaming
         }
         return lhs.chunk.id == rhs.chunk.id &&
                lhs.chunk.isComplete == rhs.chunk.isComplete &&
                lhs.chunk.content == rhs.chunk.content &&
-               lhs.isDarkMode == rhs.isDarkMode
+               lhs.isDarkMode == rhs.isDarkMode &&
+               lhs.isStreaming == rhs.isStreaming
     }
 
     var body: some View {
-        LaTeXMarkdownView(content: chunk.content, isDarkMode: isDarkMode)
-            .id(chunk.id)
+        if !chunk.isComplete && isStreaming {
+            Text(chunk.content)
+                .font(.system(size: 15))
+                .foregroundColor(isDarkMode ? .white.opacity(0.9) : .black.opacity(0.9))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+                .id(chunk.id)
+        } else {
+            LaTeXMarkdownView(content: chunk.content, isDarkMode: isDarkMode)
+                .equatable()
+                .id(chunk.id)
+        }
     }
 }
 
