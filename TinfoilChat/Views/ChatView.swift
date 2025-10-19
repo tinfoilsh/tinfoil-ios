@@ -495,10 +495,10 @@ struct ChatScrollView: View {
                         }
                     }
 
-                    // Bottom anchor point placed outside the VStack so it always exists
                     Color.clear
-                        .frame(height: 1)
+                        .frame(height: 20)
                         .id("bottom")
+                        .padding(.bottom, 8)
                         .background(
                             GeometryReader { geometry -> Color in
                                 let isCurrentlyAtBottom = isViewFullyVisible(geometry)
@@ -596,11 +596,10 @@ struct ChatScrollView: View {
                                 Button(action: {
                                     cancelScrollSettlingWork()
                                     userHasScrolled = false
-                                    let targetId: AnyHashable = messages.last?.id ?? "bottom"
-                                    proxy.scrollTo(targetId, anchor: .bottom)
+                                    proxy.scrollTo("bottom", anchor: .bottom)
                                     DispatchQueue.main.async {
                                         withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
-                                            proxy.scrollTo(targetId, anchor: .bottom)
+                                            proxy.scrollTo("bottom", anchor: .bottom)
                                         }
                                         isAtBottom = true
                                         viewModel.isScrollInteractionActive = false
@@ -616,11 +615,10 @@ struct ChatScrollView: View {
                                 Button(action: {
                                     cancelScrollSettlingWork()
                                     userHasScrolled = false
-                                    let targetId: AnyHashable = messages.last?.id ?? "bottom"
-                                    proxy.scrollTo(targetId, anchor: .bottom)
+                                    proxy.scrollTo("bottom", anchor: .bottom)
                                     DispatchQueue.main.async {
                                         withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
-                                            proxy.scrollTo(targetId, anchor: .bottom)
+                                            proxy.scrollTo("bottom", anchor: .bottom)
                                         }
                                         isAtBottom = true
                                         viewModel.isScrollInteractionActive = false
@@ -722,15 +720,10 @@ struct ChatScrollView: View {
 
     private func requestJumpToBottom(animated: Bool) {
         guard let proxy = scrollViewProxy else { return }
-        let bottomAnchor: AnyHashable = "bottom"
-        let lastMessageId = messages.last?.id
         cancelScrollSettlingWork()
 
         let performScroll = {
-            proxy.scrollTo(bottomAnchor, anchor: .bottom)
-            if let lastMessageId {
-                proxy.scrollTo(lastMessageId, anchor: .bottom)
-            }
+            proxy.scrollTo("bottom", anchor: .bottom)
         }
 
         DispatchQueue.main.async {
