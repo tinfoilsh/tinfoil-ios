@@ -922,89 +922,35 @@ class ChatViewModel: ObservableObject {
                     }
                 }
 
-                func updateCurrentThoughts() {
-                    currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                }
+                for try await chunk in stream {
+                    if Task.isCancelled { break }
 
-                func appendToResponse(_ newContent: String) -> Bool {
-                    if responseContent.isEmpty {
-                        responseContent = newContent
-                    } else {
-                        responseContent += newContent
-                    }
-
-                    let hasNewCompletedChunks = chunker.appendToken(newContent)
-
-                    if hasNewCompletedChunks && !hasShownFirstChunk {
-                        hasShownFirstChunk = true
-                    }
-
-                    return true
-                }
-
-                func triggerHaptic() {
-                    guard hapticEnabled, let generator = hapticGenerator else { return }
-
-                    if isInThinkingMode {
-                        if hapticChunkCount < 5 {
-                            let now = Date()
-                            if now.timeIntervalSince(lastHapticTime) >= minHapticInterval {
-                                generator.impactOccurred(intensity: 0.5)
-                                lastHapticTime = now
-                                hapticChunkCount += 1
+                    // Inline haptic feedback
+                    if hapticEnabled, let generator = hapticGenerator {
+                        if isInThinkingMode {
+                            if hapticChunkCount < 5 {
+                                let now = Date()
+                                if now.timeIntervalSince(lastHapticTime) >= minHapticInterval {
+                                    generator.impactOccurred(intensity: 0.5)
+                                    lastHapticTime = now
+                                    hapticChunkCount += 1
+                                }
                             }
-                        }
-                    } else {
-                        if !hasStartedResponse {
-                            hasStartedResponse = true
-                            hapticChunkCount = 0
-                        }
-
-                        if hapticChunkCount < 5 {
-                            let now = Date()
-                            if now.timeIntervalSince(lastHapticTime) >= minHapticInterval {
-                                generator.impactOccurred(intensity: 0.5)
-                                lastHapticTime = now
-                                hapticChunkCount += 1
-                            }
-                        }
-                    }
-                }
-
-                func updateUI(force: Bool = false) async {
-                    await MainActor.run {
-                        guard self.currentChat?.id == streamChatId else { return }
-                        guard var chat = self.currentChat,
-                              !chat.messages.isEmpty,
-                              let lastIndex = chat.messages.indices.last else {
-                            return
-                        }
-
-                        chat.messages[lastIndex].content = responseContent
-                        chat.messages[lastIndex].thoughts = currentThoughts
-                        chat.messages[lastIndex].isThinking = isInThinkingMode
-                        chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
-                        chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
-
-                        let shouldRefreshUI = force || self.isAtBottom
-
-                        if shouldRefreshUI {
-                            self.updateChat(chat, throttleForStreaming: true)
                         } else {
-                            if let index = self.chats.firstIndex(where: { $0.id == chat.id }) {
-                                self.chats[index] = chat
-                                if self.currentChat?.id == chat.id {
-                                    self.currentChat = chat
+                            if !hasStartedResponse {
+                                hasStartedResponse = true
+                                hapticChunkCount = 0
+                            }
+                            if hapticChunkCount < 5 {
+                                let now = Date()
+                                if now.timeIntervalSince(lastHapticTime) >= minHapticInterval {
+                                    generator.impactOccurred(intensity: 0.5)
+                                    lastHapticTime = now
+                                    hapticChunkCount += 1
                                 }
                             }
                         }
                     }
-                }
-
-                for try await chunk in stream {
-                    if Task.isCancelled { break }
-
-                    triggerHaptic()
 
                     let content = chunk.choices.first?.delta.content ?? ""
                     let hasReasoningContent = chunk.choices.first?.delta.reasoning != nil
@@ -1017,12 +963,12 @@ class ChatViewModel: ObservableObject {
                         isFirstChunk = false
                         thinkStartTime = Date()
                         thoughtsBuffer = reasoningContent
-                        updateCurrentThoughts()
+                        currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                         didMutateState = true
                     } else if isUsingReasoningFormat {
                         if !reasoningContent.isEmpty {
                             thoughtsBuffer += reasoningContent
-                            updateCurrentThoughts()
+                            currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                             isInThinkingMode = true
                             didMutateState = true
                         }
@@ -1033,13 +979,31 @@ class ChatViewModel: ObservableObject {
                             }
                             isInThinkingMode = false
                             thinkStartTime = nil
-                            updateCurrentThoughts()
-                            let hasNewChunks = appendToResponse(content)
-                            didMutateState = hasNewChunks
+                            currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                            // Inline appendToResponse
+                            if responseContent.isEmpty {
+                                responseContent = content
+                            } else {
+                                responseContent += content
+                            }
+                            let hasNewChunks = chunker.appendToken(content)
+                            if hasNewChunks && !hasShownFirstChunk {
+                                hasShownFirstChunk = true
+                            }
+                            didMutateState = true
                         } else if !content.isEmpty {
-                            let hasNewChunks = appendToResponse(content)
+                            // Inline appendToResponse
+                            if responseContent.isEmpty {
+                                responseContent = content
+                            } else {
+                                responseContent += content
+                            }
+                            let hasNewChunks = chunker.appendToken(content)
+                            if hasNewChunks && !hasShownFirstChunk {
+                                hasShownFirstChunk = true
+                            }
                             isInThinkingMode = false
-                            didMutateState = hasNewChunks
+                            didMutateState = true
                         }
                     } else if !isUsingReasoningFormat && !content.isEmpty {
                         if isFirstChunk {
@@ -1056,22 +1020,40 @@ class ChatViewModel: ObservableObject {
                                     thinkStartTime = Date()
                                     let afterThink = String(processContent[thinkRange.upperBound...])
                                     thoughtsBuffer = afterThink
-                                    updateCurrentThoughts()
+                                    currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                                     didMutateState = true
                                 } else {
-                                    let hasNewChunks = appendToResponse(processContent)
-                                    didMutateState = hasNewChunks
+                                    // Inline appendToResponse
+                                    if responseContent.isEmpty {
+                                        responseContent = processContent
+                                    } else {
+                                        responseContent += processContent
+                                    }
+                                    let hasNewChunks = chunker.appendToken(processContent)
+                                    if hasNewChunks && !hasShownFirstChunk {
+                                        hasShownFirstChunk = true
+                                    }
+                                    didMutateState = true
                                 }
                             }
                         } else if hasThinkTag {
                             if let endRange = content.range(of: "</think>") {
                                 let beforeEnd = String(content[..<endRange.lowerBound])
                                 thoughtsBuffer += beforeEnd
-                                updateCurrentThoughts()
+                                currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                                 isInThinkingMode = false
 
                                 let afterEnd = String(content[endRange.upperBound...])
-                                let hasNewChunks = appendToResponse(afterEnd)
+                                // Inline appendToResponse
+                                if responseContent.isEmpty {
+                                    responseContent = afterEnd
+                                } else {
+                                    responseContent += afterEnd
+                                }
+                                let hasNewChunks = chunker.appendToken(afterEnd)
+                                if hasNewChunks && !hasShownFirstChunk {
+                                    hasShownFirstChunk = true
+                                }
 
                                 if let startTime = thinkStartTime {
                                     generationTimeSeconds = Date().timeIntervalSince(startTime)
@@ -1083,26 +1065,57 @@ class ChatViewModel: ObservableObject {
                                 didMutateState = hasNewChunks || !afterEnd.isEmpty
                             } else {
                                 thoughtsBuffer += content
-                                updateCurrentThoughts()
+                                currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                                 isInThinkingMode = true
                                 didMutateState = true
                             }
                         } else {
-                            let hasNewChunks = appendToResponse(content)
-                            didMutateState = hasNewChunks
+                            // Inline appendToResponse
+                            if responseContent.isEmpty {
+                                responseContent = content
+                            } else {
+                                responseContent += content
+                            }
+                            let hasNewChunks = chunker.appendToken(content)
+                            if hasNewChunks && !hasShownFirstChunk {
+                                hasShownFirstChunk = true
+                            }
+                            didMutateState = true
                         }
                     }
 
                     if didMutateState {
-                        await updateUI()
+                        // Inline updateUI - but only update contentChunks if they've actually changed
+                        let currentChunks = chunker.getAllChunks()
+
+                        await MainActor.run { [weak self] in
+                            guard let self = self else { return }
+                            guard self.currentChat?.id == streamChatId else { return }
+                            guard var chat = self.currentChat,
+                                  !chat.messages.isEmpty,
+                                  let lastIndex = chat.messages.indices.last else {
+                                return
+                            }
+
+                            chat.messages[lastIndex].content = responseContent
+                            chat.messages[lastIndex].thoughts = currentThoughts
+                            chat.messages[lastIndex].isThinking = isInThinkingMode
+                            chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
+
+                            if chat.messages[lastIndex].contentChunks != currentChunks {
+                                chat.messages[lastIndex].contentChunks = currentChunks
+                            }
+
+                            self.updateChat(chat, throttleForStreaming: true)
+                        }
                     }
                 }
 
                 if isInThinkingMode && !thoughtsBuffer.isEmpty {
                     if isUsingReasoningFormat {
-                        updateCurrentThoughts()
+                        currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                     } else {
-                        updateCurrentThoughts()
+                        currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                         if responseContent.isEmpty {
                             responseContent = thoughtsBuffer
                             currentThoughts = nil
@@ -1112,12 +1125,60 @@ class ChatViewModel: ObservableObject {
                         generationTimeSeconds = Date().timeIntervalSince(startTime)
                     }
                     isInThinkingMode = false
-                    await updateUI(force: true)
+                    // Inline updateUI(force: true)
+                    let currentChunks = chunker.getAllChunks()
+
+                    await MainActor.run { [weak self] in
+                        guard let self = self else { return }
+                        guard self.currentChat?.id == streamChatId else { return }
+                        guard var chat = self.currentChat,
+                              !chat.messages.isEmpty,
+                              let lastIndex = chat.messages.indices.last else {
+                            return
+                        }
+                        chat.messages[lastIndex].content = responseContent
+                        chat.messages[lastIndex].thoughts = currentThoughts
+                        chat.messages[lastIndex].isThinking = isInThinkingMode
+                        chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
+
+                        if chat.messages[lastIndex].contentChunks != currentChunks {
+                            chat.messages[lastIndex].contentChunks = currentChunks
+                        }
+
+                        self.updateChat(chat, throttleForStreaming: true)
+                    }
                 } else if isFirstChunk && !initialContentBuffer.isEmpty {
-                    _ = appendToResponse(initialContentBuffer)
+                    // Inline appendToResponse
+                    if responseContent.isEmpty {
+                        responseContent = initialContentBuffer
+                    } else {
+                        responseContent += initialContentBuffer
+                    }
+                    _ = chunker.appendToken(initialContentBuffer)
                     isInThinkingMode = false
                     currentThoughts = nil
-                    await updateUI(force: true)
+                    // Inline updateUI(force: true)
+                    let currentChunks = chunker.getAllChunks()
+
+                    await MainActor.run { [weak self] in
+                        guard let self = self else { return }
+                        guard self.currentChat?.id == streamChatId else { return }
+                        guard var chat = self.currentChat,
+                              !chat.messages.isEmpty,
+                              let lastIndex = chat.messages.indices.last else {
+                            return
+                        }
+                        chat.messages[lastIndex].content = responseContent
+                        chat.messages[lastIndex].thoughts = currentThoughts
+                        chat.messages[lastIndex].isThinking = isInThinkingMode
+                        chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
+
+                        if chat.messages[lastIndex].contentChunks != currentChunks {
+                            chat.messages[lastIndex].contentChunks = currentChunks
+                        }
+
+                        self.updateChat(chat, throttleForStreaming: true)
+                    }
                 }
 
                 await MainActor.run {
@@ -1729,6 +1790,7 @@ class ChatViewModel: ObservableObject {
             // Update currentChat directly ONLY IF it's the one being updated
             if currentChat?.id == chat.id {
                 currentChat = updatedChat
+                objectWillChange.send()
             }
             
             // During streaming, batch saves to reduce disk I/O
