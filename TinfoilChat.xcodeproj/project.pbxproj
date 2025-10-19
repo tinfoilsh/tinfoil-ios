@@ -14,6 +14,7 @@
 		999769632E295C1A00A570DC /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 999769622E295C1A00A570DC /* RevenueCat */; };
 		999769652E295C1A00A570DC /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 999769642E295C1A00A570DC /* RevenueCatUI */; };
 		99976A572E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit in Resources */ = {isa = PBXBuildFile; fileRef = 99976A562E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit */; };
+		D4FD450D5DF249E2A37CA9CD /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 6E93C3925EE14CD689429CE8 /* Sentry */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -52,6 +53,7 @@
 				999769652E295C1A00A570DC /* RevenueCatUI in Frameworks */,
 				999769632E295C1A00A570DC /* RevenueCat in Frameworks */,
 				9926F7B32DBD497A002E4B00 /* MarkdownUI in Frameworks */,
+				D4FD450D5DF249E2A37CA9CD /* Sentry in Frameworks */,
 				998397652E6657ED00A46274 /* SwiftMath in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -86,6 +88,7 @@
 				9909E5BA2DBD460C0040357B /* Sources */,
 				9909E5BB2DBD460C0040357B /* Frameworks */,
 				9909E5BC2DBD460C0040357B /* Resources */,
+				554C569A850F47BEA789F729 /* Upload Debug Symbols to Sentry */,
 			);
 			buildRules = (
 			);
@@ -98,6 +101,7 @@
 			packageProductDependencies = (
 				9926F7B22DBD497A002E4B00 /* MarkdownUI */,
 				99095BBA2DC2BC1E009C8F44 /* Clerk */,
+				6E93C3925EE14CD689429CE8 /* Sentry */,
 				999769622E295C1A00A570DC /* RevenueCat */,
 				999769642E295C1A00A570DC /* RevenueCatUI */,
 				998397642E6657ED00A46274 /* SwiftMath */,
@@ -134,6 +138,7 @@
 			packageReferences = (
 				9926F7B12DBD497A002E4B00 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 				99095BB92DC2BC1E009C8F44 /* XCRemoteSwiftPackageReference "clerk-ios" */,
+				265076DEC67642B78D44265D /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				999769612E295C1A00A570DC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 				998397632E6657ED00A46274 /* XCRemoteSwiftPackageReference "SwiftMath" */,
 				996C8D6C2E83870900C12826 /* XCRemoteSwiftPackageReference "tinfoil-swift" */,
@@ -158,6 +163,24 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		554C569A850F47BEA789F729 /* Upload Debug Symbols to Sentry */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${TARGET_NAME}",
+			);
+			name = "Upload Debug Symbols to Sentry";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# This script is responsible for uploading debug symbols and source context for Sentry.\nif which sentry-cli >/dev/null; then\nexport SENTRY_ORG=tinfoil\nexport SENTRY_PROJECT=mobile-ios\nERROR=$(sentry-cli debug-files upload --include-sources \"$DWARF_DSYM_FOLDER_PATH\" 2>&1 >/dev/null)\nif [ ! $? -eq 0 ]; then\necho \"warning: sentry-cli - $ERROR\"\nfi\nelse\necho \"warning: sentry-cli not installed, download from https://github.com/getsentry/sentry-cli/releases\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		9909E5BA2DBD460C0040357B /* Sources */ = {
@@ -401,6 +424,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		265076DEC67642B78D44265D /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/getsentry/sentry-cocoa/";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 8.0.0;
+			};
+		};
 		99095BB92DC2BC1E009C8F44 /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/clerk/clerk-ios";
@@ -444,6 +475,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		6E93C3925EE14CD689429CE8 /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 265076DEC67642B78D44265D /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = Sentry;
+		};
 		99095BBA2DC2BC1E009C8F44 /* Clerk */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 99095BB92DC2BC1E009C8F44 /* XCRemoteSwiftPackageReference "clerk-ios" */;

@@ -7,7 +7,9 @@
 //
 
 import SwiftUI
+import Sentry
 import RevenueCat
+
 import UIKit
 import Clerk
 
@@ -129,7 +131,37 @@ struct TinfoilChatApp: App {
 // MARK: - AppDelegate
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        // Configure RevenueCat
         RevenueCatManager.shared.configure(apiKey: "appl_NsqQinGVxyvuivFgGKjKcIqHlsk")
+        
+        // Configure Sentry
+        SentrySDK.start { options in
+            options.dsn = "https://6f1fb6f77a16359e4d05acd52bbb2b93@o4509288836694016.ingest.us.sentry.io/4509290148069376"
+            options.tracesSampleRate = 1.0
+            options.profilesSampleRate = 1.0
+            // options.debug = true // Commented out for production
+            options.enableAutoSessionTracking = true
+
+            // Adds IP for users.
+            // For more information, visit: https://docs.sentry.io/platforms/apple/data-management/data-collected/
+            options.sendDefaultPii = true
+
+            // Configure profiling. Visit https://docs.sentry.io/platforms/apple/profiling/ to learn more.
+            options.configureProfiling = {
+                $0.sessionSampleRate = 1.0 // We recommend adjusting this value in production.
+                $0.lifecycle = .trace
+            }
+
+            // Uncomment the following lines to add more data to your events
+            // options.attachScreenshot = true // This adds a screenshot to the error events
+            // options.attachViewHierarchy = true // This adds the view hierarchy to the error events
+        }
+        // Remove the next line after confirming that your Sentry integration is working.
+        SentrySDK.capture(message: "This app uses Sentry! :)")
+
+        // Navigation bar appearance will be configured per-view to support light/dark mode
+        // Individual views (ChatView, SettingsView, etc.) handle their own appearance
+        
         return true
     }
 
