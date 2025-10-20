@@ -397,8 +397,7 @@ struct ChatScrollView: View {
     @Binding var messageText: String
     
     // Scroll management
-    @State private var scrollPosition = ScrollPosition()
-    @State private var scrolledID: String?
+    @State private var scrollViewProxy: ScrollViewProxy?
     @State private var userHasScrolled = false
     @State private var isAtBottom = false
 
@@ -422,215 +421,223 @@ struct ChatScrollView: View {
 
     @State private var scrollEndWorkItem: DispatchWorkItem?
     @State private var lastObservedScrollOffset: CGFloat = 0
-
+    
     // MARK: - Body
-
+    
     var body: some View {
         VStack(spacing: 0) {
-            messagesScrollView
-            messageInputSection
-        }
-        .onAppear {
-            setupKeyboardObservers()
-        }
-        .onDisappear {
-            removeKeyboardObservers()
-        }
-    }
-
-    // MARK: - Subviews
-
-    private var scrollViewContent: some View {
-        ScrollView {
-            GeometryReader { geo -> Color in
-                let offset = geo.frame(in: .named(scrollCoordinateSpaceName)).minY
-                DispatchQueue.main.async {
-                    updateScrollActivity(with: offset)
-                }
-                return Color.clear
-            }
-            .frame(height: 0)
-
-            messagesLazyVStack
-                .scrollTargetLayout()
-        }
-    }
-
-    private var messagesLazyVStack: some View {
-        LazyVStack(spacing: 0) {
-            if messages.isEmpty {
-                if let authManager = viewModel.authManager {
-                    WelcomeView(
-                        isDarkMode: isDarkMode,
-                        authManager: authManager,
-                        onRequestSignIn: onRequestSignIn
-                    )
-                    .padding(.vertical, 16)
-                    .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 0)
-                    .frame(maxWidth: 900)
-                    .frame(maxWidth: .infinity)
-                }
-            } else {
-                ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
-                    let actualIndex = index
-
-                    if actualIndex != 0 && actualIndex == archivedMessagesStartIndex {
-                        HStack(spacing: 8) {
-                            Rectangle()
-                                .frame(height: 1)
-                                .foregroundColor(.gray)
-                            Text("archived")
-                                .foregroundColor(.gray)
-                                .font(.system(size: 12))
-                            Rectangle()
-                                .frame(height: 1)
-                                .foregroundColor(.gray)
+            // Messages ScrollView
+            ScrollViewReader { proxy in
+                ScrollView {
+                    GeometryReader { geo -> Color in
+                        let offset = geo.frame(in: .named(scrollCoordinateSpaceName)).minY
+                        DispatchQueue.main.async {
+                            updateScrollActivity(with: offset)
                         }
-                        .padding(.vertical, 16)
-                        .padding(.horizontal, 24)
+                        return Color.clear
+                    }
+                    .frame(height: 0)
+                    LazyVStack(spacing: 0) {
+                        if messages.isEmpty {
+                            if let authManager = viewModel.authManager {
+                                WelcomeView(
+                                    isDarkMode: isDarkMode,
+                                    authManager: authManager,
+                                    onRequestSignIn: onRequestSignIn
+                                )
+                                    .padding(.vertical, 16)
+                                    .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 0)
+                                    .frame(maxWidth: 900)
+                                    .frame(maxWidth: .infinity)
+                            }
+                        } else {
+                            ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+                                let actualIndex = index
+                                
+                                // Check if we should show the archived divider
+                                if actualIndex != 0 && actualIndex == archivedMessagesStartIndex {
+                                    // Divider for archived messages
+                                    HStack(spacing: 8) {
+                                        Rectangle()
+                                            .frame(height: 1)
+                                            .foregroundColor(.gray)
+                                        Text("archived")
+                                            .foregroundColor(.gray)
+                                            .font(.system(size: 12))
+                                        Rectangle()
+                                            .frame(height: 1)
+                                            .foregroundColor(.gray)
+                                    }
+                                    .padding(.vertical, 16)
+                                    .padding(.horizontal, 24)
+                                }
+                                
+                                MessageView(
+                                    message: message,
+                                    isDarkMode: isDarkMode,
+                                    isLastMessage: index == messages.count - 1,
+                                    isLoading: isLoading
+                                )
+                                .id(message.id)
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 8)
+                                .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
+                                    view.frame(maxWidth: 900)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .opacity(actualIndex < archivedMessagesStartIndex ? 0.6 : 1.0)
+                            }
+                            
+                        }
                     }
 
-                    MessageView(
-                        message: message,
-                        isDarkMode: isDarkMode,
-                        isLastMessage: index == messages.count - 1,
-                        isLoading: isLoading
-                    )
-                    .id(message.id)
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 8)
-                    .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
-                        view.frame(maxWidth: 900)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .opacity(actualIndex < archivedMessagesStartIndex ? 0.6 : 1.0)
+                    Color.clear
+                        .frame(height: 20)
+                        .id("bottom")
+                        .padding(.bottom, 8)
+                        .background(
+                            GeometryReader { geometry -> Color in
+                                let isCurrentlyAtBottom = isViewFullyVisible(geometry)
+                                if isAtBottom != isCurrentlyAtBottom {
+                                    DispatchQueue.main.async {
+                                        isAtBottom = isCurrentlyAtBottom
+                                        viewModel.isAtBottom = isCurrentlyAtBottom
+                                        if isCurrentlyAtBottom {
+                                            userHasScrolled = false
+                                            viewModel.isScrollInteractionActive = false
+                                            cancelScrollSettlingWork()
+                                        }
+                                    }
+                                }
+                                return Color.clear
+                            }
+                        )
                 }
-            }
-
-            Color.clear
-                .frame(height: 1)
-                .id("bottom")
-        }
-        .padding(.bottom, 20)
-    }
-
-    private var messagesScrollView: some View {
-        ScrollViewReader { proxy in
-            scrollViewWithModifiers
-        }
-    }
-
-    private var scrollViewWithModifiers: some View {
-        scrollViewWithLifecycle
-            .overlay(alignment: .bottom) {
-                scrollToBottomButton
-            }
-            .background(Color.chatBackground(isDarkMode: isDarkMode))
-    }
-
-    private var scrollViewWithLifecycle: some View {
-        scrollViewWithStateChanges
-            .onAppear {
-                viewModel.isScrollInteractionActive = false
-                cancelScrollSettlingWork()
-                requestJumpToBottom(animated: false)
-            }
-            .onDisappear {
-                cancelScrollSettlingWork()
-                viewModel.isScrollInteractionActive = false
-            }
-            .coordinateSpace(name: scrollCoordinateSpaceName)
-    }
-
-    private var scrollViewWithStateChanges: some View {
-        scrollViewWithGestures
-            .onChange(of: messages) { oldMessages, newMessages in
-                handleMessagesChange(oldMessages: oldMessages, newMessages: newMessages)
-            }
-            .onChange(of: messages.last?.isThinking) { _, isThinking in
-                if isThinking == true && isAtBottom && !userHasScrolled {
-                    requestJumpToBottom(animated: true)
-                }
-            }
-            .onChange(of: viewModel.currentChat?.createdAt) { _, _ in
-                handleChatChange()
-            }
-    }
-
-    private var scrollViewWithGestures: some View {
-        scrollViewBase
-            .simultaneousGesture(scrollDragGesture)
-            .onTapGesture {
-                if isKeyboardVisible {
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                }
-            }
-    }
-
-    private var scrollViewBase: some View {
-        scrollViewContent
-            .scrollPosition($scrollPosition)
-            .scrollPosition(id: $scrolledID, anchor: .bottom)
-            .onChange(of: scrolledID) { _, newID in
-                handleScrollPositionChange(newID)
-            }
-            .id(viewModel.currentChat?.createdAt ?? Date.distantPast)
-            .ignoresSafeArea(.keyboard)
-    }
-
-    private var scrollDragGesture: some Gesture {
-        DragGesture(minimumDistance: 10)
-            .onChanged { value in
-                if abs(value.translation.height) > abs(value.translation.width) {
-                    cancelScrollSettlingWork()
-                    if value.translation.height > 0 && isLoading {
-                        userHasScrolled = true
-                    }
-                    if value.translation.height > 10 && isKeyboardVisible {
+                // Reset scroll state when switching chats
+                .id(viewModel.currentChat?.createdAt ?? Date.distantPast)
+                .ignoresSafeArea(.keyboard)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 10)
+                        .onChanged { value in
+                            if abs(value.translation.height) > abs(value.translation.width) {
+                                cancelScrollSettlingWork()
+                                if value.translation.height > 0 && isLoading {
+                                    userHasScrolled = true
+                                }
+                                if value.translation.height > 10 && isKeyboardVisible {
+                                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                }
+                                if !viewModel.isScrollInteractionActive {
+                                    viewModel.isScrollInteractionActive = true
+                                }
+                                scheduleScrollSettlingCheck()
+                            }
+                        }
+                        .onEnded { _ in
+                            scheduleScrollSettlingCheck()
+                        }
+                )
+                .onTapGesture {
+                    if isKeyboardVisible {
                         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                     }
-                    if !viewModel.isScrollInteractionActive {
-                        viewModel.isScrollInteractionActive = true
-                    }
-                    scheduleScrollSettlingCheck()
                 }
-            }
-            .onEnded { _ in
-                scheduleScrollSettlingCheck()
-            }
-    }
+                .onChange(of: messages) { oldMessages, newMessages in
+                    let previousCount = oldMessages.count
+                    let newCount = newMessages.count
 
-    @ViewBuilder
-    private var scrollToBottomButton: some View {
-        if !isAtBottom && !messages.isEmpty && !isKeyboardVisible {
-            Group {
-                if #available(iOS 26, *) {
-                    Button(action: scrollToBottomAction) {
-                        Image(systemName: "arrow.down")
-                            .font(.system(size: 12, weight: .semibold))
-                            .frame(width: Constants.UI.scrollToBottomButtonSize, height: Constants.UI.scrollToBottomButtonSize)
-                    }
-                    .buttonStyle(.glass)
-                    .clipShape(Circle())
-                } else {
-                    Button(action: scrollToBottomAction) {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.white)
-                            .padding(8)
-                            .background(Color.gray.opacity(0.8))
-                            .clipShape(Circle())
+                    guard newCount >= previousCount else { return }
+
+                    if newCount > previousCount {
+                        let appendedMessages = newMessages.suffix(newCount - previousCount)
+                        let includesUserMessage = appendedMessages.contains { $0.role == .user }
+                        let wasInitialLoad = previousCount == 0
+                        let shouldAutoFollow = includesUserMessage || wasInitialLoad
+
+                        if shouldAutoFollow {
+                            userHasScrolled = false
+                            requestJumpToBottom(animated: false)
+                            viewModel.isScrollInteractionActive = false
+                            cancelScrollSettlingWork()
+                        }
                     }
                 }
-            }
-            .padding(.bottom, 16)
-            .padding(.trailing, 16)
-            .transition(.opacity)
-        }
-    }
+                .onChange(of: messages.last?.isThinking) { _, isThinking in
+                    if isThinking == true && isAtBottom && !userHasScrolled {
+                        requestJumpToBottom(animated: true)
+                    }
+                }
+                .onChange(of: viewModel.currentChat?.createdAt) { _, _ in
+                    userHasScrolled = false
+                    viewModel.isScrollInteractionActive = false
+                    cancelScrollSettlingWork()
+                    requestJumpToBottom(animated: false)
+                }
+                .onAppear {
+                    scrollViewProxy = proxy
+                    viewModel.isScrollInteractionActive = false
+                    cancelScrollSettlingWork()
+                    requestJumpToBottom(animated: false)
+                }
+                .onDisappear {
+                    cancelScrollSettlingWork()
+                    viewModel.isScrollInteractionActive = false
+                }
+                .coordinateSpace(name: scrollCoordinateSpaceName)
 
-    private var messageInputSection: some View {
-        Group {
+                .overlay(alignment: .bottom) {
+                    if !isAtBottom && !messages.isEmpty && !isKeyboardVisible {
+                        Group {
+                            if #available(iOS 26, *) {
+                                Button(action: {
+                                    cancelScrollSettlingWork()
+                                    userHasScrolled = false
+                                    proxy.scrollTo("bottom", anchor: .bottom)
+                                    DispatchQueue.main.async {
+                                        withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
+                                            proxy.scrollTo("bottom", anchor: .bottom)
+                                        }
+                                        isAtBottom = true
+                                        viewModel.isScrollInteractionActive = false
+                                    }
+                                }) {
+                                    Image(systemName: "arrow.down")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .frame(width: Constants.UI.scrollToBottomButtonSize, height: Constants.UI.scrollToBottomButtonSize)
+                                }
+                                .buttonStyle(.glass)
+                                .clipShape(Circle())
+                            } else {
+                                Button(action: {
+                                    cancelScrollSettlingWork()
+                                    userHasScrolled = false
+                                    proxy.scrollTo("bottom", anchor: .bottom)
+                                    DispatchQueue.main.async {
+                                        withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
+                                            proxy.scrollTo("bottom", anchor: .bottom)
+                                        }
+                                        isAtBottom = true
+                                        viewModel.isScrollInteractionActive = false
+                                    }
+                                }) {
+                                    Image(systemName: "arrow.down.circle.fill")
+                                        .font(.system(size: 24))
+                                        .foregroundColor(.white)
+                                        .padding(8)
+                                        .background(Color.gray.opacity(0.8))
+                                        .clipShape(Circle())
+                                }
+                            }
+                        }
+                        .padding(.bottom, 16)
+                        .padding(.trailing, 16)
+                        .transition(.opacity)
+                    }
+                }
+                .background(Color.chatBackground(isDarkMode: isDarkMode))
+            }
+            
+            // Message input view
             if UIDevice.current.userInterfaceIdiom == .phone {
                 if #available(iOS 26, *) {
                     MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
@@ -668,59 +675,14 @@ struct ChatScrollView: View {
                     )
                 }
             }
+            
         }
-    }
-
-    // MARK: - Helper Functions
-
-    private func handleScrollPositionChange(_ newID: String?) {
-        let wasAtBottom = isAtBottom
-        isAtBottom = (newID == "bottom")
-        viewModel.isAtBottom = isAtBottom
-
-        if isAtBottom && !wasAtBottom {
-            userHasScrolled = false
-            viewModel.isScrollInteractionActive = false
-            cancelScrollSettlingWork()
+        .onAppear {
+            setupKeyboardObservers()
         }
-    }
-
-    private func handleMessagesChange(oldMessages: [Message], newMessages: [Message]) {
-        let previousCount = oldMessages.count
-        let newCount = newMessages.count
-
-        guard newCount >= previousCount else { return }
-
-        if newCount > previousCount {
-            let appendedMessages = newMessages.suffix(newCount - previousCount)
-            let includesUserMessage = appendedMessages.contains { $0.role == .user }
-            let wasInitialLoad = previousCount == 0
-            let shouldAutoFollow = includesUserMessage || wasInitialLoad
-
-            if shouldAutoFollow {
-                userHasScrolled = false
-                requestJumpToBottom(animated: false)
-                viewModel.isScrollInteractionActive = false
-                cancelScrollSettlingWork()
-            }
+        .onDisappear {
+            removeKeyboardObservers()
         }
-    }
-
-    private func handleChatChange() {
-        userHasScrolled = false
-        viewModel.isScrollInteractionActive = false
-        cancelScrollSettlingWork()
-        requestJumpToBottom(animated: false)
-    }
-
-    private func scrollToBottomAction() {
-        cancelScrollSettlingWork()
-        userHasScrolled = false
-        withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
-            scrollPosition.scrollTo(edge: .bottom)
-        }
-        isAtBottom = true
-        viewModel.isScrollInteractionActive = false
     }
 
     private func updateScrollActivity(with offset: CGFloat) {
@@ -753,15 +715,24 @@ struct ChatScrollView: View {
     }
 
     private func requestJumpToBottom(animated: Bool) {
+        guard let proxy = scrollViewProxy else { return }
         cancelScrollSettlingWork()
 
-        Task { @MainActor in
+        let performScroll = {
+            proxy.scrollTo("bottom", anchor: .bottom)
+        }
+
+        DispatchQueue.main.async {
             if animated {
                 withAnimation(.easeOut(duration: 0.2)) {
-                    scrollPosition.scrollTo(edge: .bottom)
+                    performScroll()
                 }
             } else {
-                scrollPosition.scrollTo(edge: .bottom)
+                performScroll()
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                performScroll()
             }
 
             userHasScrolled = false
@@ -782,7 +753,7 @@ struct ChatScrollView: View {
                 
                 // Only auto-scroll to bottom when keyboard appears if we're already at the bottom
                 if !userHasScrolled {
-                    scrollPosition.scrollTo(edge: .bottom)
+                    scrollViewProxy?.scrollTo("bottom", anchor: .bottom)
                 }
             }
         }
@@ -798,6 +769,34 @@ struct ChatScrollView: View {
     private func removeKeyboardObservers() {
         NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
+    }
+    
+    // MARK: - Helper Methods
+
+    /// Checks if a view is fully visible in the scroll view
+    private func isViewFullyVisible(_ geometry: GeometryProxy) -> Bool {
+        // Get the key window using the new API for iOS 15+
+        let keyWindow = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }
+        
+        guard let window = keyWindow else { return false }
+        
+        // Convert the frame to global coordinates
+        let globalFrame = geometry.frame(in: .global)
+        
+        // Get safe area insets
+        let safeAreaInsets = window.safeAreaInsets
+        
+        // Calculate visible screen height excluding keyboard and input view
+        // We don't add keyboard height here to avoid creating extra scrollable space
+        let visibleHeight = UIScreen.main.bounds.height - safeAreaInsets.top - safeAreaInsets.bottom
+
+        let slack: CGFloat = 150
+        let isVisible = globalFrame.minY >= -slack && globalFrame.maxY <= (visibleHeight + slack)
+        
+        return isVisible
     }
 }
 
