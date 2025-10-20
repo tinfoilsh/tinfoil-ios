@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		99095BBB2DC2BC1E009C8F44 /* Clerk in Frameworks */ = {isa = PBXBuildFile; productRef = 99095BBA2DC2BC1E009C8F44 /* Clerk */; };
 		9926F7B32DBD497A002E4B00 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 9926F7B22DBD497A002E4B00 /* MarkdownUI */; };
+		9933808C2EA5A7C60073276A /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = 9933808B2EA5A7C60073276A /* Highlightr */; };
 		996C8D6E2E83870900C12826 /* TinfoilAI in Frameworks */ = {isa = PBXBuildFile; productRef = 996C8D6D2E83870900C12826 /* TinfoilAI */; };
 		998397652E6657ED00A46274 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = 998397642E6657ED00A46274 /* SwiftMath */; };
 		999769632E295C1A00A570DC /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 999769622E295C1A00A570DC /* RevenueCat */; };
@@ -52,6 +53,7 @@
 				99095BBB2DC2BC1E009C8F44 /* Clerk in Frameworks */,
 				999769652E295C1A00A570DC /* RevenueCatUI in Frameworks */,
 				999769632E295C1A00A570DC /* RevenueCat in Frameworks */,
+				9933808C2EA5A7C60073276A /* Highlightr in Frameworks */,
 				9926F7B32DBD497A002E4B00 /* MarkdownUI in Frameworks */,
 				D4FD450D5DF249E2A37CA9CD /* Sentry in Frameworks */,
 				998397652E6657ED00A46274 /* SwiftMath in Frameworks */,
@@ -106,6 +108,7 @@
 				999769642E295C1A00A570DC /* RevenueCatUI */,
 				998397642E6657ED00A46274 /* SwiftMath */,
 				996C8D6D2E83870900C12826 /* TinfoilAI */,
+				9933808B2EA5A7C60073276A /* Highlightr */,
 			);
 			productName = TinfoilChat;
 			productReference = 9909E5BE2DBD460C0040357B /* TinfoilChat.app */;
@@ -142,6 +145,7 @@
 				999769612E295C1A00A570DC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 				998397632E6657ED00A46274 /* XCRemoteSwiftPackageReference "SwiftMath" */,
 				996C8D6C2E83870900C12826 /* XCRemoteSwiftPackageReference "tinfoil-swift" */,
+				9933808A2EA5A7C60073276A /* XCRemoteSwiftPackageReference "Highlightr" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9909E5BF2DBD460C0040357B /* Products */;
@@ -448,6 +452,14 @@
 				minimumVersion = 2.4.1;
 			};
 		};
+		9933808A2EA5A7C60073276A /* XCRemoteSwiftPackageReference "Highlightr" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/raspu/Highlightr";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.3.0;
+			};
+		};
 		996C8D6C2E83870900C12826 /* XCRemoteSwiftPackageReference "tinfoil-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tinfoilsh/tinfoil-swift";
@@ -489,6 +501,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 9926F7B12DBD497A002E4B00 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
 			productName = MarkdownUI;
+		};
+		9933808B2EA5A7C60073276A /* Highlightr */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9933808A2EA5A7C60073276A /* XCRemoteSwiftPackageReference "Highlightr" */;
+			productName = Highlightr;
 		};
 		996C8D6D2E83870900C12826 /* TinfoilAI */ = {
 			isa = XCSwiftPackageProductDependency;

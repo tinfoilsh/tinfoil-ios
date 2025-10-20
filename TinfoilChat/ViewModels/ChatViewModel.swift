@@ -24,6 +24,7 @@ class ChatViewModel: ObservableObject {
     /// When set to true, the input field should become first responder (focus keyboard)
     @Published var shouldFocusInput: Bool = false
     @Published var isScrollInteractionActive: Bool = false
+    @Published var isAtBottom: Bool = true
     
     // Verification properties - consolidated to reduce update frequency
     struct VerificationInfo {
@@ -841,53 +842,35 @@ class ChatViewModel: ObservableObject {
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{CURRENT_DATETIME}", with: currentDateTime)
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{TIMEZONE}", with: timezone)
                 
-                // Append rules if they exist
-                let rules = AppConfig.shared.rules
-                if !rules.isEmpty {
-                    // Apply same replacements to rules
-                    var processedRules = rules.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
-                    
-                    // Use the same language that was used for the system prompt
+                // Process rules with same replacements
+                var processedRules = AppConfig.shared.rules
+                if !processedRules.isEmpty {
+                    processedRules = processedRules.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
                     processedRules = processedRules.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
-                    
+
                     if !personalizationXML.isEmpty {
                         processedRules = processedRules.replacingOccurrences(of: "{USER_PREFERENCES}", with: personalizationXML)
                     } else {
                         processedRules = processedRules.replacingOccurrences(of: "{USER_PREFERENCES}", with: "")
                     }
-                    
+
                     processedRules = processedRules.replacingOccurrences(of: "{CURRENT_DATETIME}", with: currentDateTime)
                     processedRules = processedRules.replacingOccurrences(of: "{TIMEZONE}", with: timezone)
-                    
-                    systemPrompt += "\n" + processedRules
                 }
-                
-                // Build messages array inline
-                var messages: [ChatQuery.ChatCompletionMessageParam] = [
-                    .system(.init(content: .textContent(systemPrompt)))
-                ]
-                
-                // Add conversation messages - use ProfileManager's maxPromptMessages if available
+
+                // Use ChatQueryBuilder to create query with model-specific system prompt handling
                 let maxMessages = profileManager.maxPromptMessages > 0 ? profileManager.maxPromptMessages : settingsManager.maxMessages
-                let messagesForContext = Array(self.messages.suffix(maxMessages))
-                for message in messagesForContext {
-                    if message.role == .user {
-                        messages.append(.user(.init(content: .string(message.content))))
-                    } else if !message.content.isEmpty {
-                        messages.append(.assistant(.init(content: .textContent(message.content))))
-                    }
-                }
-                
-                let chatQuery = ChatQuery(
-                    messages: messages,
-                    model: modelId,
-                    stream: true
+                let chatQuery = ChatQueryBuilder.buildQuery(
+                    modelId: modelId,
+                    systemPrompt: systemPrompt,
+                    rules: processedRules,
+                    conversationMessages: self.messages,
+                    maxMessages: maxMessages
                 )
                 
                 // Use the OpenAI client's chatsStream method through TinfoilAI
                 let stream: AsyncThrowingStream<ChatStreamResult, Error> = client.chatsStream(query: chatQuery)
 
-                // Process the stream
                 var thinkStartTime: Date? = nil
                 var hasThinkTag = false
                 var thoughtsBuffer = ""
@@ -902,6 +885,10 @@ class ChatViewModel: ObservableObject {
                 var hapticGenerator: UIImpactFeedbackGenerator?
                 var lastHapticTime = Date.distantPast
                 let minHapticInterval: TimeInterval = 0.1
+                var chunker = StreamingMarkdownChunker()
+                var hapticChunkCount = 0
+                var hasStartedResponse = false
+                var hasShownFirstChunk = false
 
                 await MainActor.run {
                     if let chat = self.currentChat,
@@ -918,44 +905,35 @@ class ChatViewModel: ObservableObject {
                     }
                 }
 
-                func updateCurrentThoughts() {
-                    currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                }
+                for try await chunk in stream {
+                    if Task.isCancelled { break }
 
-                func appendToResponse(_ newContent: String) {
-                    if responseContent.isEmpty {
-                        responseContent = newContent
-                    } else {
-                        responseContent += newContent
-                    }
-                }
-
-                func updateUI() async {
-                    await MainActor.run {
-                        guard self.currentChat?.id == streamChatId else { return }
-                        guard var chat = self.currentChat,
-                              !chat.messages.isEmpty,
-                              let lastIndex = chat.messages.indices.last else {
-                            return
-                        }
-                        chat.messages[lastIndex].content = responseContent
-                        chat.messages[lastIndex].thoughts = currentThoughts
-                        chat.messages[lastIndex].isThinking = isInThinkingMode
-                        chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
-                        self.updateChat(chat, throttleForStreaming: false)
-
-                        if hapticEnabled, let generator = hapticGenerator {
-                            let now = Date()
-                            if now.timeIntervalSince(lastHapticTime) >= minHapticInterval {
-                                generator.impactOccurred(intensity: 0.5)
-                                lastHapticTime = now
+                    // Inline haptic feedback
+                    if hapticEnabled, let generator = hapticGenerator {
+                        if isInThinkingMode {
+                            if hapticChunkCount < 5 {
+                                let now = Date()
+                                if now.timeIntervalSince(lastHapticTime) >= minHapticInterval {
+                                    generator.impactOccurred(intensity: 0.5)
+                                    lastHapticTime = now
+                                    hapticChunkCount += 1
+                                }
+                            }
+                        } else {
+                            if !hasStartedResponse {
+                                hasStartedResponse = true
+                                hapticChunkCount = 0
+                            }
+                            if hapticChunkCount < 5 {
+                                let now = Date()
+                                if now.timeIntervalSince(lastHapticTime) >= minHapticInterval {
+                                    generator.impactOccurred(intensity: 0.5)
+                                    lastHapticTime = now
+                                    hapticChunkCount += 1
+                                }
                             }
                         }
                     }
-                }
-
-                for try await chunk in stream {
-                    if Task.isCancelled { break }
 
                     let content = chunk.choices.first?.delta.content ?? ""
                     let hasReasoningContent = chunk.choices.first?.delta.reasoning != nil
@@ -968,12 +946,12 @@ class ChatViewModel: ObservableObject {
                         isFirstChunk = false
                         thinkStartTime = Date()
                         thoughtsBuffer = reasoningContent
-                        updateCurrentThoughts()
+                        currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                         didMutateState = true
                     } else if isUsingReasoningFormat {
                         if !reasoningContent.isEmpty {
                             thoughtsBuffer += reasoningContent
-                            updateCurrentThoughts()
+                            currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                             isInThinkingMode = true
                             didMutateState = true
                         }
@@ -984,11 +962,29 @@ class ChatViewModel: ObservableObject {
                             }
                             isInThinkingMode = false
                             thinkStartTime = nil
-                            updateCurrentThoughts()
-                            appendToResponse(content)
+                            currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                            // Inline appendToResponse
+                            if responseContent.isEmpty {
+                                responseContent = content
+                            } else {
+                                responseContent += content
+                            }
+                            let hasNewChunks = chunker.appendToken(content)
+                            if hasNewChunks && !hasShownFirstChunk {
+                                hasShownFirstChunk = true
+                            }
                             didMutateState = true
                         } else if !content.isEmpty {
-                            appendToResponse(content)
+                            // Inline appendToResponse
+                            if responseContent.isEmpty {
+                                responseContent = content
+                            } else {
+                                responseContent += content
+                            }
+                            let hasNewChunks = chunker.appendToken(content)
+                            if hasNewChunks && !hasShownFirstChunk {
+                                hasShownFirstChunk = true
+                            }
                             isInThinkingMode = false
                             didMutateState = true
                         }
@@ -1007,10 +1003,19 @@ class ChatViewModel: ObservableObject {
                                     thinkStartTime = Date()
                                     let afterThink = String(processContent[thinkRange.upperBound...])
                                     thoughtsBuffer = afterThink
-                                    updateCurrentThoughts()
+                                    currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                                     didMutateState = true
                                 } else {
-                                    appendToResponse(processContent)
+                                    // Inline appendToResponse
+                                    if responseContent.isEmpty {
+                                        responseContent = processContent
+                                    } else {
+                                        responseContent += processContent
+                                    }
+                                    let hasNewChunks = chunker.appendToken(processContent)
+                                    if hasNewChunks && !hasShownFirstChunk {
+                                        hasShownFirstChunk = true
+                                    }
                                     didMutateState = true
                                 }
                             }
@@ -1018,11 +1023,20 @@ class ChatViewModel: ObservableObject {
                             if let endRange = content.range(of: "</think>") {
                                 let beforeEnd = String(content[..<endRange.lowerBound])
                                 thoughtsBuffer += beforeEnd
-                                updateCurrentThoughts()
+                                currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                                 isInThinkingMode = false
 
                                 let afterEnd = String(content[endRange.upperBound...])
-                                appendToResponse(afterEnd)
+                                // Inline appendToResponse
+                                if responseContent.isEmpty {
+                                    responseContent = afterEnd
+                                } else {
+                                    responseContent += afterEnd
+                                }
+                                let hasNewChunks = chunker.appendToken(afterEnd)
+                                if hasNewChunks && !hasShownFirstChunk {
+                                    hasShownFirstChunk = true
+                                }
 
                                 if let startTime = thinkStartTime {
                                     generationTimeSeconds = Date().timeIntervalSince(startTime)
@@ -1031,29 +1045,60 @@ class ChatViewModel: ObservableObject {
                                 hasThinkTag = false
                                 thinkStartTime = nil
                                 thoughtsBuffer = ""
-                                didMutateState = true
+                                didMutateState = hasNewChunks || !afterEnd.isEmpty
                             } else {
                                 thoughtsBuffer += content
-                                updateCurrentThoughts()
+                                currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                                 isInThinkingMode = true
                                 didMutateState = true
                             }
                         } else {
-                            appendToResponse(content)
+                            // Inline appendToResponse
+                            if responseContent.isEmpty {
+                                responseContent = content
+                            } else {
+                                responseContent += content
+                            }
+                            let hasNewChunks = chunker.appendToken(content)
+                            if hasNewChunks && !hasShownFirstChunk {
+                                hasShownFirstChunk = true
+                            }
                             didMutateState = true
                         }
                     }
 
                     if didMutateState {
-                        await updateUI()
+                        // Inline updateUI - but only update contentChunks if they've actually changed
+                        let currentChunks = chunker.getAllChunks()
+
+                        await MainActor.run { [weak self] in
+                            guard let self = self else { return }
+                            guard self.currentChat?.id == streamChatId else { return }
+                            guard var chat = self.currentChat,
+                                  !chat.messages.isEmpty,
+                                  let lastIndex = chat.messages.indices.last else {
+                                return
+                            }
+
+                            chat.messages[lastIndex].content = responseContent
+                            chat.messages[lastIndex].thoughts = currentThoughts
+                            chat.messages[lastIndex].isThinking = isInThinkingMode
+                            chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
+
+                            if chat.messages[lastIndex].contentChunks != currentChunks {
+                                chat.messages[lastIndex].contentChunks = currentChunks
+                            }
+
+                            self.updateChat(chat, throttleForStreaming: true)
+                        }
                     }
                 }
 
                 if isInThinkingMode && !thoughtsBuffer.isEmpty {
                     if isUsingReasoningFormat {
-                        updateCurrentThoughts()
+                        currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                     } else {
-                        updateCurrentThoughts()
+                        currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                         if responseContent.isEmpty {
                             responseContent = thoughtsBuffer
                             currentThoughts = nil
@@ -1063,23 +1108,68 @@ class ChatViewModel: ObservableObject {
                         generationTimeSeconds = Date().timeIntervalSince(startTime)
                     }
                     isInThinkingMode = false
-                    await updateUI()
+                    // Inline updateUI(force: true)
+                    let currentChunks = chunker.getAllChunks()
+
+                    await MainActor.run { [weak self] in
+                        guard let self = self else { return }
+                        guard self.currentChat?.id == streamChatId else { return }
+                        guard var chat = self.currentChat,
+                              !chat.messages.isEmpty,
+                              let lastIndex = chat.messages.indices.last else {
+                            return
+                        }
+                        chat.messages[lastIndex].content = responseContent
+                        chat.messages[lastIndex].thoughts = currentThoughts
+                        chat.messages[lastIndex].isThinking = isInThinkingMode
+                        chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
+
+                        if chat.messages[lastIndex].contentChunks != currentChunks {
+                            chat.messages[lastIndex].contentChunks = currentChunks
+                        }
+
+                        self.updateChat(chat, throttleForStreaming: true)
+                    }
                 } else if isFirstChunk && !initialContentBuffer.isEmpty {
-                    appendToResponse(initialContentBuffer)
+                    // Inline appendToResponse
+                    if responseContent.isEmpty {
+                        responseContent = initialContentBuffer
+                    } else {
+                        responseContent += initialContentBuffer
+                    }
+                    _ = chunker.appendToken(initialContentBuffer)
                     isInThinkingMode = false
                     currentThoughts = nil
-                    await updateUI()
+                    // Inline updateUI(force: true)
+                    let currentChunks = chunker.getAllChunks()
+
+                    await MainActor.run { [weak self] in
+                        guard let self = self else { return }
+                        guard self.currentChat?.id == streamChatId else { return }
+                        guard var chat = self.currentChat,
+                              !chat.messages.isEmpty,
+                              let lastIndex = chat.messages.indices.last else {
+                            return
+                        }
+                        chat.messages[lastIndex].content = responseContent
+                        chat.messages[lastIndex].thoughts = currentThoughts
+                        chat.messages[lastIndex].isThinking = isInThinkingMode
+                        chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
+
+                        if chat.messages[lastIndex].contentChunks != currentChunks {
+                            chat.messages[lastIndex].contentChunks = currentChunks
+                        }
+
+                        self.updateChat(chat, throttleForStreaming: true)
+                    }
                 }
 
-                // Mark as complete
                 await MainActor.run {
                     self.isLoading = false
 
-                    // Mark the chat as no longer having an active stream
                     if var chat = self.currentChat {
                         chat.hasActiveStream = false
-                        
-                        // Force any pending stream updates to save immediately
+
                         self.streamUpdateTimer?.invalidate()
                         self.streamUpdateTimer = nil
                         if self.pendingStreamUpdate != nil {
@@ -1088,8 +1178,13 @@ class ChatViewModel: ObservableObject {
                                 self.saveChats()
                             }
                         }
-                        
-                        self.updateChat(chat)  // Final update without throttling
+
+                        if !chat.messages.isEmpty, let lastIndex = chat.messages.indices.last {
+                            chunker.finalize()
+                            chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
+                        }
+
+                        self.updateChat(chat)
 
                         // If this was the first exchange and title is still placeholder, generate via LLM
                         if chat.needsGeneratedTitle && chat.messages.count >= 2 {
@@ -1414,7 +1509,7 @@ class ChatViewModel: ObservableObject {
         currentTask?.cancel()
         currentTask = nil
         isLoading = false
-        
+
         // Reset the hasActiveStream property
         if var chat = currentChat {
             chat.hasActiveStream = false
@@ -1422,9 +1517,10 @@ class ChatViewModel: ObservableObject {
             // End streaming tracking for cloud sync
             streamingTracker.endStreaming(chat.id)
         }
-        
+
         self.showVerifierSheet = false
     }
+
     
     /// Shows the verifier sheet with current verification state
     func showVerifier() {
@@ -1677,6 +1773,7 @@ class ChatViewModel: ObservableObject {
             // Update currentChat directly ONLY IF it's the one being updated
             if currentChat?.id == chat.id {
                 currentChat = updatedChat
+                objectWillChange.send()
             }
             
             // During streaming, batch saves to reduce disk I/O
@@ -1822,9 +1919,6 @@ class ChatViewModel: ObservableObject {
             chat.modelType = modelType
             updateChat(chat)
         }
-        
-        // Notify of successful model change with haptic feedback
-        Chat.triggerSuccessFeedback()
     }
     
     // MARK: - Authentication & Model Access
@@ -2158,12 +2252,12 @@ class ChatViewModel: ObservableObject {
                             self.currentChat = newChat
                         }
                     }
-                    
-                    // Select the first chat
-                    if let first = self.chats.first {
+
+                    // Only select the first chat if we don't have a current chat selected
+                    if self.currentChat == nil, let first = self.chats.first {
                         self.currentChat = first
                     }
-                    
+
                     // Mark that we've loaded the initial page
                     self.hasLoadedInitialPage = true
                     self.isPaginationActive = displayableChats.count > 0
@@ -2361,8 +2455,16 @@ class ChatViewModel: ObservableObject {
             if let userId = currentUserId {
                 let loadedChats = Chat.loadFromDefaults(userId: userId)
                 await MainActor.run {
-                    self.chats = loadedChats.sorted { $0.createdAt > $1.createdAt }
-                    self.ensureBlankChatAtTop()
+                    let blankChat = loadedChats.first(where: { $0.isBlankChat })
+                    let nonBlankChats = loadedChats.filter { !$0.isBlankChat }
+                    let sortedNonBlankChats = nonBlankChats.sorted { $0.createdAt > $1.createdAt }
+
+                    if let blankChat = blankChat {
+                        self.chats = [blankChat] + sortedNonBlankChats
+                    } else {
+                        self.chats = sortedNonBlankChats
+                        self.ensureBlankChatAtTop()
+                    }
                 }
             }
         } catch {
@@ -2409,9 +2511,18 @@ class ChatViewModel: ObservableObject {
             }
             
             Chat.saveToDefaults(uniqueChats, userId: userId)
-            
+
             await MainActor.run {
-                self.chats = uniqueChats.sorted { $0.createdAt > $1.createdAt }
+                let blankChat = uniqueChats.first(where: { $0.isBlankChat })
+                let nonBlankChats = uniqueChats.filter { !$0.isBlankChat }
+                let sortedNonBlankChats = nonBlankChats.sorted { $0.createdAt > $1.createdAt }
+
+                if let blankChat = blankChat {
+                    self.chats = [blankChat] + sortedNonBlankChats
+                } else {
+                    self.chats = sortedNonBlankChats
+                    self.ensureBlankChatAtTop()
+                }
             }
         }
     }
@@ -2475,11 +2586,14 @@ class ChatViewModel: ObservableObject {
     @MainActor
     private func updateChatsAfterSync() async {
         guard let userId = currentUserId else { return }
-        
+
         // IMPORTANT: Preserve pagination token before updating
         let savedPaginationToken = self.paginationToken
         let savedIsPaginationActive = self.isPaginationActive
-        
+
+        // IMPORTANT: Preserve the current chat ID so it stays in the array even if beyond first page
+        let currentChatId = self.currentChat?.id
+
         // Load all chats from storage (includes newly synced ones)
         let allChats = Chat.loadFromDefaults(userId: userId)
         
@@ -2523,13 +2637,21 @@ class ChatViewModel: ObservableObject {
         if hasAttemptedLoadMore && currentlyLoadedIds.count > Constants.Pagination.chatsPerPage {
             // User has loaded more pages - preserve all currently loaded synced chats
             let syncedChatsToShow = syncedChats.filter { chat in
-                // Keep if it was already loaded OR if it's in the first page positions
-                currentlyLoadedIds.contains(chat.id) || syncedChats.firstIndex(where: { $0.id == chat.id }) ?? Int.max < Constants.Pagination.chatsPerPage
+                // Keep if it was already loaded OR if it's in the first page positions OR if it's the current chat
+                currentlyLoadedIds.contains(chat.id) ||
+                syncedChats.firstIndex(where: { $0.id == chat.id }) ?? Int.max < Constants.Pagination.chatsPerPage ||
+                (currentChatId != nil && chat.id == currentChatId)
             }
             updatedChats.append(contentsOf: syncedChatsToShow)
         } else {
-            // Only first page loaded - update just the first page
-            updatedChats.append(contentsOf: Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)))
+            // Only first page loaded - include first page AND current chat if it exists
+            var syncedChatsToShow = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage))
+            if let currentChatId = currentChatId,
+               let currentChat = syncedChats.first(where: { $0.id == currentChatId }),
+               !syncedChatsToShow.contains(where: { $0.id == currentChatId }) {
+                syncedChatsToShow.append(currentChat)
+            }
+            updatedChats.append(contentsOf: syncedChatsToShow)
         }
         
         // Remove duplicates based on chat ID
@@ -2541,24 +2663,30 @@ class ChatViewModel: ObservableObject {
             seen.insert(chat.id)
             return true
         }
-        
-        // Update the chats array
-        self.chats = uniqueChats.sorted { $0.createdAt > $1.createdAt }
-        
-        // Update currentChat if it was synced with new messages
-        if let currentChat = self.currentChat,
-           !currentChat.locallyModified,
-           !currentChat.hasActiveStream,
-           let updatedChat = self.chats.first(where: { $0.id == currentChat.id }) {
-            // Check if the chat actually changed (different message count or updated timestamp)
-            if updatedChat.messages.count != currentChat.messages.count ||
-               updatedChat.updatedAt != currentChat.updatedAt {
-                self.currentChat = updatedChat
-            }
+
+        // Separate blank chat from other chats to ensure it's always at position 0
+        // This prevents the blank chat from being affected by createdAt sorting
+        let blankChat = uniqueChats.first(where: { $0.isBlankChat })
+        let nonBlankChats = uniqueChats.filter { !$0.isBlankChat }
+
+        // Sort only non-blank chats by createdAt (newest first)
+        let sortedNonBlankChats = nonBlankChats.sorted { $0.createdAt > $1.createdAt }
+
+        // Build final array with blank chat at position 0, followed by sorted non-blank chats
+        if let blankChat = blankChat {
+            self.chats = [blankChat] + sortedNonBlankChats
+        } else {
+            // No blank chat exists - set array to sorted chats, then create blank chat at position 0
+            self.chats = sortedNonBlankChats
+            self.ensureBlankChatAtTop()
         }
-        
-        // Ensure blank chat at top
-        self.ensureBlankChatAtTop()
+
+        // IMPORTANT: Always update currentChat to point to the instance in the chats array
+        // This ensures currentChat is never stale and always references a chat that's in the array
+        if let currentChatId = currentChatId,
+           let updatedChat = self.chats.first(where: { $0.id == currentChatId }) {
+            self.currentChat = updatedChat
+        }
         
         // Update hasMoreChats conservatively to preserve server-provided pagination
         let displayedSyncedChats = chats.filter { !$0.isBlankChat && !$0.hasTemporaryId }.count
@@ -2617,12 +2745,19 @@ class ChatViewModel: ObservableObject {
                     seen.insert(chat.id)
                     return true
                 }
-                
-                // Update the chats array
-                self.chats = uniqueChats.sorted { $0.createdAt > $1.createdAt }
-                
-                // Ensure blank chat at top
-                self.ensureBlankChatAtTop()
+
+                // Separate blank chat from other chats to ensure it's always at position 0
+                let blankChat = uniqueChats.first(where: { $0.isBlankChat })
+                let nonBlankChats = uniqueChats.filter { !$0.isBlankChat }
+                let sortedNonBlankChats = nonBlankChats.sorted { $0.createdAt > $1.createdAt }
+
+                // Build final array with blank chat at position 0, followed by sorted non-blank chats
+                if let blankChat = blankChat {
+                    self.chats = [blankChat] + sortedNonBlankChats
+                } else {
+                    self.chats = sortedNonBlankChats
+                    self.ensureBlankChatAtTop()
+                }
                 
                 // Update hasMoreChats based on whether there are more chats beyond the first page
                 self.hasMoreChats = syncedChats.count > Constants.Pagination.chatsPerPage
@@ -2632,16 +2767,27 @@ class ChatViewModel: ObservableObject {
             // This happens after initial sync or when pagination hasn't been set up
             if let userId = currentUserId {
                 let allChats = Chat.loadFromDefaults(userId: userId)
-                
-                // Sort by creation date (newest first) 
-                let sortedChats = allChats.sorted { $0.createdAt > $1.createdAt }
-                
-                // Take only first page of chats initially
-                self.chats = Array(sortedChats.prefix(Constants.Pagination.chatsPerPage))
-                self.ensureBlankChatAtTop()
-                
-                // Set up pagination based on whether there are more chats
-                self.hasMoreChats = sortedChats.count > Constants.Pagination.chatsPerPage
+
+                // Separate blank chat from other chats
+                let blankChat = allChats.first(where: { $0.isBlankChat })
+                let nonBlankChats = allChats.filter { !$0.isBlankChat }
+
+                // Sort non-blank chats by creation date (newest first)
+                let sortedNonBlankChats = nonBlankChats.sorted { $0.createdAt > $1.createdAt }
+
+                // Take only first page of non-blank chats initially
+                let firstPageNonBlankChats = Array(sortedNonBlankChats.prefix(Constants.Pagination.chatsPerPage))
+
+                // Build final array with blank chat at position 0, followed by first page
+                if let blankChat = blankChat {
+                    self.chats = [blankChat] + firstPageNonBlankChats
+                } else {
+                    self.chats = firstPageNonBlankChats
+                    self.ensureBlankChatAtTop()
+                }
+
+                // Set up pagination based on whether there are more non-blank chats
+                self.hasMoreChats = nonBlankChats.count > Constants.Pagination.chatsPerPage
                 // Pagination token will be set by initializeCloudSync or setupPaginationForAppRestart
             }
         }
@@ -2840,16 +2986,18 @@ extension ChatViewModel {
 
         let titlePrompt = "You are a conversation title generator. Your job is to generate a title for the following conversation between the USER and the ASSISTANT. Generate a concise, descriptive title (max 15 tokens) for this conversation. Output ONLY the title, nothing else."
 
-        // Build messages
-        let params: [ChatQuery.ChatCompletionMessageParam] = [
-            .system(.init(content: .textContent(titlePrompt))),
-            .user(.init(content: .string("Generate a title for this conversation:\n\n\(snippet)")))
-        ]
+        // Create a single user message for the query (system prompt will be handled by ChatQueryBuilder)
+        let userMessage = Message(
+            role: .user,
+            content: "Generate a title for this conversation:\n\n\(snippet)"
+        )
 
-        let query = ChatQuery(
-            messages: params,
-            model: modelToUse.modelName,
-            stream: true
+        let query = ChatQueryBuilder.buildQuery(
+            modelId: modelToUse.modelName,
+            systemPrompt: titlePrompt,
+            rules: "",
+            conversationMessages: [userMessage],
+            maxMessages: 1
         )
 
         // Collect streamed content

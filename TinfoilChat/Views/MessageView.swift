@@ -24,11 +24,13 @@ struct ThinkingBoxExpansionPreferenceKey: PreferenceKey {
 struct MessageView: View {
     let message: Message
     let isDarkMode: Bool
+    let isLastMessage: Bool
+    let isLoading: Bool
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
     @State private var showCopyFeedback = false
     @State private var cachedParsedContent: (thinkingText: String, remainderText: String, contentHash: Int)? = nil
     @State private var showLongMessageSheet = false
-    
+
     var body: some View {
         HStack {
             if message.role == .user {
@@ -40,8 +42,8 @@ struct MessageView: View {
                 if message.role == .assistant &&
                     message.content.isEmpty &&
                     message.thoughts == nil &&
-                    viewModel.isLoading &&
-                    message.id == viewModel.messages.last?.id {
+                    isLoading &&
+                    isLastMessage {
                     LoadingDotsView(isDarkMode: isDarkMode)
                         .padding(.horizontal)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -55,18 +57,23 @@ struct MessageView: View {
                             thinkingText: message.thoughts ?? "",
                             isDarkMode: isDarkMode,
                             isCollapsible: !message.isThinking,
-                            isStreaming: message.isThinking && viewModel.isLoading && message.id == viewModel.messages.last?.id,
+                            isStreaming: message.isThinking && isLoading && isLastMessage,
                             generationTimeSeconds: message.generationTimeSeconds,
                             messageCollapsed: message.isCollapsed
                         )
                         
-                        // Display regular content if present
-                        if !message.content.isEmpty {
-                            LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .transaction { transaction in
-                                    transaction.animation = nil
-                                }
+                                if !message.content.isEmpty {
+                            if !message.contentChunks.isEmpty {
+                                ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else {
+                                LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
+                                    .equatable()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .transaction { transaction in
+                                        transaction.animation = nil
+                                    }
+                            }
                         }
                     }
                 }
@@ -79,7 +86,7 @@ struct MessageView: View {
                             thinkingText: parsed.thinkingText,
                             isDarkMode: isDarkMode,
                             isCollapsible: message.content.contains("</think>"),
-                            isStreaming: viewModel.isLoading && message.id == viewModel.messages.last?.id,
+                            isStreaming: isLoading && isLastMessage,
                             generationTimeSeconds: message.generationTimeSeconds,
                             messageCollapsed: message.isCollapsed
                         )
@@ -87,6 +94,7 @@ struct MessageView: View {
                         // Remainder: text after </think> if present
                         if !parsed.remainderText.isEmpty {
                             LaTeXMarkdownView(content: parsed.remainderText, isDarkMode: isDarkMode)
+                                .equatable()
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .transaction { transaction in
                                     transaction.animation = nil
@@ -102,23 +110,25 @@ struct MessageView: View {
                     }
                 }
 
-                // Otherwise display the message as before using Markdown rendering
                 else if !message.content.isEmpty {
                     if message.streamError != nil {
-                        // Error message display
                         ErrorMessageView(errorMessage: message.streamError!, isDarkMode: isDarkMode)
                     } else if message.role == .user {
                         AdaptiveMarkdownText(content: message.content, isDarkMode: isDarkMode)
+                    } else if !message.contentChunks.isEmpty {
+                        ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
+                            .equatable()
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 
                 // Add copy button for assistant messages (only when not streaming)
-                if message.role == .assistant && 
+                if message.role == .assistant &&
                    (!message.content.isEmpty || message.thoughts != nil) &&
-                   !(viewModel.isLoading && message.id == viewModel.messages.last?.id) {
+                   !(isLoading && isLastMessage) {
                     HStack {
                         Button(action: copyMessage) {
                             HStack(spacing: 4) {
@@ -417,8 +427,12 @@ private struct MarkdownThemeCache {
         MarkdownUI.Theme.gitHub
             .text {
                 FontFamily(.system(.default))
-                FontSize(.em(1.0))
+                FontSize(15)
                 ForegroundColor(textColor ?? (isDarkMode ? .white : Color.black.opacity(0.8)))
+            }
+            .paragraph { configuration in
+                configuration.label
+                    .markdownMargin(top: 0, bottom: 12)
             }
             .code {
                 FontFamilyVariant(.monospaced)
@@ -795,7 +809,44 @@ extension CodeBlockConfiguration: @retroactive Equatable {
     }
 }
 
-// At the end of the file, add the ErrorMessageView
+struct ChunkedContentView: View {
+    let chunks: [ContentChunk]
+    let isDarkMode: Bool
+    let isStreaming: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(chunks) { chunk in
+                ChunkView(chunk: chunk, isDarkMode: isDarkMode, isStreaming: isStreaming)
+            }
+        }
+        .textSelection(.enabled)
+    }
+}
+
+struct ChunkView: View, Equatable {
+    let chunk: ContentChunk
+    let isDarkMode: Bool
+    let isStreaming: Bool
+
+    static func == (lhs: ChunkView, rhs: ChunkView) -> Bool {
+        if lhs.chunk.isComplete && rhs.chunk.isComplete {
+            return lhs.chunk.id == rhs.chunk.id && lhs.isDarkMode == rhs.isDarkMode && lhs.isStreaming == rhs.isStreaming
+        }
+        return lhs.chunk.id == rhs.chunk.id &&
+               lhs.chunk.isComplete == rhs.chunk.isComplete &&
+               lhs.chunk.content == rhs.chunk.content &&
+               lhs.isDarkMode == rhs.isDarkMode &&
+               lhs.isStreaming == rhs.isStreaming
+    }
+
+    var body: some View {
+        LaTeXMarkdownView(content: chunk.content, isDarkMode: isDarkMode)
+            .equatable()
+            .id(chunk.id)
+    }
+}
+
 struct ErrorMessageView: View {
     let errorMessage: String
     let isDarkMode: Bool

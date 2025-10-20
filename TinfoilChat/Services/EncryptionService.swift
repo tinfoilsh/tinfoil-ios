@@ -45,16 +45,6 @@ class EncryptionService: ObservableObject {
     
     /// Initialize with existing key or generate new one
     func initialize() async throws -> String {
-        // Check if this is a fresh install by looking for a first launch marker
-        let hasLaunchedBefore = UserDefaults.standard.bool(forKey: "hasLaunchedBefore")
-        
-        if !hasLaunchedBefore {
-            // First launch after install - clear any lingering keychain data
-            deleteKeyFromKeychain()
-            deleteKeyHistoryFromKeychain()
-            UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
-        }
-        
         // Check if we have a stored key in Keychain
         if let storedKey = loadKeyFromKeychain() {
             try await setKey(storedKey)
@@ -78,8 +68,6 @@ class EncryptionService: ObservableObject {
         
         // Store the key in Keychain with prefix
         try saveKeyToKeychain(normalizedKey)
-        // Mark that first-launch cleanup already happened so initialize() keeps this key
-        UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
         try updateKeyHistory(withNewKey: normalizedKey, previousKey: previousKey)
     }
     
@@ -265,7 +253,7 @@ class EncryptionService: ObservableObject {
             kSecAttrService as String: keychainService,
             kSecAttrAccount as String: keychainHistoryKey,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
 
         // Delete any existing item before saving
@@ -340,7 +328,7 @@ class EncryptionService: ObservableObject {
             kSecAttrService as String: keychainService,
             kSecAttrAccount as String: keychainKey,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
         
         // Delete any existing item

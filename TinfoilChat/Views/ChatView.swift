@@ -474,7 +474,9 @@ struct ChatScrollView: View {
                                 
                                 MessageView(
                                     message: message,
-                                    isDarkMode: isDarkMode
+                                    isDarkMode: isDarkMode,
+                                    isLastMessage: index == messages.count - 1,
+                                    isLoading: isLoading
                                 )
                                 .id(message.id)
                                 .padding(.vertical, 8)
@@ -489,16 +491,17 @@ struct ChatScrollView: View {
                         }
                     }
 
-                    // Bottom anchor point placed outside the VStack so it always exists
                     Color.clear
-                        .frame(height: 1)
+                        .frame(height: 20)
                         .id("bottom")
+                        .padding(.bottom, 8)
                         .background(
                             GeometryReader { geometry -> Color in
                                 let isCurrentlyAtBottom = isViewFullyVisible(geometry)
                                 if isAtBottom != isCurrentlyAtBottom {
                                     DispatchQueue.main.async {
                                         isAtBottom = isCurrentlyAtBottom
+                                        viewModel.isAtBottom = isCurrentlyAtBottom
                                         if isCurrentlyAtBottom {
                                             userHasScrolled = false
                                             viewModel.isScrollInteractionActive = false
@@ -514,20 +517,21 @@ struct ChatScrollView: View {
                 .id(viewModel.currentChat?.createdAt ?? Date.distantPast)
                 .ignoresSafeArea(.keyboard)
                 .simultaneousGesture(
-                    DragGesture()
+                    DragGesture(minimumDistance: 10)
                         .onChanged { value in
-                            cancelScrollSettlingWork()
-                            if value.translation.height > 0 && isLoading {
-                                userHasScrolled = true
+                            if abs(value.translation.height) > abs(value.translation.width) {
+                                cancelScrollSettlingWork()
+                                if value.translation.height > 0 && isLoading {
+                                    userHasScrolled = true
+                                }
+                                if value.translation.height > 10 && isKeyboardVisible {
+                                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                }
+                                if !viewModel.isScrollInteractionActive {
+                                    viewModel.isScrollInteractionActive = true
+                                }
+                                scheduleScrollSettlingCheck()
                             }
-                            // Dismiss keyboard when scrolling up
-                            if value.translation.height > 10 && isKeyboardVisible {
-                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                            }
-                            if !viewModel.isScrollInteractionActive {
-                                viewModel.isScrollInteractionActive = true
-                            }
-                            scheduleScrollSettlingCheck()
                         }
                         .onEnded { _ in
                             scheduleScrollSettlingCheck()
@@ -558,7 +562,11 @@ struct ChatScrollView: View {
                         }
                     }
                 }
-                // When the selected chat changes, just reset bookkeeping
+                .onChange(of: messages.last?.isThinking) { _, isThinking in
+                    if isThinking == true && isAtBottom && !userHasScrolled {
+                        requestJumpToBottom(animated: true)
+                    }
+                }
                 .onChange(of: viewModel.currentChat?.createdAt) { _, _ in
                     userHasScrolled = false
                     viewModel.isScrollInteractionActive = false
@@ -584,11 +592,10 @@ struct ChatScrollView: View {
                                 Button(action: {
                                     cancelScrollSettlingWork()
                                     userHasScrolled = false
-                                    let targetId: AnyHashable = messages.last?.id ?? "bottom"
-                                    proxy.scrollTo(targetId, anchor: .bottom)
+                                    proxy.scrollTo("bottom", anchor: .bottom)
                                     DispatchQueue.main.async {
                                         withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
-                                            proxy.scrollTo(targetId, anchor: .bottom)
+                                            proxy.scrollTo("bottom", anchor: .bottom)
                                         }
                                         isAtBottom = true
                                         viewModel.isScrollInteractionActive = false
@@ -604,11 +611,10 @@ struct ChatScrollView: View {
                                 Button(action: {
                                     cancelScrollSettlingWork()
                                     userHasScrolled = false
-                                    let targetId: AnyHashable = messages.last?.id ?? "bottom"
-                                    proxy.scrollTo(targetId, anchor: .bottom)
+                                    proxy.scrollTo("bottom", anchor: .bottom)
                                     DispatchQueue.main.async {
                                         withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
-                                            proxy.scrollTo(targetId, anchor: .bottom)
+                                            proxy.scrollTo("bottom", anchor: .bottom)
                                         }
                                         isAtBottom = true
                                         viewModel.isScrollInteractionActive = false
@@ -710,15 +716,10 @@ struct ChatScrollView: View {
 
     private func requestJumpToBottom(animated: Bool) {
         guard let proxy = scrollViewProxy else { return }
-        let bottomAnchor: AnyHashable = "bottom"
-        let lastMessageId = messages.last?.id
         cancelScrollSettlingWork()
 
         let performScroll = {
-            proxy.scrollTo(bottomAnchor, anchor: .bottom)
-            if let lastMessageId {
-                proxy.scrollTo(lastMessageId, anchor: .bottom)
-            }
+            proxy.scrollTo("bottom", anchor: .bottom)
         }
 
         DispatchQueue.main.async {
@@ -791,9 +792,8 @@ struct ChatScrollView: View {
         // Calculate visible screen height excluding keyboard and input view
         // We don't add keyboard height here to avoid creating extra scrollable space
         let visibleHeight = UIScreen.main.bounds.height - safeAreaInsets.top - safeAreaInsets.bottom
-        
-        // Add some slack to the visibility check (allow 20 points overflow)
-        let slack: CGFloat = 40
+
+        let slack: CGFloat = 150
         let isVisible = globalFrame.minY >= -slack && globalFrame.maxY <= (visibleHeight + slack)
         
         return isVisible

@@ -43,10 +43,13 @@ struct MessageInputView: View {
             // Text input area
             CustomTextEditor(text: $messageText,
                              textHeight: $textHeight,
-                             placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message")
+                             placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
+                             shouldFocusInput: viewModel.shouldFocusInput,
+                             isLoading: viewModel.isLoading,
+                             onFocusHandled: { viewModel.shouldFocusInput = false },
+                             onSendMessage: { text in viewModel.sendMessage(text: text) })
                 .frame(height: textHeight)
                 .padding(.horizontal)
-                .environmentObject(viewModel)
             
             // Bottom row with shield and send button
             HStack {
@@ -127,7 +130,7 @@ struct MessageInputView: View {
                         }
                     }
                 }
-                .padding(.trailing, 16)
+                .padding(.trailing, 8)
             }
             .padding(.vertical, 8)
         }
@@ -193,8 +196,11 @@ struct CustomTextEditor: UIViewRepresentable {
     @Binding var text: String
     @Binding var textHeight: CGFloat
     var placeholderText: String
-    @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
-    
+    var shouldFocusInput: Bool
+    var isLoading: Bool
+    var onFocusHandled: () -> Void
+    var onSendMessage: (String) -> Void
+
     func makeUIView(context: Context) -> UITextView {
         let textView = UITextView()
         textView.delegate = context.coordinator
@@ -204,13 +210,11 @@ struct CustomTextEditor: UIViewRepresentable {
         textView.isEditable = true
         textView.isSelectable = true
         textView.alwaysBounceVertical = false
-        // Prevent status bar tap from targeting the input's internal scroll view
-        // so the main chat ScrollView handles scroll-to-top immediately.
         textView.scrollsToTop = false
-        textView.textContainerInset = UIEdgeInsets(top: 16, left: 2, bottom: 8, right: 5) // Reduced left padding
+        textView.textContainerInset = UIEdgeInsets(top: 16, left: 2, bottom: 8, right: 5)
         textView.textContainer.lineFragmentPadding = 0
-        textView.tintColor = UIColor.systemBlue // Set cursor and selection color to blue
-        
+        textView.tintColor = UIColor.systemBlue
+
         // Initialize with placeholder or actual text
         if text.isEmpty {
             textView.text = placeholderText
@@ -226,27 +230,25 @@ struct CustomTextEditor: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: UITextView, context: Context) {
-        // Check if text field is currently being edited
+        context.coordinator.parent = self
         let isCurrentlyEditing = context.coordinator.isEditing
-        
-        // If a new conversation was started, request focus to show the keyboard
-        if viewModel.shouldFocusInput {
-            if !uiView.isFirstResponder {
-                uiView.becomeFirstResponder()
-            }
-            // Reset the flag to avoid repeated focusing
+
+        if shouldFocusInput && !context.coordinator.hasFocusedFromFlag {
+            context.coordinator.hasFocusedFromFlag = true
             DispatchQueue.main.async {
-                viewModel.shouldFocusInput = false
+                if !uiView.isFirstResponder {
+                    uiView.becomeFirstResponder()
+                }
+                self.onFocusHandled()
             }
+        } else if !shouldFocusInput {
+            context.coordinator.hasFocusedFromFlag = false
         }
 
-        // Only show placeholder if text is empty AND not currently being edited
         if text.isEmpty && !isCurrentlyEditing && uiView.textColor != .lightGray {
-            // Text was cleared and we're not editing, show placeholder
             uiView.text = placeholderText
             uiView.textColor = .lightGray
         } else if text.isEmpty && isCurrentlyEditing {
-            // Empty text but still editing, ensure we don't show placeholder
             if uiView.textColor == .lightGray {
                 uiView.text = ""
                 uiView.textColor = UIColor { traitCollection in
@@ -254,24 +256,19 @@ struct CustomTextEditor: UIViewRepresentable {
                 }
             }
         } else if !text.isEmpty && uiView.textColor == .lightGray {
-            // New text arrived, remove placeholder
             uiView.text = text
             uiView.textColor = UIColor { traitCollection in
                 return traitCollection.userInterfaceStyle == .dark ? .white : .black
             }
         } else if !text.isEmpty && uiView.text != text && uiView.textColor != .lightGray {
-            // Text changed but not placeholder related
             uiView.text = text
         }
-        
-        // Update editable status
+
         uiView.isEditable = true
-        
-        // Calculate the new height
+
         let size = uiView.sizeThatFits(CGSize(width: uiView.frame.width, height: CGFloat.greatestFiniteMagnitude))
         let newHeight = min(MessageInputView.Layout.maximumHeight, max(MessageInputView.Layout.minimumHeight, size.height))
-        
-        // Only update height if it changed
+
         if textHeight != newHeight {
             textHeight = newHeight
         }
@@ -284,7 +281,8 @@ struct CustomTextEditor: UIViewRepresentable {
     class Coordinator: NSObject, UITextViewDelegate {
         var parent: CustomTextEditor
         var isEditing = false
-        
+        var hasFocusedFromFlag = false
+
         init(_ parent: CustomTextEditor) {
             self.parent = parent
         }
@@ -296,28 +294,22 @@ struct CustomTextEditor: UIViewRepresentable {
                 let isMac = ProcessInfo.processInfo.isiOSAppOnMac
                 
                 if isMac {
-                    // On Mac, Enter sends message (no way to detect Shift in UITextView)
-                    // Users can use Option+Enter for line breaks
                     let currentText = textView.text ?? ""
                     let trimmedText = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    
-                    if !trimmedText.isEmpty && !parent.viewModel.isLoading {
-                        // Send the message
-                        parent.viewModel.sendMessage(text: trimmedText)
-                        
-                        // Clear the text field
+
+                    if !trimmedText.isEmpty && !parent.isLoading {
+                        parent.onSendMessage(trimmedText)
+
                         textView.text = ""
                         parent.text = ""
                         parent.textHeight = MessageInputView.Layout.defaultHeight
-                        
-                        // Update placeholder
+
                         textView.text = parent.placeholderText
                         textView.textColor = .lightGray
-                        
-                        // Resign first responder to dismiss keyboard
+
                         textView.resignFirstResponder()
                     }
-                    
+
                     return false
                 }
             }
