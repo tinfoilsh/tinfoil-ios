@@ -230,6 +230,7 @@ struct CustomTextEditor: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: UITextView, context: Context) {
+        context.coordinator.parent = self
         let isCurrentlyEditing = context.coordinator.isEditing
 
         if shouldFocusInput && !context.coordinator.hasFocusedFromFlag {
