@@ -55,14 +55,17 @@ struct ChatQueryBuilder {
 
         // Add conversation history
         let recentMessages = Array(conversationMessages.suffix(maxMessages))
-        for (index, msg) in recentMessages.enumerated() {
+        var hasAddedSystemInstructions = useSystemRole
+
+        for msg in recentMessages {
             if msg.role == .user {
                 var userContent = msg.content
 
-                // For models that don't use system role: prepend system instructions to the FIRST user message only
-                if !useSystemRole && index == 0 {
+                // For models that don't use system role: prepend system instructions to the FIRST user message
+                if !hasAddedSystemInstructions {
                     let instructions = rules.isEmpty ? systemPrompt : systemPrompt + "\n\n" + rules
                     userContent = instructions + "\n\n" + msg.content
+                    hasAddedSystemInstructions = true
                 }
 
                 messages.append(.user(.init(content: .string(userContent))))
