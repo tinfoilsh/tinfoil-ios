@@ -12,6 +12,7 @@
 		9933808C2EA5A7C60073276A /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = 9933808B2EA5A7C60073276A /* Highlightr */; };
 		996C8D6E2E83870900C12826 /* TinfoilAI in Frameworks */ = {isa = PBXBuildFile; productRef = 996C8D6D2E83870900C12826 /* TinfoilAI */; };
 		998397652E6657ED00A46274 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = 998397642E6657ED00A46274 /* SwiftMath */; };
+		998ED4D72EA6C75C00D7B6BB /* tinfoil-glass.icon in Resources */ = {isa = PBXBuildFile; fileRef = 998ED4D62EA6C75C00D7B6BB /* tinfoil-glass.icon */; };
 		999769632E295C1A00A570DC /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 999769622E295C1A00A570DC /* RevenueCat */; };
 		999769652E295C1A00A570DC /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 999769642E295C1A00A570DC /* RevenueCatUI */; };
 		99976A572E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit in Resources */ = {isa = PBXBuildFile; fileRef = 99976A562E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit */; };
@@ -20,6 +21,7 @@
 
 /* Begin PBXFileReference section */
 		9909E5BE2DBD460C0040357B /* TinfoilChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TinfoilChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		998ED4D62EA6C75C00D7B6BB /* tinfoil-glass.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "tinfoil-glass.icon"; sourceTree = "<group>"; };
 		99976A562E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = TinfoilChatStoreKitConfiguration.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -66,6 +68,7 @@
 		9909E5B52DBD460C0040357B = {
 			isa = PBXGroup;
 			children = (
+				998ED4D62EA6C75C00D7B6BB /* tinfoil-glass.icon */,
 				99976A562E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit */,
 				9909E5C02DBD460C0040357B /* TinfoilChat */,
 				9909E5BF2DBD460C0040357B /* Products */,
@@ -163,6 +166,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				99976A572E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit in Resources */,
+				998ED4D72EA6C75C00D7B6BB /* tinfoil-glass.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -321,7 +325,7 @@
 		9909E5CA2DBD460E0040357B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "tinfoil-glass";
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = TinfoilChat/TinfoilChatDebug.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
@@ -364,7 +368,7 @@
 		9909E5CB2DBD460E0040357B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "tinfoil-glass";
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = TinfoilChat/TinfoilChatRelease.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
