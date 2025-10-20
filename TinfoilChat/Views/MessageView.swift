@@ -392,7 +392,7 @@ private struct MarkdownThemeCache {
         textColor: Color.userMessageForegroundDark
     )
     static let userLightTheme = createTheme(
-        isDarkMode: true,
+        isDarkMode: false,
         textColor: Color.userMessageForegroundLight
     )
     

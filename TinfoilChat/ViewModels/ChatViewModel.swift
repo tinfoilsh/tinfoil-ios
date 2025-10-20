@@ -898,10 +898,10 @@ class ChatViewModel: ObservableObject {
                 var responseContent = ""
                 var currentThoughts: String? = nil
                 var generationTimeSeconds: TimeInterval? = nil
-                let minStreamUpdateInterval: TimeInterval = 0.08
-                var lastStreamUpdateTime = Date.distantPast
-                var hasPendingUIUpdate = false
-                var throttledFlushTask: Task<Void, Never>? = nil
+                let hapticEnabled = SettingsManager.shared.hapticFeedbackEnabled
+                var hapticGenerator: UIImpactFeedbackGenerator?
+                var lastHapticTime = Date.distantPast
+                let minHapticInterval: TimeInterval = 0.1
 
                 await MainActor.run {
                     if let chat = self.currentChat,
@@ -911,6 +911,10 @@ class ChatViewModel: ObservableObject {
                         currentThoughts = chat.messages[lastIndex].thoughts
                         generationTimeSeconds = chat.messages[lastIndex].generationTimeSeconds
                         isInThinkingMode = chat.messages[lastIndex].isThinking
+                    }
+                    if hapticEnabled {
+                        hapticGenerator = UIImpactFeedbackGenerator(style: .light)
+                        hapticGenerator?.prepare()
                     }
                 }
 
@@ -926,43 +930,28 @@ class ChatViewModel: ObservableObject {
                     }
                 }
 
-                func flushPendingUpdate(throttle: Bool) async {
-                    guard hasPendingUIUpdate else { return }
-                    let shouldDefer = await MainActor.run { self.isScrollInteractionActive }
-                    if shouldDefer {
-                        throttledFlushTask?.cancel()
-                        throttledFlushTask = Task { @MainActor in
-                            defer { throttledFlushTask = nil }
-                            while !Task.isCancelled && self.isScrollInteractionActive {
-                                try? await Task.sleep(nanoseconds: 50_000_000)
-                            }
-                            await flushPendingUpdate(throttle: throttle)
-                        }
-                        return
-                    }
-                    let didApply = await MainActor.run { () -> Bool in
-                        guard self.currentChat?.id == streamChatId else { return false }
+                func updateUI() async {
+                    await MainActor.run {
+                        guard self.currentChat?.id == streamChatId else { return }
                         guard var chat = self.currentChat,
                               !chat.messages.isEmpty,
                               let lastIndex = chat.messages.indices.last else {
-                            return false
+                            return
                         }
                         chat.messages[lastIndex].content = responseContent
                         chat.messages[lastIndex].thoughts = currentThoughts
                         chat.messages[lastIndex].isThinking = isInThinkingMode
                         chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
-                        self.updateChat(chat, throttleForStreaming: throttle)
-                        return true
-                    }
-                    if didApply {
-                        hasPendingUIUpdate = false
-                        lastStreamUpdateTime = Date()
-                    }
-                }
+                        self.updateChat(chat, throttleForStreaming: false)
 
-                defer {
-                    throttledFlushTask?.cancel()
-                    throttledFlushTask = nil
+                        if hapticEnabled, let generator = hapticGenerator {
+                            let now = Date()
+                            if now.timeIntervalSince(lastHapticTime) >= minHapticInterval {
+                                generator.impactOccurred(intensity: 0.5)
+                                lastHapticTime = now
+                            }
+                        }
+                    }
                 }
 
                 for try await chunk in stream {
@@ -971,7 +960,6 @@ class ChatViewModel: ObservableObject {
                     let content = chunk.choices.first?.delta.content ?? ""
                     let hasReasoningContent = chunk.choices.first?.delta.reasoning != nil
                     let reasoningContent = chunk.choices.first?.delta.reasoning ?? ""
-                    var forceImmediateUpdate = false
                     var didMutateState = false
 
                     if hasReasoningContent && !isUsingReasoningFormat && !isInThinkingMode {
@@ -982,7 +970,6 @@ class ChatViewModel: ObservableObject {
                         thoughtsBuffer = reasoningContent
                         updateCurrentThoughts()
                         didMutateState = true
-                        forceImmediateUpdate = true
                     } else if isUsingReasoningFormat {
                         if !reasoningContent.isEmpty {
                             thoughtsBuffer += reasoningContent
@@ -1000,7 +987,6 @@ class ChatViewModel: ObservableObject {
                             updateCurrentThoughts()
                             appendToResponse(content)
                             didMutateState = true
-                            forceImmediateUpdate = true
                         } else if !content.isEmpty {
                             appendToResponse(content)
                             isInThinkingMode = false
@@ -1023,7 +1009,6 @@ class ChatViewModel: ObservableObject {
                                     thoughtsBuffer = afterThink
                                     updateCurrentThoughts()
                                     didMutateState = true
-                                    forceImmediateUpdate = true
                                 } else {
                                     appendToResponse(processContent)
                                     didMutateState = true
@@ -1047,7 +1032,6 @@ class ChatViewModel: ObservableObject {
                                 thinkStartTime = nil
                                 thoughtsBuffer = ""
                                 didMutateState = true
-                                forceImmediateUpdate = true
                             } else {
                                 thoughtsBuffer += content
                                 updateCurrentThoughts()
@@ -1061,22 +1045,7 @@ class ChatViewModel: ObservableObject {
                     }
 
                     if didMutateState {
-                        hasPendingUIUpdate = true
-                        let now = Date()
-                        let elapsed = now.timeIntervalSince(lastStreamUpdateTime)
-                        if forceImmediateUpdate || elapsed >= minStreamUpdateInterval {
-                            throttledFlushTask?.cancel()
-                            throttledFlushTask = nil
-                            await flushPendingUpdate(throttle: true)
-                        } else {
-                            let remainingDelay = max(minStreamUpdateInterval - elapsed, 0)
-                            throttledFlushTask?.cancel()
-                            throttledFlushTask = Task { @MainActor in
-                                try? await Task.sleep(nanoseconds: UInt64((remainingDelay * 1_000_000_000).rounded()))
-                                if Task.isCancelled { return }
-                                await flushPendingUpdate(throttle: true)
-                            }
-                        }
+                        await updateUI()
                     }
                 }
 
@@ -1094,18 +1063,13 @@ class ChatViewModel: ObservableObject {
                         generationTimeSeconds = Date().timeIntervalSince(startTime)
                     }
                     isInThinkingMode = false
-                    hasPendingUIUpdate = true
+                    await updateUI()
                 } else if isFirstChunk && !initialContentBuffer.isEmpty {
                     appendToResponse(initialContentBuffer)
                     isInThinkingMode = false
                     currentThoughts = nil
-                    hasPendingUIUpdate = true
+                    await updateUI()
                 }
-
-                throttledFlushTask?.cancel()
-                throttledFlushTask = nil
-
-                await flushPendingUpdate(throttle: false)
 
                 // Mark as complete
                 await MainActor.run {
