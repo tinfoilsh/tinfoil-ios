@@ -33,7 +33,7 @@ class ChatViewModel: ObservableObject {
         var error: String? = nil
     }
     @Published var verification = VerificationInfo()
-    private var hasRunInitialVerification: Bool = false
+    @Published var verificationDocument: VerificationDocument? = nil
     
     // Cloud sync properties
     @Published var isSyncing: Bool = false
@@ -100,11 +100,6 @@ class ChatViewModel: ObservableObject {
     var isVerifying: Bool { verification.isVerifying }
     var isVerified: Bool { verification.isVerified }
     var verificationError: String? { verification.error }
-    
-    // Stored verification measurements
-    private var verificationCodeDigest: String?
-    private var verificationRuntimeDigest: String?
-    private var verificationTlsCertFingerprint: String?
     
     // Model properties
     @Published var currentModel: ModelType
@@ -447,136 +442,63 @@ class ChatViewModel: ObservableObject {
     }
     
     private func setupTinfoilClient() {
-        if !hasRunInitialVerification {
-            self.verification.error = nil
-            self.verification.isVerifying = true
-        }
-        
+        verification.error = nil
+        verification.isVerifying = true
+
         Task {
             do {
-                // Wait for AppConfig to be ready before getting API key
                 await AppConfig.shared.waitForInitialization()
-                
-                // Get the global API key (can be empty for free models)
                 let apiKey = await AppConfig.shared.getApiKey()
-                
-                if !hasRunInitialVerification {
-                    // Run explicit verification first to capture measurements
-                    await runExplicitVerification()
-                    
-                    // Then create the client with nonblocking verification as a double check
-                    client = try await TinfoilAI.create(
-                        apiKey: apiKey,
-                        nonblockingVerification: { [weak self] passed in
-                            Task { @MainActor in
-                                guard let self = self else { return }
-                                
-                                // Update verification state if there's a mismatch
-                                if !passed && self.verification.isVerified {
-                                    self.verification.isVerified = false
-                                    self.verification.error = "Client verification failed after explicit verification succeeded"
+
+                client = try await TinfoilAI.create(
+                    apiKey: apiKey,
+                    onVerification: { [weak self] verificationDoc in
+                        Task { @MainActor in
+                            guard let self = self else { return }
+
+                            self.verificationDocument = verificationDoc
+                            self.verification.isVerifying = false
+
+                            if let doc = verificationDoc {
+                                self.verification.isVerified = doc.securityVerified
+                                if !doc.securityVerified {
+                                    self.verification.error = doc.getFirstError() ?? "Verification failed"
+                                } else {
+                                    self.verification.error = nil
                                 }
+                            } else {
+                                self.verification.isVerified = false
+                                self.verification.error = "No verification document received"
                             }
                         }
-                    )
-                } else {
-                    client = try await TinfoilAI.create(
-                        apiKey: apiKey,
-                        nonblockingVerification: nil
-                    )
-                }
-
+                    }
+                )
             } catch {
-                if !hasRunInitialVerification {
+                await MainActor.run {
                     self.verification.isVerifying = false
-                    self.verification.isVerified = false
-                    self.verification.error = error.localizedDescription
-                    self.hasRunInitialVerification = true
-                }
-            }
-        }
-    }
-    
-    /// Runs explicit verification and stores measurements
-    private func runExplicitVerification() async {
-        // Create callbacks to capture verification results
-        let callbacks = VerificationCallbacks(
-            onVerificationStart: { [weak self] in
-                Task { @MainActor in
-                    self?.verification.isVerifying = true
-                }
-            },
-            onVerificationComplete: { [weak self] result in
-                Task { @MainActor in
-                    guard let self = self else { return }
 
-                    self.verification.isVerifying = false
-                    self.hasRunInitialVerification = true
-
-                    switch result {
-                    case .success(let groundTruth):
-                        // Store measurements from ground truth
-                        // Always try to format measurements, even if not in expected format
-
-                        // Handle code measurement - extract first register value
-                        if let codeMeasurement = groundTruth.codeMeasurement {
-                            self.verificationCodeDigest = codeMeasurement.registers.first ?? ""
-                        }
-                        
-                        // Handle enclave measurement - extract first register value
-                        if let enclaveMeasurement = groundTruth.enclaveMeasurement {
-                            self.verificationRuntimeDigest = enclaveMeasurement.registers.first ?? ""
-                        }
-                        
-                        // Store the public key (this is already a string)
-                        self.verificationTlsCertFingerprint = groundTruth.tlsPublicKey
-                        
-                        self.verification.isVerified = true
-                        self.verification.error = nil
-
-                    case .failure(let error):
+                    if self.verificationDocument == nil {
                         self.verification.isVerified = false
                         self.verification.error = error.localizedDescription
                     }
                 }
             }
-        )
-
-        // Create secure client and run verification
-        let secureClient = SecureClient(
-            callbacks: callbacks
-        )
-
-        do {
-            _ = try await secureClient.verify()
-        } catch {
-            await MainActor.run {
-                self.verification.isVerifying = false
-                self.verification.isVerified = false
-                self.verification.error = error.localizedDescription
-                self.hasRunInitialVerification = true
-            }
         }
     }
     
-    /// Public method to retry client setup (called when returning from background)
+    
     func retryClientSetup() {
-        // Only retry if we don't have a working client or if verification actually failed
-        // Don't recreate the client unnecessarily as it causes temporary verification failures
         guard client == nil || (!isVerified && !isVerifying && verificationError != nil) else {
-            // Client exists and is either verified or still verifying - no need to recreate
             return
         }
-        
-        // Don't reset client while there's an active message being sent
+
         guard !isLoading else {
-            // Retry after the current operation completes
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 self?.retryClientSetup()
             }
             return
         }
-        
+
         setupTinfoilClient()
     }
     
@@ -885,7 +807,7 @@ class ChatViewModel: ObservableObject {
                 var hapticGenerator: UIImpactFeedbackGenerator?
                 var lastHapticTime = Date.distantPast
                 let minHapticInterval: TimeInterval = 0.1
-                var chunker = StreamingMarkdownChunker()
+                let chunker = StreamingMarkdownChunker()
                 var hapticChunkCount = 0
                 var hasStartedResponse = false
                 var hasShownFirstChunk = false
@@ -1524,14 +1446,7 @@ class ChatViewModel: ObservableObject {
     
     /// Shows the verifier sheet with current verification state
     func showVerifier() {
-        // Use stored measurements from initial verification
-        verifierView = VerifierView(
-            initialVerificationState: isVerified ? true : (verificationError != nil ? false : nil),
-            initialError: verificationError,
-            codeDigest: verificationCodeDigest,
-            runtimeDigest: verificationRuntimeDigest,
-            tlsCertFingerprint: verificationTlsCertFingerprint
-        )
+        verifierView = VerifierView(verificationDocument: verificationDocument)
         showVerifierSheet = true
     }
     

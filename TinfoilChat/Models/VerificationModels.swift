@@ -37,7 +37,8 @@ extension VerificationStatus {
 struct VerificationSectionState {
     var status: VerifierStatus
     var error: String?
-    var digest: String?
+    var measurementType: String?
+    var registers: [String]?
     var tlsCertificateFingerprint: String?
     var steps: [VerificationStep] = []
 }
