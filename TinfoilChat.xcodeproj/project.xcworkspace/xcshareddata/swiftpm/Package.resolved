@@ -1,5 +1,5 @@
 {
-  "originHash" : "7873abad983524fb9be1ad48c0c99dabb66b32078e5227113f3ef79a8c857dd3",
+  "originHash" : "9a49ba8854214daf4f00a046060abcfa099f1c32d430a037abe140a1a2562954",
   "pins" : [
     {
       "identity" : "clerk-ios",
@@ -169,7 +169,7 @@
       "location" : "https://github.com/tinfoilsh/tinfoil-swift",
       "state" : {
         "branch" : "main",
-        "revision" : "9dd2785afc54cd659f2dd2a29bef87a874c75094"
+        "revision" : "bdcc8006f17c078e63fd18ebd1af9dbb3ae32fd7"
       }
     }
   ],
