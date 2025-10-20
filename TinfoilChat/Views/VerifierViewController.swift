@@ -63,42 +63,39 @@ private struct VerificationStepConfig {
 
 /// Pure SwiftUI implementation of the Verifier view
 struct VerifierView: View {
-    
-    /// The overall verification state (code, runtime, security).
+
     @State private var verificationState: VerificationState
-    
-    /// Whether we are verifying right now.
-    @State private var isVerifying: Bool = false
-    
-    /// Access to the chat view model for updating verification status
+
     @EnvironmentObject var chatViewModel: ChatViewModel
-    
-    // Color scheme for adapting to dark/light mode
     @Environment(\.colorScheme) private var colorScheme
-    
-    init(initialVerificationState: Bool? = nil, 
-         initialError: String? = nil,
-         codeDigest: String? = nil,
-         runtimeDigest: String? = nil,
-         tlsCertFingerprint: String? = nil) {
-        // Create an initial verification state based on chatViewModel's state
+
+    init(verificationDocument: VerificationDocument? = nil) {
         let initialState: VerificationState
-        
-        if let isVerified = initialVerificationState {
-            if isVerified {
-                initialState = VerificationState(
-                    code: VerificationSectionState(status: .success, error: nil, digest: codeDigest),
-                    runtime: VerificationSectionState(status: .success, error: nil, digest: runtimeDigest, tlsCertificateFingerprint: tlsCertFingerprint),
-                    security: VerificationSectionState(status: .success)
+
+        if let doc = verificationDocument {
+            let codeStatus: VerifierStatus = doc.steps.verifyCode.status == .success ? .success : (doc.steps.verifyCode.status == .failed ? .error : .pending)
+            let runtimeStatus: VerifierStatus = doc.steps.verifyEnclave.status == .success ? .success : (doc.steps.verifyEnclave.status == .failed ? .error : .pending)
+            let securityStatus: VerifierStatus = doc.steps.compareMeasurements.status == .success ? .success : (doc.steps.compareMeasurements.status == .failed ? .error : .pending)
+
+            initialState = VerificationState(
+                code: VerificationSectionState(
+                    status: codeStatus,
+                    error: doc.steps.verifyCode.error,
+                    measurementType: doc.codeMeasurement.type,
+                    registers: doc.codeMeasurement.registers
+                ),
+                runtime: VerificationSectionState(
+                    status: runtimeStatus,
+                    error: doc.steps.verifyEnclave.error,
+                    measurementType: doc.enclaveMeasurement.measurement.type,
+                    registers: doc.enclaveMeasurement.measurement.registers,
+                    tlsCertificateFingerprint: doc.enclaveMeasurement.tlsPublicKeyFingerprint
+                ),
+                security: VerificationSectionState(
+                    status: securityStatus,
+                    error: doc.steps.compareMeasurements.error
                 )
-            } else {
-                let errorMessage = initialError ?? "Verification failed"
-                initialState = VerificationState(
-                    code: VerificationSectionState(status: .error, error: errorMessage),
-                    runtime: VerificationSectionState(status: .error),
-                    security: VerificationSectionState(status: .error)
-                )
-            }
+            )
         } else {
             initialState = VerificationState(
                 code: VerificationSectionState(status: .pending),
@@ -106,7 +103,7 @@ struct VerifierView: View {
                 security: VerificationSectionState(status: .pending)
             )
         }
-        
+
         _verificationState = State(initialValue: initialState)
     }
     
@@ -204,50 +201,53 @@ struct VerifierView: View {
                     .padding(.horizontal)
                 }
                 .padding(.bottom, 8)
-                
-                verifyButtonSection
-                
+
                 // The steps for code, runtime, security
                 ProcessStepView(
                     title: VerificationStepConfig.codeIntegrity.title(for: verificationState.code.status),
                     description: VerificationStepConfig.codeIntegrity.description,
                     status: verificationState.code.status,
                     error: verificationState.code.error,
-                    measurements: verificationState.code.digest,
+                    measurementType: verificationState.code.measurementType,
+                    registers: verificationState.code.registers,
                     steps: verificationState.code.steps,
                     links: [
                         ("GitHub Release", Constants.Proxy.githubReleaseURL)
                     ],
                     stepKey: VerificationStepConfig.codeIntegrity.key
                 )
-                
+
                 ProcessStepView(
                     title: VerificationStepConfig.remoteAttestation.title(for: verificationState.runtime.status),
                     description: VerificationStepConfig.remoteAttestation.description,
                     status: verificationState.runtime.status,
                     error: verificationState.runtime.error,
-                    measurements: verificationState.runtime.digest,
+                    measurementType: verificationState.runtime.measurementType,
+                    registers: verificationState.runtime.registers,
                     steps: verificationState.runtime.steps,
                     stepKey: VerificationStepConfig.remoteAttestation.key,
                     tlsCertificateFingerprint: verificationState.runtime.tlsCertificateFingerprint
                 )
-                
+
                 ProcessStepView(
                     title: VerificationStepConfig.codeConsistency.title(for: verificationState.security.status),
                     description: VerificationStepConfig.codeConsistency.description,
                     status: verificationState.security.status,
                     error: verificationState.security.error,
-                    measurements: nil,
+                    measurementType: nil,
+                    registers: nil,
                     steps: [],
                     stepKey: VerificationStepConfig.codeConsistency.key
                 ) {
                     AnyView(
                         Group {
-                            if let codeMeasurements = verificationState.code.digest,
-                               let runtimeMeasurements = verificationState.runtime.digest {
+                            if let codeRegisters = verificationState.code.registers,
+                               let runtimeRegisters = verificationState.runtime.registers {
                                 MeasurementDiffView(
-                                    sourceMeasurements: codeMeasurements,
-                                    runtimeMeasurements: runtimeMeasurements,
+                                    sourceMeasurementType: verificationState.code.measurementType,
+                                    sourceRegisters: codeRegisters,
+                                    runtimeMeasurementType: verificationState.runtime.measurementType,
+                                    runtimeRegisters: runtimeRegisters,
                                     isVerified: (verificationState.security.status == .success)
                                 )
                             }
@@ -259,161 +259,6 @@ struct VerifierView: View {
         }
     }
     
-    /// A section containing just the verify button
-    private var verifyButtonSection: some View {
-        Button(action: {
-            // Prevent multiple verification attempts
-            guard !isVerifying else { return }
-            
-            // Run the verification asynchronously
-            Task {
-                await verifyAll()
-            }
-        }) {
-            HStack(spacing: 8) {
-                if isVerifying {
-                    ProgressView()
-                        .frame(width: 16, height: 16)
-                } else {
-                    Image(systemName: "checkmark.shield.fill")
-                        .font(.system(size: 16, weight: .medium))
-                }
-                Text(isVerifying ? "Verifying..." : "Verify Again")
-                    .fontWeight(.medium)
-            }
-            .frame(minWidth: 200)
-            .padding(.vertical, 12)
-            .padding(.horizontal, 16)
-        }
-        .disabled(isVerifying)
-        .buttonStyle(.borderedProminent)
-        .tint(colorScheme == .dark ? Color.gray.opacity(0.3) : Color.tinfoilDark)
-        .shadow(color: colorScheme == .dark ? 
-                Color.gray.opacity(0.15) : 
-                Color.tinfoilDark.opacity(0.2), 
-                radius: 3, x: 0, y: 2)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .center)
-    }
-    
-    // MARK: - Logic placeholders
-    
-    /// Verification flow of the committed and runtime binaries using remote attestation.
-    /// This uses the TinfoilAI implementation with the SecureClient class
-    private func verifyAll() async {
-        // Update on the main thread
-        await MainActor.run {
-            isVerifying = true
-            // set the status to loading
-            verificationState.code.status = .loading
-            verificationState.runtime.status = .pending
-            verificationState.security.status = .pending
-            
-            // Update the chatViewModel to show verification is in progress
-            var updatedVerification = chatViewModel.verification
-            updatedVerification.isVerifying = true
-            chatViewModel.verification = updatedVerification
-            
-        }
-
-        // Create verification callbacks to update UI as steps complete
-        let callbacks = VerificationCallbacks(
-            onVerificationStart: {
-                Task { @MainActor in
-                    // Mark all verification steps as in progress
-                    self.verificationState.code.status = .loading
-                    self.verificationState.runtime.status = .loading
-                    self.verificationState.security.status = .loading
-                }
-            },
-            onVerificationComplete: { result in
-                Task { @MainActor in
-                    switch result {
-                    case .success(let groundTruth):
-                        // Update code verification status - extract first register value
-                        if let codeMeasurement = groundTruth.codeMeasurement {
-                            self.verificationState.code.status = .success
-                            self.verificationState.code.digest = codeMeasurement.registers.first ?? ""
-                        } else {
-                            self.verificationState.code.status = .error
-                            self.verificationState.code.error = "Source measurement not available"
-                        }
-                        
-                        // Update runtime verification status - extract first register value
-                        if let enclaveMeasurement = groundTruth.enclaveMeasurement {
-                            self.verificationState.runtime.status = .success
-                            self.verificationState.runtime.digest = enclaveMeasurement.registers.first ?? ""
-                            self.verificationState.runtime.tlsCertificateFingerprint = groundTruth.tlsPublicKey
-                        } else {
-                            self.verificationState.runtime.status = .error
-                            self.verificationState.runtime.error = "Runtime measurement not available"
-                        }
-                        
-                        // Update security verification status
-                        self.verificationState.security.status = .success
-                        self.isVerifying = false
-                        
-                        // Update the chatViewModel's verification status
-                        var updatedVerification = self.chatViewModel.verification
-                        updatedVerification.isVerified = true
-                        updatedVerification.isVerifying = false
-                        updatedVerification.error = nil
-                        self.chatViewModel.verification = updatedVerification
-                    
-                    case .failure(let error):
-                        // All verifications fail on error
-                        self.verificationState.code.status = .error
-                        self.verificationState.code.error = error.localizedDescription
-                        self.verificationState.runtime.status = .error
-                        self.verificationState.runtime.error = error.localizedDescription
-                        self.verificationState.security.status = .error
-                        self.verificationState.security.error = error.localizedDescription
-                        self.isVerifying = false
-                        
-                        // Update the failed verification status in chatViewModel
-                        var updatedVerification = self.chatViewModel.verification
-                        updatedVerification.isVerified = false
-                        updatedVerification.isVerifying = false
-                        updatedVerification.error = error.localizedDescription
-                        self.chatViewModel.verification = updatedVerification
-                    }
-                }
-            }
-        )
-
-        // Create a secure client instance using proxy constants
-        let secureClient = SecureClient(
-            callbacks: callbacks
-        )
-        
-        // Run the verification process
-        do {
-            // This will trigger callbacks as each step completes
-            _ = try await secureClient.verify()
-        } catch {
-            // Handle any unexpected errors not caught by callbacks
-            await MainActor.run {
-                if verificationState.code.status != .error {
-                    verificationState.code.status = .error
-                    verificationState.code.error = "Verification failed: \(error.localizedDescription)"
-                }
-                if verificationState.runtime.status != .error {
-                    verificationState.runtime.status = .error
-                }
-                if verificationState.security.status != .error {
-                    verificationState.security.status = .error
-                }
-                isVerifying = false
-                
-                // Update the chatViewModel with the error
-                var updatedVerification = chatViewModel.verification
-                updatedVerification.isVerified = false
-                updatedVerification.isVerifying = false
-                updatedVerification.error = error.localizedDescription
-                chatViewModel.verification = updatedVerification
-            }
-        }
-    }
     
 }
 
@@ -441,7 +286,7 @@ struct VerificationStatusView: View {
         VStack(spacing: 0) {
             VStack {
                 if hasErrors {
-                    Label("Verification failed. Please check above errors.", systemImage: "exclamationmark.triangle")
+                    Label("Verification failed. Please check the verification details below for errors.", systemImage: "exclamationmark.triangle")
                         .foregroundColor(.red)
                         .font(.headline)
                 } else if allSuccess {
@@ -481,23 +326,25 @@ struct ProcessStepView: View {
     let description: String
     let status: VerifierStatus
     let error: String?
-    let measurements: String?
+    let measurementType: String?
+    let registers: [String]?
     let steps: [VerificationStep]
     let links: [(text: String, url: String)]?
     let children: AnyView?
     let stepKey: String
     let tlsCertificateFingerprint: String?
-    
+
     @Environment(\.colorScheme) private var colorScheme
     @State private var isOpen: Bool = false
-    
-    
+
+
     init(
         title: String,
         description: String,
         status: VerifierStatus,
         error: String?,
-        measurements: String?,
+        measurementType: String?,
+        registers: [String]?,
         steps: [VerificationStep],
         links: [(text: String, url: String)]? = nil,
         stepKey: String,
@@ -508,7 +355,8 @@ struct ProcessStepView: View {
         self.description = description
         self.status = status
         self.error = error
-        self.measurements = measurements
+        self.measurementType = measurementType
+        self.registers = registers
         self.steps = steps
         self.links = links
         self.children = children()
@@ -600,14 +448,13 @@ struct ProcessStepView: View {
             }
             
             // Show measurements if available
-            if let measurements = measurements, !measurements.isEmpty {
+            if let registers = registers, !registers.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .center, spacing: 8) {
-                        Text(stepKey == "CODE_INTEGRITY" ? 
-                            "Source Measurement" : 
+                        Text(stepKey == "CODE_INTEGRITY" ?
+                            "Source Measurement" :
                             "Runtime Measurement").font(.headline)
-                        
-                        // Show different icons based on step
+
                         if stepKey == "CODE_INTEGRITY" {
                             Image("git-icon")
                                 .resizable()
@@ -632,27 +479,35 @@ struct ProcessStepView: View {
                                     .opacity(0.7)
                             }
                         }
-                        
+
                         Spacer()
                     }
-                    
-                    Text(stepKey == "CODE_INTEGRITY" ? 
-                        "Received from GitHub and Sigstore." : 
+
+                    if let type = measurementType {
+                        Text(type)
+                            .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                            .font(.system(.caption, design: .monospaced))
+                    }
+
+                    Text(stepKey == "CODE_INTEGRITY" ?
+                        "Received from GitHub and Sigstore." :
                         "Received from the enclave.")
                         .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                         .font(.subheadline)
-                        
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        Text(measurements)
-                            .font(.system(.subheadline, design: .monospaced))
-                            .padding(8)
+
+                    ForEach(Array(registers.enumerated()), id: \.offset) { index, register in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            Text(register)
+                                .font(.system(.subheadline, design: .monospaced))
+                                .padding(8)
+                        }
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(colorScheme == .dark ?
+                                      Color(.systemGray5) :
+                                      Color(.systemFill))
+                        )
                     }
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(colorScheme == .dark ? 
-                                  Color(.systemGray5) : 
-                                  Color(.systemFill))
-                    )
                 }
             }
             
@@ -788,16 +643,16 @@ struct TLSCertificateFingerprintView: View {
 // MARK: - MeasurementDiffView
 
 struct MeasurementDiffView: View {
-    let sourceMeasurements: String
-    let runtimeMeasurements: String
+    let sourceMeasurementType: String?
+    let sourceRegisters: [String]
+    let runtimeMeasurementType: String?
+    let runtimeRegisters: [String]
     let isVerified: Bool
-    
+
     @Environment(\.colorScheme) private var colorScheme
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Measurement Comparison").font(.headline)
-                
             HStack(spacing: 8) {
                 Image(systemName: isVerified ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
                     .foregroundColor(isVerified ? .green : .red)
@@ -813,73 +668,10 @@ struct MeasurementDiffView: View {
             .frame(maxWidth: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(isVerified ? 
-                          Color.green.opacity(colorScheme == .dark ? 0.2 : 0.1) : 
+                    .fill(isVerified ?
+                          Color.green.opacity(colorScheme == .dark ? 0.2 : 0.1) :
                           Color.red.opacity(colorScheme == .dark ? 0.2 : 0.1))
             )
-            
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .center, spacing: 8) {
-                    Text("Source Measurement").font(.headline)
-                    Image("git-icon")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 20, height: 20)
-                        .opacity(0.7)
-                    Spacer()
-                }
-                Text("Received from GitHub and Sigstore.")
-                    .foregroundColor(colorScheme == .dark ? .gray : .secondary)
-                    .font(.subheadline)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    Text(sourceMeasurements)
-                        .font(.system(.subheadline, design: .monospaced))
-                        .padding(8)
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(colorScheme == .dark ? 
-                              Color(.systemGray5) : 
-                              Color(.systemFill))
-                )
-            }
-            
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .center, spacing: 8) {
-                    Text("Runtime Measurement").font(.headline)
-                    HStack(spacing: 4) {
-                        Image("cpu-icon")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 28, height: 14)
-                            .opacity(0.7)
-                        Text("+")
-                            .font(.system(size: 14))
-                            .foregroundColor(colorScheme == .dark ? .gray : .secondary)
-                            .opacity(0.7)
-                        Image("gpu-icon")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 28, height: 14)
-                            .opacity(0.7)
-                    }
-                    Spacer()
-                }
-                Text("Received from the enclave.")
-                    .foregroundColor(colorScheme == .dark ? .gray : .secondary)
-                    .font(.subheadline)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    Text(runtimeMeasurements)
-                        .font(.system(.subheadline, design: .monospaced))
-                        .padding(8)
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(colorScheme == .dark ? 
-                              Color(.systemGray5) : 
-                              Color(.systemFill))
-                )
-            }
         }
         .padding(.top, 10)
     }
