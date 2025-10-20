@@ -156,10 +156,6 @@ struct ChatContainer: View {
         for scene in UIApplication.shared.connectedScenes {
             if let windowScene = scene as? UIWindowScene {
                 for window in windowScene.windows {
-                    for view in window.subviews {
-                        view.removeFromSuperview()
-                        window.addSubview(view)
-                    }
                     if let navigationBar = window.rootViewController?.navigationController?.navigationBar {
                         navigationBar.standardAppearance = appearance
                         navigationBar.compactAppearance = appearance
