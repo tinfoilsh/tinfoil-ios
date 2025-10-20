@@ -58,10 +58,13 @@ struct ChatContainer: View {
         .environmentObject(viewModel)
         .onAppear {
             setupNavigationBarAppearance()
-            
+
             // Ensure sidebar is closed on initial appearance
             isSidebarOpen = false
             dragOffset = 0
+        }
+        .onChange(of: colorScheme) { _, _ in
+            setupNavigationBarAppearance()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // App is going to background, record the time
@@ -123,18 +126,45 @@ struct ChatContainer: View {
         }
     }
     
-    /// Configure navigation bar appearance to be solid color
+    /// Configure navigation bar appearance
     private func setupNavigationBarAppearance() {
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        
-        // Always use dark navigation bar for main chat view since logo is white
-        appearance.backgroundColor = UIColor(Color.backgroundPrimary)
-        appearance.shadowColor = .clear
-        
+        if #available(iOS 26, *) {
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithTransparentBackground()
+            appearance.shadowColor = .clear
+
+            updateAllNavigationBars(with: appearance)
+        } else {
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = colorScheme == .dark ? UIColor(Color.backgroundPrimary) : .white
+            appearance.shadowColor = .clear
+
+            updateAllNavigationBars(with: appearance)
+        }
+    }
+
+    /// Update all navigation bars in the app with the given appearance
+    private func updateAllNavigationBars(with appearance: UINavigationBarAppearance) {
+        let tintColor: UIColor = colorScheme == .dark ? .white : .black
+
         UINavigationBar.appearance().standardAppearance = appearance
         UINavigationBar.appearance().compactAppearance = appearance
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        UINavigationBar.appearance().tintColor = tintColor
+
+        for scene in UIApplication.shared.connectedScenes {
+            if let windowScene = scene as? UIWindowScene {
+                for window in windowScene.windows {
+                    if let navigationBar = window.rootViewController?.navigationController?.navigationBar {
+                        navigationBar.standardAppearance = appearance
+                        navigationBar.compactAppearance = appearance
+                        navigationBar.scrollEdgeAppearance = appearance
+                        navigationBar.tintColor = tintColor
+                    }
+                }
+            }
+        }
     }
     
     /// The main content layout including chat area and sidebar
@@ -164,62 +194,43 @@ struct ChatContainer: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .applyTransparentToolbarIfAvailable()
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button(action: toggleSidebar) {
                     MenuToXButton(isX: isSidebarOpen)
                         .frame(width: 24, height: 24)
-                        .foregroundColor(.white)
+                        .foregroundColor(toolbarContentColor)
                 }
             }
             ToolbarItem(placement: .principal) {
-                Image("navbar-logo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 22)
+                if #available(iOS 26, *) {
+                    EmptyView()
+                } else {
+                    Image(colorScheme == .dark ? "logo-white" : "logo-dark")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 22)
+                }
             }
             // Only show toolbar items when chat has messages (not a new/blank chat)
             if authManager.isAuthenticated && !(viewModel.currentChat?.isBlankChat ?? true) {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 8) {
-                        ModelPicker(viewModel: viewModel)
-                        
-                        // New chat button
-                        Button(action: createNewChat) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(toolbarButtonFill)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .strokeBorder(toolbarButtonStroke, lineWidth: 1)
-                                    )
-                                    .frame(width: 24, height: 24)
+                    ModelPicker(viewModel: viewModel)
+                }
 
-                                Image(systemName: "plus")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(toolbarContentColor)
-                            }
-                        }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: createNewChat) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(toolbarContentColor)
                     }
                 }
             }
             if !authManager.isAuthenticated {
-                // Show sign in button for non-authenticated users
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: showAuthenticationView) {
                         Text("Sign in")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(toolbarContentColor)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(toolbarButtonFill)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .strokeBorder(toolbarButtonStroke, lineWidth: 1)
-                                    )
-                            )
                     }
                 }
             }
@@ -568,25 +579,49 @@ struct ChatScrollView: View {
 
                 .overlay(alignment: .bottom) {
                     if !isAtBottom && !messages.isEmpty && !isKeyboardVisible {
-                        Button(action: {
-                            cancelScrollSettlingWork()
-                            userHasScrolled = false
-                            let targetId: AnyHashable = messages.last?.id ?? "bottom"
-                            proxy.scrollTo(targetId, anchor: .bottom)
-                            DispatchQueue.main.async {
-                                withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
+                        Group {
+                            if #available(iOS 26, *) {
+                                Button(action: {
+                                    cancelScrollSettlingWork()
+                                    userHasScrolled = false
+                                    let targetId: AnyHashable = messages.last?.id ?? "bottom"
                                     proxy.scrollTo(targetId, anchor: .bottom)
+                                    DispatchQueue.main.async {
+                                        withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
+                                            proxy.scrollTo(targetId, anchor: .bottom)
+                                        }
+                                        isAtBottom = true
+                                        viewModel.isScrollInteractionActive = false
+                                    }
+                                }) {
+                                    Image(systemName: "arrow.down")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .frame(width: Constants.UI.scrollToBottomButtonSize, height: Constants.UI.scrollToBottomButtonSize)
                                 }
-                                isAtBottom = true
-                                viewModel.isScrollInteractionActive = false
-                            }
-                        }) {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .font(.system(size: 24))
-                                .foregroundColor(.white)
-                                .padding(8)
-                                .background(Color.gray.opacity(0.8))
+                                .buttonStyle(.glass)
                                 .clipShape(Circle())
+                            } else {
+                                Button(action: {
+                                    cancelScrollSettlingWork()
+                                    userHasScrolled = false
+                                    let targetId: AnyHashable = messages.last?.id ?? "bottom"
+                                    proxy.scrollTo(targetId, anchor: .bottom)
+                                    DispatchQueue.main.async {
+                                        withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
+                                            proxy.scrollTo(targetId, anchor: .bottom)
+                                        }
+                                        isAtBottom = true
+                                        viewModel.isScrollInteractionActive = false
+                                    }
+                                }) {
+                                    Image(systemName: "arrow.down.circle.fill")
+                                        .font(.system(size: 24))
+                                        .foregroundColor(.white)
+                                        .padding(8)
+                                        .background(Color.gray.opacity(0.8))
+                                        .clipShape(Circle())
+                                }
+                            }
                         }
                         .padding(.bottom, 16)
                         .padding(.trailing, 16)
@@ -598,32 +633,41 @@ struct ChatScrollView: View {
             
             // Message input view
             if UIDevice.current.userInterfaceIdiom == .phone {
-                // iPhone: Full width input
-                MessageInputView(messageText: $messageText, viewModel: viewModel)
-                    .background(
-                        RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
-                            .fill(Color.chatSurface(isDarkMode: isDarkMode))
-                            .edgesIgnoringSafeArea(.bottom)
-                    )
-                    .environmentObject(viewModel.authManager ?? AuthManager())
-            } else {
-                // iPad/Mac: Centered input with max width
-                HStack {
-                    Spacer(minLength: 0)
-                    MessageInputView(messageText: $messageText, viewModel: viewModel)
-                        .frame(maxWidth: 600)
+                if #available(iOS 26, *) {
+                    MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
+                        .environmentObject(viewModel.authManager ?? AuthManager())
+                } else {
+                    MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
                         .background(
                             RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
                                 .fill(Color.chatSurface(isDarkMode: isDarkMode))
+                                .edgesIgnoringSafeArea(.bottom)
                         )
                         .environmentObject(viewModel.authManager ?? AuthManager())
-                    Spacer(minLength: 0)
                 }
-                .background(
-                    Color.clear
-                        .frame(height: 1)
-                        .edgesIgnoringSafeArea(.bottom)
-                )
+            } else {
+                if #available(iOS 26, *) {
+                    MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
+                        .frame(maxWidth: 600)
+                        .environmentObject(viewModel.authManager ?? AuthManager())
+                } else {
+                    HStack {
+                        Spacer(minLength: 0)
+                        MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
+                            .frame(maxWidth: 600)
+                            .background(
+                                RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
+                                    .fill(Color.chatSurface(isDarkMode: isDarkMode))
+                            )
+                            .environmentObject(viewModel.authManager ?? AuthManager())
+                        Spacer(minLength: 0)
+                    }
+                    .background(
+                        Color.clear
+                            .frame(height: 1)
+                            .edgesIgnoringSafeArea(.bottom)
+                    )
+                }
             }
             
         }
@@ -1012,10 +1056,16 @@ struct ModelTab: View {
             .background(
                 ZStack {
                     // Base background
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.chatSurface(isDarkMode: isDarkMode))
-                        .opacity(isEnabled ? 1.0 : 0.7)
-                    
+                    if #available(iOS 26, *) {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(.thickMaterial)
+                            .opacity(isEnabled ? 1.0 : 0.7)
+                    } else {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.chatSurface(isDarkMode: isDarkMode))
+                            .opacity(isEnabled ? 1.0 : 0.7)
+                    }
+
                     // Selected state background
                     if isSelected {
                         RoundedRectangle(cornerRadius: 12)
@@ -1060,8 +1110,7 @@ struct ModelTab: View {
 /// Animated button that transforms between a menu icon and an X
 struct MenuToXButton: View {
     let isX: Bool
-    @Environment(\.colorScheme) var colorScheme
-    
+
     var body: some View {
         ZStack {
             // Top line
@@ -1069,19 +1118,18 @@ struct MenuToXButton: View {
                 .frame(width: 18, height: 2)
                 .rotationEffect(.degrees(isX ? 45 : 0))
                 .offset(y: isX ? 0 : -6)
-            
+
             // Middle line
             Rectangle()
                 .frame(width: 18, height: 2)
                 .opacity(isX ? 0 : 1)
-            
+
             // Bottom line
             Rectangle()
                 .frame(width: 18, height: 2)
                 .rotationEffect(.degrees(isX ? -45 : 0))
                 .offset(y: isX ? 0 : 6)
         }
-        .foregroundColor(.white)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isX)
     }
 }
@@ -1102,11 +1150,20 @@ extension View {
     func corners(_ corners: UIRectCorner) -> some View {
         clipShape(RoundedCorner(radius: 15, corners: corners))
     }
-    
+
     /// Conditionally apply a modifier
     @ViewBuilder func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
         if condition {
             transform(self)
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func applyTransparentToolbarIfAvailable() -> some View {
+        if #available(iOS 26, *) {
+            self.toolbarBackground(.hidden, for: .navigationBar)
         } else {
             self
         }
@@ -1117,110 +1174,36 @@ extension View {
 struct ModelPicker: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @EnvironmentObject private var authManager: AuthManager
-    @Environment(\.colorScheme) private var colorScheme
     @State private var showModelPicker = false
-    @State private var refreshID = UUID()
 
-    private var buttonFill: Color {
-        colorScheme == .dark ? Color.white.opacity(0.1) : Color.white
-    }
-
-    private var buttonStroke: Color {
-        colorScheme == .dark ? Color.white.opacity(0.2) : Color.white
-    }
-    
     var body: some View {
-        Button(action: {
-            showModelPicker.toggle()
-        }) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(buttonFill)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(buttonStroke, lineWidth: 1)
-                    )
-                    .frame(width: 24, height: 24)
-                
-                Image(viewModel.currentModel.iconName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 20, height: 20)
-            }
-        }
-        .popover(isPresented: $showModelPicker) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Select Model")
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                    .padding(.top, 16)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
-                
-                Divider()
-                
-                // Get filtered models based on authentication and subscription status
-                let availableModels = AppConfig.shared.filteredModelTypes(
-                    isAuthenticated: authManager.isAuthenticated, 
-                    hasActiveSubscription: authManager.hasActiveSubscription
-                )
-                
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(availableModels) { model in
-                            Button(action: {
-                                viewModel.changeModel(to: model)
-                                showModelPicker = false
-                            }) {
-                                HStack(alignment: .center, spacing: 12) {
-                                    Image(model.iconName)
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(width: 24, height: 24)
-                                    
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(model.modelNameSimple)
-                                            .fontWeight(.medium)
-                                            .foregroundColor(.primary)
-                                        
-                                        Text(model.description)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                            .lineLimit(2)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                    
-                                    Spacer()
-                                    
-                                    if viewModel.currentModel == model {
-                                        Image(systemName: "checkmark")
-                                            .foregroundColor(Color.accentPrimary)
-                                            .font(.system(size: 14, weight: .bold))
-                                    }
-                                }
-                                .contentShape(Rectangle())
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            .background(viewModel.currentModel == model ? Color.gray.opacity(0.1) : Color.clear)
-                            
-                            if model != availableModels.last {
-                                Divider()
-                                    .padding(.leading, 52)
-                            }
-                        }
+        Menu {
+            let availableModels = AppConfig.shared.filteredModelTypes(
+                isAuthenticated: authManager.isAuthenticated,
+                hasActiveSubscription: authManager.hasActiveSubscription
+            )
+
+            ForEach(availableModels) { model in
+                Button(action: {
+                    viewModel.changeModel(to: model)
+                }) {
+                    Label {
+                        Text(model.modelNameSimple)
+                    } icon: {
+                        Image(model.iconName)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 20, height: 20)
                     }
                 }
+                .disabled(viewModel.currentModel == model)
             }
-            .frame(width: 320)
-            .presentationCompactAdaptation(.popover)
+        } label: {
+            Image(viewModel.currentModel.iconName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 22, height: 22)
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SubscriptionStatusUpdated"))) { _ in
-            // Force refresh model picker when subscription changes
-            refreshID = UUID()
-        }
-        .id(refreshID)
     }
 }
 

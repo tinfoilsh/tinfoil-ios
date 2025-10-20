@@ -5,8 +5,8 @@ import UIKit
 struct MessageInputView: View {
     // MARK: - Constants
     fileprivate enum Layout {
-        static let defaultHeight: CGFloat = 80
-        static let minimumHeight: CGFloat = 80
+        static let defaultHeight: CGFloat = 72
+        static let minimumHeight: CGFloat = 72
         static let maximumHeight: CGFloat = 180
     }
     
@@ -17,9 +17,10 @@ struct MessageInputView: View {
     @State private var showErrorPopover = false
     @State private var textHeight: CGFloat = Layout.defaultHeight
     @ObservedObject private var settings = SettingsManager.shared
-    
+    var isKeyboardVisible: Bool = false
+
     private var isDarkMode: Bool { colorScheme == .dark }
-    
+
     // Check for subscription status
     private var hasPremiumAccess: Bool {
         authManager.isAuthenticated && authManager.hasActiveSubscription
@@ -40,8 +41,8 @@ struct MessageInputView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Text input area
-            CustomTextEditor(text: $messageText, 
-                             textHeight: $textHeight, 
+            CustomTextEditor(text: $messageText,
+                             textHeight: $textHeight,
                              placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message")
                 .frame(height: textHeight)
                 .padding(.horizontal)
@@ -91,26 +92,58 @@ struct MessageInputView: View {
                 Spacer()
                 
                 // Send/Microphone button
-                Button(action: handleButtonPress) {
-                    ZStack {
-                        Circle()
-                            .fill(shouldShowMicrophone ? 
-                                  (viewModel.isRecording ? Color.red : (isDarkMode ? Color.white : Color.primary)) :
-                                  (isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight))
-                            .frame(width: 32, height: 32)
-                        
-                        Image(systemName: shouldShowMicrophone ? 
-                              (viewModel.isRecording ? "mic.fill" : "mic") : 
-                              (viewModel.isLoading ? "stop.fill" : "arrow.up"))
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(shouldShowMicrophone ? 
-                                           (viewModel.isRecording ? .white : (isDarkMode ? .black : .white)) :
-                                           (isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
+                Group {
+                    if #available(iOS 26, *) {
+                        Button(action: handleButtonPress) {
+                            Image(systemName: shouldShowMicrophone ?
+                                  (viewModel.isRecording ? "mic.fill" : "mic") :
+                                  (viewModel.isLoading ? "stop.fill" : "arrow.up"))
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(width: 24, height: 24)
+                                .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.circle)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                        .clipShape(.circle)
+                        .tint(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
+                    } else {
+                        Button(action: handleButtonPress) {
+                            ZStack {
+                                Circle()
+                                    .fill(shouldShowMicrophone ?
+                                          (viewModel.isRecording ? Color.red : (isDarkMode ? Color.white : Color.primary)) :
+                                          (isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight))
+                                    .frame(width: 32, height: 32)
+
+                                Image(systemName: shouldShowMicrophone ?
+                                      (viewModel.isRecording ? "mic.fill" : "mic") :
+                                      (viewModel.isLoading ? "stop.fill" : "arrow.up"))
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(shouldShowMicrophone ?
+                                                   (viewModel.isRecording ? .white : (isDarkMode ? .black : .white)) :
+                                                   (isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
+                            }
+                        }
                     }
                 }
                 .padding(.trailing, 16)
             }
             .padding(.vertical, 8)
+        }
+        .background {
+            if #available(iOS 26, *) {
+                RoundedRectangle(cornerRadius: 26)
+                    .fill(.thickMaterial)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, isKeyboardVisible ? 12 : 0)
+        .background {
+            if #available(iOS 26, *) {
+                Color.chatBackground(isDarkMode: isDarkMode)
+                    .ignoresSafeArea()
+            }
         }
         .onChange(of: viewModel.transcribedText) { oldValue, newValue in
             if !newValue.isEmpty && newValue != oldValue {

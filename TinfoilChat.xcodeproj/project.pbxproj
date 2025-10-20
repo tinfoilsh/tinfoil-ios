@@ -66,7 +66,6 @@
 			children = (
 				99976A562E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit */,
 				9909E5C02DBD460C0040357B /* TinfoilChat */,
-				993428612E21073100A5B575 /* Frameworks */,
 				9909E5BF2DBD460C0040357B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -77,13 +76,6 @@
 				9909E5BE2DBD460C0040357B /* TinfoilChat.app */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		993428612E21073100A5B575 /* Frameworks */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */

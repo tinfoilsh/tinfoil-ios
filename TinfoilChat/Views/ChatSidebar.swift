@@ -55,27 +55,11 @@ struct ChatSidebar: View {
     var body: some View {
         sidebarContent
             .frame(width: 300)
-            .background(Color.sidebarBackground(for: colorScheme))
+            .background(colorScheme == .dark ? Color.sidebarBackground(for: colorScheme) : Color.white)
+            .ignoresSafeArea(edges: .bottom)
             .onReceive(timeUpdateTimer) { _ in
-                // Update the current time to trigger view refresh
                 currentTime = Date()
             }
-            .overlay(
-                VStack(spacing: 0) {
-                    // Top border
-                    Rectangle()
-                        .fill(Color.white.opacity(0.2))
-                        .frame(height: 1)
-                    Spacer()
-                }
-            )
-            .overlay(
-                Rectangle()
-                    .fill(Color.white.opacity(0.2))
-                    .frame(width: 1)
-                    .frame(maxHeight: .infinity),
-                alignment: .trailing
-            )
             .alert("Delete Chat", isPresented: .constant(deletingChatId != nil)) {
             Button("Cancel", role: .cancel) {
                 deletingChatId = nil
@@ -129,39 +113,14 @@ struct ChatSidebar: View {
     
     private var sidebarContent: some View {
         VStack(spacing: 0) {
-           
-            // New Chat Button - shown for all authenticated users
-            if authManager.isAuthenticated {
-                Button(action: {
-                    if !viewModel.messages.isEmpty {
-                        viewModel.createNewChat()
-                        isOpen = false
-                    }
-                }) {
-                    HStack {
-                        Image(systemName: "plus")
-                        Text("New chat")
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.sidebarButtonBackground(for: colorScheme))
-                    .foregroundColor(colorScheme == .dark ? .white : .black)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(colorScheme == .dark ? Color.clear : Color.gray.opacity(0.2), lineWidth: 1)
-                    )
-                    .cornerRadius(8)
-                }
-                .padding([.horizontal, .top], 16)
-            }
-            
+
             // Chat History Header
             VStack(alignment: .leading, spacing: 4) {
                 Text("Chat History")
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.secondary)
-                
+
                 if authManager.isAuthenticated {
                     Text("Your chats are encrypted and backed up. You can manage your encryption key in Settings.")
                         .font(.caption)
@@ -175,8 +134,12 @@ struct ChatSidebar: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 16)
-            .background(Color.sidebarBackground(for: colorScheme))
-            
+            .overlay(
+                Divider()
+                    .background(Color.gray.opacity(0.3)),
+                alignment: .bottom
+            )
+
             // Chat List - shows multiple chats for all authenticated users
             ScrollView {
                 LazyVStack(spacing: 12) {
@@ -225,26 +188,43 @@ struct ChatSidebar: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
                         } else {
-                            Button(action: {
-                                Task {
-                                    await viewModel.loadMoreChats()
+                            Group {
+                                if #available(iOS 26, *) {
+                                    Button(action: {
+                                        Task {
+                                            await viewModel.loadMoreChats()
+                                        }
+                                    }) {
+                                        Text("Load More")
+                                            .font(.system(size: 16, weight: .regular))
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                    }
+                                    .buttonStyle(.glass)
+                                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                                } else {
+                                    Button(action: {
+                                        Task {
+                                            await viewModel.loadMoreChats()
+                                        }
+                                    }) {
+                                        Text("Load More")
+                                            .foregroundColor(.primary)
+                                            .font(.system(size: 16, weight: .regular))
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 20)
+                                                    .fill(Color(UIColor.secondarySystemBackground).opacity(0.3))
+                                            )
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 20)
+                                                    .strokeBorder(Color.gray.opacity(0.1), lineWidth: 1)
+                                            )
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
                                 }
-                            }) {
-                                Text("Load More")
-                                    .foregroundColor(.primary)
-                                    .font(.system(size: 16, weight: .regular))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(Color(UIColor.secondarySystemBackground).opacity(0.3))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .strokeBorder(Color.gray.opacity(0.1), lineWidth: 1)
-                                    )
                             }
-                            .buttonStyle(PlainButtonStyle())
                         }
                     }
                 }
@@ -259,31 +239,50 @@ struct ChatSidebar: View {
                 await viewModel.performFullSync()
             }
             .frame(maxHeight: .infinity)
-            
+
             Divider()
                 .background(Color.gray.opacity(0.3))
-                .padding(.bottom, 8)
-            
+
             // Settings Button
-            Button(action: {
-                showSettings = true
-            }) {
-                HStack {
-                    Image(systemName: "gear")
-                    Text("Settings")
+            Group {
+                if #available(iOS 26, *) {
+                    Button(action: {
+                        showSettings = true
+                    }) {
+                        HStack {
+                            Image(systemName: "gear")
+                            Text("Settings")
+                        }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                    .buttonStyle(.glass)
+                } else {
+                    Button(action: {
+                        showSettings = true
+                    }) {
+                        HStack {
+                            Image(systemName: "gear")
+                            Text("Settings")
+                        }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .background(Color.sidebarButtonBackground(for: colorScheme))
+                        .foregroundColor(colorScheme == .dark ? .white : .black)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(colorScheme == .dark ? Color.clear : Color.gray.opacity(0.2), lineWidth: 1)
+                        )
+                        .cornerRadius(8)
+                    }
                 }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .center)
-                .background(Color.sidebarButtonBackground(for: colorScheme))
-                .foregroundColor(colorScheme == .dark ? .white : .black)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(colorScheme == .dark ? Color.clear : Color.gray.opacity(0.2), lineWidth: 1)
-                )
-                .cornerRadius(8)
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
+            .safeAreaPadding(.bottom)
         }
         .frame(maxHeight: .infinity, alignment: .top)
     }

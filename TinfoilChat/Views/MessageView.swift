@@ -140,7 +140,16 @@ struct MessageView: View {
             }
             .padding(.vertical, 8)
             .padding(.horizontal, message.role == .user ? 12 : 0)
-            .background(message.role == .user ? Color.userMessageBackground(isDarkMode: isDarkMode) : nil)
+            .background {
+                if message.role == .user {
+                    if #available(iOS 26, *) {
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(.thickMaterial)
+                    } else {
+                        Color.userMessageBackground(isDarkMode: isDarkMode)
+                    }
+                }
+            }
             .cornerRadius(16)
             .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
             .contextMenu {
@@ -610,7 +619,14 @@ struct CollapsibleThinkingBox: View {
                 .transition(.identity)
             }
         }
-        .background(Color.thinkingBackground(isDarkMode: isDarkMode))
+        .background {
+            if #available(iOS 26, *) {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.thickMaterial)
+            } else {
+                Color.thinkingBackground(isDarkMode: isDarkMode)
+            }
+        }
         .cornerRadius(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
