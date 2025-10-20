@@ -34,13 +34,14 @@ struct ContentChunk: Codable, Equatable, Identifiable {
 
 class StreamingMarkdownChunker {
     private var fullContent: String = ""
+    private var isFinalized: Bool = false
 
     func getAllChunks() -> [ContentChunk] {
         guard !fullContent.isEmpty else { return [] }
         return [ContentChunk(
             type: .paragraph,
             content: fullContent,
-            isComplete: false
+            isComplete: isFinalized
         )]
     }
 
@@ -50,9 +51,11 @@ class StreamingMarkdownChunker {
     }
 
     func finalize() {
+        isFinalized = true
     }
 
     func reset() {
         fullContent = ""
+        isFinalized = false
     }
 }
