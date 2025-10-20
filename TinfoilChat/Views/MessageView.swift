@@ -430,6 +430,10 @@ private struct MarkdownThemeCache {
                 FontSize(15)
                 ForegroundColor(textColor ?? (isDarkMode ? .white : Color.black.opacity(0.8)))
             }
+            .paragraph { configuration in
+                configuration.label
+                    .markdownMargin(top: 0, bottom: 12)
+            }
             .code {
                 FontFamilyVariant(.monospaced)
                 FontSize(.em(0.85))

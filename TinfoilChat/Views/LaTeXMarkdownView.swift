@@ -762,7 +762,7 @@ private struct MarkdownThemeCache {
             }
             .paragraph { configuration in
                 configuration.label
-                    .markdownMargin(top: 0, bottom: 0)
+                    .markdownMargin(top: 0, bottom: 12)
             }
             .code {
                 FontFamilyVariant(.monospaced)
