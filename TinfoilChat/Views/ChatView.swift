@@ -428,10 +428,9 @@ struct ChatScrollView: View {
     // MARK: - Body
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Messages ScrollView - fills entire screen
-            ScrollViewReader { proxy in
-                ScrollView {
+        // Messages ScrollView with floating input
+        ScrollViewReader { proxy in
+            ScrollView {
                     GeometryReader { geo -> Color in
                         let offset = geo.frame(in: .named(scrollCoordinateSpaceName)).minY
                         DispatchQueue.main.async {
@@ -495,7 +494,7 @@ struct ChatScrollView: View {
                     }
 
                     Color.clear
-                        .frame(height: isKeyboardVisible ? 20 : 120) // Dynamic padding based on keyboard
+                        .frame(height: 20)
                         .id("bottom")
                         .padding(.bottom, 8)
                         .background(
@@ -708,35 +707,32 @@ struct ChatScrollView: View {
                     }
                 }
                 .background(Color.chatBackground(isDarkMode: isDarkMode))
-            }
-
-            // Floating Message input view
-            VStack {
-                Spacer()
-                if UIDevice.current.userInterfaceIdiom == .phone {
-                    if #available(iOS 26, *) {
-                        MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
-                            .environmentObject(viewModel.authManager ?? AuthManager())
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    // Input area that floats over scroll content
+                    if UIDevice.current.userInterfaceIdiom == .phone {
+                        if #available(iOS 26, *) {
+                            MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
+                                .environmentObject(viewModel.authManager ?? AuthManager())
+                        } else {
+                            MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
+                                .environmentObject(viewModel.authManager ?? AuthManager())
+                        }
                     } else {
-                        MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
-                            .environmentObject(viewModel.authManager ?? AuthManager())
-                    }
-                } else {
-                    if #available(iOS 26, *) {
-                        MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
-                            .frame(maxWidth: 600)
-                            .environmentObject(viewModel.authManager ?? AuthManager())
-                    } else {
-                        HStack {
-                            Spacer(minLength: 0)
+                        if #available(iOS 26, *) {
                             MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
                                 .frame(maxWidth: 600)
                                 .environmentObject(viewModel.authManager ?? AuthManager())
-                            Spacer(minLength: 0)
+                        } else {
+                            HStack {
+                                Spacer(minLength: 0)
+                                MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
+                                    .frame(maxWidth: 600)
+                                    .environmentObject(viewModel.authManager ?? AuthManager())
+                                Spacer(minLength: 0)
+                            }
                         }
                     }
                 }
-            }
         }
         .onAppear {
             setupKeyboardObservers()
