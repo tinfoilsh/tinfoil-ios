@@ -385,9 +385,9 @@ struct ChatContainer: View {
 
 /// A scrollable view that displays chat messages
 struct ChatScrollView: View {
-    
+
     // MARK: - Properties
-    
+
     let messages: [Message]
     let isDarkMode: Bool
     let isLoading: Bool
@@ -395,11 +395,14 @@ struct ChatScrollView: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @ObservedObject private var settings = SettingsManager.shared
     @Binding var messageText: String
-    
+
     // Scroll management
     @State private var scrollViewProxy: ScrollViewProxy?
     @State private var userHasScrolled = false
     @State private var isAtBottom = false
+    @State private var scrollPosition: ScrollPosition = ScrollPosition(edge: .bottom)
+    @State private var lazyVStackId = UUID()
+    @State private var contentOpacity: Double = 1.0
 
     // Keyboard handling
     @State private var keyboardHeight: CGFloat = 0
@@ -513,8 +516,13 @@ struct ChatScrollView: View {
                             }
                         )
                 }
+                // Add opacity for smooth fade-in animation
+                .opacity(contentOpacity)
+                // Add unique ID to LazyVStack to force layout refresh
+                .id(lazyVStackId)
                 // Reset scroll state when switching chats
                 .id(viewModel.currentChat?.createdAt ?? Date.distantPast)
+                .scrollPosition($scrollPosition)
                 .ignoresSafeArea(.keyboard)
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 10)
@@ -556,28 +564,87 @@ struct ChatScrollView: View {
 
                         if shouldAutoFollow {
                             userHasScrolled = false
-                            requestJumpToBottom(animated: false)
-                            viewModel.isScrollInteractionActive = false
+
+                            // Keep content visible when sending messages (no fade)
+                            contentOpacity = 1.0
+                            lazyVStackId = UUID()
+
+                            // Immediate scroll for user-initiated messages
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                scrollPosition.scrollTo(edge: .bottom)
+                                userHasScrolled = false
+                                isAtBottom = true
+                                viewModel.isScrollInteractionActive = false
+                            }
                             cancelScrollSettlingWork()
                         }
                     }
                 }
                 .onChange(of: messages.last?.isThinking) { _, isThinking in
                     if isThinking == true && isAtBottom && !userHasScrolled {
-                        requestJumpToBottom(animated: true)
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            scrollPosition.scrollTo(edge: .bottom)
+                        }
                     }
                 }
                 .onChange(of: viewModel.currentChat?.createdAt) { _, _ in
                     userHasScrolled = false
                     viewModel.isScrollInteractionActive = false
                     cancelScrollSettlingWork()
-                    requestJumpToBottom(animated: false)
+
+                    // Check if we're switching TO a new/empty chat
+                    let isNewEmptyChat = viewModel.currentChat?.isBlankChat ?? true
+
+                    if isNewEmptyChat {
+                        // No fade animation when switching to a new/empty chat
+                        contentOpacity = 1.0
+                        lazyVStackId = UUID()
+                        scrollPosition.scrollTo(edge: .bottom)
+                        isAtBottom = true
+                    } else {
+                        // Fade animation only for switching between non-empty chats
+                        contentOpacity = 0.0
+                        lazyVStackId = UUID()
+
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            scrollPosition.scrollTo(edge: .bottom)
+                            isAtBottom = true
+
+                            // Wait for scroll to complete before fading in
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                withAnimation(.easeIn(duration: 0.3)) {
+                                    contentOpacity = 1.0
+                                }
+                            }
+                        }
+                    }
                 }
                 .onAppear {
                     scrollViewProxy = proxy
                     viewModel.isScrollInteractionActive = false
                     cancelScrollSettlingWork()
-                    requestJumpToBottom(animated: false)
+
+                    // No fade animation for empty chats (welcome view)
+                    if messages.isEmpty {
+                        contentOpacity = 1.0
+                        scrollPosition.scrollTo(edge: .bottom)
+                        isAtBottom = true
+                    } else {
+                        // Start with content hidden for non-empty chats
+                        contentOpacity = 0.0
+
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            scrollPosition.scrollTo(edge: .bottom)
+                            isAtBottom = true
+
+                            // Wait for scroll to fully settle before fading in
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                withAnimation(.easeIn(duration: 0.3)) {
+                                    contentOpacity = 1.0
+                                }
+                            }
+                        }
+                    }
                 }
                 .onDisappear {
                     cancelScrollSettlingWork()
@@ -592,14 +659,17 @@ struct ChatScrollView: View {
                                 Button(action: {
                                     cancelScrollSettlingWork()
                                     userHasScrolled = false
-                                    proxy.scrollTo("bottom", anchor: .bottom)
-                                    DispatchQueue.main.async {
-                                        withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
-                                            proxy.scrollTo("bottom", anchor: .bottom)
-                                        }
-                                        isAtBottom = true
-                                        viewModel.isScrollInteractionActive = false
+
+                                    // Ensure content stays visible (no fade)
+                                    contentOpacity = 1.0
+
+                                    // Just use proxy to scroll to the bottom marker
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        proxy.scrollTo("bottom", anchor: .bottom)
                                     }
+
+                                    isAtBottom = true
+                                    viewModel.isScrollInteractionActive = false
                                 }) {
                                     Image(systemName: "arrow.down")
                                         .font(.system(size: 12, weight: .semibold))
@@ -611,14 +681,17 @@ struct ChatScrollView: View {
                                 Button(action: {
                                     cancelScrollSettlingWork()
                                     userHasScrolled = false
-                                    proxy.scrollTo("bottom", anchor: .bottom)
-                                    DispatchQueue.main.async {
-                                        withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
-                                            proxy.scrollTo("bottom", anchor: .bottom)
-                                        }
-                                        isAtBottom = true
-                                        viewModel.isScrollInteractionActive = false
+
+                                    // Ensure content stays visible (no fade)
+                                    contentOpacity = 1.0
+
+                                    // Just use proxy to scroll to the bottom marker
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        proxy.scrollTo("bottom", anchor: .bottom)
                                     }
+
+                                    isAtBottom = true
+                                    viewModel.isScrollInteractionActive = false
                                 }) {
                                     Image(systemName: "arrow.down.circle.fill")
                                         .font(.system(size: 24))
@@ -714,33 +787,6 @@ struct ChatScrollView: View {
         scrollEndWorkItem = nil
     }
 
-    private func requestJumpToBottom(animated: Bool) {
-        guard let proxy = scrollViewProxy else { return }
-        cancelScrollSettlingWork()
-
-        let performScroll = {
-            proxy.scrollTo("bottom", anchor: .bottom)
-        }
-
-        DispatchQueue.main.async {
-            if animated {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    performScroll()
-                }
-            } else {
-                performScroll()
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                performScroll()
-            }
-
-            userHasScrolled = false
-            isAtBottom = true
-            viewModel.isScrollInteractionActive = false
-        }
-    }
-
     // MARK: - Keyboard Handling
 
     private func setupKeyboardObservers() {
@@ -753,7 +799,7 @@ struct ChatScrollView: View {
                 
                 // Only auto-scroll to bottom when keyboard appears if we're already at the bottom
                 if !userHasScrolled {
-                    scrollViewProxy?.scrollTo("bottom", anchor: .bottom)
+                    scrollPosition.scrollTo(edge: .bottom)
                 }
             }
         }
