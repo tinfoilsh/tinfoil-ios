@@ -402,6 +402,7 @@ struct ChatScrollView: View {
     @State private var isAtBottom = false
     @State private var scrollPosition: ScrollPosition = ScrollPosition(edge: .bottom)
     @State private var lazyVStackId = UUID()
+    @State private var contentOpacity: Double = 1.0
 
     // Keyboard handling
     @State private var keyboardHeight: CGFloat = 0
@@ -515,6 +516,8 @@ struct ChatScrollView: View {
                             }
                         )
                 }
+                // Add opacity for smooth fade-in animation
+                .opacity(contentOpacity)
                 // Add unique ID to LazyVStack to force layout refresh
                 .id(lazyVStackId)
                 // Reset scroll state when switching chats
@@ -584,20 +587,43 @@ struct ChatScrollView: View {
                     userHasScrolled = false
                     viewModel.isScrollInteractionActive = false
                     cancelScrollSettlingWork()
-                    // Force LazyVStack refresh when switching chats
+
+                    // Immediately hide content (no animation)
+                    contentOpacity = 0.0
+
+                    // Force LazyVStack refresh and scroll
                     lazyVStackId = UUID()
+
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         scrollPosition.scrollTo(edge: .bottom)
                         isAtBottom = true
+
+                        // Wait for scroll to complete before fading in
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            withAnimation(.easeIn(duration: 0.3)) {
+                                contentOpacity = 1.0
+                            }
+                        }
                     }
                 }
                 .onAppear {
                     scrollViewProxy = proxy
                     viewModel.isScrollInteractionActive = false
                     cancelScrollSettlingWork()
+
+                    // Start with content hidden
+                    contentOpacity = 0.0
+
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         scrollPosition.scrollTo(edge: .bottom)
                         isAtBottom = true
+
+                        // Wait for scroll to fully settle before fading in
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            withAnimation(.easeIn(duration: 0.3)) {
+                                contentOpacity = 1.0
+                            }
+                        }
                     }
                 }
                 .onDisappear {
