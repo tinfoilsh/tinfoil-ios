@@ -2531,12 +2531,16 @@ class ChatViewModel: ObservableObject {
         
         // Separate chats into categories
         let twoMinutesAgo = Date().addingTimeInterval(-Constants.Pagination.recentChatThresholdSeconds)
-        let recentChats = sortedChats.filter { $0.createdAt >= twoMinutesAgo }
         let unsavedChats = sortedChats.filter { $0.isBlankChat || $0.hasTemporaryId }
-        let syncedChats = sortedChats.filter { 
-            !$0.isBlankChat && 
-            !$0.hasTemporaryId && 
-            $0.createdAt < twoMinutesAgo 
+        let recentChats = sortedChats.filter {
+            $0.createdAt >= twoMinutesAgo &&
+            !$0.isBlankChat &&
+            !$0.hasTemporaryId
+        }
+        let syncedChats = sortedChats.filter {
+            !$0.isBlankChat &&
+            !$0.hasTemporaryId &&
+            $0.createdAt < twoMinutesAgo
         }
         
         // Build the updated chat list
