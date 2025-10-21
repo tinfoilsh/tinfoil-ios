@@ -564,8 +564,12 @@ struct ChatScrollView: View {
 
                         if shouldAutoFollow {
                             userHasScrolled = false
-                            // Force LazyVStack refresh to prevent blank screen
+
+                            // Keep content visible when sending messages (no fade)
+                            contentOpacity = 1.0
                             lazyVStackId = UUID()
+
+                            // Immediate scroll for user-initiated messages
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                                 scrollPosition.scrollTo(edge: .bottom)
                                 userHasScrolled = false
@@ -588,20 +592,29 @@ struct ChatScrollView: View {
                     viewModel.isScrollInteractionActive = false
                     cancelScrollSettlingWork()
 
-                    // Immediately hide content (no animation)
-                    contentOpacity = 0.0
+                    // Check if we're switching TO a new/empty chat
+                    let isNewEmptyChat = viewModel.currentChat?.isBlankChat ?? true
 
-                    // Force LazyVStack refresh and scroll
-                    lazyVStackId = UUID()
-
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    if isNewEmptyChat {
+                        // No fade animation when switching to a new/empty chat
+                        contentOpacity = 1.0
+                        lazyVStackId = UUID()
                         scrollPosition.scrollTo(edge: .bottom)
                         isAtBottom = true
+                    } else {
+                        // Fade animation only for switching between non-empty chats
+                        contentOpacity = 0.0
+                        lazyVStackId = UUID()
 
-                        // Wait for scroll to complete before fading in
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            withAnimation(.easeIn(duration: 0.3)) {
-                                contentOpacity = 1.0
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            scrollPosition.scrollTo(edge: .bottom)
+                            isAtBottom = true
+
+                            // Wait for scroll to complete before fading in
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                withAnimation(.easeIn(duration: 0.3)) {
+                                    contentOpacity = 1.0
+                                }
                             }
                         }
                     }
@@ -611,17 +624,24 @@ struct ChatScrollView: View {
                     viewModel.isScrollInteractionActive = false
                     cancelScrollSettlingWork()
 
-                    // Start with content hidden
-                    contentOpacity = 0.0
-
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    // No fade animation for empty chats (welcome view)
+                    if messages.isEmpty {
+                        contentOpacity = 1.0
                         scrollPosition.scrollTo(edge: .bottom)
                         isAtBottom = true
+                    } else {
+                        // Start with content hidden for non-empty chats
+                        contentOpacity = 0.0
 
-                        // Wait for scroll to fully settle before fading in
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            withAnimation(.easeIn(duration: 0.3)) {
-                                contentOpacity = 1.0
+                            scrollPosition.scrollTo(edge: .bottom)
+                            isAtBottom = true
+
+                            // Wait for scroll to fully settle before fading in
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                withAnimation(.easeIn(duration: 0.3)) {
+                                    contentOpacity = 1.0
+                                }
                             }
                         }
                     }
@@ -639,9 +659,15 @@ struct ChatScrollView: View {
                                 Button(action: {
                                     cancelScrollSettlingWork()
                                     userHasScrolled = false
-                                    withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
-                                        scrollPosition.scrollTo(edge: .bottom)
+
+                                    // Ensure content stays visible (no fade)
+                                    contentOpacity = 1.0
+
+                                    // Just use proxy to scroll to the bottom marker
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        proxy.scrollTo("bottom", anchor: .bottom)
                                     }
+
                                     isAtBottom = true
                                     viewModel.isScrollInteractionActive = false
                                 }) {
@@ -655,9 +681,15 @@ struct ChatScrollView: View {
                                 Button(action: {
                                     cancelScrollSettlingWork()
                                     userHasScrolled = false
-                                    withAnimation(.interpolatingSpring(stiffness: 150, damping: 20)) {
-                                        scrollPosition.scrollTo(edge: .bottom)
+
+                                    // Ensure content stays visible (no fade)
+                                    contentOpacity = 1.0
+
+                                    // Just use proxy to scroll to the bottom marker
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        proxy.scrollTo("bottom", anchor: .bottom)
                                     }
+
                                     isAtBottom = true
                                     viewModel.isScrollInteractionActive = false
                                 }) {
