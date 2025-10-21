@@ -25,7 +25,8 @@ class ChatViewModel: ObservableObject {
     @Published var shouldFocusInput: Bool = false
     @Published var isScrollInteractionActive: Bool = false
     @Published var isAtBottom: Bool = true
-    
+    @Published var isClientInitializing: Bool = true
+
     // Verification properties - consolidated to reduce update frequency
     struct VerificationInfo {
         var isVerifying: Bool = false
@@ -278,6 +279,9 @@ class ChatViewModel: ObservableObject {
         }
         
         // Initial sync will be triggered when authManager is set (see authManager didSet)
+
+        // Setup Tinfoil client immediately
+        setupTinfoilClient()
     }
     
     deinit {
@@ -444,6 +448,7 @@ class ChatViewModel: ObservableObject {
     private func setupTinfoilClient() {
         verification.error = nil
         verification.isVerifying = true
+        isClientInitializing = true
 
         Task {
             do {
@@ -473,9 +478,15 @@ class ChatViewModel: ObservableObject {
                         }
                     }
                 )
+
+                // Mark client initialization as complete
+                await MainActor.run {
+                    self.isClientInitializing = false
+                }
             } catch {
                 await MainActor.run {
                     self.verification.isVerifying = false
+                    self.isClientInitializing = false
 
                     if self.verificationDocument == nil {
                         self.verification.isVerified = false
@@ -687,19 +698,22 @@ class ChatViewModel: ObservableObject {
             
             do {
                 // Wait for client initialization if needed
-                if client == nil {
-                    setupTinfoilClient()
-                    
-                    // Wait for client to be available with timeout
+                if client == nil || isClientInitializing {
+                    // If client setup hasn't started, start it
+                    if client == nil {
+                        setupTinfoilClient()
+                    }
+
+                    // Wait for initialization to complete with timeout
                     let maxWaitTime = Constants.Sync.clientInitTimeoutSeconds
                     let startTime = Date()
-                    
-                    while client == nil && Date().timeIntervalSince(startTime) < maxWaitTime {
+
+                    while isClientInitializing && Date().timeIntervalSince(startTime) < maxWaitTime {
                         try await Task.sleep(nanoseconds: 100_000_000) // 100ms
                     }
                 }
-                
-                guard let client = client else {
+
+                guard let client = client, !isClientInitializing else {
                     throw NSError(domain: "TinfoilChat", code: 1,
                                 userInfo: [NSLocalizedDescriptionKey: "Service temporarily unavailable. Please try again."])
                 }
