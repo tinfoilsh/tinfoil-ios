@@ -426,10 +426,10 @@ struct ChatScrollView: View {
     @State private var lastObservedScrollOffset: CGFloat = 0
     
     // MARK: - Body
-    
+
     var body: some View {
-        VStack(spacing: 0) {
-            // Messages ScrollView
+        ZStack(alignment: .bottom) {
+            // Messages ScrollView - fills entire screen
             ScrollViewReader { proxy in
                 ScrollView {
                     GeometryReader { geo -> Color in
@@ -495,7 +495,7 @@ struct ChatScrollView: View {
                     }
 
                     Color.clear
-                        .frame(height: 20)
+                        .frame(height: isKeyboardVisible ? 20 : 120) // Dynamic padding based on keyboard
                         .id("bottom")
                         .padding(.bottom, 8)
                         .background(
@@ -709,46 +709,34 @@ struct ChatScrollView: View {
                 }
                 .background(Color.chatBackground(isDarkMode: isDarkMode))
             }
-            
-            // Message input view
-            if UIDevice.current.userInterfaceIdiom == .phone {
-                if #available(iOS 26, *) {
-                    MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
-                        .environmentObject(viewModel.authManager ?? AuthManager())
+
+            // Floating Message input view
+            VStack {
+                Spacer()
+                if UIDevice.current.userInterfaceIdiom == .phone {
+                    if #available(iOS 26, *) {
+                        MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
+                            .environmentObject(viewModel.authManager ?? AuthManager())
+                    } else {
+                        MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
+                            .environmentObject(viewModel.authManager ?? AuthManager())
+                    }
                 } else {
-                    MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
-                        .background(
-                            RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
-                                .fill(Color.chatSurface(isDarkMode: isDarkMode))
-                                .edgesIgnoringSafeArea(.bottom)
-                        )
-                        .environmentObject(viewModel.authManager ?? AuthManager())
-                }
-            } else {
-                if #available(iOS 26, *) {
-                    MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
-                        .frame(maxWidth: 600)
-                        .environmentObject(viewModel.authManager ?? AuthManager())
-                } else {
-                    HStack {
-                        Spacer(minLength: 0)
+                    if #available(iOS 26, *) {
                         MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
                             .frame(maxWidth: 600)
-                            .background(
-                                RoundedCorner(radius: 16, corners: [.topLeft, .topRight])
-                                    .fill(Color.chatSurface(isDarkMode: isDarkMode))
-                            )
                             .environmentObject(viewModel.authManager ?? AuthManager())
-                        Spacer(minLength: 0)
+                    } else {
+                        HStack {
+                            Spacer(minLength: 0)
+                            MessageInputView(messageText: $messageText, viewModel: viewModel, isKeyboardVisible: isKeyboardVisible)
+                                .frame(maxWidth: 600)
+                                .environmentObject(viewModel.authManager ?? AuthManager())
+                            Spacer(minLength: 0)
+                        }
                     }
-                    .background(
-                        Color.clear
-                            .frame(height: 1)
-                            .edgesIgnoringSafeArea(.bottom)
-                    )
                 }
             }
-            
         }
         .onAppear {
             setupKeyboardObservers()
