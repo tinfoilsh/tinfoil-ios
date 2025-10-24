@@ -17,24 +17,30 @@ struct LaTeXMarkdownView: View, Equatable {
     let isDarkMode: Bool
     let horizontalPadding: CGFloat
     let maxWidthAlignment: Alignment
+    let isStreaming: Bool
+
+    @State private var segmentCache: [String: ContentSegment] = [:]
+    @State private var lastContent: String = ""
 
     static func == (lhs: LaTeXMarkdownView, rhs: LaTeXMarkdownView) -> Bool {
         lhs.content == rhs.content &&
         lhs.isDarkMode == rhs.isDarkMode &&
         lhs.horizontalPadding == rhs.horizontalPadding &&
-        lhs.maxWidthAlignment == rhs.maxWidthAlignment
+        lhs.maxWidthAlignment == rhs.maxWidthAlignment &&
+        lhs.isStreaming == rhs.isStreaming
     }
 
-    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0, maxWidthAlignment: Alignment = .leading) {
+    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0, maxWidthAlignment: Alignment = .leading, isStreaming: Bool = false) {
         self.content = content
         self.isDarkMode = isDarkMode
         self.horizontalPadding = horizontalPadding
         self.maxWidthAlignment = maxWidthAlignment
+        self.isStreaming = isStreaming
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(parseContent(), id: \.id) { segment in
+            ForEach(getOrCreateSegments(), id: \.id) { segment in
                 segment.view
                     .id(segment.id)
             }
@@ -44,6 +50,54 @@ struct LaTeXMarkdownView: View, Equatable {
         .transaction { transaction in
             transaction.animation = nil
         }
+    }
+
+    private func getOrCreateSegments() -> [ContentSegment] {
+        if isStreaming {
+            return [ContentSegment(
+                id: "streaming_\(content.hashValue)",
+                view: AnyView(
+                    Markdown(content)
+                        .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
+                        .environment(\.colorScheme, isDarkMode ? .dark : .light)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                )
+            )]
+        }
+
+        if content == lastContent {
+            return parseContentWithCache()
+        }
+
+        DispatchQueue.main.async {
+            lastContent = content
+        }
+        return parseContentWithCache()
+    }
+
+    private func parseContentWithCache() -> [ContentSegment] {
+        let rawSegments = parseContent()
+        var result: [ContentSegment] = []
+        var newCache: [String: ContentSegment] = [:]
+
+        for segment in rawSegments {
+            if let cached = segmentCache[segment.id] {
+                result.append(cached)
+                newCache[segment.id] = cached
+            } else {
+                result.append(segment)
+                newCache[segment.id] = segment
+            }
+        }
+
+        if newCache.count != segmentCache.count {
+            DispatchQueue.main.async {
+                segmentCache = newCache
+            }
+        }
+
+        return result
     }
     
     /// Parse content into segments of markdown and LaTeX
