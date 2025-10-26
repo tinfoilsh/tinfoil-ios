@@ -11,6 +11,37 @@ import MarkdownUI
 import SwiftMath
 import UIKit
 
+private struct ContentSegment {
+    let id: String
+    let view: AnyView
+}
+
+/// Global cache for rendered markdown content
+private class MarkdownRenderCache {
+    static let shared = MarkdownRenderCache()
+
+    private var cache: [String: [ContentSegment]] = [:]
+    private let queue = DispatchQueue(label: "com.tinfoil.markdown-cache", attributes: .concurrent)
+
+    func get(for key: String) -> [ContentSegment]? {
+        queue.sync {
+            cache[key]
+        }
+    }
+
+    func set(_ segments: [ContentSegment], for key: String) {
+        queue.async(flags: .barrier) {
+            self.cache[key] = segments
+        }
+    }
+
+    func clear() {
+        queue.async(flags: .barrier) {
+            self.cache.removeAll()
+        }
+    }
+}
+
 /// A view that renders mixed Markdown and LaTeX content
 struct LaTeXMarkdownView: View, Equatable {
     let content: String
@@ -18,9 +49,6 @@ struct LaTeXMarkdownView: View, Equatable {
     let horizontalPadding: CGFloat
     let maxWidthAlignment: Alignment
     let isStreaming: Bool
-
-    @State private var segmentCache: [String: ContentSegment] = [:]
-    @State private var lastContent: String = ""
 
     static func == (lhs: LaTeXMarkdownView, rhs: LaTeXMarkdownView) -> Bool {
         lhs.content == rhs.content &&
@@ -66,33 +94,15 @@ struct LaTeXMarkdownView: View, Equatable {
             )]
         }
 
-        if content == lastContent {
-            return parseContentWithCache()
+        let cacheKey = "\(content.hashValue)_\(isDarkMode)"
+
+        if let cached = MarkdownRenderCache.shared.get(for: cacheKey) {
+            return cached
         }
 
-        DispatchQueue.main.async {
-            lastContent = content
-        }
-        return parseContentWithCache()
-    }
-
-    private func parseContentWithCache() -> [ContentSegment] {
-        let rawSegments = parseContent()
-        var result: [ContentSegment] = []
-        var newCache: [String: ContentSegment] = [:]
-
-        for segment in rawSegments {
-            result.append(segment)
-            newCache[segment.id] = segment
-        }
-
-        if newCache.count != segmentCache.count {
-            DispatchQueue.main.async {
-                segmentCache = newCache
-            }
-        }
-
-        return result
+        let segments = parseContent()
+        MarkdownRenderCache.shared.set(segments, for: cacheKey)
+        return segments
     }
     
     /// Parse content into segments of markdown and LaTeX
@@ -334,11 +344,6 @@ struct LaTeXMarkdownView: View, Equatable {
         }
 
         return result
-    }
-    
-    private struct ContentSegment {
-        let id: String
-        let view: AnyView
     }
 
     private struct SpecialSegment {

@@ -8,7 +8,7 @@
 
 import Foundation
 
-enum ContentChunkType: Codable, Equatable {
+enum ContentChunkType: Codable, Equatable, Hashable {
     case paragraph
     case codeBlock(language: String?)
     case heading
@@ -18,7 +18,7 @@ enum ContentChunkType: Codable, Equatable {
     case other
 }
 
-struct ContentChunk: Codable, Equatable, Identifiable {
+struct ContentChunk: Codable, Equatable, Identifiable, Hashable {
     let id: String
     let type: ContentChunkType
     let content: String
