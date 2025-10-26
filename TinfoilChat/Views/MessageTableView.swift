@@ -40,7 +40,10 @@ struct MessageTableView: UIViewRepresentable {
         tableView.showsVerticalScrollIndicator = true
         tableView.contentInsetAdjustmentBehavior = .never
         tableView.clipsToBounds = false
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "Cell")
+
+        if #available(iOS 15.0, *) {
+            tableView.isPrefetchingEnabled = true
+        }
 
         context.coordinator.tableView = tableView
 
@@ -197,7 +200,15 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-            let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath)
+            let cellIdentifier: String
+            if parent.messages.isEmpty {
+                cellIdentifier = "WelcomeCell"
+            } else {
+                let message = parent.messages[indexPath.row]
+                cellIdentifier = "Cell_\(message.id)"
+            }
+
+            let cell = tableView.dequeueReusableCell(withIdentifier: cellIdentifier) ?? UITableViewCell(style: .default, reuseIdentifier: cellIdentifier)
             cell.selectionStyle = .none
             cell.backgroundColor = .clear
 
@@ -233,12 +244,16 @@ struct MessageTableView: UIViewRepresentable {
                     showArchiveSeparator: showArchiveSeparator
                 )
 
-                cell.contentConfiguration = UIHostingConfiguration {
-                    ObservableMessageCell(wrapper: wrapper, viewModel: parent.viewModel, coordinator: self)
+                if cell.contentConfiguration == nil {
+                    cell.contentConfiguration = UIHostingConfiguration {
+                        ObservableMessageCell(wrapper: wrapper, viewModel: parent.viewModel, coordinator: self)
+                    }
+                    .minSize(width: 0, height: 0)
+                    .margins(.all, 0)
+                    .background(.clear)
+                } else {
+                    wrapper.objectWillChange.send()
                 }
-                .minSize(width: 0, height: 0)
-                .margins(.all, 0)
-                .background(.clear)
             }
 
             return cell
