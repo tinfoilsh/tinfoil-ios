@@ -82,13 +82,8 @@ struct LaTeXMarkdownView: View, Equatable {
         var newCache: [String: ContentSegment] = [:]
 
         for segment in rawSegments {
-            if let cached = segmentCache[segment.id] {
-                result.append(cached)
-                newCache[segment.id] = cached
-            } else {
-                result.append(segment)
-                newCache[segment.id] = segment
-            }
+            result.append(segment)
+            newCache[segment.id] = segment
         }
 
         if newCache.count != segmentCache.count {

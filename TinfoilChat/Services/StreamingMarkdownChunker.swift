@@ -65,7 +65,7 @@ class StreamingMarkdownChunker {
                 if let closingRange = workingBuffer.range(of: "```", options: .backwards) {
                     let afterFence = String(workingBuffer[closingRange.upperBound...])
                     if afterFence.trimmingCharacters(in: .whitespaces).isEmpty || afterFence.hasPrefix("\n") {
-                        finalizeCodeBlock()
+                        finalizeCodeBlock(preserveAfterFence: afterFence)
                         return true
                     }
                 }
@@ -137,7 +137,7 @@ class StreamingMarkdownChunker {
         return false
     }
 
-    private func finalizeCodeBlock() {
+    private func finalizeCodeBlock(preserveAfterFence: String = "") {
         let chunkId = "codeblock_\(workingBuffer.hashValue)_\(Date().timeIntervalSince1970)"
         completedChunks.append(ContentChunk(
             id: chunkId,
@@ -148,7 +148,7 @@ class StreamingMarkdownChunker {
 
         isInCodeBlock = false
         codeBlockLanguage = nil
-        workingBuffer = ""
+        workingBuffer = preserveAfterFence
     }
 
     private func finalizeTable() {

@@ -22,6 +22,7 @@ struct OptimizedChatListView: View {
     @State private var estimatedStreamingHeight: CGFloat = 0
     @State private var lastAIMessageID: String? = nil
     @State private var scrollTrigger = UUID()
+    @State private var keyboardObservers: [Any] = []
 
     private var archivedMessagesStartIndex: Int {
         max(0, messages.count - settings.maxMessages)
@@ -138,22 +139,24 @@ struct OptimizedChatListView: View {
     }
 
     private func setupKeyboardObservers() {
-        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { _ in
+        let showObserver = NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { _ in
             withAnimation(.easeOut(duration: 0.25)) {
                 isKeyboardVisible = true
             }
         }
 
-        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
+        let hideObserver = NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
             withAnimation(.easeOut(duration: 0.25)) {
                 isKeyboardVisible = false
             }
         }
+
+        keyboardObservers = [showObserver, hideObserver]
     }
 
     private func removeKeyboardObservers() {
-        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
-        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
+        keyboardObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        keyboardObservers.removeAll()
     }
 }
 
