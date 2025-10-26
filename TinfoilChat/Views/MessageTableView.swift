@@ -68,6 +68,7 @@ struct MessageTableView: UIViewRepresentable {
         if messageCountChanged {
             context.coordinator.lastMessageCount = messages.count
             context.coordinator.lastStreamingHash = streamingContentHash
+            context.coordinator.heightCache.removeAll()
             tableView.reloadData()
         } else if streamingHashChanged && !messages.isEmpty {
             context.coordinator.lastStreamingHash = streamingContentHash
@@ -167,6 +168,7 @@ struct MessageTableView: UIViewRepresentable {
         private var isDragging = false
         var messageWrappers: [String: ObservableMessageWrapper] = [:]
         var shouldScrollToBottomAfterLayout = false
+        var heightCache: [IndexPath: CGFloat] = [:]
 
         init(_ parent: MessageTableView) {
             self.parent = parent
@@ -242,7 +244,19 @@ struct MessageTableView: UIViewRepresentable {
             return cell
         }
 
+        func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
+            if let cachedHeight = heightCache[indexPath] {
+                return cachedHeight
+            }
+            return 100
+        }
+
         func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+            let height = cell.frame.size.height
+            if height > 0 {
+                heightCache[indexPath] = height
+            }
+
             if shouldScrollToBottomAfterLayout {
                 let numberOfRows = tableView.numberOfRows(inSection: 0)
                 if indexPath.row == numberOfRows - 1 {
@@ -258,6 +272,9 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
+        func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        }
+
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             updateContentInset()
             checkIfAtBottom()
@@ -266,6 +283,8 @@ struct MessageTableView: UIViewRepresentable {
         func updateContentInset() {
             guard let tableView = tableView else { return }
 
+            let targetInset: CGFloat
+
             if parent.isLoading, let lastMessage = parent.messages.last,
                let wrapper = messageWrappers[lastMessage.id], wrapper.actualContentHeight > 0 {
 
@@ -273,13 +292,14 @@ struct MessageTableView: UIViewRepresentable {
                 let bufferHeight = screenHeight * wrapper.bufferMultiplier
                 let unusedBuffer = bufferHeight - wrapper.actualContentHeight
 
-                let inset = -max(0, unusedBuffer)
-
-                tableView.contentInset.bottom = inset
-                tableView.scrollIndicatorInsets.bottom = inset
+                targetInset = -max(0, unusedBuffer)
             } else {
-                tableView.contentInset.bottom = 0
-                tableView.scrollIndicatorInsets.bottom = 0
+                targetInset = 0
+            }
+
+            if tableView.contentInset.bottom != targetInset {
+                tableView.contentInset.bottom = targetInset
+                tableView.scrollIndicatorInsets.bottom = targetInset
             }
         }
 
@@ -361,6 +381,8 @@ class ObservableMessageWrapper: ObservableObject {
     var bufferMultiplier: CGFloat = 1.0
     var lastExtendedAtHeight: CGFloat = 0
     var lastReportedHeight: CGFloat = 0
+    var cachedHeight: CGFloat?
+    var cachedHeightKey: Int?
 
     init(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool) {
         self.message = message
@@ -372,12 +394,29 @@ class ObservableMessageWrapper: ObservableObject {
     }
 
     func update(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool) {
+        let contentChanged = self.message.content != message.content ||
+                            self.message.thoughts != message.thoughts ||
+                            self.message.contentChunks != message.contentChunks ||
+                            self.isDarkMode != isDarkMode
+
+        if contentChanged {
+            cachedHeight = nil
+            cachedHeightKey = nil
+        }
+
         self.message = message
         self.isDarkMode = isDarkMode
         self.isLastMessage = isLastMessage
         self.isLoading = isLoading
         self.isArchived = isArchived
         self.showArchiveSeparator = showArchiveSeparator
+    }
+
+    func getCacheKey() -> Int {
+        message.content.hashValue ^
+        (message.thoughts?.hashValue ?? 0) ^
+        (message.contentChunks.hashValue) ^
+        isDarkMode.hashValue
     }
 }
 
@@ -429,20 +468,20 @@ struct ObservableMessageCell: View {
                     view.frame(maxWidth: 900)
                         .frame(maxWidth: .infinity)
                 }
-                .overlay(
-                    GeometryReader { geometry in
-                        Color.clear
-                            .preference(key: StreamingContentHeightKey.self, value: geometry.size.height)
+                .if(wrapper.isLoading && wrapper.isLastMessage) { view in
+                    view.overlay(
+                        GeometryReader { geometry in
+                            Color.clear
+                                .preference(key: StreamingContentHeightKey.self, value: geometry.size.height)
+                        }
+                    )
+                    .onPreferenceChange(StreamingContentHeightKey.self) { height in
+                        let heightDiff = abs(height - wrapper.lastReportedHeight)
+                        if heightDiff > 5 {
+                            wrapper.actualContentHeight = height
+                            wrapper.lastReportedHeight = height
+                        }
                     }
-                )
-            }
-        }
-        .onPreferenceChange(StreamingContentHeightKey.self) { height in
-            if wrapper.isLoading && wrapper.isLastMessage {
-                let heightDiff = abs(height - wrapper.lastReportedHeight)
-                if heightDiff > 5 {
-                    wrapper.actualContentHeight = height
-                    wrapper.lastReportedHeight = height
                 }
             }
         }
