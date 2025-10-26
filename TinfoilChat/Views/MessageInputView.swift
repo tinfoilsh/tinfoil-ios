@@ -38,130 +38,202 @@ struct MessageInputView: View {
         false
     }
     
+    @ViewBuilder
     var body: some View {
-        VStack(spacing: 0) {
-            // Text input area
-            CustomTextEditor(text: $messageText,
-                             textHeight: $textHeight,
-                             placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
-                             shouldFocusInput: viewModel.shouldFocusInput,
-                             isLoading: viewModel.isLoading,
-                             onFocusHandled: { viewModel.shouldFocusInput = false },
-                             onSendMessage: { text in viewModel.sendMessage(text: text) })
-                .frame(height: textHeight)
-                .padding(.horizontal)
-            
-            // Bottom row with shield and send button
-            HStack {
-                // Shield status indicator
-                Button(action: {
-                    viewModel.showVerifier()
-                }) {
-                    HStack {
-                        Image(systemName: viewModel.isVerified && viewModel.verificationError == nil ? "lock.fill" : 
-                                          viewModel.isVerifying ? "shield" : "exclamationmark.shield.fill")
-                            .foregroundColor(viewModel.isVerified && viewModel.verificationError == nil ? .green : 
-                                            viewModel.isVerifying ? .orange : .red)
-                            .font(.caption)
-                        if let error = viewModel.verificationError {
-                            HStack(spacing: 4) {
-                                Text("Verification failed")
-                                    .font(.caption)
-                                    .foregroundColor(.red)
-                                Button(action: {
-                                    showErrorPopover.toggle()
-                                }) {
-                                    Image(systemName: "info.circle")
+        if #available(iOS 26, *) {
+            // iOS 26+ with liquid glass effect
+            VStack(spacing: 0) {
+                // Text input area
+                CustomTextEditor(text: $messageText,
+                                 textHeight: $textHeight,
+                                 placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
+                                 shouldFocusInput: viewModel.shouldFocusInput,
+                                 isLoading: viewModel.isLoading,
+                                 onFocusHandled: { viewModel.shouldFocusInput = false },
+                                 onSendMessage: { text in viewModel.sendMessage(text: text) })
+                    .frame(height: textHeight)
+                    .padding(.horizontal)
+
+                // Bottom row with shield and send button
+                HStack {
+                    // Shield status indicator
+                    Button(action: {
+                        viewModel.showVerifier()
+                    }) {
+                        HStack {
+                            Image(systemName: viewModel.isVerified && viewModel.verificationError == nil ? "lock.fill" :
+                                              viewModel.isVerifying ? "shield" : "exclamationmark.shield.fill")
+                                .foregroundColor(viewModel.isVerified && viewModel.verificationError == nil ? .green :
+                                                viewModel.isVerifying ? .orange : .red)
+                                .font(.caption)
+                            if let error = viewModel.verificationError {
+                                HStack(spacing: 4) {
+                                    Text("Verification failed")
                                         .font(.caption)
                                         .foregroundColor(.red)
+                                    Button(action: {
+                                        showErrorPopover.toggle()
+                                    }) {
+                                        Image(systemName: "info.circle")
+                                            .font(.caption)
+                                            .foregroundColor(.red)
+                                    }
+                                    .alert(isPresented: $showErrorPopover) {
+                                        Alert(
+                                            title: Text("Verification Error"),
+                                            message: Text(error),
+                                            dismissButton: .default(Text("OK"))
+                                        )
+                                    }
                                 }
-                                .alert(isPresented: $showErrorPopover) {
-                                    Alert(
-                                        title: Text("Verification Error"),
-                                        message: Text(error),
-                                        dismissButton: .default(Text("OK"))
-                                    )
-                                }
+                            } else {
+                                Text(viewModel.verificationStatusMessage)
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
                             }
-                        } else {
-                            Text(viewModel.verificationStatusMessage)
-                                .font(.caption)
-                                .foregroundColor(.gray)
                         }
                     }
+                    .padding(.leading)
+
+                    Spacer()
+
+                    // Send/Microphone button
+                    Button(action: handleButtonPress) {
+                        Image(systemName: shouldShowMicrophone ?
+                              (viewModel.isRecording ? "mic.fill" : "mic") :
+                              (viewModel.isLoading ? "stop.fill" : "arrow.up"))
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 24, height: 24)
+                            .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .clipShape(.circle)
+                    .tint(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
+                    .padding(.trailing, 8)
                 }
-                .padding(.leading)
-                
-                Spacer()
-                
-                // Send/Microphone button
-                Group {
-                    if #available(iOS 26, *) {
-                        Button(action: handleButtonPress) {
+                .padding(.vertical, 8)
+            }
+            .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 26))
+            .padding(.horizontal, 12)
+            .padding(.bottom, isKeyboardVisible ? 12 : 0)
+            .onChange(of: viewModel.transcribedText) { oldValue, newValue in
+                if !newValue.isEmpty && newValue != oldValue {
+                    // Check if it's an error message (don't auto-send these)
+                    if newValue.contains("requires authentication") || newValue.contains("failed") {
+                        // Show error message in text field for user to see
+                        messageText = newValue
+                        textHeight = Layout.defaultHeight
+                    } else {
+                        // For successful transcriptions, the message is auto-sent by the ViewModel
+                        // We don't need to do anything here since sendMessage is called directly
+                    }
+
+                    // Clear the transcribed text to prevent it from being processed again
+                    viewModel.transcribedText = ""
+                }
+            }
+        } else {
+            // iOS 25 and below with material effect
+            VStack(spacing: 0) {
+                // Text input area
+                CustomTextEditor(text: $messageText,
+                                 textHeight: $textHeight,
+                                 placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
+                                 shouldFocusInput: viewModel.shouldFocusInput,
+                                 isLoading: viewModel.isLoading,
+                                 onFocusHandled: { viewModel.shouldFocusInput = false },
+                                 onSendMessage: { text in viewModel.sendMessage(text: text) })
+                    .frame(height: textHeight)
+                    .padding(.horizontal)
+
+                // Bottom row with shield and send button
+                HStack {
+                    // Shield status indicator
+                    Button(action: {
+                        viewModel.showVerifier()
+                    }) {
+                        HStack {
+                            Image(systemName: viewModel.isVerified && viewModel.verificationError == nil ? "lock.fill" :
+                                              viewModel.isVerifying ? "shield" : "exclamationmark.shield.fill")
+                                .foregroundColor(viewModel.isVerified && viewModel.verificationError == nil ? .green :
+                                                viewModel.isVerifying ? .orange : .red)
+                                .font(.caption)
+                            if let error = viewModel.verificationError {
+                                HStack(spacing: 4) {
+                                    Text("Verification failed")
+                                        .font(.caption)
+                                        .foregroundColor(.red)
+                                    Button(action: {
+                                        showErrorPopover.toggle()
+                                    }) {
+                                        Image(systemName: "info.circle")
+                                            .font(.caption)
+                                            .foregroundColor(.red)
+                                    }
+                                    .alert(isPresented: $showErrorPopover) {
+                                        Alert(
+                                            title: Text("Verification Error"),
+                                            message: Text(error),
+                                            dismissButton: .default(Text("OK"))
+                                        )
+                                    }
+                                }
+                            } else {
+                                Text(viewModel.verificationStatusMessage)
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                    }
+                    .padding(.leading)
+
+                    Spacer()
+
+                    // Send/Microphone button
+                    Button(action: handleButtonPress) {
+                        ZStack {
+                            Circle()
+                                .fill(shouldShowMicrophone ?
+                                      (viewModel.isRecording ? Color.red : (isDarkMode ? Color.white : Color.primary)) :
+                                      (isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight))
+                                .frame(width: 32, height: 32)
+
                             Image(systemName: shouldShowMicrophone ?
                                   (viewModel.isRecording ? "mic.fill" : "mic") :
                                   (viewModel.isLoading ? "stop.fill" : "arrow.up"))
                                 .font(.system(size: 16, weight: .semibold))
-                                .frame(width: 24, height: 24)
-                                .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .buttonBorderShape(.circle)
-                        .glassEffect(.regular.interactive(), in: .circle)
-                        .clipShape(.circle)
-                        .tint(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
-                    } else {
-                        Button(action: handleButtonPress) {
-                            ZStack {
-                                Circle()
-                                    .fill(shouldShowMicrophone ?
-                                          (viewModel.isRecording ? Color.red : (isDarkMode ? Color.white : Color.primary)) :
-                                          (isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight))
-                                    .frame(width: 32, height: 32)
-
-                                Image(systemName: shouldShowMicrophone ?
-                                      (viewModel.isRecording ? "mic.fill" : "mic") :
-                                      (viewModel.isLoading ? "stop.fill" : "arrow.up"))
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(shouldShowMicrophone ?
-                                                   (viewModel.isRecording ? .white : (isDarkMode ? .black : .white)) :
-                                                   (isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
-                            }
+                                .foregroundColor(shouldShowMicrophone ?
+                                               (viewModel.isRecording ? .white : (isDarkMode ? .black : .white)) :
+                                               (isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
                         }
                     }
+                    .padding(.trailing, 8)
                 }
-                .padding(.trailing, 8)
+                .padding(.vertical, 8)
             }
-            .padding(.vertical, 8)
-        }
-        .background {
-            if #available(iOS 26, *) {
+            .background {
                 RoundedRectangle(cornerRadius: 26)
                     .fill(.thickMaterial)
             }
-        }
-        .padding(.horizontal, 12)
-        .padding(.bottom, isKeyboardVisible ? 12 : 0)
-        .background {
-            if #available(iOS 26, *) {
-                Color.chatBackground(isDarkMode: isDarkMode)
-                    .ignoresSafeArea()
-            }
-        }
-        .onChange(of: viewModel.transcribedText) { oldValue, newValue in
-            if !newValue.isEmpty && newValue != oldValue {
-                // Check if it's an error message (don't auto-send these)
-                if newValue.contains("requires authentication") || newValue.contains("failed") {
-                    // Show error message in text field for user to see
-                    messageText = newValue
-                    textHeight = Layout.defaultHeight
-                } else {
-                    // For successful transcriptions, the message is auto-sent by the ViewModel
-                    // We don't need to do anything here since sendMessage is called directly
+            .padding(.horizontal, 12)
+            .padding(.bottom, isKeyboardVisible ? 12 : 0)
+            .onChange(of: viewModel.transcribedText) { oldValue, newValue in
+                if !newValue.isEmpty && newValue != oldValue {
+                    // Check if it's an error message (don't auto-send these)
+                    if newValue.contains("requires authentication") || newValue.contains("failed") {
+                        // Show error message in text field for user to see
+                        messageText = newValue
+                        textHeight = Layout.defaultHeight
+                    } else {
+                        // For successful transcriptions, the message is auto-sent by the ViewModel
+                        // We don't need to do anything here since sendMessage is called directly
+                    }
+
+                    // Clear the transcribed text to prevent it from being processed again
+                    viewModel.transcribedText = ""
                 }
-                
-                // Clear the transcribed text to prevent it from being processed again
-                viewModel.transcribedText = ""
             }
         }
     }
