@@ -569,8 +569,9 @@ private struct MarkdownTableView: View {
             tableContainer(useColumnWidths: false)
                 .hidden()
                 .onPreferenceChange(ColumnWidthPreferenceKey.self) { newValues in
-                    if columnWidths != newValues {
-                        columnWidths = newValues
+                    let cappedValues = newValues.mapValues { min($0, Constants.UI.tableMaxColumnWidth) }
+                    if columnWidths != cappedValues {
+                        columnWidths = cappedValues
                     }
                 }
         )
