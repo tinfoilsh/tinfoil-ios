@@ -574,10 +574,17 @@ struct CollapsibleThinkingBox: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                if let tableView = findTableView() {
+                    UIView.performWithoutAnimation {
+                        isCollapsed.toggle()
+                        viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
+                        tableView.beginUpdates()
+                        tableView.endUpdates()
+                    }
+                } else {
                     isCollapsed.toggle()
+                    viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
                 }
-                viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
             }) {
                 HStack {
                     Image(systemName: "brain.head.profile")
@@ -624,13 +631,10 @@ struct CollapsibleThinkingBox: View {
                         .padding(.vertical, 12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
-                        .transaction { transaction in
-                            transaction.animation = nil
-                        }
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        .animation(nil, value: isCollapsed)
         .background {
             if #available(iOS 26, *) {
                 RoundedRectangle(cornerRadius: 16)
@@ -655,11 +659,32 @@ struct CollapsibleThinkingBox: View {
         }
         .onChange(of: messageCollapsed) { _, newValue in
             if newValue != isCollapsed {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                UIView.performWithoutAnimation {
                     isCollapsed = newValue
                 }
             }
         }
+    }
+
+    private func findTableView() -> UITableView? {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first else {
+            return nil
+        }
+
+        func findTableView(in view: UIView) -> UITableView? {
+            if let tableView = view as? UITableView {
+                return tableView
+            }
+            for subview in view.subviews {
+                if let found = findTableView(in: subview) {
+                    return found
+                }
+            }
+            return nil
+        }
+
+        return findTableView(in: window)
     }
 }
 
