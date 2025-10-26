@@ -31,6 +31,7 @@ enum Constants {
         static let modelIconExtension = ".png"
         static let scrollToBottomButtonSize: CGFloat = 27
         static let scrollToBottomIconSize: CGFloat = 16
+        static let tableMaxColumnWidth: CGFloat = 300
     }
 
     enum API {
