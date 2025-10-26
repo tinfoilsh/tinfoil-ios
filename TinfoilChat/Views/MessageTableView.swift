@@ -33,7 +33,7 @@ struct MessageTableView: UIViewRepresentable {
         tableView.separatorStyle = .none
         tableView.delegate = context.coordinator
         tableView.dataSource = context.coordinator
-        tableView.keyboardDismissMode = .interactive
+        tableView.keyboardDismissMode = .onDrag
         tableView.allowsSelection = false
         tableView.estimatedRowHeight = 100
         tableView.rowHeight = UITableView.automaticDimension
@@ -288,6 +288,10 @@ struct MessageTableView: UIViewRepresentable {
             parent.userHasScrolled = true
             parent.viewModel.isScrollInteractionActive = true
             shouldScrollToBottomAfterLayout = false
+
+            UIView.animate(withDuration: 0.3) {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
         }
 
         func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
