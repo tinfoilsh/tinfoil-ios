@@ -172,6 +172,7 @@ struct MessageTableView: UIViewRepresentable {
         var messageWrappers: [String: ObservableMessageWrapper] = [:]
         var shouldScrollToBottomAfterLayout = false
         var heightCache: [IndexPath: CGFloat] = [:]
+        var shownMessageIds: Set<String> = []
 
         init(_ parent: MessageTableView) {
             self.parent = parent
@@ -182,7 +183,9 @@ struct MessageTableView: UIViewRepresentable {
                 existing.update(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator)
                 return existing
             } else {
-                let wrapper = ObservableMessageWrapper(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator)
+                let isFirstTimeShown = !shownMessageIds.contains(message.id)
+                shownMessageIds.insert(message.id)
+                let wrapper = ObservableMessageWrapper(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator, shouldAnimateAppearance: isFirstTimeShown)
                 messageWrappers[message.id] = wrapper
                 return wrapper
             }
@@ -392,6 +395,7 @@ class ObservableMessageWrapper: ObservableObject {
     @Published var isLoading: Bool
     @Published var isArchived: Bool
     @Published var showArchiveSeparator: Bool
+    @Published var shouldAnimateAppearance: Bool = false
     var actualContentHeight: CGFloat = 0
     var bufferMultiplier: CGFloat = 1.0
     var lastExtendedAtHeight: CGFloat = 0
@@ -399,13 +403,14 @@ class ObservableMessageWrapper: ObservableObject {
     var cachedHeight: CGFloat?
     var cachedHeightKey: Int?
 
-    init(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool) {
+    init(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool, shouldAnimateAppearance: Bool = true) {
         self.message = message
         self.isDarkMode = isDarkMode
         self.isLastMessage = isLastMessage
         self.isLoading = isLoading
         self.isArchived = isArchived
         self.showArchiveSeparator = showArchiveSeparator
+        self.shouldAnimateAppearance = shouldAnimateAppearance
     }
 
     func update(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool) {
@@ -439,6 +444,7 @@ struct ObservableMessageCell: View {
     @ObservedObject var wrapper: ObservableMessageWrapper
     @ObservedObject var viewModel: ChatViewModel
     weak var coordinator: MessageTableView.Coordinator?
+    @State private var hasAppeared = false
 
     private var bufferHeight: CGFloat {
         let screenHeight = UIScreen.main.bounds.height
@@ -498,6 +504,16 @@ struct ObservableMessageCell: View {
                         }
                     }
                 }
+            }
+        }
+        .opacity(wrapper.shouldAnimateAppearance ? (hasAppeared ? 1 : 0) : 1)
+        .onAppear {
+            if wrapper.shouldAnimateAppearance && !hasAppeared {
+                withAnimation(.easeIn(duration: 0.2)) {
+                    hasAppeared = true
+                }
+            } else {
+                hasAppeared = true
             }
         }
     }
