@@ -18,6 +18,7 @@ struct MessageTableView: UIViewRepresentable {
     @Binding var userHasScrolled: Bool
     let scrollTrigger: UUID
     @Binding var tableOpacity: Double
+    let keyboardHeight: CGFloat
 
     // Track streaming content to trigger updates
     private var streamingContentHash: Int {
@@ -48,6 +49,18 @@ struct MessageTableView: UIViewRepresentable {
 
     func updateUIView(_ tableView: UITableView, context: Context) {
         context.coordinator.parent = self
+
+        let keyboardHeightChanged = context.coordinator.lastKeyboardHeight != keyboardHeight
+        if keyboardHeightChanged {
+            let wasAtBottom = context.coordinator.parent.isAtBottom
+            context.coordinator.lastKeyboardHeight = keyboardHeight
+
+            if wasAtBottom && keyboardHeight > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    context.coordinator.scrollToBottom(animated: true)
+                }
+            }
+        }
 
         let messageCountChanged = context.coordinator.lastMessageCount != messages.count
         let streamingHashChanged = context.coordinator.lastStreamingHash != streamingContentHash
@@ -150,6 +163,7 @@ struct MessageTableView: UIViewRepresentable {
         var lastMessageCount: Int = 0
         var lastIsLoading: Bool = false
         var lastStreamingHash: Int = 0
+        var lastKeyboardHeight: CGFloat = 0
         private var isDragging = false
         var messageWrappers: [String: ObservableMessageWrapper] = [:]
         var shouldScrollToBottomAfterLayout = false

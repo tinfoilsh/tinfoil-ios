@@ -19,6 +19,7 @@ struct ChatListView: View {
     @State private var isAtBottom = true
     @State private var userHasScrolled = false
     @State private var isKeyboardVisible = false
+    @State private var keyboardHeight: CGFloat = 0
     @State private var scrollTrigger = UUID()
     @State private var tableOpacity = 1.0
 
@@ -37,7 +38,8 @@ struct ChatListView: View {
             isAtBottom: $isAtBottom,
             userHasScrolled: $userHasScrolled,
             scrollTrigger: scrollTrigger,
-            tableOpacity: $tableOpacity
+            tableOpacity: $tableOpacity,
+            keyboardHeight: keyboardHeight
         )
         .opacity(tableOpacity)
         .background(Color.chatBackground(isDarkMode: isDarkMode))
@@ -129,15 +131,20 @@ struct ChatListView: View {
     }
 
     private func setupKeyboardObservers() {
-        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { _ in
-            withAnimation(.easeOut(duration: 0.25)) {
-                isKeyboardVisible = true
+        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { notification in
+            if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                let keyboardHeight = keyboardFrame.height
+                withAnimation(.easeOut(duration: 0.25)) {
+                    isKeyboardVisible = true
+                    self.keyboardHeight = keyboardHeight
+                }
             }
         }
 
         NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
             withAnimation(.easeOut(duration: 0.25)) {
                 isKeyboardVisible = false
+                keyboardHeight = 0
             }
         }
     }
