@@ -1004,10 +1004,9 @@ class ChatViewModel: ObservableObject {
                     }
 
                     if didMutateState {
-                        // Inline updateUI - but only update contentChunks if they've actually changed
                         let currentChunks = chunker.getAllChunks()
 
-                        await MainActor.run { [weak self] in
+                        Task { @MainActor [weak self] in
                             guard let self = self else { return }
                             guard self.currentChat?.id == streamChatId else { return }
                             guard var chat = self.currentChat,
@@ -1044,10 +1043,9 @@ class ChatViewModel: ObservableObject {
                         generationTimeSeconds = Date().timeIntervalSince(startTime)
                     }
                     isInThinkingMode = false
-                    // Inline updateUI(force: true)
                     let currentChunks = chunker.getAllChunks()
 
-                    await MainActor.run { [weak self] in
+                    Task { @MainActor [weak self] in
                         guard let self = self else { return }
                         guard self.currentChat?.id == streamChatId else { return }
                         guard var chat = self.currentChat,
@@ -1067,7 +1065,6 @@ class ChatViewModel: ObservableObject {
                         self.updateChat(chat, throttleForStreaming: true)
                     }
                 } else if isFirstChunk && !initialContentBuffer.isEmpty {
-                    // Inline appendToResponse
                     if responseContent.isEmpty {
                         responseContent = initialContentBuffer
                     } else {
@@ -1076,10 +1073,9 @@ class ChatViewModel: ObservableObject {
                     _ = chunker.appendToken(initialContentBuffer)
                     isInThinkingMode = false
                     currentThoughts = nil
-                    // Inline updateUI(force: true)
                     let currentChunks = chunker.getAllChunks()
 
-                    await MainActor.run { [weak self] in
+                    Task { @MainActor [weak self] in
                         guard let self = self else { return }
                         guard self.currentChat?.id == streamChatId else { return }
                         guard var chat = self.currentChat,

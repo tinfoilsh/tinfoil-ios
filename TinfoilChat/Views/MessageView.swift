@@ -38,19 +38,20 @@ struct MessageView: View {
             }
             
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
-                // Show the loading dots for a fresh streaming assistant response (but not if we have thoughts)
+                // Show the loading dots for a fresh streaming assistant response (but not if we have thoughts or are thinking)
                 if message.role == .assistant &&
                     message.content.isEmpty &&
                     message.thoughts == nil &&
+                    !message.isThinking &&
                     isLoading &&
                     isLastMessage {
                     LoadingDotsView(isDarkMode: isDarkMode)
                         .padding(.horizontal)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                
-                // If the message has thoughts (from either format), display them in a thinking box
-                else if message.thoughts != nil {
+
+                // If the message is thinking or has thoughts, display them in a thinking box
+                else if message.isThinking || message.thoughts != nil {
                     VStack(alignment: .leading, spacing: 4) {
                         CollapsibleThinkingBox(
                             messageId: message.id,
@@ -67,7 +68,7 @@ struct MessageView: View {
                                 ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             } else {
-                                LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
+                                LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
                                     .equatable()
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .transaction { transaction in
@@ -93,7 +94,7 @@ struct MessageView: View {
                         
                         // Remainder: text after </think> if present
                         if !parsed.remainderText.isEmpty {
-                            LaTeXMarkdownView(content: parsed.remainderText, isDarkMode: isDarkMode)
+                            LaTeXMarkdownView(content: parsed.remainderText, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
                                 .equatable()
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .transaction { transaction in
@@ -119,7 +120,7 @@ struct MessageView: View {
                         ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
-                        LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode)
+                        LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
                             .equatable()
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -538,7 +539,6 @@ struct AdaptiveMarkdownText: View {
     }
 }
 
-// New collapsible thinking box that always takes full width and left-aligns its text.
 struct CollapsibleThinkingBox: View {
     let messageId: String
     let thinkingText: String
@@ -549,6 +549,7 @@ struct CollapsibleThinkingBox: View {
     let messageCollapsed: Bool
 
     @State private var isCollapsed: Bool
+    @State private var hasAppeared = false
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
 
     init(
@@ -572,11 +573,18 @@ struct CollapsibleThinkingBox: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header is always visible
             Button(action: {
-                // Toggle instantly without animations
-                isCollapsed.toggle()
-                viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
+                if let tableView = findTableView() {
+                    UIView.performWithoutAnimation {
+                        isCollapsed.toggle()
+                        viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
+                        tableView.beginUpdates()
+                        tableView.endUpdates()
+                    }
+                } else {
+                    isCollapsed.toggle()
+                    viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
+                }
             }) {
                 HStack {
                     Image(systemName: "brain.head.profile")
@@ -611,13 +619,11 @@ struct CollapsibleThinkingBox: View {
             }
             .buttonStyle(PlainButtonStyle())
             .frame(maxWidth: .infinity)
-            
-            // Content area with divider - only inserted when expanded for smoother layout
+
             if !isCollapsed {
                 VStack(alignment: .leading, spacing: 0) {
                     Divider()
-                    
-                    // Simple text view for thoughts
+
                     Text(thinkingText)
                         .font(.system(size: 14))
                         .foregroundColor(isDarkMode ? .white.opacity(0.9) : Color.black.opacity(0.8))
@@ -625,14 +631,10 @@ struct CollapsibleThinkingBox: View {
                         .padding(.vertical, 12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
-                        .transaction { transaction in
-                            // Prevent text content changes from animating
-                            transaction.animation = nil
-                        }
                 }
-                .transition(.identity)
             }
         }
+        .animation(nil, value: isCollapsed)
         .background {
             if #available(iOS 26, *) {
                 RoundedRectangle(cornerRadius: 16)
@@ -645,17 +647,44 @@ struct CollapsibleThinkingBox: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
         .clipped()
-        // Set preference when thinking box expansion state changes
+        .opacity(hasAppeared ? 1 : 0)
+        .scaleEffect(hasAppeared ? 1 : 0.95)
+        .onAppear {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                hasAppeared = true
+            }
+        }
         .preference(key: ThinkingBoxExpansionPreferenceKey.self, value: !isCollapsed ? messageId : nil)
         .onChange(of: isStreaming) { oldValue, newValue in
-            // Keep the box collapsed regardless of streaming state changes
-            // User can manually expand/collapse as needed
         }
         .onChange(of: messageCollapsed) { _, newValue in
             if newValue != isCollapsed {
-                isCollapsed = newValue
+                UIView.performWithoutAnimation {
+                    isCollapsed = newValue
+                }
             }
         }
+    }
+
+    private func findTableView() -> UITableView? {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first else {
+            return nil
+        }
+
+        func findTableView(in view: UIView) -> UITableView? {
+            if let tableView = view as? UITableView {
+                return tableView
+            }
+            for subview in view.subviews {
+                if let found = findTableView(in: subview) {
+                    return found
+                }
+            }
+            return nil
+        }
+
+        return findTableView(in: window)
     }
 }
 
@@ -831,7 +860,7 @@ struct ChunkView: View, Equatable {
 
     static func == (lhs: ChunkView, rhs: ChunkView) -> Bool {
         if lhs.chunk.isComplete && rhs.chunk.isComplete {
-            return lhs.chunk.id == rhs.chunk.id && lhs.isDarkMode == rhs.isDarkMode && lhs.isStreaming == rhs.isStreaming
+            return lhs.chunk.id == rhs.chunk.id && lhs.isDarkMode == rhs.isDarkMode
         }
         return lhs.chunk.id == rhs.chunk.id &&
                lhs.chunk.isComplete == rhs.chunk.isComplete &&
@@ -841,9 +870,13 @@ struct ChunkView: View, Equatable {
     }
 
     var body: some View {
-        LaTeXMarkdownView(content: chunk.content, isDarkMode: isDarkMode)
-            .equatable()
-            .id(chunk.id)
+        LaTeXMarkdownView(
+            content: chunk.content,
+            isDarkMode: isDarkMode,
+            isStreaming: chunk.isComplete ? false : isStreaming
+        )
+        .equatable()
+        .id(chunk.id)
     }
 }
 
