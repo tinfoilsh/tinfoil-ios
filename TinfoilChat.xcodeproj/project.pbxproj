@@ -488,7 +488,7 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tinfoilsh/swift-markdown-ui";
 			requirement = {
-				branch = sacha/extensions;
+				branch = main;
 				kind = branch;
 			};
 		};

@@ -141,8 +141,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/swift-markdown-ui",
       "state" : {
-        "branch" : "sacha/extensions",
-        "revision" : "1c71bedd4777f17fa3302c78a5a6019aed782a06"
+        "branch" : "main",
+        "revision" : "10a74aea0a52a1ce24dee1bd631cfbe796fa6dc3"
       }
     },
     {
