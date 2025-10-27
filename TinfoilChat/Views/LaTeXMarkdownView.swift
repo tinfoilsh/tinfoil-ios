@@ -832,15 +832,35 @@ private struct MarkdownThemeCache {
                 BackgroundColor(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
             }
             .codeBlock { configuration in
-                configuration.label
-                    .relativeLineSpacing(.em(0.25))
-                    .markdownTextStyle {
-                        FontFamilyVariant(.monospaced)
-                        FontSize(.em(0.85))
+                VStack(spacing: 0) {
+                    HStack {
+                        Text(configuration.language ?? "code")
+                            .font(.system(.caption, design: .monospaced))
+                            .fontWeight(.semibold)
+                            .foregroundColor(isDarkMode ? SwiftUI.Color.white.opacity(0.7) : SwiftUI.Color.black.opacity(0.6))
+                        Spacer()
                     }
-                    .padding()
-                    .background(isDarkMode ? SwiftUI.Color.black.opacity(0.2) : SwiftUI.Color.gray.opacity(0.05))
-                    .cornerRadius(8)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(isDarkMode ? SwiftUI.Color.white.opacity(0.05) : SwiftUI.Color.black.opacity(0.03))
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        configuration.label
+                            .relativeLineSpacing(.em(0.25))
+                            .markdownTextStyle {
+                                FontFamilyVariant(.monospaced)
+                                FontSize(.em(0.85))
+                            }
+                            .padding(12)
+                    }
+                    .background(isDarkMode ? SwiftUI.Color.black.opacity(0.3) : SwiftUI.Color.gray.opacity(0.05))
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(isDarkMode ? SwiftUI.Color.white.opacity(0.1) : SwiftUI.Color.black.opacity(0.1), lineWidth: 1)
+                )
+                .markdownMargin(top: .zero, bottom: .em(0.8))
             }
 
         let withHeadings = baseTheme
