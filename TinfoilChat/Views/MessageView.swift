@@ -398,7 +398,7 @@ private struct RawContentModalView: View {
 
     private var responseContent: String {
         if message.thoughts != nil {
-            return message.content
+        return message.content.hasPrefix("<think>") ? "" : message.content
         }
         if message.content.hasPrefix("<think>") {
             let tagSuffix = "</think>"
