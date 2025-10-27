@@ -1621,32 +1621,57 @@ class ChatViewModel: ObservableObject {
     }
     
     // MARK: - Private Methods
-    
-    /// Ensures there's always a blank chat at the top of the list
-    private func ensureBlankChatAtTop() {
-        // Check if the first chat is blank (no messages)
-        if let firstChat = chats.first, firstChat.isBlankChat {
-            return // Already have a blank chat at top
+
+    /// Normalizes the chats array to ensure exactly one blank chat at position 0
+    /// This is the single source of truth for chat array structure:
+    /// 1. Removes ALL blank chats (deduplicates)
+    /// 2. Deduplicates by chat ID (preserves order)
+    /// 3. Adds exactly ONE blank chat at position 0 if user has chat access
+    ///
+    /// Note: This does NOT sort. Caller should sort chats before calling this if needed.
+    private func normalizeChatsArray() {
+        // Track if currentChat was pointing to a blank chat
+        let wasCurrentChatBlank = currentChat?.isBlankChat == true
+
+        // Step 1: Remove ALL blank chats to deduplicate
+        var normalizedChats = chats.filter { !$0.isBlankChat }
+
+        // Step 2: Deduplicate by ID (keep first occurrence, preserve order)
+        var seenIds = Set<String>()
+        normalizedChats = normalizedChats.filter { chat in
+            if seenIds.contains(chat.id) {
+                return false
+            }
+            seenIds.insert(chat.id)
+            return true
         }
-        
-        // Check if any chat in the list is blank
-        if let blankChatIndex = chats.firstIndex(where: { $0.isBlankChat }) {
-            // Move it to the top
-            let blankChat = chats.remove(at: blankChatIndex)
-            chats.insert(blankChat, at: 0)
-        } else {
-            // No blank chat exists, create one
-            // It will automatically be blank (no messages) and have a temporary ID (UUID)
-            let newBlankChat = Chat.create(
+
+        // Step 3: Add exactly ONE blank chat at position 0 if user has chat access
+        var newBlankChat: Chat?
+        if hasChatAccess {
+            let blankChat = Chat.create(
                 modelType: currentModel,
                 language: nil,
                 userId: currentUserId
             )
-            chats.insert(newBlankChat, at: 0)
-            
-            // Important: Don't save yet, as this might be called during initialization
-            // The calling code will handle saving
+            normalizedChats.insert(blankChat, at: 0)
+            newBlankChat = blankChat
         }
+
+        // Update the chats array
+        chats = normalizedChats
+
+        // Step 4: If currentChat was pointing to a blank chat, update it to the new blank chat
+        // This maintains the invariant that currentChat is always in the chats array
+        if wasCurrentChatBlank, let newBlankChat = newBlankChat {
+            currentChat = newBlankChat
+        }
+    }
+
+    /// Ensures there's always a blank chat at the top of the list
+    /// This now simply calls normalizeChatsArray() for consistency
+    private func ensureBlankChatAtTop() {
+        normalizeChatsArray()
     }
 
     /// Persist the collapse state for a message's thinking box
@@ -2156,26 +2181,9 @@ class ChatViewModel: ObservableObject {
                 let firstPage = Array(displayableChats.prefix(Constants.Pagination.chatsPerPage))
                 
                 await MainActor.run {
-                    if !firstPage.isEmpty {
-                        // Replace current chats with synced ones
-                        self.chats = firstPage
-                        
-                        // Only add blank chat if we don't have one already
-                        if !self.chats.contains(where: { $0.isBlankChat }) {
-                            self.ensureBlankChatAtTop()
-                        }
-                    } else {
-                        // No synced chats, keep the blank chat
-                        if self.chats.isEmpty {
-                            let newChat = Chat.create(
-                                modelType: self.currentModel,
-                                language: nil,
-                                userId: userId
-                            )
-                            self.chats = [newChat]
-                            self.currentChat = newChat
-                        }
-                    }
+                    // Set chats and normalize to ensure exactly one blank chat at position 0
+                    self.chats = firstPage
+                    normalizeChatsArray()
 
                     // Only select the first chat if we don't have a current chat selected
                     if self.currentChat == nil, let first = self.chats.first {
@@ -2379,16 +2387,12 @@ class ChatViewModel: ObservableObject {
             if let userId = currentUserId {
                 let loadedChats = Chat.loadFromDefaults(userId: userId)
                 await MainActor.run {
-                    let blankChat = loadedChats.first(where: { $0.isBlankChat })
                     let nonBlankChats = loadedChats.filter { !$0.isBlankChat }
                     let sortedNonBlankChats = nonBlankChats.sorted { $0.createdAt > $1.createdAt }
 
-                    if let blankChat = blankChat {
-                        self.chats = [blankChat] + sortedNonBlankChats
-                    } else {
-                        self.chats = sortedNonBlankChats
-                        self.ensureBlankChatAtTop()
-                    }
+                    // Set chats and normalize to ensure exactly one blank chat at position 0
+                    self.chats = sortedNonBlankChats
+                    normalizeChatsArray()
                 }
             }
         } catch {
@@ -2437,16 +2441,12 @@ class ChatViewModel: ObservableObject {
             Chat.saveToDefaults(uniqueChats, userId: userId)
 
             await MainActor.run {
-                let blankChat = uniqueChats.first(where: { $0.isBlankChat })
                 let nonBlankChats = uniqueChats.filter { !$0.isBlankChat }
                 let sortedNonBlankChats = nonBlankChats.sorted { $0.createdAt > $1.createdAt }
 
-                if let blankChat = blankChat {
-                    self.chats = [blankChat] + sortedNonBlankChats
-                } else {
-                    self.chats = sortedNonBlankChats
-                    self.ensureBlankChatAtTop()
-                }
+                // Set chats and normalize to ensure exactly one blank chat at position 0
+                self.chats = sortedNonBlankChats
+                normalizeChatsArray()
             }
         }
     }
@@ -2582,32 +2582,16 @@ class ChatViewModel: ObservableObject {
             updatedChats.append(contentsOf: syncedChatsToShow)
         }
         
-        // Remove duplicates based on chat ID
-        var seen = Set<String>()
-        let uniqueChats = updatedChats.filter { chat in
-            if seen.contains(chat.id) {
-                return false
-            }
-            seen.insert(chat.id)
-            return true
+        // Sort non-blank chats by createdAt before normalization
+        updatedChats.sort { chat1, chat2 in
+            if chat1.isBlankChat { return true }
+            if chat2.isBlankChat { return false }
+            return chat1.createdAt > chat2.createdAt
         }
 
-        // Separate blank chat from other chats to ensure it's always at position 0
-        // This prevents the blank chat from being affected by createdAt sorting
-        let blankChat = uniqueChats.first(where: { $0.isBlankChat })
-        let nonBlankChats = uniqueChats.filter { !$0.isBlankChat }
-
-        // Sort only non-blank chats by createdAt (newest first)
-        let sortedNonBlankChats = nonBlankChats.sorted { $0.createdAt > $1.createdAt }
-
-        // Build final array with blank chat at position 0, followed by sorted non-blank chats
-        if let blankChat = blankChat {
-            self.chats = [blankChat] + sortedNonBlankChats
-        } else {
-            // No blank chat exists - set array to sorted chats, then create blank chat at position 0
-            self.chats = sortedNonBlankChats
-            self.ensureBlankChatAtTop()
-        }
+        // Set chats and normalize to ensure exactly one blank chat at position 0
+        self.chats = updatedChats
+        normalizeChatsArray()
 
         // IMPORTANT: Always update currentChat to point to the instance in the chats array
         // This ensures currentChat is never stale and always references a chat that's in the array
@@ -2663,29 +2647,13 @@ class ChatViewModel: ObservableObject {
                 
                 // Keep first page of synced chats + all unsaved chats + all recent chats
                 let chatsToShow = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + unsavedChats + recentChats
-                
-                // Remove duplicates based on chat ID
-                var seen = Set<String>()
-                let uniqueChats = chatsToShow.filter { chat in
-                    if seen.contains(chat.id) {
-                        return false
-                    }
-                    seen.insert(chat.id)
-                    return true
-                }
 
-                // Separate blank chat from other chats to ensure it's always at position 0
-                let blankChat = uniqueChats.first(where: { $0.isBlankChat })
-                let nonBlankChats = uniqueChats.filter { !$0.isBlankChat }
-                let sortedNonBlankChats = nonBlankChats.sorted { $0.createdAt > $1.createdAt }
+                // Sort by createdAt (newest first)
+                let sortedChatsToShow = chatsToShow.sorted { $0.createdAt > $1.createdAt }
 
-                // Build final array with blank chat at position 0, followed by sorted non-blank chats
-                if let blankChat = blankChat {
-                    self.chats = [blankChat] + sortedNonBlankChats
-                } else {
-                    self.chats = sortedNonBlankChats
-                    self.ensureBlankChatAtTop()
-                }
+                // Set chats and normalize to ensure exactly one blank chat at position 0
+                self.chats = sortedChatsToShow
+                normalizeChatsArray()
                 
                 // Update hasMoreChats based on whether there are more chats beyond the first page
                 self.hasMoreChats = syncedChats.count > Constants.Pagination.chatsPerPage
@@ -2696,27 +2664,19 @@ class ChatViewModel: ObservableObject {
             if let userId = currentUserId {
                 let allChats = Chat.loadFromDefaults(userId: userId)
 
-                // Separate blank chat from other chats
-                let blankChat = allChats.first(where: { $0.isBlankChat })
+                // Filter out blank chats and sort by creation date (newest first)
                 let nonBlankChats = allChats.filter { !$0.isBlankChat }
-
-                // Sort non-blank chats by creation date (newest first)
                 let sortedNonBlankChats = nonBlankChats.sorted { $0.createdAt > $1.createdAt }
 
                 // Take only first page of non-blank chats initially
                 let firstPageNonBlankChats = Array(sortedNonBlankChats.prefix(Constants.Pagination.chatsPerPage))
 
-                // Build final array with blank chat at position 0, followed by first page
-                if let blankChat = blankChat {
-                    self.chats = [blankChat] + firstPageNonBlankChats
-                } else {
-                    self.chats = firstPageNonBlankChats
-                    self.ensureBlankChatAtTop()
-                }
+                // Set chats and normalize to ensure exactly one blank chat at position 0
+                self.chats = firstPageNonBlankChats
+                normalizeChatsArray()
 
                 // Set up pagination based on whether there are more non-blank chats
                 self.hasMoreChats = nonBlankChats.count > Constants.Pagination.chatsPerPage
-                // Pagination token will be set by initializeCloudSync or setupPaginationForAppRestart
             }
         }
     }
@@ -2792,7 +2752,9 @@ class ChatViewModel: ObservableObject {
                     if let userId = self.currentUserId {
                         let updatedChats = Chat.loadFromDefaults(userId: userId)
                         await MainActor.run {
-                            self.chats = updatedChats
+                            let sortedChats = updatedChats.sorted { $0.createdAt > $1.createdAt }
+                            self.chats = sortedChats
+                            normalizeChatsArray()
                         }
                     }
                 }
@@ -2857,7 +2819,9 @@ class ChatViewModel: ObservableObject {
         if let userId = currentUserId {
             let updatedChats = Chat.loadFromDefaults(userId: userId)
             await MainActor.run {
-                self.chats = updatedChats
+                let sortedChats = updatedChats.sorted { $0.createdAt > $1.createdAt }
+                self.chats = sortedChats
+                normalizeChatsArray()
             }
         }
     }
