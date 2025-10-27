@@ -801,21 +801,16 @@ struct MathView: UIViewRepresentable {
     }
 }
 
-/// Cached markdown themes (referenced from original MessageView)
-private struct MarkdownThemeCache {
-    static let darkTheme = createTheme(isDarkMode: true)
-    static let lightTheme = createTheme(isDarkMode: false)
+private struct CodeBlockWithCopy: View {
+    let configuration: CodeBlockConfiguration
+    let headerBg: SwiftUI.Color
+    let headerFg: SwiftUI.Color
+    let bodyBg: SwiftUI.Color
+    let border: SwiftUI.Color
 
-    static func getTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
-        isDarkMode ? darkTheme : lightTheme
-    }
+    @State private var showCopyFeedback = false
 
-    static func getSplashTheme(isDarkMode: Bool) -> Splash.Theme {
-        isDarkMode ? .wwdc17(withFont: .init(size: 16)) : .sunset(withFont: .init(size: 16))
-    }
-
-    @ViewBuilder
-    private static func codeBlockView(configuration: CodeBlockConfiguration, headerBg: SwiftUI.Color, headerFg: SwiftUI.Color, bodyBg: SwiftUI.Color, border: SwiftUI.Color) -> some View {
+    var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Text(configuration.language ?? "code")
@@ -823,6 +818,13 @@ private struct MarkdownThemeCache {
                     .fontWeight(.semibold)
                     .foregroundColor(headerFg)
                 Spacer()
+
+                Button(action: copyAction) {
+                    Image(systemName: showCopyFeedback ? "checkmark" : "doc.on.doc")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .foregroundColor(showCopyFeedback ? .green : headerFg)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -842,6 +844,33 @@ private struct MarkdownThemeCache {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(border, lineWidth: 1))
         .markdownMargin(top: .zero, bottom: .em(0.8))
+    }
+
+    private func copyAction() {
+        UIPasteboard.general.string = configuration.content
+
+        withAnimation {
+            showCopyFeedback = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation {
+                showCopyFeedback = false
+            }
+        }
+    }
+}
+
+/// Cached markdown themes (referenced from original MessageView)
+private struct MarkdownThemeCache {
+    static let darkTheme = createTheme(isDarkMode: true)
+    static let lightTheme = createTheme(isDarkMode: false)
+
+    static func getTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
+        isDarkMode ? darkTheme : lightTheme
+    }
+
+    static func getSplashTheme(isDarkMode: Bool) -> Splash.Theme {
+        isDarkMode ? .wwdc17(withFont: .init(size: 16)) : .sunset(withFont: .init(size: 16))
     }
 
     private static func createTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
@@ -872,7 +901,7 @@ private struct MarkdownThemeCache {
                 BackgroundColor(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.08))
             }
             .codeBlock { configuration in
-                codeBlockView(configuration: configuration, headerBg: codeBlockHeaderBg, headerFg: codeBlockHeaderFg, bodyBg: codeBlockBodyBg, border: codeBlockBorder)
+                CodeBlockWithCopy(configuration: configuration, headerBg: codeBlockHeaderBg, headerFg: codeBlockHeaderFg, bodyBg: codeBlockBodyBg, border: codeBlockBorder)
             }
 
         let withHeadings = baseTheme
