@@ -814,9 +814,46 @@ private struct MarkdownThemeCache {
         isDarkMode ? .wwdc17(withFont: .init(size: 16)) : .sunset(withFont: .init(size: 16))
     }
 
-    private static func createTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
+    @ViewBuilder
+    private static func codeBlockView(configuration: CodeBlockConfiguration, headerBg: SwiftUI.Color, headerFg: SwiftUI.Color, bodyBg: SwiftUI.Color, border: SwiftUI.Color) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(configuration.language ?? "code")
+                    .font(.system(.caption, design: .monospaced))
+                    .fontWeight(.semibold)
+                    .foregroundColor(headerFg)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(headerBg)
 
-        let baseTheme = MarkdownUI.Theme.gitHub
+            ScrollView(.horizontal, showsIndicators: false) {
+                configuration.label
+                    .relativeLineSpacing(.em(0.25))
+                    .markdownTextStyle {
+                        FontFamilyVariant(.monospaced)
+                        FontSize(.em(0.85))
+                    }
+                    .padding(12)
+            }
+            .background(bodyBg)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(border, lineWidth: 1))
+        .markdownMargin(top: .zero, bottom: .em(0.8))
+    }
+
+    private static func createTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
+        let textColor = isDarkMode ? SwiftUI.Color.white : SwiftUI.Color.black.opacity(0.8)
+        let codeBackgroundColor = isDarkMode ? SwiftUI.Color.white.opacity(0.15) : SwiftUI.Color.black.opacity(0.08)
+        let codeForegroundColor = isDarkMode ? SwiftUI.Color(red: 1.0, green: 0.6, blue: 0.4) : SwiftUI.Color(red: 0.8, green: 0.3, blue: 0.2)
+        let codeBlockHeaderBg = isDarkMode ? SwiftUI.Color.white.opacity(0.05) : SwiftUI.Color.black.opacity(0.03)
+        let codeBlockHeaderFg = isDarkMode ? SwiftUI.Color.white.opacity(0.7) : SwiftUI.Color.black.opacity(0.6)
+        let codeBlockBodyBg = isDarkMode ? SwiftUI.Color.black.opacity(0.3) : SwiftUI.Color.gray.opacity(0.05)
+        let codeBlockBorder = isDarkMode ? SwiftUI.Color.white.opacity(0.1) : SwiftUI.Color.black.opacity(0.1)
+
+        let textTheme = MarkdownUI.Theme.gitHub
             .text {
                 FontFamily(.system(.default))
                 FontSize(15)
@@ -826,41 +863,16 @@ private struct MarkdownThemeCache {
                 configuration.label
                     .markdownMargin(top: 0, bottom: 12)
             }
+
+        let baseTheme = textTheme
             .code {
                 FontFamilyVariant(.monospaced)
                 FontSize(.em(0.85))
-                BackgroundColor(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
+                ForegroundColor(isDarkMode ? Color(red: 1.0, green: 0.6, blue: 0.4) : Color(red: 0.8, green: 0.3, blue: 0.2))
+                BackgroundColor(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.08))
             }
             .codeBlock { configuration in
-                VStack(spacing: 0) {
-                    HStack {
-                        Text(configuration.language ?? "code")
-                            .font(.system(.caption, design: .monospaced))
-                            .fontWeight(.semibold)
-                            .foregroundColor(isDarkMode ? SwiftUI.Color.white.opacity(0.7) : SwiftUI.Color.black.opacity(0.6))
-                        Spacer()
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(isDarkMode ? SwiftUI.Color.white.opacity(0.05) : SwiftUI.Color.black.opacity(0.03))
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        configuration.label
-                            .relativeLineSpacing(.em(0.25))
-                            .markdownTextStyle {
-                                FontFamilyVariant(.monospaced)
-                                FontSize(.em(0.85))
-                            }
-                            .padding(12)
-                    }
-                    .background(isDarkMode ? SwiftUI.Color.black.opacity(0.3) : SwiftUI.Color.gray.opacity(0.05))
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(isDarkMode ? SwiftUI.Color.white.opacity(0.1) : SwiftUI.Color.black.opacity(0.1), lineWidth: 1)
-                )
-                .markdownMargin(top: .zero, bottom: .em(0.8))
+                codeBlockView(configuration: configuration, headerBg: codeBlockHeaderBg, headerFg: codeBlockHeaderFg, bodyBg: codeBlockBodyBg, border: codeBlockBorder)
             }
 
         let withHeadings = baseTheme
