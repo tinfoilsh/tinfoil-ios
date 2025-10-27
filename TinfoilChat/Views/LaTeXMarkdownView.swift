@@ -10,6 +10,7 @@ import SwiftUI
 import MarkdownUI
 import SwiftMath
 import UIKit
+import Highlightr
 
 private struct ContentSegment {
     let id: String
@@ -88,6 +89,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 view: AnyView(
                     Markdown(content)
                         .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
+                        .markdownCodeSyntaxHighlighter(.highlightr(theme: MarkdownThemeCache.getHighlightrTheme(isDarkMode: isDarkMode)))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 )
@@ -177,6 +179,7 @@ struct LaTeXMarkdownView: View, Equatable {
                         view: AnyView(
                             Markdown(markdownText)
                                 .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
+                                .markdownCodeSyntaxHighlighter(.highlightr(theme: MarkdownThemeCache.getHighlightrTheme(isDarkMode: isDarkMode)))
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         )
@@ -238,6 +241,7 @@ struct LaTeXMarkdownView: View, Equatable {
                     view: AnyView(
                         Markdown(remainingText)
                             .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
+                            .markdownCodeSyntaxHighlighter(.highlightr(theme: MarkdownThemeCache.getHighlightrTheme(isDarkMode: isDarkMode)))
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     )
@@ -251,6 +255,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 view: AnyView(
                     Markdown(content)
                         .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
+                        .markdownCodeSyntaxHighlighter(.highlightr(theme: MarkdownThemeCache.getHighlightrTheme(isDarkMode: isDarkMode)))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 )
@@ -547,16 +552,16 @@ private struct MarkdownTableView: View {
 
     @State private var columnWidths: [Int: CGFloat] = [:]
 
-    private var borderColor: Color {
-        isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2)
+    private var borderColor: SwiftUI.Color {
+        isDarkMode ? SwiftUI.Color.white.opacity(0.2) : SwiftUI.Color.black.opacity(0.2)
     }
 
-    private var headerBackground: Color {
-        Color.clear
+    private var headerBackground: SwiftUI.Color {
+        SwiftUI.Color.clear
     }
 
-    private var alternatingRowBackground: Color {
-        Color.clear
+    private var alternatingRowBackground: SwiftUI.Color {
+        SwiftUI.Color.clear
     }
 
     var body: some View {
@@ -604,7 +609,7 @@ private struct MarkdownTableView: View {
                     isHeader: false,
                     isDarkMode: isDarkMode,
                     borderColor: borderColor,
-                    background: index.isMultiple(of: 2) ? alternatingRowBackground : Color.clear,
+                    background: index.isMultiple(of: 2) ? alternatingRowBackground : SwiftUI.Color.clear,
                     columnWidths: useColumnWidths ? columnWidths : [:],
                     measureColumns: !useColumnWidths
                 )
@@ -629,8 +634,8 @@ private struct MarkdownTableRowView: View {
     let alignments: [TableAlignment]
     let isHeader: Bool
     let isDarkMode: Bool
-    let borderColor: Color
-    let background: Color
+    let borderColor: SwiftUI.Color
+    let background: SwiftUI.Color
     let columnWidths: [Int: CGFloat]
     let measureColumns: Bool
 
@@ -669,7 +674,7 @@ private struct MarkdownTableCell: View {
     let columnIndex: Int
     let columnWidth: CGFloat?
     let measureColumn: Bool
-    let background: Color
+    let background: SwiftUI.Color
 
     var body: some View {
         let cellContent = LaTeXMarkdownView(
@@ -704,7 +709,7 @@ private struct ColumnWidthReader: View {
 
     var body: some View {
         GeometryReader { proxy in
-            Color.clear
+            SwiftUI.Color.clear
                 .preference(key: ColumnWidthPreferenceKey.self, value: [columnIndex: proxy.size.width])
         }
     }
@@ -796,17 +801,88 @@ struct MathView: UIViewRepresentable {
     }
 }
 
+private struct CodeBlockWithCopy: View {
+    let configuration: CodeBlockConfiguration
+    let headerBg: SwiftUI.Color
+    let headerFg: SwiftUI.Color
+    let bodyBg: SwiftUI.Color
+    let border: SwiftUI.Color
+
+    @State private var showCopyFeedback = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(configuration.language ?? "code")
+                    .font(.system(.caption, design: .monospaced))
+                    .fontWeight(.semibold)
+                    .foregroundColor(headerFg)
+                Spacer()
+
+                Button(action: copyAction) {
+                    Image(systemName: showCopyFeedback ? "checkmark" : "doc.on.doc")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .foregroundColor(showCopyFeedback ? .green : headerFg)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(headerBg)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                configuration.label
+                    .relativeLineSpacing(.em(0.25))
+                    .markdownTextStyle {
+                        FontFamilyVariant(.monospaced)
+                        FontSize(.em(0.85))
+                    }
+                    .padding(12)
+            }
+            .background(bodyBg)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(border, lineWidth: 1))
+        .markdownMargin(top: .zero, bottom: .em(0.8))
+    }
+
+    private func copyAction() {
+        UIPasteboard.general.string = configuration.content
+
+        withAnimation {
+            showCopyFeedback = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation {
+                showCopyFeedback = false
+            }
+        }
+    }
+}
+
 /// Cached markdown themes (referenced from original MessageView)
 private struct MarkdownThemeCache {
     static let darkTheme = createTheme(isDarkMode: true)
     static let lightTheme = createTheme(isDarkMode: false)
-    
+
     static func getTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
         isDarkMode ? darkTheme : lightTheme
     }
-    
+
+    static func getHighlightrTheme(isDarkMode: Bool) -> String {
+        isDarkMode ? "monokai-sublime" : "xcode"
+    }
+
     private static func createTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
-        let baseTheme = MarkdownUI.Theme.gitHub
+        let textColor = isDarkMode ? SwiftUI.Color.white : SwiftUI.Color.black.opacity(0.8)
+        let codeBackgroundColor = isDarkMode ? SwiftUI.Color.white.opacity(0.15) : SwiftUI.Color.black.opacity(0.08)
+        let codeForegroundColor = isDarkMode ? SwiftUI.Color(red: 1.0, green: 0.6, blue: 0.4) : SwiftUI.Color(red: 0.8, green: 0.3, blue: 0.2)
+        let codeBlockHeaderBg = isDarkMode ? SwiftUI.Color.white.opacity(0.05) : SwiftUI.Color.black.opacity(0.03)
+        let codeBlockHeaderFg = isDarkMode ? SwiftUI.Color.white.opacity(0.7) : SwiftUI.Color.black.opacity(0.6)
+        let codeBlockBodyBg = isDarkMode ? SwiftUI.Color.black.opacity(0.3) : SwiftUI.Color.gray.opacity(0.05)
+        let codeBlockBorder = isDarkMode ? SwiftUI.Color.white.opacity(0.1) : SwiftUI.Color.black.opacity(0.1)
+
+        let textTheme = MarkdownUI.Theme.gitHub
             .text {
                 FontFamily(.system(.default))
                 FontSize(15)
@@ -816,16 +892,16 @@ private struct MarkdownThemeCache {
                 configuration.label
                     .markdownMargin(top: 0, bottom: 12)
             }
+
+        let baseTheme = textTheme
             .code {
                 FontFamilyVariant(.monospaced)
                 FontSize(.em(0.85))
-                BackgroundColor(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
+                ForegroundColor(isDarkMode ? Color(red: 1.0, green: 0.6, blue: 0.4) : Color(red: 0.8, green: 0.3, blue: 0.2))
+                BackgroundColor(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.08))
             }
             .codeBlock { configuration in
-                configuration.label
-                    .padding()
-                    .background(isDarkMode ? Color.black.opacity(0.2) : Color.gray.opacity(0.05))
-                    .cornerRadius(8)
+                CodeBlockWithCopy(configuration: configuration, headerBg: codeBlockHeaderBg, headerFg: codeBlockHeaderFg, bodyBg: codeBlockBodyBg, border: codeBlockBorder)
             }
 
         let withHeadings = baseTheme
@@ -865,7 +941,7 @@ private struct MarkdownThemeCache {
 
                 return paddedLabel
                     .padding(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-                    .background(Color.secondary.opacity(0.1))
+                    .background(SwiftUI.Color.secondary.opacity(0.1))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .listItem { configuration in
@@ -877,7 +953,7 @@ private struct MarkdownThemeCache {
             .table { configuration in
                 ScrollView(.horizontal, showsIndicators: true) {
                     configuration.label
-                        .markdownTableBorderStyle(MarkdownUI.TableBorderStyle(color: isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2)))
+                        .markdownTableBorderStyle(MarkdownUI.TableBorderStyle(color: isDarkMode ? SwiftUI.Color.white.opacity(0.2) : SwiftUI.Color.black.opacity(0.2)))
                 }
             }
     }

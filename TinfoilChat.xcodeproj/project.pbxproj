@@ -16,7 +16,6 @@
 		999769652E295C1A00A570DC /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 999769642E295C1A00A570DC /* RevenueCatUI */; };
 		99976A572E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit in Resources */ = {isa = PBXBuildFile; fileRef = 99976A562E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit */; };
 		99C5A0592EAE824300A1F328 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 99C5A0582EAE824300A1F328 /* MarkdownUI */; };
-		99C5A05C2EAE85BF00A1F328 /* Splash in Frameworks */ = {isa = PBXBuildFile; productRef = 99C5A05B2EAE85BF00A1F328 /* Splash */; };
 		D4FD450D5DF249E2A37CA9CD /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 6E93C3925EE14CD689429CE8 /* Sentry */; };
 /* End PBXBuildFile section */
 
@@ -54,7 +53,6 @@
 			files = (
 				996C8D6E2E83870900C12826 /* TinfoilAI in Frameworks */,
 				99095BBB2DC2BC1E009C8F44 /* Clerk in Frameworks */,
-				99C5A05C2EAE85BF00A1F328 /* Splash in Frameworks */,
 				999769652E295C1A00A570DC /* RevenueCatUI in Frameworks */,
 				99C5A0592EAE824300A1F328 /* MarkdownUI in Frameworks */,
 				999769632E295C1A00A570DC /* RevenueCat in Frameworks */,
@@ -114,7 +112,6 @@
 				996C8D6D2E83870900C12826 /* TinfoilAI */,
 				9933808B2EA5A7C60073276A /* Highlightr */,
 				99C5A0582EAE824300A1F328 /* MarkdownUI */,
-				99C5A05B2EAE85BF00A1F328 /* Splash */,
 			);
 			productName = TinfoilChat;
 			productReference = 9909E5BE2DBD460C0040357B /* TinfoilChat.app */;
@@ -152,7 +149,6 @@
 				996C8D6C2E83870900C12826 /* XCRemoteSwiftPackageReference "tinfoil-swift" */,
 				9933808A2EA5A7C60073276A /* XCRemoteSwiftPackageReference "Highlightr" */,
 				99C5A0572EAE824300A1F328 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
-				99C5A05A2EAE85BF00A1F328 /* XCRemoteSwiftPackageReference "Splash" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9909E5BF2DBD460C0040357B /* Products */;
@@ -492,14 +488,6 @@
 				kind = branch;
 			};
 		};
-		99C5A05A2EAE85BF00A1F328 /* XCRemoteSwiftPackageReference "Splash" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/JohnSundell/Splash";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.16.0;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -542,11 +530,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 99C5A0572EAE824300A1F328 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
 			productName = MarkdownUI;
-		};
-		99C5A05B2EAE85BF00A1F328 /* Splash */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 99C5A05A2EAE85BF00A1F328 /* XCRemoteSwiftPackageReference "Splash" */;
-			productName = Splash;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
