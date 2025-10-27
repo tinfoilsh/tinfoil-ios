@@ -10,7 +10,7 @@ import SwiftUI
 import MarkdownUI
 import SwiftMath
 import UIKit
-import Splash
+import Highlightr
 
 private struct ContentSegment {
     let id: String
@@ -89,7 +89,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 view: AnyView(
                     Markdown(content)
                         .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-                        .markdownCodeSyntaxHighlighter(.splash(theme: MarkdownThemeCache.getSplashTheme(isDarkMode: isDarkMode)))
+                        .markdownCodeSyntaxHighlighter(.highlightr(theme: MarkdownThemeCache.getHighlightrTheme(isDarkMode: isDarkMode)))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 )
@@ -179,7 +179,7 @@ struct LaTeXMarkdownView: View, Equatable {
                         view: AnyView(
                             Markdown(markdownText)
                                 .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-                                .markdownCodeSyntaxHighlighter(.splash(theme: MarkdownThemeCache.getSplashTheme(isDarkMode: isDarkMode)))
+                                .markdownCodeSyntaxHighlighter(.highlightr(theme: MarkdownThemeCache.getHighlightrTheme(isDarkMode: isDarkMode)))
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         )
@@ -241,7 +241,7 @@ struct LaTeXMarkdownView: View, Equatable {
                     view: AnyView(
                         Markdown(remainingText)
                             .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-                            .markdownCodeSyntaxHighlighter(.splash(theme: MarkdownThemeCache.getSplashTheme(isDarkMode: isDarkMode)))
+                            .markdownCodeSyntaxHighlighter(.highlightr(theme: MarkdownThemeCache.getHighlightrTheme(isDarkMode: isDarkMode)))
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     )
@@ -255,7 +255,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 view: AnyView(
                     Markdown(content)
                         .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-                        .markdownCodeSyntaxHighlighter(.splash(theme: MarkdownThemeCache.getSplashTheme(isDarkMode: isDarkMode)))
+                        .markdownCodeSyntaxHighlighter(.highlightr(theme: MarkdownThemeCache.getHighlightrTheme(isDarkMode: isDarkMode)))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 )
@@ -869,8 +869,8 @@ private struct MarkdownThemeCache {
         isDarkMode ? darkTheme : lightTheme
     }
 
-    static func getSplashTheme(isDarkMode: Bool) -> Splash.Theme {
-        isDarkMode ? .wwdc17(withFont: .init(size: 16)) : .sunset(withFont: .init(size: 16))
+    static func getHighlightrTheme(isDarkMode: Bool) -> String {
+        isDarkMode ? "monokai-sublime" : "xcode"
     }
 
     private static func createTheme(isDarkMode: Bool) -> MarkdownUI.Theme {

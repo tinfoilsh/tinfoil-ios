@@ -1,5 +1,5 @@
 {
-  "originHash" : "ece180c87fed4563f5b1a15aa0a27c5f635552ef9e53b378336d9edad2961867",
+  "originHash" : "5c687388de0e369e2bfde9e42ad74a5bf13e98996d546ed426c9dd7a3f48fc3d",
   "pins" : [
     {
       "identity" : "clerk-ios",
@@ -98,15 +98,6 @@
       "state" : {
         "revision" : "776c4a6db74d5c6c143974be91c383680d468630",
         "version" : "1.3.0"
-      }
-    },
-    {
-      "identity" : "splash",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/JohnSundell/Splash",
-      "state" : {
-        "revision" : "7f4df436eb78fe64fe2c32c58006e9949fa28ad8",
-        "version" : "0.16.0"
       }
     },
     {
