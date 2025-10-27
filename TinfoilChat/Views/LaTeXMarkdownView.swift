@@ -885,7 +885,7 @@ private struct MarkdownThemeCache {
         let textTheme = MarkdownUI.Theme.gitHub
             .text {
                 FontFamily(.system(.default))
-                FontSize(15)
+                FontSize(.em(1.0))
                 ForegroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
             }
             .paragraph { configuration in

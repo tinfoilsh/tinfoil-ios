@@ -572,7 +572,7 @@ private struct MarkdownThemeCache {
         MarkdownUI.Theme.gitHub
             .text {
                 FontFamily(.system(.default))
-                FontSize(15)
+                FontSize(.em(1.0))
                 ForegroundColor(textColor ?? (isDarkMode ? .white : Color.black.opacity(0.8)))
             }
             .paragraph { configuration in
@@ -766,7 +766,7 @@ struct CollapsibleThinkingBox: View {
                     Divider()
 
                     Text(thinkingText)
-                        .font(.system(size: 14))
+                        .font(.system(.body))
                         .foregroundColor(isDarkMode ? .white.opacity(0.9) : Color.black.opacity(0.8))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
