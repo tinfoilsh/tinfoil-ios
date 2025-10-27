@@ -94,7 +94,7 @@ struct LaTeXMarkdownView: View, Equatable {
             )]
         }
 
-        let cacheKey = "\(content.hashValue)_\(isDarkMode)"
+        let cacheKey = "\(content)_\(isDarkMode)"
 
         if let cached = MarkdownRenderCache.shared.get(for: cacheKey) {
             return cached

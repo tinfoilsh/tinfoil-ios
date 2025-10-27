@@ -212,13 +212,7 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-            let cellIdentifier: String
-            if parent.messages.isEmpty {
-                cellIdentifier = "WelcomeCell"
-            } else {
-                let message = parent.messages[indexPath.row]
-                cellIdentifier = "Cell_\(message.id)"
-            }
+            let cellIdentifier = parent.messages.isEmpty ? "WelcomeCell" : "MessageCell"
 
             let cell = tableView.dequeueReusableCell(withIdentifier: cellIdentifier) ?? UITableViewCell(style: .default, reuseIdentifier: cellIdentifier)
             cell.selectionStyle = .none
