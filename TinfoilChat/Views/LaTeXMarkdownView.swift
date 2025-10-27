@@ -10,6 +10,7 @@ import SwiftUI
 import MarkdownUI
 import SwiftMath
 import UIKit
+import Splash
 
 private struct ContentSegment {
     let id: String
@@ -88,6 +89,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 view: AnyView(
                     Markdown(content)
                         .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
+                        .markdownCodeSyntaxHighlighter(.splash(theme: MarkdownThemeCache.getSplashTheme(isDarkMode: isDarkMode)))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 )
@@ -177,6 +179,7 @@ struct LaTeXMarkdownView: View, Equatable {
                         view: AnyView(
                             Markdown(markdownText)
                                 .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
+                                .markdownCodeSyntaxHighlighter(.splash(theme: MarkdownThemeCache.getSplashTheme(isDarkMode: isDarkMode)))
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         )
@@ -238,6 +241,7 @@ struct LaTeXMarkdownView: View, Equatable {
                     view: AnyView(
                         Markdown(remainingText)
                             .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
+                            .markdownCodeSyntaxHighlighter(.splash(theme: MarkdownThemeCache.getSplashTheme(isDarkMode: isDarkMode)))
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     )
@@ -251,6 +255,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 view: AnyView(
                     Markdown(content)
                         .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
+                        .markdownCodeSyntaxHighlighter(.splash(theme: MarkdownThemeCache.getSplashTheme(isDarkMode: isDarkMode)))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 )
@@ -547,16 +552,16 @@ private struct MarkdownTableView: View {
 
     @State private var columnWidths: [Int: CGFloat] = [:]
 
-    private var borderColor: Color {
-        isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2)
+    private var borderColor: SwiftUI.Color {
+        isDarkMode ? SwiftUI.Color.white.opacity(0.2) : SwiftUI.Color.black.opacity(0.2)
     }
 
-    private var headerBackground: Color {
-        Color.clear
+    private var headerBackground: SwiftUI.Color {
+        SwiftUI.Color.clear
     }
 
-    private var alternatingRowBackground: Color {
-        Color.clear
+    private var alternatingRowBackground: SwiftUI.Color {
+        SwiftUI.Color.clear
     }
 
     var body: some View {
@@ -604,7 +609,7 @@ private struct MarkdownTableView: View {
                     isHeader: false,
                     isDarkMode: isDarkMode,
                     borderColor: borderColor,
-                    background: index.isMultiple(of: 2) ? alternatingRowBackground : Color.clear,
+                    background: index.isMultiple(of: 2) ? alternatingRowBackground : SwiftUI.Color.clear,
                     columnWidths: useColumnWidths ? columnWidths : [:],
                     measureColumns: !useColumnWidths
                 )
@@ -629,8 +634,8 @@ private struct MarkdownTableRowView: View {
     let alignments: [TableAlignment]
     let isHeader: Bool
     let isDarkMode: Bool
-    let borderColor: Color
-    let background: Color
+    let borderColor: SwiftUI.Color
+    let background: SwiftUI.Color
     let columnWidths: [Int: CGFloat]
     let measureColumns: Bool
 
@@ -669,7 +674,7 @@ private struct MarkdownTableCell: View {
     let columnIndex: Int
     let columnWidth: CGFloat?
     let measureColumn: Bool
-    let background: Color
+    let background: SwiftUI.Color
 
     var body: some View {
         let cellContent = LaTeXMarkdownView(
@@ -704,7 +709,7 @@ private struct ColumnWidthReader: View {
 
     var body: some View {
         GeometryReader { proxy in
-            Color.clear
+            SwiftUI.Color.clear
                 .preference(key: ColumnWidthPreferenceKey.self, value: [columnIndex: proxy.size.width])
         }
     }
@@ -800,12 +805,17 @@ struct MathView: UIViewRepresentable {
 private struct MarkdownThemeCache {
     static let darkTheme = createTheme(isDarkMode: true)
     static let lightTheme = createTheme(isDarkMode: false)
-    
+
     static func getTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
         isDarkMode ? darkTheme : lightTheme
     }
-    
+
+    static func getSplashTheme(isDarkMode: Bool) -> Splash.Theme {
+        isDarkMode ? .wwdc17(withFont: .init(size: 16)) : .sunset(withFont: .init(size: 16))
+    }
+
     private static func createTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
+
         let baseTheme = MarkdownUI.Theme.gitHub
             .text {
                 FontFamily(.system(.default))
@@ -823,8 +833,13 @@ private struct MarkdownThemeCache {
             }
             .codeBlock { configuration in
                 configuration.label
+                    .relativeLineSpacing(.em(0.25))
+                    .markdownTextStyle {
+                        FontFamilyVariant(.monospaced)
+                        FontSize(.em(0.85))
+                    }
                     .padding()
-                    .background(isDarkMode ? Color.black.opacity(0.2) : Color.gray.opacity(0.05))
+                    .background(isDarkMode ? SwiftUI.Color.black.opacity(0.2) : SwiftUI.Color.gray.opacity(0.05))
                     .cornerRadius(8)
             }
 
@@ -865,7 +880,7 @@ private struct MarkdownThemeCache {
 
                 return paddedLabel
                     .padding(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-                    .background(Color.secondary.opacity(0.1))
+                    .background(SwiftUI.Color.secondary.opacity(0.1))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .listItem { configuration in
@@ -877,7 +892,7 @@ private struct MarkdownThemeCache {
             .table { configuration in
                 ScrollView(.horizontal, showsIndicators: true) {
                     configuration.label
-                        .markdownTableBorderStyle(MarkdownUI.TableBorderStyle(color: isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2)))
+                        .markdownTableBorderStyle(MarkdownUI.TableBorderStyle(color: isDarkMode ? SwiftUI.Color.white.opacity(0.2) : SwiftUI.Color.black.opacity(0.2)))
                 }
             }
     }
