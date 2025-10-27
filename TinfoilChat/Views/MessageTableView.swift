@@ -65,8 +65,16 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
+        let isDarkModeChanged = context.coordinator.lastIsDarkMode != isDarkMode
         let messageCountChanged = context.coordinator.lastMessageCount != messages.count
         let streamingHashChanged = context.coordinator.lastStreamingHash != streamingContentHash
+
+        if isDarkModeChanged {
+            context.coordinator.lastIsDarkMode = isDarkMode
+            for wrapper in context.coordinator.messageWrappers.values {
+                wrapper.isDarkMode = isDarkMode
+            }
+        }
 
         if messageCountChanged {
             context.coordinator.lastMessageCount = messages.count
@@ -168,6 +176,7 @@ struct MessageTableView: UIViewRepresentable {
         var lastIsLoading: Bool = false
         var lastStreamingHash: Int = 0
         var lastKeyboardHeight: CGFloat = 0
+        var lastIsDarkMode: Bool = false
         private var isDragging = false
         var messageWrappers: [String: ObservableMessageWrapper] = [:]
         var shouldScrollToBottomAfterLayout = false

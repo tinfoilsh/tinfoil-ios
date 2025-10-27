@@ -73,6 +73,7 @@ struct LaTeXMarkdownView: View, Equatable {
                     .id(segment.id)
             }
         }
+        .environment(\.colorScheme, isDarkMode ? .dark : .light)
         .padding(.horizontal, horizontalPadding)
         .frame(maxWidth: horizontalPadding > 0 ? .infinity : nil, alignment: maxWidthAlignment)
         .transaction { transaction in
@@ -87,7 +88,6 @@ struct LaTeXMarkdownView: View, Equatable {
                 view: AnyView(
                     Markdown(content)
                         .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-                        .environment(\.colorScheme, isDarkMode ? .dark : .light)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 )
@@ -177,7 +177,6 @@ struct LaTeXMarkdownView: View, Equatable {
                         view: AnyView(
                             Markdown(markdownText)
                                 .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-                                .environment(\.colorScheme, isDarkMode ? .dark : .light)
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         )
@@ -239,7 +238,6 @@ struct LaTeXMarkdownView: View, Equatable {
                     view: AnyView(
                         Markdown(remainingText)
                             .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-                            .environment(\.colorScheme, isDarkMode ? .dark : .light)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     )
@@ -253,7 +251,6 @@ struct LaTeXMarkdownView: View, Equatable {
                 view: AnyView(
                     Markdown(content)
                         .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-                        .environment(\.colorScheme, isDarkMode ? .dark : .light)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 )
