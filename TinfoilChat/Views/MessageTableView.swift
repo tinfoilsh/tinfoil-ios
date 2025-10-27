@@ -8,7 +8,6 @@
 import SwiftUI
 
 struct MessageTableView: UIViewRepresentable {
-    let messages: [Message]
     let archivedMessagesStartIndex: Int
     let isDarkMode: Bool
     let isLoading: Bool
@@ -19,6 +18,10 @@ struct MessageTableView: UIViewRepresentable {
     let scrollTrigger: UUID
     @Binding var tableOpacity: Double
     let keyboardHeight: CGFloat
+
+    private var messages: [Message] {
+        viewModel.messages
+    }
 
     // Track streaming content to trigger updates
     private var streamingContentHash: Int {
@@ -65,6 +68,15 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
+        let currentChatId = viewModel.currentChat?.id
+        let chatIdChanged = context.coordinator.lastChatId != currentChatId
+        if chatIdChanged {
+            context.coordinator.lastChatId = currentChatId
+            context.coordinator.messageWrappers.removeAll()
+            context.coordinator.shownMessageIds.removeAll()
+            context.coordinator.cellReuseIdentifierSuffix = UUID().uuidString
+        }
+
         let isDarkModeChanged = context.coordinator.lastIsDarkMode != isDarkMode
         let messageCountChanged = context.coordinator.lastMessageCount != messages.count
         let streamingHashChanged = context.coordinator.lastStreamingHash != streamingContentHash
@@ -76,7 +88,7 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
-        if messageCountChanged {
+        if messageCountChanged || chatIdChanged {
             context.coordinator.lastMessageCount = messages.count
             context.coordinator.lastStreamingHash = streamingContentHash
             context.coordinator.heightCache.removeAll()
@@ -175,8 +187,10 @@ struct MessageTableView: UIViewRepresentable {
         var lastMessageCount: Int = 0
         var lastIsLoading: Bool = false
         var lastStreamingHash: Int = 0
+        var cellReuseIdentifierSuffix: String = ""
         var lastKeyboardHeight: CGFloat = 0
         var lastIsDarkMode: Bool = false
+        var lastChatId: String? = nil
         private var isDragging = false
         var messageWrappers: [String: ObservableMessageWrapper] = [:]
         var shouldScrollToBottomAfterLayout = false
@@ -212,7 +226,7 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-            let cellIdentifier = parent.messages.isEmpty ? "WelcomeCell" : "MessageCell"
+            let cellIdentifier = (parent.messages.isEmpty ? "WelcomeCell" : "MessageCell") + cellReuseIdentifierSuffix
 
             let cell = tableView.dequeueReusableCell(withIdentifier: cellIdentifier) ?? UITableViewCell(style: .default, reuseIdentifier: cellIdentifier)
             cell.selectionStyle = .none
@@ -250,16 +264,13 @@ struct MessageTableView: UIViewRepresentable {
                     showArchiveSeparator: showArchiveSeparator
                 )
 
-                if cell.contentConfiguration == nil {
-                    cell.contentConfiguration = UIHostingConfiguration {
-                        ObservableMessageCell(wrapper: wrapper, viewModel: parent.viewModel, coordinator: self)
-                    }
-                    .minSize(width: 0, height: 0)
-                    .margins(.all, 0)
-                    .background(.clear)
-                } else {
-                    wrapper.objectWillChange.send()
+                // Always recreate the content configuration to ensure correct wrapper is used
+                cell.contentConfiguration = UIHostingConfiguration {
+                    ObservableMessageCell(wrapper: wrapper, viewModel: parent.viewModel, coordinator: self)
                 }
+                .minSize(width: 0, height: 0)
+                .margins(.all, 0)
+                .background(.clear)
             }
 
             return cell

@@ -144,7 +144,7 @@ class ChatViewModel: ObservableObject {
         }
     }
     
-    var messages: [Message] { // This now holds all messages for the current chat
+    var messages: [Message] {
         currentChat?.messages ?? []
     }
     
@@ -555,12 +555,11 @@ class ChatViewModel: ObservableObject {
     
     /// Selects a chat as the current chat
     func selectChat(_ chat: Chat) {
-        
         // Cancel any ongoing generation first
         if isLoading {
             cancelGeneration()
         }
-        
+
         // Find the most up-to-date version of the chat in the chats array
         let chatToSelect: Chat
         if let index = chats.firstIndex(where: { $0.id == chat.id }) {
@@ -568,12 +567,12 @@ class ChatViewModel: ObservableObject {
         } else {
             chatToSelect = chat
             if !chats.contains(where: { $0.id == chat.id }) {
-                chats.append(chatToSelect) // Add if truly new
+                chats.append(chatToSelect)
             }
         }
-        
+
         currentChat = chatToSelect
-        
+
         // Update the current model to match the chat's model
         if currentModel != chatToSelect.modelType {
             changeModel(to: chatToSelect.modelType, shouldUpdateChat: false)
@@ -1700,12 +1699,12 @@ class ChatViewModel: ObservableObject {
                 currentChat = updatedChat
                 objectWillChange.send()
             }
-            
+
             // During streaming, batch saves to reduce disk I/O
             if throttleForStreaming {
                 // Store pending update
                 pendingStreamUpdate = updatedChat
-                
+
                 // Cancel existing timer and create new one
                 streamUpdateTimer?.invalidate()
                 streamUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
