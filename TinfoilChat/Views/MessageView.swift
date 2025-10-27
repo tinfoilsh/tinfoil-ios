@@ -30,6 +30,7 @@ struct MessageView: View {
     @State private var showCopyFeedback = false
     @State private var cachedParsedContent: (thinkingText: String, remainderText: String, contentHash: Int)? = nil
     @State private var showLongMessageSheet = false
+    @State private var showRawContentModal = false
 
     var body: some View {
         HStack {
@@ -131,19 +132,17 @@ struct MessageView: View {
                    (!message.content.isEmpty || message.thoughts != nil) &&
                    !(isLoading && isLastMessage) {
                     HStack {
-                        Button(action: copyMessage) {
+                        Button(action: { showRawContentModal = true }) {
                             HStack(spacing: 4) {
-                                Image(systemName: showCopyFeedback ? "checkmark" : "doc.on.doc")
+                                Image(systemName: "doc.on.doc")
                                     .font(.system(size: 12))
-                                if showCopyFeedback {
-                                    Text("Copied!")
-                                        .font(.system(size: 12))
-                                }
+                                Text("Copy")
+                                    .font(.system(size: 12))
                             }
                             .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
                         }
                         .buttonStyle(PlainButtonStyle())
-                        
+
                         Spacer()
                     }
                     .padding(.top, 4)
@@ -163,36 +162,9 @@ struct MessageView: View {
             }
             .cornerRadius(16)
             .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
-            .contextMenu {
-                if !message.content.isEmpty || message.thoughts != nil {
-                    Button(action: copyMessage) {
-                        Label("Copy All", systemImage: "doc.on.doc")
-                    }
-                    
-                    // Handle thoughts from Message model
-                    if let thoughts = message.thoughts {
-                        if !message.content.isEmpty {
-                            Button(action: { copyMessagePart(message.content) }) {
-                                Label("Copy Response", systemImage: "text.quote")
-                            }
-                        }
-                        
-                        Button(action: { copyMessagePart(thoughts) }) {
-                            Label("Copy Thinking", systemImage: "brain")
-                        }
-                    }
-                    // Legacy: handle parsed content
-                    else if let parsed = getParsedMessageContent() {
-                        if !parsed.remainderText.isEmpty {
-                            Button(action: { copyMessagePart(parsed.remainderText) }) {
-                                Label("Copy Response", systemImage: "text.quote")
-                            }
-                        }
-                        
-                        Button(action: { copyMessagePart(parsed.thinkingText) }) {
-                            Label("Copy Thinking", systemImage: "brain")
-                        }
-                    }
+            .onLongPressGesture {
+                if message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil) {
+                    showRawContentModal = true
                 }
             }
         }
@@ -200,6 +172,13 @@ struct MessageView: View {
         .sheet(isPresented: $showLongMessageSheet) {
             LongMessageDetailView(
                 message: message
+            )
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showRawContentModal) {
+            RawContentModalView(
+                message: message,
+                isDarkMode: isDarkMode
             )
             .presentationDetents([.medium, .large])
         }
@@ -364,7 +343,7 @@ private struct SelectableTextView: UIViewRepresentable {
         textView.isSelectable = true
         textView.backgroundColor = .clear
         textView.textColor = UIColor(white: 1.0, alpha: 0.92)
-        textView.font = UIFont.systemFont(ofSize: 15)
+        textView.font = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
         textView.textContainerInset = .zero
         textView.textContainer.lineFragmentPadding = 0
         textView.alwaysBounceVertical = true
@@ -379,6 +358,171 @@ private struct SelectableTextView: UIViewRepresentable {
     func updateUIView(_ uiView: UITextView, context: Context) {
         if uiView.text != text {
             uiView.text = text
+        }
+    }
+}
+
+private struct RawContentModalView: View {
+    let message: Message
+    let isDarkMode: Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var showCopyAllFeedback = false
+    @State private var showCopyResponseFeedback = false
+    @State private var showCopyThoughtsFeedback = false
+
+    private var hasThoughts: Bool {
+        if let thoughts = message.thoughts, !thoughts.isEmpty {
+            return true
+        }
+        return message.content.hasPrefix("<think>")
+    }
+
+    private var thoughtsContent: String? {
+        if let thoughts = message.thoughts, !thoughts.isEmpty {
+            return thoughts
+        }
+        if message.content.hasPrefix("<think>") {
+            let tagPrefix = "<think>"
+            let tagSuffix = "</think>"
+            let start = message.content.index(message.content.startIndex, offsetBy: tagPrefix.count)
+
+            if let endTagRange = message.content.range(of: tagSuffix, range: start..<message.content.endIndex) {
+                return String(message.content[start..<endTagRange.lowerBound])
+            } else {
+                return String(message.content[start...])
+            }
+        }
+        return nil
+    }
+
+    private var responseContent: String {
+        if message.thoughts != nil {
+            return message.content
+        }
+        if message.content.hasPrefix("<think>") {
+            let tagSuffix = "</think>"
+            if let endTagRange = message.content.range(of: tagSuffix) {
+                return String(message.content[endTagRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return message.content
+    }
+
+    private var fullRawContent: String {
+        if let thoughts = thoughtsContent, !thoughts.isEmpty {
+            if !responseContent.isEmpty {
+                return thoughts + "\n\n" + responseContent
+            }
+            return thoughts
+        }
+        return responseContent
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                SelectableTextView(text: fullRawContent)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Divider()
+
+                VStack(spacing: 12) {
+                    Button(action: copyAll) {
+                        HStack {
+                            Image(systemName: showCopyAllFeedback ? "checkmark" : "doc.on.doc")
+                            Text(showCopyAllFeedback ? "Copied All!" : "Copy All")
+                            Spacer()
+                        }
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    if hasThoughts && !responseContent.isEmpty {
+                        Button(action: copyResponse) {
+                            HStack {
+                                Image(systemName: showCopyResponseFeedback ? "checkmark" : "text.quote")
+                                Text(showCopyResponseFeedback ? "Copied Response!" : "Copy Response")
+                                Spacer()
+                            }
+                            .foregroundColor(.white)
+                            .padding()
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+
+                    if hasThoughts {
+                        Button(action: copyThoughts) {
+                            HStack {
+                                Image(systemName: showCopyThoughtsFeedback ? "checkmark" : "brain")
+                                Text(showCopyThoughtsFeedback ? "Copied Thoughts!" : "Copy Thoughts")
+                                Spacer()
+                            }
+                            .foregroundColor(.white)
+                            .padding()
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+                .padding()
+                .background(Color.backgroundPrimary)
+            }
+            .background(Color.backgroundPrimary)
+            .navigationTitle("Raw Content")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Close") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func copyAll() {
+        UIPasteboard.general.string = fullRawContent
+        withAnimation {
+            showCopyAllFeedback = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation {
+                showCopyAllFeedback = false
+            }
+        }
+    }
+
+    private func copyResponse() {
+        UIPasteboard.general.string = responseContent
+        withAnimation {
+            showCopyResponseFeedback = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation {
+                showCopyResponseFeedback = false
+            }
+        }
+    }
+
+    private func copyThoughts() {
+        if let thoughts = thoughtsContent {
+            UIPasteboard.general.string = thoughts
+            withAnimation {
+                showCopyThoughtsFeedback = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                withAnimation {
+                    showCopyThoughtsFeedback = false
+                }
+            }
         }
     }
 }
@@ -513,7 +657,6 @@ struct MarkdownText: View {
             .padding(.horizontal, horizontalPadding)
             .environment(\.colorScheme, isDarkMode ? .dark : .light)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .textSelection(.enabled)
     }
 }
 
@@ -535,7 +678,6 @@ struct AdaptiveMarkdownText: View {
             .padding(.horizontal, horizontalPadding)
             .environment(\.colorScheme, .dark)
             .fixedSize(horizontal: false, vertical: true)
-            .textSelection(.enabled)
     }
 }
 
@@ -629,7 +771,6 @@ struct CollapsibleThinkingBox: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
                 }
             }
         }
@@ -789,7 +930,6 @@ struct SimpleCodeBlockView: View {
                     .font(.system(.body, design: .monospaced))
                     .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                     .padding(8)
-                    .textSelection(.enabled)
             }
         }
         .frame(maxWidth: UIScreen.main.bounds.width * 0.85)
@@ -841,7 +981,6 @@ struct ChunkedContentView: View {
                 ChunkView(chunk: chunk, isDarkMode: isDarkMode, isStreaming: isStreaming)
             }
         }
-        .textSelection(.enabled)
     }
 }
 
