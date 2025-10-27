@@ -549,7 +549,6 @@ struct CollapsibleThinkingBox: View {
     let messageCollapsed: Bool
 
     @State private var isCollapsed: Bool
-    @State private var hasAppeared = false
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
 
     init(
@@ -647,13 +646,6 @@ struct CollapsibleThinkingBox: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
         .clipped()
-        .opacity(hasAppeared ? 1 : 0)
-        .scaleEffect(hasAppeared ? 1 : 0.95)
-        .onAppear {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                hasAppeared = true
-            }
-        }
         .preference(key: ThinkingBoxExpansionPreferenceKey.self, value: !isCollapsed ? messageId : nil)
         .onChange(of: isStreaming) { oldValue, newValue in
         }

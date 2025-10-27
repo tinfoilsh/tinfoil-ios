@@ -56,12 +56,12 @@ enum Constants {
     enum Pagination {
         static let chatsPerPage = 20
         static let recentChatThresholdSeconds: TimeInterval = 120  // 2 minutes
-        static let cleanupThresholdSeconds: TimeInterval = 60     // 1 minute
+        static let cleanupThresholdSeconds: TimeInterval = 90     // 1.5 minutes
     }
 
     enum Sync {
-        static let autoSyncIntervalSeconds: TimeInterval = 30.0
-        static let clientInitTimeoutSeconds: TimeInterval = 30.0
+        static let autoSyncIntervalSeconds: TimeInterval = 60.0
+        static let clientInitTimeoutSeconds: TimeInterval = 60.0
         static let backgroundTaskName = "CompleteStreamingResponse"
     }
 }

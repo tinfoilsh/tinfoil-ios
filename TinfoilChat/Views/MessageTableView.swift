@@ -40,7 +40,10 @@ struct MessageTableView: UIViewRepresentable {
         tableView.showsVerticalScrollIndicator = true
         tableView.contentInsetAdjustmentBehavior = .never
         tableView.clipsToBounds = false
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "Cell")
+
+        if #available(iOS 15.0, *) {
+            tableView.isPrefetchingEnabled = true
+        }
 
         context.coordinator.tableView = tableView
 
@@ -62,12 +65,21 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
+        let isDarkModeChanged = context.coordinator.lastIsDarkMode != isDarkMode
         let messageCountChanged = context.coordinator.lastMessageCount != messages.count
         let streamingHashChanged = context.coordinator.lastStreamingHash != streamingContentHash
+
+        if isDarkModeChanged {
+            context.coordinator.lastIsDarkMode = isDarkMode
+            for wrapper in context.coordinator.messageWrappers.values {
+                wrapper.isDarkMode = isDarkMode
+            }
+        }
 
         if messageCountChanged {
             context.coordinator.lastMessageCount = messages.count
             context.coordinator.lastStreamingHash = streamingContentHash
+            context.coordinator.heightCache.removeAll()
             tableView.reloadData()
         } else if streamingHashChanged && !messages.isEmpty {
             context.coordinator.lastStreamingHash = streamingContentHash
@@ -164,9 +176,12 @@ struct MessageTableView: UIViewRepresentable {
         var lastIsLoading: Bool = false
         var lastStreamingHash: Int = 0
         var lastKeyboardHeight: CGFloat = 0
+        var lastIsDarkMode: Bool = false
         private var isDragging = false
         var messageWrappers: [String: ObservableMessageWrapper] = [:]
         var shouldScrollToBottomAfterLayout = false
+        var heightCache: [IndexPath: CGFloat] = [:]
+        var shownMessageIds: Set<String> = []
 
         init(_ parent: MessageTableView) {
             self.parent = parent
@@ -177,7 +192,9 @@ struct MessageTableView: UIViewRepresentable {
                 existing.update(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator)
                 return existing
             } else {
-                let wrapper = ObservableMessageWrapper(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator)
+                let isFirstTimeShown = !shownMessageIds.contains(message.id)
+                shownMessageIds.insert(message.id)
+                let wrapper = ObservableMessageWrapper(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator, shouldAnimateAppearance: isFirstTimeShown)
                 messageWrappers[message.id] = wrapper
                 return wrapper
             }
@@ -195,7 +212,9 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-            let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath)
+            let cellIdentifier = parent.messages.isEmpty ? "WelcomeCell" : "MessageCell"
+
+            let cell = tableView.dequeueReusableCell(withIdentifier: cellIdentifier) ?? UITableViewCell(style: .default, reuseIdentifier: cellIdentifier)
             cell.selectionStyle = .none
             cell.backgroundColor = .clear
 
@@ -231,18 +250,34 @@ struct MessageTableView: UIViewRepresentable {
                     showArchiveSeparator: showArchiveSeparator
                 )
 
-                cell.contentConfiguration = UIHostingConfiguration {
-                    ObservableMessageCell(wrapper: wrapper, viewModel: parent.viewModel, coordinator: self)
+                if cell.contentConfiguration == nil {
+                    cell.contentConfiguration = UIHostingConfiguration {
+                        ObservableMessageCell(wrapper: wrapper, viewModel: parent.viewModel, coordinator: self)
+                    }
+                    .minSize(width: 0, height: 0)
+                    .margins(.all, 0)
+                    .background(.clear)
+                } else {
+                    wrapper.objectWillChange.send()
                 }
-                .minSize(width: 0, height: 0)
-                .margins(.all, 0)
-                .background(.clear)
             }
 
             return cell
         }
 
+        func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
+            if let cachedHeight = heightCache[indexPath] {
+                return cachedHeight
+            }
+            return 100
+        }
+
         func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+            let height = cell.frame.size.height
+            if height > 0 {
+                heightCache[indexPath] = height
+            }
+
             if shouldScrollToBottomAfterLayout {
                 let numberOfRows = tableView.numberOfRows(inSection: 0)
                 if indexPath.row == numberOfRows - 1 {
@@ -258,6 +293,9 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
+        func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        }
+
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             updateContentInset()
             checkIfAtBottom()
@@ -266,6 +304,8 @@ struct MessageTableView: UIViewRepresentable {
         func updateContentInset() {
             guard let tableView = tableView else { return }
 
+            let targetInset: CGFloat
+
             if parent.isLoading, let lastMessage = parent.messages.last,
                let wrapper = messageWrappers[lastMessage.id], wrapper.actualContentHeight > 0 {
 
@@ -273,13 +313,14 @@ struct MessageTableView: UIViewRepresentable {
                 let bufferHeight = screenHeight * wrapper.bufferMultiplier
                 let unusedBuffer = bufferHeight - wrapper.actualContentHeight
 
-                let inset = -max(0, unusedBuffer)
-
-                tableView.contentInset.bottom = inset
-                tableView.scrollIndicatorInsets.bottom = inset
+                targetInset = -max(0, unusedBuffer)
             } else {
-                tableView.contentInset.bottom = 0
-                tableView.scrollIndicatorInsets.bottom = 0
+                targetInset = 0
+            }
+
+            if tableView.contentInset.bottom != targetInset {
+                tableView.contentInset.bottom = targetInset
+                tableView.scrollIndicatorInsets.bottom = targetInset
             }
         }
 
@@ -357,12 +398,35 @@ class ObservableMessageWrapper: ObservableObject {
     @Published var isLoading: Bool
     @Published var isArchived: Bool
     @Published var showArchiveSeparator: Bool
+    @Published var shouldAnimateAppearance: Bool = false
     var actualContentHeight: CGFloat = 0
     var bufferMultiplier: CGFloat = 1.0
     var lastExtendedAtHeight: CGFloat = 0
     var lastReportedHeight: CGFloat = 0
+    var cachedHeight: CGFloat?
+    var cachedHeightKey: Int?
 
-    init(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool) {
+    init(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool, shouldAnimateAppearance: Bool = true) {
+        self.message = message
+        self.isDarkMode = isDarkMode
+        self.isLastMessage = isLastMessage
+        self.isLoading = isLoading
+        self.isArchived = isArchived
+        self.showArchiveSeparator = showArchiveSeparator
+        self.shouldAnimateAppearance = shouldAnimateAppearance
+    }
+
+    func update(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool) {
+        let contentChanged = self.message.content != message.content ||
+                            self.message.thoughts != message.thoughts ||
+                            self.message.contentChunks != message.contentChunks ||
+                            self.isDarkMode != isDarkMode
+
+        if contentChanged {
+            cachedHeight = nil
+            cachedHeightKey = nil
+        }
+
         self.message = message
         self.isDarkMode = isDarkMode
         self.isLastMessage = isLastMessage
@@ -371,13 +435,11 @@ class ObservableMessageWrapper: ObservableObject {
         self.showArchiveSeparator = showArchiveSeparator
     }
 
-    func update(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool) {
-        self.message = message
-        self.isDarkMode = isDarkMode
-        self.isLastMessage = isLastMessage
-        self.isLoading = isLoading
-        self.isArchived = isArchived
-        self.showArchiveSeparator = showArchiveSeparator
+    func getCacheKey() -> Int {
+        message.content.hashValue ^
+        (message.thoughts?.hashValue ?? 0) ^
+        (message.contentChunks.hashValue) ^
+        isDarkMode.hashValue
     }
 }
 
@@ -385,6 +447,7 @@ struct ObservableMessageCell: View {
     @ObservedObject var wrapper: ObservableMessageWrapper
     @ObservedObject var viewModel: ChatViewModel
     weak var coordinator: MessageTableView.Coordinator?
+    @State private var hasAppeared = false
 
     private var bufferHeight: CGFloat {
         let screenHeight = UIScreen.main.bounds.height
@@ -429,21 +492,31 @@ struct ObservableMessageCell: View {
                     view.frame(maxWidth: 900)
                         .frame(maxWidth: .infinity)
                 }
-                .overlay(
-                    GeometryReader { geometry in
-                        Color.clear
-                            .preference(key: StreamingContentHeightKey.self, value: geometry.size.height)
+                .if(wrapper.isLoading && wrapper.isLastMessage) { view in
+                    view.overlay(
+                        GeometryReader { geometry in
+                            Color.clear
+                                .preference(key: StreamingContentHeightKey.self, value: geometry.size.height)
+                        }
+                    )
+                    .onPreferenceChange(StreamingContentHeightKey.self) { height in
+                        let heightDiff = abs(height - wrapper.lastReportedHeight)
+                        if heightDiff > 5 {
+                            wrapper.actualContentHeight = height
+                            wrapper.lastReportedHeight = height
+                        }
                     }
-                )
+                }
             }
         }
-        .onPreferenceChange(StreamingContentHeightKey.self) { height in
-            if wrapper.isLoading && wrapper.isLastMessage {
-                let heightDiff = abs(height - wrapper.lastReportedHeight)
-                if heightDiff > 5 {
-                    wrapper.actualContentHeight = height
-                    wrapper.lastReportedHeight = height
+        .opacity(wrapper.shouldAnimateAppearance ? (hasAppeared ? 1 : 0) : 1)
+        .onAppear {
+            if wrapper.shouldAnimateAppearance && !hasAppeared {
+                withAnimation(.easeIn(duration: 0.2)) {
+                    hasAppeared = true
                 }
+            } else {
+                hasAppeared = true
             }
         }
     }
