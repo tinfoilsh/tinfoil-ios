@@ -12,17 +12,68 @@ import SwiftMath
 import UIKit
 import Highlightr
 
-private struct ContentSegment {
-    let id: String
-    let view: AnyView
+private enum SegmentKind {
+    case markdown(String)
+    case latex(String, isDisplay: Bool)
+    case table(ParsedTable)
 }
 
-/// Global cache for rendered markdown content
+private struct ContentSegment {
+    let id: String
+    let kind: SegmentKind
+
+    func createView(isDarkMode: Bool) -> AnyView {
+        switch kind {
+        case .markdown(let text):
+            return AnyView(
+                Markdown(text)
+                    .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
+                    .markdownCodeSyntaxHighlighter(MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            )
+        case .latex(let latex, let isDisplay):
+            return AnyView(
+                LaTeXView(
+                    latex: latex,
+                    isDisplay: isDisplay,
+                    isDarkMode: isDarkMode
+                )
+            )
+        case .table(let table):
+            return AnyView(
+                MarkdownTableView(
+                    table: table,
+                    isDarkMode: isDarkMode
+                )
+            )
+        }
+    }
+}
+
+/// Simple cache for parsed markdown segments
 private class MarkdownRenderCache {
     static let shared = MarkdownRenderCache()
 
     private var cache: [String: [ContentSegment]] = [:]
     private let queue = DispatchQueue(label: "com.tinfoil.markdown-cache", attributes: .concurrent)
+
+    init() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleMemoryWarning),
+            name: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func handleMemoryWarning() {
+        clear()
+    }
 
     func get(for key: String) -> [ContentSegment]? {
         queue.sync {
@@ -70,7 +121,7 @@ struct LaTeXMarkdownView: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(getOrCreateSegments(), id: \.id) { segment in
-                segment.view
+                segment.createView(isDarkMode: isDarkMode)
                     .id(segment.id)
             }
         }
@@ -86,17 +137,11 @@ struct LaTeXMarkdownView: View, Equatable {
         if isStreaming {
             return [ContentSegment(
                 id: "streaming_\(content.hashValue)",
-                view: AnyView(
-                    Markdown(content)
-                        .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-                        .markdownCodeSyntaxHighlighter(MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode))
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                )
+                kind: .markdown(content)
             )]
         }
 
-        let cacheKey = "\(content)_\(isDarkMode)"
+        let cacheKey = "\(content.hashValue)"
 
         if let cached = MarkdownRenderCache.shared.get(for: cacheKey) {
             return cached
@@ -176,13 +221,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 if !markdownText.isEmpty {
                     segments.append(ContentSegment(
                         id: "md_\(special.range.location)_\(markdownText.hashValue)",
-                        view: AnyView(
-                            Markdown(markdownText)
-                                .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-                                .markdownCodeSyntaxHighlighter(MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode))
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                        )
+                        kind: .markdown(markdownText)
                     ))
                 }
             }
@@ -210,23 +249,12 @@ struct LaTeXMarkdownView: View, Equatable {
 
                 segments.append(ContentSegment(
                     id: "latex_\(special.range.location)_\(sanitizedLatex.hashValue)",
-                    view: AnyView(
-                        LaTeXView(
-                            latex: sanitizedLatex,
-                            isDisplay: isDisplay,
-                            isDarkMode: isDarkMode
-                        )
-                    )
+                    kind: .latex(sanitizedLatex, isDisplay: isDisplay)
                 ))
             case let .table(table):
                 segments.append(ContentSegment(
                     id: "table_\(special.range.location)",
-                    view: AnyView(
-                        MarkdownTableView(
-                            table: table,
-                            isDarkMode: isDarkMode
-                        )
-                    )
+                    kind: .table(table)
                 ))
             }
 
@@ -238,13 +266,7 @@ struct LaTeXMarkdownView: View, Equatable {
             if !remainingText.isEmpty {
                 segments.append(ContentSegment(
                     id: "md_end_\(remainingText.hashValue)",
-                    view: AnyView(
-                        Markdown(remainingText)
-                            .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-                            .markdownCodeSyntaxHighlighter(MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode))
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    )
+                    kind: .markdown(remainingText)
                 ))
             }
         }
@@ -252,13 +274,7 @@ struct LaTeXMarkdownView: View, Equatable {
         if segments.isEmpty {
             segments.append(ContentSegment(
                 id: "md_full_\(content.hashValue)",
-                view: AnyView(
-                    Markdown(content)
-                        .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-                        .markdownCodeSyntaxHighlighter(MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode))
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                )
+                kind: .markdown(content)
             ))
         }
 

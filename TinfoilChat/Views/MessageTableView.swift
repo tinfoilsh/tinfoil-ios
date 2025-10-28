@@ -75,7 +75,7 @@ struct MessageTableView: UIViewRepresentable {
             context.coordinator.lastChatId = currentChatId
             context.coordinator.messageWrappers.removeAll()
             context.coordinator.shownMessageIds.removeAll()
-            context.coordinator.cellReuseIdentifierSuffix = UUID().uuidString
+            context.coordinator.heightCache.removeAll()
         }
 
         let isDarkModeChanged = context.coordinator.lastIsDarkMode != isDarkMode
@@ -92,7 +92,9 @@ struct MessageTableView: UIViewRepresentable {
         if messageCountChanged || chatIdChanged {
             context.coordinator.lastMessageCount = messages.count
             context.coordinator.lastStreamingHash = streamingContentHash
-            context.coordinator.heightCache.removeAll()
+            if !chatIdChanged {
+                context.coordinator.heightCache.removeAll()
+            }
             tableView.reloadData()
         } else if streamingHashChanged && !messages.isEmpty {
             context.coordinator.lastStreamingHash = streamingContentHash
