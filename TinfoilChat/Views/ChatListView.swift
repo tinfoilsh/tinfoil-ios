@@ -45,7 +45,7 @@ struct ChatListView: View {
         )
         .opacity(tableOpacity)
         .background(Color.chatBackground(isDarkMode: isDarkMode))
-        .overlay(alignment: .bottomTrailing) {
+        .overlay(alignment: .bottom) {
             if !isAtBottom && !messages.isEmpty && !isKeyboardVisible {
                 Group {
                     if #available(iOS 26, *) {
@@ -76,7 +76,6 @@ struct ChatListView: View {
                     }
                 }
                 .padding(.bottom, 16)
-                .padding(.trailing, 16)
                 .transition(.opacity)
             }
         }

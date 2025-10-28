@@ -735,7 +735,10 @@ struct CollapsibleThinkingBox: View {
                 }
             }) {
                 HStack {
-                    Image(systemName: "brain.head.profile")
+                    Image("tin")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 30, height: 30)
                         .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                     HStack(spacing: 4) {
                         if let seconds = generationTimeSeconds {
@@ -781,14 +784,11 @@ struct CollapsibleThinkingBox: View {
             }
         }
         .animation(nil, value: isCollapsed)
-        .background {
-            if #available(iOS 26, *) {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(.thickMaterial)
-            } else {
-                Color.thinkingBackground(isDarkMode: isDarkMode)
-            }
-        }
+        .background(Color.clear)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2), lineWidth: 1)
+        )
         .cornerRadius(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
