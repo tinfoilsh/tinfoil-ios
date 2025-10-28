@@ -204,6 +204,8 @@ struct MessageTableView: UIViewRepresentable {
         func getOrCreateWrapper(for message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool) -> ObservableMessageWrapper {
             if let existing = messageWrappers[message.id] {
                 existing.update(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator)
+                // Never re-animate existing messages
+                existing.shouldAnimateAppearance = false
                 return existing
             } else {
                 let isFirstTimeShown = !shownMessageIds.contains(message.id)
@@ -520,7 +522,7 @@ struct ObservableMessageCell: View {
                 }
             }
         }
-        .opacity(wrapper.shouldAnimateAppearance ? (hasAppeared ? 1 : 0) : 1)
+        .opacity(wrapper.shouldAnimateAppearance && !hasAppeared ? 0 : 1)
         .onAppear {
             if wrapper.shouldAnimateAppearance && !hasAppeared {
                 withAnimation(.easeIn(duration: 0.2)) {
