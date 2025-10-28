@@ -275,7 +275,7 @@ struct Message: Identifiable, Codable, Equatable {
     var thoughts: String? = nil
     var isThinking: Bool = false
     var timestamp: Date
-    var isCollapsed: Bool = false
+    var isCollapsed: Bool = true
     var isStreaming: Bool = false
     var streamError: String? = nil
     var generationTimeSeconds: Double? = nil
@@ -298,7 +298,7 @@ struct Message: Identifiable, Codable, Equatable {
         return formatter
     }()
     
-    init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = false, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = []) {
+    init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = []) {
         self.id = id
         self.role = role
         self.content = content
@@ -338,7 +338,7 @@ struct Message: Identifiable, Codable, Equatable {
             timestamp = Date()
         }
         
-        isCollapsed = try container.decodeIfPresent(Bool.self, forKey: .isCollapsed) ?? false
+        isCollapsed = try container.decodeIfPresent(Bool.self, forKey: .isCollapsed) ?? true
         isStreaming = try container.decodeIfPresent(Bool.self, forKey: .isStreaming) ?? false
         streamError = try container.decodeIfPresent(String.self, forKey: .streamError)
         generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)

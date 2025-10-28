@@ -8,7 +8,6 @@
 import SwiftUI
 
 struct MessageTableView: UIViewRepresentable {
-    let messages: [Message]
     let archivedMessagesStartIndex: Int
     let isDarkMode: Bool
     let isLoading: Bool
@@ -20,11 +19,16 @@ struct MessageTableView: UIViewRepresentable {
     @Binding var tableOpacity: Double
     let keyboardHeight: CGFloat
 
-    // Track streaming content to trigger updates
+    private var messages: [Message] {
+        viewModel.messages
+    }
+
     private var streamingContentHash: Int {
         guard !messages.isEmpty, isLoading else { return 0 }
         let lastMessage = messages[messages.count - 1]
-        return lastMessage.content.count ^ (lastMessage.thoughts?.count ?? 0) ^ (lastMessage.isThinking ? 1 : 0)
+        let contentChunksHash = lastMessage.contentChunks.hashValue
+        let thinkingHash = (lastMessage.isThinking ? 1 : 0) ^ (lastMessage.thoughts?.count ?? 0)
+        return contentChunksHash ^ thinkingHash
     }
 
     func makeUIView(context: Context) -> UITableView {
@@ -65,6 +69,15 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
+        let currentChatId = viewModel.currentChat?.id
+        let chatIdChanged = context.coordinator.lastChatId != currentChatId
+        if chatIdChanged {
+            context.coordinator.lastChatId = currentChatId
+            context.coordinator.messageWrappers.removeAll()
+            context.coordinator.shownMessageIds.removeAll()
+            context.coordinator.heightCache.removeAll()
+        }
+
         let isDarkModeChanged = context.coordinator.lastIsDarkMode != isDarkMode
         let messageCountChanged = context.coordinator.lastMessageCount != messages.count
         let streamingHashChanged = context.coordinator.lastStreamingHash != streamingContentHash
@@ -76,10 +89,12 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
-        if messageCountChanged {
+        if messageCountChanged || chatIdChanged {
             context.coordinator.lastMessageCount = messages.count
             context.coordinator.lastStreamingHash = streamingContentHash
-            context.coordinator.heightCache.removeAll()
+            if !chatIdChanged {
+                context.coordinator.heightCache.removeAll()
+            }
             tableView.reloadData()
         } else if streamingHashChanged && !messages.isEmpty {
             context.coordinator.lastStreamingHash = streamingContentHash
@@ -97,12 +112,14 @@ struct MessageTableView: UIViewRepresentable {
                 let needsBufferExtension = wrapper.actualContentHeight > threshold && wrapper.actualContentHeight > wrapper.lastExtendedAtHeight + 50
 
                 DispatchQueue.main.async {
-                    wrapper.message = lastMessage
-                    wrapper.isDarkMode = isDarkMode
-                    wrapper.isLastMessage = isLastMessage
-                    wrapper.isLoading = isLoading
-                    wrapper.isArchived = isArchived
-                    wrapper.showArchiveSeparator = showArchiveSeparator
+                    wrapper.update(
+                        message: lastMessage,
+                        isDarkMode: isDarkMode,
+                        isLastMessage: isLastMessage,
+                        isLoading: isLoading,
+                        isArchived: isArchived,
+                        showArchiveSeparator: showArchiveSeparator
+                    )
 
                     if needsBufferExtension {
                         CATransaction.begin()
@@ -175,8 +192,10 @@ struct MessageTableView: UIViewRepresentable {
         var lastMessageCount: Int = 0
         var lastIsLoading: Bool = false
         var lastStreamingHash: Int = 0
+        var cellReuseIdentifierSuffix: String = ""
         var lastKeyboardHeight: CGFloat = 0
         var lastIsDarkMode: Bool = false
+        var lastChatId: String? = nil
         private var isDragging = false
         var messageWrappers: [String: ObservableMessageWrapper] = [:]
         var shouldScrollToBottomAfterLayout = false
@@ -190,6 +209,8 @@ struct MessageTableView: UIViewRepresentable {
         func getOrCreateWrapper(for message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool) -> ObservableMessageWrapper {
             if let existing = messageWrappers[message.id] {
                 existing.update(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator)
+                // Never re-animate existing messages
+                existing.shouldAnimateAppearance = false
                 return existing
             } else {
                 let isFirstTimeShown = !shownMessageIds.contains(message.id)
@@ -212,7 +233,7 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-            let cellIdentifier = parent.messages.isEmpty ? "WelcomeCell" : "MessageCell"
+            let cellIdentifier = (parent.messages.isEmpty ? "WelcomeCell" : "MessageCell") + cellReuseIdentifierSuffix
 
             let cell = tableView.dequeueReusableCell(withIdentifier: cellIdentifier) ?? UITableViewCell(style: .default, reuseIdentifier: cellIdentifier)
             cell.selectionStyle = .none
@@ -250,16 +271,13 @@ struct MessageTableView: UIViewRepresentable {
                     showArchiveSeparator: showArchiveSeparator
                 )
 
-                if cell.contentConfiguration == nil {
-                    cell.contentConfiguration = UIHostingConfiguration {
-                        ObservableMessageCell(wrapper: wrapper, viewModel: parent.viewModel, coordinator: self)
-                    }
-                    .minSize(width: 0, height: 0)
-                    .margins(.all, 0)
-                    .background(.clear)
-                } else {
-                    wrapper.objectWillChange.send()
+                // Always recreate the content configuration to ensure correct wrapper is used
+                cell.contentConfiguration = UIHostingConfiguration {
+                    ObservableMessageCell(wrapper: wrapper, viewModel: parent.viewModel, coordinator: self)
                 }
+                .minSize(width: 0, height: 0)
+                .margins(.all, 0)
+                .background(.clear)
             }
 
             return cell
@@ -422,6 +440,15 @@ class ObservableMessageWrapper: ObservableObject {
                             self.message.contentChunks != message.contentChunks ||
                             self.isDarkMode != isDarkMode
 
+        let metadataChanged = self.isLastMessage != isLastMessage ||
+                              self.isLoading != isLoading ||
+                              self.isArchived != isArchived ||
+                              self.showArchiveSeparator != showArchiveSeparator
+
+        if !contentChanged && !metadataChanged {
+            return
+        }
+
         if contentChanged {
             cachedHeight = nil
             cachedHeightKey = nil
@@ -509,7 +536,7 @@ struct ObservableMessageCell: View {
                 }
             }
         }
-        .opacity(wrapper.shouldAnimateAppearance ? (hasAppeared ? 1 : 0) : 1)
+        .opacity(wrapper.shouldAnimateAppearance && !hasAppeared ? 0 : 1)
         .onAppear {
             if wrapper.shouldAnimateAppearance && !hasAppeared {
                 withAnimation(.easeIn(duration: 0.2)) {

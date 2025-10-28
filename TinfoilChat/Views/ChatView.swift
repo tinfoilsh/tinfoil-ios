@@ -277,7 +277,6 @@ struct ChatContainer: View {
     /// The scrollable chat message area
     private var chatArea: some View {
         ChatListView(
-            messages: viewModel.messages,
             isDarkMode: colorScheme == .dark,
             isLoading: viewModel.isLoading,
             onRequestSignIn: showAuthenticationView,

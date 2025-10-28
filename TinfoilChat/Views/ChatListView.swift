@@ -8,7 +8,6 @@
 import SwiftUI
 
 struct ChatListView: View {
-    let messages: [Message]
     let isDarkMode: Bool
     let isLoading: Bool
     let onRequestSignIn: () -> Void
@@ -23,13 +22,16 @@ struct ChatListView: View {
     @State private var scrollTrigger = UUID()
     @State private var tableOpacity = 1.0
 
+    private var messages: [Message] {
+        viewModel.messages
+    }
+
     private var archivedMessagesStartIndex: Int {
         max(0, messages.count - settings.maxMessages)
     }
 
     var body: some View {
         MessageTableView(
-            messages: messages,
             archivedMessagesStartIndex: archivedMessagesStartIndex,
             isDarkMode: isDarkMode,
             isLoading: isLoading,

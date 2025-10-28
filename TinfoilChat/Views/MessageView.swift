@@ -132,7 +132,11 @@ struct MessageView: View {
                    (!message.content.isEmpty || message.thoughts != nil) &&
                    !(isLoading && isLastMessage) {
                     HStack {
-                        Button(action: { showRawContentModal = true }) {
+                        Button {
+                            Task { @MainActor in
+                                showRawContentModal = true
+                            }
+                        } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: "doc.on.doc")
                                     .font(.system(size: 12))
@@ -164,7 +168,9 @@ struct MessageView: View {
             .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
             .onLongPressGesture {
                 if message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil) {
-                    showRawContentModal = true
+                    Task { @MainActor in
+                        showRawContentModal = true
+                    }
                 }
             }
         }
@@ -176,11 +182,8 @@ struct MessageView: View {
             .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showRawContentModal) {
-            RawContentModalView(
-                message: message,
-                isDarkMode: isDarkMode
-            )
-            .presentationDetents([.medium, .large])
+            RawContentModalView(message: message)
+                .presentationDetents([.medium, .large])
         }
     }
     
@@ -336,13 +339,13 @@ private struct LongMessageDetailView: View {
 
 private struct SelectableTextView: UIViewRepresentable {
     let text: String
+    @Environment(\.colorScheme) private var colorScheme
 
     func makeUIView(context: Context) -> UITextView {
         let textView = UITextView()
         textView.isEditable = false
         textView.isSelectable = true
         textView.backgroundColor = .clear
-        textView.textColor = UIColor(white: 1.0, alpha: 0.92)
         textView.font = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
         textView.textContainerInset = .zero
         textView.textContainer.lineFragmentPadding = 0
@@ -359,17 +362,22 @@ private struct SelectableTextView: UIViewRepresentable {
         if uiView.text != text {
             uiView.text = text
         }
+        uiView.textColor = colorScheme == .dark ? UIColor(white: 1.0, alpha: 0.92) : UIColor(white: 0.0, alpha: 0.92)
     }
 }
 
 private struct RawContentModalView: View {
     let message: Message
-    let isDarkMode: Bool
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showCopyAllFeedback = false
     @State private var showCopyResponseFeedback = false
     @State private var showCopyThoughtsFeedback = false
+
+    private var isDarkMode: Bool {
+        colorScheme == .dark
+    }
 
     private var hasThoughts: Bool {
         if let thoughts = message.thoughts, !thoughts.isEmpty {
@@ -434,9 +442,9 @@ private struct RawContentModalView: View {
                             Text(showCopyAllFeedback ? "Copied All!" : "Copy All")
                             Spacer()
                         }
-                        .foregroundColor(.white)
+                        .foregroundColor(isDarkMode ? .white : .black)
                         .padding()
-                        .background(Color.white.opacity(0.1))
+                        .background(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
                         .cornerRadius(8)
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -448,9 +456,9 @@ private struct RawContentModalView: View {
                                 Text(showCopyResponseFeedback ? "Copied Response!" : "Copy Response")
                                 Spacer()
                             }
-                            .foregroundColor(.white)
+                            .foregroundColor(isDarkMode ? .white : .black)
                             .padding()
-                            .background(Color.white.opacity(0.1))
+                            .background(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
                             .cornerRadius(8)
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -463,18 +471,18 @@ private struct RawContentModalView: View {
                                 Text(showCopyThoughtsFeedback ? "Copied Thoughts!" : "Copy Thoughts")
                                 Spacer()
                             }
-                            .foregroundColor(.white)
+                            .foregroundColor(isDarkMode ? .white : .black)
                             .padding()
-                            .background(Color.white.opacity(0.1))
+                            .background(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
                             .cornerRadius(8)
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
                 }
                 .padding()
-                .background(Color.backgroundPrimary)
+                .background(isDarkMode ? Color.backgroundPrimary : Color(UIColor.systemBackground))
             }
-            .background(Color.backgroundPrimary)
+            .background(isDarkMode ? Color.backgroundPrimary : Color(UIColor.systemBackground))
             .navigationTitle("Raw Content")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -485,7 +493,6 @@ private struct RawContentModalView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
     }
 
     private func copyAll() {
@@ -572,7 +579,7 @@ private struct MarkdownThemeCache {
         MarkdownUI.Theme.gitHub
             .text {
                 FontFamily(.system(.default))
-                FontSize(15)
+                FontSize(.em(1.0))
                 ForegroundColor(textColor ?? (isDarkMode ? .white : Color.black.opacity(0.8)))
             }
             .paragraph { configuration in
@@ -752,7 +759,6 @@ struct CollapsibleThinkingBox: View {
                     Spacer()
                     Image(systemName: "chevron.down")
                         .rotationEffect(.degrees(isCollapsed ? 0 : -180))
-                        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isCollapsed)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 16)
@@ -766,7 +772,7 @@ struct CollapsibleThinkingBox: View {
                     Divider()
 
                     Text(thinkingText)
-                        .font(.system(size: 14))
+                        .font(.system(.body))
                         .foregroundColor(isDarkMode ? .white.opacity(0.9) : Color.black.opacity(0.8))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
