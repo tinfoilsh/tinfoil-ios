@@ -63,6 +63,7 @@ struct MessageView: View {
                             generationTimeSeconds: message.generationTimeSeconds,
                             messageCollapsed: message.isCollapsed
                         )
+                        .equatable()
                         
                                 if !message.content.isEmpty {
                             if !message.contentChunks.isEmpty {
@@ -92,6 +93,7 @@ struct MessageView: View {
                             generationTimeSeconds: message.generationTimeSeconds,
                             messageCollapsed: message.isCollapsed
                         )
+                        .equatable()
                         
                         // Remainder: text after </think> if present
                         if !parsed.remainderText.isEmpty {
@@ -681,7 +683,7 @@ struct AdaptiveMarkdownText: View {
     }
 }
 
-struct CollapsibleThinkingBox: View {
+struct CollapsibleThinkingBox: View, Equatable {
     let messageId: String
     let thinkingText: String
     let isDarkMode: Bool
@@ -692,6 +694,16 @@ struct CollapsibleThinkingBox: View {
 
     @State private var isCollapsed: Bool
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
+
+    static func == (lhs: CollapsibleThinkingBox, rhs: CollapsibleThinkingBox) -> Bool {
+        lhs.messageId == rhs.messageId &&
+        lhs.thinkingText == rhs.thinkingText &&
+        lhs.isDarkMode == rhs.isDarkMode &&
+        lhs.isCollapsible == rhs.isCollapsible &&
+        lhs.isStreaming == rhs.isStreaming &&
+        lhs.generationTimeSeconds == rhs.generationTimeSeconds &&
+        lhs.messageCollapsed == rhs.messageCollapsed
+    }
 
     init(
         messageId: String,
