@@ -825,6 +825,10 @@ class ChatViewModel: ObservableObject {
                 var hasStartedResponse = false
                 var hasShownFirstChunk = false
 
+                var lastUIUpdateTime = Date.distantPast
+                let uiUpdateInterval: TimeInterval = 0.15
+                var pendingUIUpdate = false
+
                 await MainActor.run {
                     if let chat = self.currentChat,
                        !chat.messages.isEmpty,
@@ -1003,78 +1007,69 @@ class ChatViewModel: ObservableObject {
                     }
 
                     if didMutateState {
-                        let currentChunks = chunker.getAllChunks()
+                        pendingUIUpdate = true
 
-                        Task { @MainActor [weak self] in
-                            guard let self = self else { return }
-                            guard self.currentChat?.id == streamChatId else { return }
-                            guard var chat = self.currentChat,
-                                  !chat.messages.isEmpty,
-                                  let lastIndex = chat.messages.indices.last else {
-                                return
+                        let now = Date()
+                        let timeSinceLastUpdate = now.timeIntervalSince(lastUIUpdateTime)
+
+                        if timeSinceLastUpdate >= uiUpdateInterval {
+                            lastUIUpdateTime = now
+                            pendingUIUpdate = false
+                            let currentChunks = chunker.getAllChunks()
+
+                            await MainActor.run { [weak self] in
+                                guard let self = self else { return }
+                                guard self.currentChat?.id == streamChatId else { return }
+                                guard var chat = self.currentChat,
+                                      !chat.messages.isEmpty,
+                                      let lastIndex = chat.messages.indices.last else {
+                                    return
+                                }
+
+                                chat.messages[lastIndex].content = responseContent
+                                chat.messages[lastIndex].thoughts = currentThoughts
+                                chat.messages[lastIndex].isThinking = isInThinkingMode
+                                chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
+
+                                if chat.messages[lastIndex].contentChunks != currentChunks {
+                                    chat.messages[lastIndex].contentChunks = currentChunks
+                                }
+
+                                self.updateChat(chat, throttleForStreaming: true)
                             }
-
-                            chat.messages[lastIndex].content = responseContent
-                            chat.messages[lastIndex].thoughts = currentThoughts
-                            chat.messages[lastIndex].isThinking = isInThinkingMode
-                            chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
-
-                            if chat.messages[lastIndex].contentChunks != currentChunks {
-                                chat.messages[lastIndex].contentChunks = currentChunks
-                            }
-
-                            self.updateChat(chat, throttleForStreaming: true)
                         }
                     }
                 }
 
-                if isInThinkingMode && !thoughtsBuffer.isEmpty {
-                    if isUsingReasoningFormat {
-                        currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                    } else {
-                        currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                if pendingUIUpdate || isInThinkingMode || isFirstChunk {
+                    if isInThinkingMode && !thoughtsBuffer.isEmpty {
+                        if isUsingReasoningFormat {
+                            currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                        } else {
+                            currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                            if responseContent.isEmpty {
+                                responseContent = thoughtsBuffer
+                                currentThoughts = nil
+                            }
+                        }
+                        if let startTime = thinkStartTime {
+                            generationTimeSeconds = Date().timeIntervalSince(startTime)
+                        }
+                        isInThinkingMode = false
+                    } else if isFirstChunk && !initialContentBuffer.isEmpty {
                         if responseContent.isEmpty {
-                            responseContent = thoughtsBuffer
-                            currentThoughts = nil
+                            responseContent = initialContentBuffer
+                        } else {
+                            responseContent += initialContentBuffer
                         }
+                        _ = chunker.appendToken(initialContentBuffer)
+                        isInThinkingMode = false
+                        currentThoughts = nil
                     }
-                    if let startTime = thinkStartTime {
-                        generationTimeSeconds = Date().timeIntervalSince(startTime)
-                    }
-                    isInThinkingMode = false
+
                     let currentChunks = chunker.getAllChunks()
 
-                    Task { @MainActor [weak self] in
-                        guard let self = self else { return }
-                        guard self.currentChat?.id == streamChatId else { return }
-                        guard var chat = self.currentChat,
-                              !chat.messages.isEmpty,
-                              let lastIndex = chat.messages.indices.last else {
-                            return
-                        }
-                        chat.messages[lastIndex].content = responseContent
-                        chat.messages[lastIndex].thoughts = currentThoughts
-                        chat.messages[lastIndex].isThinking = isInThinkingMode
-                        chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
-
-                        if chat.messages[lastIndex].contentChunks != currentChunks {
-                            chat.messages[lastIndex].contentChunks = currentChunks
-                        }
-
-                        self.updateChat(chat, throttleForStreaming: true)
-                    }
-                } else if isFirstChunk && !initialContentBuffer.isEmpty {
-                    if responseContent.isEmpty {
-                        responseContent = initialContentBuffer
-                    } else {
-                        responseContent += initialContentBuffer
-                    }
-                    _ = chunker.appendToken(initialContentBuffer)
-                    isInThinkingMode = false
-                    currentThoughts = nil
-                    let currentChunks = chunker.getAllChunks()
-
-                    Task { @MainActor [weak self] in
+                    await MainActor.run { [weak self] in
                         guard let self = self else { return }
                         guard self.currentChat?.id == streamChatId else { return }
                         guard var chat = self.currentChat,

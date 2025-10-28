@@ -23,11 +23,12 @@ struct MessageTableView: UIViewRepresentable {
         viewModel.messages
     }
 
-    // Track streaming content to trigger updates
     private var streamingContentHash: Int {
         guard !messages.isEmpty, isLoading else { return 0 }
         let lastMessage = messages[messages.count - 1]
-        return lastMessage.content.count ^ (lastMessage.thoughts?.count ?? 0) ^ (lastMessage.isThinking ? 1 : 0)
+        let contentChunksHash = lastMessage.contentChunks.hashValue
+        let thinkingHash = (lastMessage.isThinking ? 1 : 0) ^ (lastMessage.thoughts?.count ?? 0)
+        return contentChunksHash ^ thinkingHash
     }
 
     func makeUIView(context: Context) -> UITableView {
@@ -109,12 +110,14 @@ struct MessageTableView: UIViewRepresentable {
                 let needsBufferExtension = wrapper.actualContentHeight > threshold && wrapper.actualContentHeight > wrapper.lastExtendedAtHeight + 50
 
                 DispatchQueue.main.async {
-                    wrapper.message = lastMessage
-                    wrapper.isDarkMode = isDarkMode
-                    wrapper.isLastMessage = isLastMessage
-                    wrapper.isLoading = isLoading
-                    wrapper.isArchived = isArchived
-                    wrapper.showArchiveSeparator = showArchiveSeparator
+                    wrapper.update(
+                        message: lastMessage,
+                        isDarkMode: isDarkMode,
+                        isLastMessage: isLastMessage,
+                        isLoading: isLoading,
+                        isArchived: isArchived,
+                        showArchiveSeparator: showArchiveSeparator
+                    )
 
                     if needsBufferExtension {
                         CATransaction.begin()
@@ -434,6 +437,15 @@ class ObservableMessageWrapper: ObservableObject {
                             self.message.thoughts != message.thoughts ||
                             self.message.contentChunks != message.contentChunks ||
                             self.isDarkMode != isDarkMode
+
+        let metadataChanged = self.isLastMessage != isLastMessage ||
+                              self.isLoading != isLoading ||
+                              self.isArchived != isArchived ||
+                              self.showArchiveSeparator != showArchiveSeparator
+
+        if !contentChanged && !metadataChanged {
+            return
+        }
 
         if contentChanged {
             cachedHeight = nil
