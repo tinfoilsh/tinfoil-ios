@@ -63,7 +63,6 @@ struct MessageView: View {
                             generationTimeSeconds: message.generationTimeSeconds,
                             messageCollapsed: message.isCollapsed
                         )
-                        .equatable()
                         
                                 if !message.content.isEmpty {
                             if !message.contentChunks.isEmpty {
@@ -93,7 +92,6 @@ struct MessageView: View {
                             generationTimeSeconds: message.generationTimeSeconds,
                             messageCollapsed: message.isCollapsed
                         )
-                        .equatable()
                         
                         // Remainder: text after </think> if present
                         if !parsed.remainderText.isEmpty {
@@ -690,7 +688,7 @@ struct AdaptiveMarkdownText: View {
     }
 }
 
-struct CollapsibleThinkingBox: View, Equatable {
+struct CollapsibleThinkingBox: View {
     let messageId: String
     let thinkingText: String
     let isDarkMode: Bool
@@ -701,16 +699,6 @@ struct CollapsibleThinkingBox: View, Equatable {
 
     @State private var isCollapsed: Bool
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
-
-    static func == (lhs: CollapsibleThinkingBox, rhs: CollapsibleThinkingBox) -> Bool {
-        lhs.messageId == rhs.messageId &&
-        lhs.thinkingText == rhs.thinkingText &&
-        lhs.isDarkMode == rhs.isDarkMode &&
-        lhs.isCollapsible == rhs.isCollapsible &&
-        lhs.isStreaming == rhs.isStreaming &&
-        lhs.generationTimeSeconds == rhs.generationTimeSeconds &&
-        lhs.messageCollapsed == rhs.messageCollapsed
-    }
 
     init(
         messageId: String,
@@ -734,14 +722,16 @@ struct CollapsibleThinkingBox: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: {
-                isCollapsed.toggle()
-                viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
-
                 if let tableView = findTableView() {
                     UIView.performWithoutAnimation {
+                        isCollapsed.toggle()
+                        viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
                         tableView.beginUpdates()
                         tableView.endUpdates()
                     }
+                } else {
+                    isCollapsed.toggle()
+                    viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
                 }
             }) {
                 HStack {
