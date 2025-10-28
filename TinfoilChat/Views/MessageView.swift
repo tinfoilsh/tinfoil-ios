@@ -727,16 +727,14 @@ struct CollapsibleThinkingBox: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: {
+                isCollapsed.toggle()
+                viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
+
                 if let tableView = findTableView() {
                     UIView.performWithoutAnimation {
-                        isCollapsed.toggle()
-                        viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
                         tableView.beginUpdates()
                         tableView.endUpdates()
                     }
-                } else {
-                    isCollapsed.toggle()
-                    viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
                 }
             }) {
                 HStack {
@@ -764,7 +762,6 @@ struct CollapsibleThinkingBox: View, Equatable {
                     Spacer()
                     Image(systemName: "chevron.down")
                         .rotationEffect(.degrees(isCollapsed ? 0 : -180))
-                        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isCollapsed)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 16)
