@@ -211,7 +211,7 @@ struct VerificationStatusView: View {
                     .foregroundColor(.primary)
             }
 
-            HStack(alignment: .top, spacing: 4) {
+            HStack(alignment: .center, spacing: 4) {
                 Text("Attested by")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
@@ -220,21 +220,18 @@ struct VerificationStatusView: View {
                     Image("nvidia-icon")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(height: 12)
-
-                    Text("·")
-                        .foregroundColor(.secondary)
+                        .frame(height: 10)
 
                     if document.enclaveMeasurement.measurement.type.lowercased().contains("tdx") {
                         Image("intel-icon")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(height: 12)
+                            .frame(height: 10)
                     } else if document.enclaveMeasurement.measurement.type.lowercased().contains("sev") {
                         Image("amd-icon")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(height: 12)
+                            .frame(height: 10)
                     }
                 }
             }
@@ -369,7 +366,7 @@ struct ProcessStepView: View {
 
             FingerprintBox(text: document.enclaveFingerprint)
 
-            HStack(alignment: .top, spacing: 4) {
+            HStack(alignment: .center, spacing: 4) {
                 Text("Runtime attested by")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
@@ -378,18 +375,18 @@ struct ProcessStepView: View {
                     Image("nvidia-icon")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(height: 12)
+                        .frame(height: 10)
 
                     if document.enclaveMeasurement.measurement.type.lowercased().contains("tdx") {
                         Image("intel-icon")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(height: 12)
+                            .frame(height: 10)
                     } else if document.enclaveMeasurement.measurement.type.lowercased().contains("sev") {
                         Image("amd-icon")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(height: 12)
+                            .frame(height: 10)
                     }
                 }
             }
@@ -412,7 +409,7 @@ struct ProcessStepView: View {
 
             FingerprintBox(text: document.codeFingerprint)
 
-            HStack(alignment: .top, spacing: 4) {
+            HStack(alignment: .center, spacing: 4) {
                 Text("Code attested by")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
@@ -421,12 +418,12 @@ struct ProcessStepView: View {
                     Image("github-icon")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(height: 16)
+                        .frame(height: 14)
 
                     Image("sigstore-icon")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(height: 16)
+                        .frame(height: 14)
                 }
             }
 
