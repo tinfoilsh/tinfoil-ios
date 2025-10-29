@@ -33,31 +33,16 @@ extension VerificationStatus {
     }
 }
 
-/// Represents a single verification step with its status and details
-struct VerificationSectionState {
-    var status: VerifierStatus
-    var error: String?
-    var measurementType: String?
-    var registers: [String]?
-    var tlsCertificateFingerprint: String?
-    var steps: [VerificationStep] = []
-}
-
-/// Represents the overall verification state
-struct VerificationState {
-    var code: VerificationSectionState
-    var runtime: VerificationSectionState
-    var security: VerificationSectionState
-}
-
-/// Represents a single step in the verification process
-struct VerificationStep: Identifiable {
-    let id = UUID().uuidString
-    let text: String
-    let link: String?
-    
-    init(text: String, link: String? = nil) {
-        self.text = text
-        self.link = link
+/// Extension to convert from VerificationStepState.Status to UI status
+extension VerificationStepState.Status {
+    var uiStatus: VerifierStatus {
+        switch self {
+        case .pending:
+            return .pending
+        case .success:
+            return .success
+        case .failed:
+            return .error
+        }
     }
 } 

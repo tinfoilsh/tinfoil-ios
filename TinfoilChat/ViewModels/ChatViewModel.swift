@@ -1450,7 +1450,7 @@ class ChatViewModel: ObservableObject {
     
     /// Shows the verifier sheet with current verification state
     func showVerifier() {
-        verifierView = VerifierView(verificationDocument: verificationDocument)
+        verifierView = VerifierView()
         showVerifierSheet = true
     }
     
