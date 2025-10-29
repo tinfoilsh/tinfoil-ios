@@ -11,20 +11,14 @@ import TinfoilAI
 /// Pure SwiftUI implementation of the Verifier view
 struct VerifierView: View {
 
-    @State private var verificationDocument: VerificationDocument?
-
     @EnvironmentObject var chatViewModel: ChatViewModel
     @Environment(\.colorScheme) private var colorScheme
 
-    init(verificationDocument: VerificationDocument? = nil) {
-        _verificationDocument = State(initialValue: verificationDocument)
-    }
-    
     var body: some View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 0) {
-                    if let doc = verificationDocument {
+                    if let doc = chatViewModel.verificationDocument {
                         VerificationStatusView(document: doc)
                             .padding(.top, 16)
 
