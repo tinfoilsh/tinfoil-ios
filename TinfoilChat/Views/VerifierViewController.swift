@@ -30,9 +30,8 @@ struct VerifierView: View {
 
                         expandedContent(for: doc)
                     } else {
-                        Text("No verification data available")
-                            .foregroundColor(.secondary)
-                            .padding()
+                        LoadingPlaceholderView()
+                            .padding(.top, 16)
                     }
                 }
             }
@@ -98,7 +97,7 @@ struct VerifierView: View {
             )
 
             ProcessStepView(
-                title: "About In-Browser Verification",
+                title: "About In-App Verification",
                 document: doc,
                 stepType: .about
             )
@@ -108,6 +107,83 @@ struct VerifierView: View {
     }
     
     
+}
+
+// MARK: - LoadingPlaceholderView
+
+struct LoadingPlaceholderView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 8) {
+                ProgressView()
+                    .scaleEffect(0.9)
+                    .frame(width: 24, height: 24)
+
+                Text("Security verification in progress...")
+                    .font(.subheadline)
+                    .foregroundColor(.primary)
+
+                Spacer()
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(colorScheme == .dark ?
+                          Color(.systemGray6).opacity(0.5) :
+                          Color(.systemGray6))
+            )
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+
+            VStack(spacing: 16) {
+                LoadingStepView(title: "Runtime Verified")
+                LoadingStepView(title: "Source Code Verified")
+                LoadingStepView(title: "Fingerprints Verified")
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+        }
+    }
+}
+
+struct LoadingStepView: View {
+    let title: String
+    var isAbout: Bool = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if isAbout {
+                Image(systemName: "info.circle")
+                    .foregroundColor(.secondary)
+                    .font(.system(size: 18, weight: .medium))
+                    .frame(width: 24, height: 24)
+            } else {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .frame(width: 24, height: 24)
+            }
+
+            Text(title)
+                .font(.headline)
+                .foregroundColor(colorScheme == .dark ? .white : .primary)
+
+            Spacer()
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(colorScheme == .dark ?
+                      Color(.systemGray6) :
+                      Color(.systemGroupedBackground))
+                .shadow(color: colorScheme == .dark ?
+                        Color.black.opacity(0.3) :
+                        Color.gray.opacity(0.2),
+                        radius: 3, x: 0, y: 2)
+        )
+    }
 }
 
 // MARK: - VerificationStatusView
