@@ -204,14 +204,12 @@ struct ChatContainer: View {
                 }
             }
             ToolbarItem(placement: .principal) {
-                if #available(iOS 26, *) {
-                    EmptyView()
-                } else {
-                    Image(colorScheme == .dark ? "logo-white" : "logo-dark")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 22)
-                }
+                Image(colorScheme == .dark ? "logo-white" : "logo-dark")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 22)
+                    .opacity(isSidebarOpen ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.2), value: isSidebarOpen)
             }
             // Only show toolbar items when chat has messages (not a new/blank chat)
             if authManager.isAuthenticated && !(viewModel.currentChat?.isBlankChat ?? true) {
