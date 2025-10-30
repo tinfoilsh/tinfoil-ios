@@ -33,7 +33,7 @@ struct VerifierView: View {
             .navigationTitle("Verification Center")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
                         chatViewModel.dismissVerifier()
                     }) {
