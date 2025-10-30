@@ -25,79 +25,101 @@ struct ModularAuthenticationView: View {
   @State private var deleteError: String? = nil
   
   var body: some View {
-    GeometryReader { geometry in
-      ZStack {
-        // Background
-        (colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
-          .edgesIgnoringSafeArea(.all)
-        
-        VStack(spacing: 0) {
-          // Header
-          panelHeader
-          
-          // Main content with scroll view to handle keyboard presentation
+    NavigationView {
+      GeometryReader { geometry in
+        ZStack {
+          // Background
+          (colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+            .edgesIgnoringSafeArea(.all)
+
           VStack(spacing: 0) {
-            ScrollView(showsIndicators: false) {
-              VStack {
-                authenticationContent
-                  .padding(.horizontal)
+            // Main content with scroll view to handle keyboard presentation
+            VStack(spacing: 0) {
+              ScrollView(showsIndicators: false) {
+                VStack {
+                  authenticationContent
+                    .padding(.horizontal)
+                }
+              }
+              .scrollDisabled(clerk.user != nil || authManager.localUserData != nil)
+
+              // Third-party authentication options at the bottom
+              if shouldShowThirdPartyAuth && !isKeyboardVisible {
+                Spacer(minLength: 0)
+
+                // Divider with text
+                HStack {
+                  Rectangle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(height: 1)
+
+                  Text("or")
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 8)
+
+                  Rectangle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(height: 1)
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 20)
+                .transition(.opacity)
+
+                authButton(
+                  icon: "google-icon",
+                  text: "Continue with Google",
+                  action: { Task { await signInWithOAuth(provider: .google) } }
+                )
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+                .transition(.opacity)
+
+                authButton(
+                  systemIcon: "apple.logo",
+                  text: "Continue with Apple",
+                  action: { Task { await signInWithApple() } }
+                )
+                .padding(.horizontal)
+                .padding(.bottom, geometry.safeAreaInsets.bottom > 0 ? geometry.safeAreaInsets.bottom : 20)
+                .transition(.opacity)
               }
             }
-            .scrollDisabled(clerk.user != nil || authManager.localUserData != nil)
-            
-            // Third-party authentication options at the bottom
-            if shouldShowThirdPartyAuth && !isKeyboardVisible {
-              Spacer(minLength: 0)
-              
-              // Divider with text
-              HStack {
-                Rectangle()
-                  .fill(Color.gray.opacity(0.3))
-                  .frame(height: 1)
-                
-                Text("or")
-                  .foregroundColor(.secondary)
-                  .padding(.horizontal, 8)
-                
-                Rectangle()
-                  .fill(Color.gray.opacity(0.3))
-                  .frame(height: 1)
-              }
-              .padding(.horizontal)
-              .padding(.vertical, 20)
-              .transition(.opacity)
-              
-              authButton(
-                icon: "google-icon",
-                text: "Continue with Google",
-                action: { Task { await signInWithOAuth(provider: .google) } }
-              )
-              .padding(.horizontal)
-              .padding(.bottom, 8)
-              .transition(.opacity)
-              
-              authButton(
-                systemIcon: "apple.logo",
-                text: "Continue with Apple",
-                action: { Task { await signInWithApple() } }
-              )
-              .padding(.horizontal)
-              .padding(.bottom, geometry.safeAreaInsets.bottom > 0 ? geometry.safeAreaInsets.bottom : 20)
-              .transition(.opacity)
-            }
+            .frame(maxHeight: .infinity, alignment: .top)
           }
-          .frame(maxHeight: .infinity, alignment: .top)
+          .contentShape(Rectangle())
+          .onTapGesture {
+            dismissKeyboard()
+          }
         }
-        // Enable tap gesture to dismiss keyboard
-        .contentShape(Rectangle())
-        .onTapGesture {
-          dismissKeyboard()
+        .ignoresSafeArea(.keyboard)
+      }
+      .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+      .navigationTitle("")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .principal) {
+          Image(colorScheme == .dark ? "logo-white" : "logo-dark")
+            .resizable()
+            .scaledToFit()
+            .frame(height: 22)
+        }
+
+        ToolbarItem(placement: .navigationBarTrailing) {
+          Button(action: {
+            dismiss()
+          }) {
+            Image(systemName: "xmark")
+              .font(.system(size: 18, weight: .medium))
+          }
+          .accessibilityLabel("Close authentication screen")
         }
       }
-      .ignoresSafeArea(.keyboard) // This keeps the keyboard from pushing up the content
+      .onAppear {
+        setupNavigationBarAppearance()
+        setupNotifications()
+      }
+      .onDisappear(perform: cleanupNotifications)
     }
-    .onAppear(perform: setupNotifications)
-    .onDisappear(perform: cleanupNotifications)
   }
   
   // MARK: - Main Content Components
@@ -242,43 +264,23 @@ struct ModularAuthenticationView: View {
   private var shouldShowThirdPartyAuth: Bool {
     clerk.user == nil && !isInVerificationMode && authManager.localUserData == nil
   }
-  
-  // MARK: - Header Components
-  
-  private var panelHeader: some View {
-    VStack(spacing: 0) {
-      ZStack {
-        // Center logo
-        HStack {
-          Spacer()
-          Image(colorScheme == .dark ? "logo-white" : "logo-dark")
-            .resizable()
-            .scaledToFit()
-            .frame(height: 22)
-          Spacer()
-        }
-        
-        // Right-aligned close button
-        HStack {
-          Spacer()
-          Button(action: { dismiss() }) {
-            Image(systemName: "xmark")
-              .font(.system(size: 16, weight: .bold))
-              .foregroundColor(Color(.systemGray))
-          }
-          .buttonStyle(PlainButtonStyle())
-          .accessibilityLabel("Close authentication screen")
-          .padding(.trailing, 4)
-        }
-      }
-      .padding()
-      .background(Color(UIColor.systemBackground))
-      
-      // Add subtle separator line
-      Rectangle()
-        .fill(Color.gray.opacity(0.2))
-        .frame(height: 1)
+
+  private func setupNavigationBarAppearance() {
+    let appearance = UINavigationBarAppearance()
+    if #available(iOS 26, *) {
+      appearance.configureWithTransparentBackground()
+    } else {
+      appearance.configureWithOpaqueBackground()
+      appearance.backgroundColor = colorScheme == .dark ? UIColor(Color.backgroundPrimary) : .white
     }
+    appearance.shadowColor = .clear
+
+    let tintColor: UIColor = colorScheme == .dark ? .white : .black
+
+    UINavigationBar.appearance().standardAppearance = appearance
+    UINavigationBar.appearance().compactAppearance = appearance
+    UINavigationBar.appearance().scrollEdgeAppearance = appearance
+    UINavigationBar.appearance().tintColor = tintColor
   }
   
   // MARK: - User Profile Components
