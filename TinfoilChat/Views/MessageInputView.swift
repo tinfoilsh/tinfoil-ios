@@ -321,11 +321,13 @@ struct CustomTextEditor: UIViewRepresentable {
             uiView.text = placeholderText
             uiView.textColor = .lightGray
         } else if text.isEmpty && isCurrentlyEditing {
-            if uiView.textColor == .lightGray {
+            if uiView.text.isEmpty && uiView.textColor == .lightGray {
                 uiView.text = ""
                 uiView.textColor = UIColor { traitCollection in
                     return traitCollection.userInterfaceStyle == .dark ? .white : .black
                 }
+            } else if !uiView.text.isEmpty && uiView.textColor != .lightGray {
+                self.text = uiView.text
             }
         } else if !text.isEmpty && uiView.textColor == .lightGray {
             uiView.text = text
