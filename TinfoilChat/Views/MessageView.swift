@@ -167,7 +167,8 @@ struct MessageView: View {
             .cornerRadius(16)
             .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
             .onLongPressGesture {
-                if message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil) {
+                if (message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil)) ||
+                   (message.role == .user && !message.content.isEmpty) {
                     Task { @MainActor in
                         showRawContentModal = true
                     }
