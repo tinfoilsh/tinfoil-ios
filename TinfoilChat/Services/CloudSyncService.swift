@@ -789,15 +789,18 @@ class CloudSyncService: ObservableObject {
             }
         }
         
-        // Convert to Chat
-        var chatToSave = chatToConvert.toChat()
-        
+        // Convert to Chat - may return nil if models aren't available
+        guard var chatToSave = chatToConvert.toChat() else {
+            print("Warning: Could not convert StoredChat to Chat - no models available. Skipping chat \(chatToConvert.id)")
+            return
+        }
+
         // IMPORTANT: Preserve original createdAt date if chat already exists locally
         // Only update content, not creation timestamp
         if let existingChat = existingChat {
             chatToSave.createdAt = existingChat.createdAt
         }
-        
+
         // Add updated chat
         chats.append(chatToSave)
         
@@ -845,7 +848,12 @@ class CloudSyncService: ObservableObject {
         // Skip placeholder chats that still lack content
         guard !chat.messages.isEmpty else { return }
 
-        var chatForUpload = chat.toChat()
+        // Convert to Chat for re-encryption - may fail if models aren't available
+        guard var chatForUpload = chat.toChat() else {
+            print("Warning: Could not convert StoredChat to Chat for re-encryption - no models available. Skipping chat \(chat.id)")
+            return
+        }
+
         chatForUpload.decryptionFailed = false
         chatForUpload.encryptedData = nil
         chatForUpload.locallyModified = true

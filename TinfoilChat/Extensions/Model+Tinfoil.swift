@@ -12,9 +12,13 @@ import Foundation
 @MainActor
 struct TinfoilModel {
     /// Get the current model ID as a string
-    static var currentModelId: String {
+    /// Returns nil if no models are available (app not initialized)
+    static var currentModelId: String? {
         get async {
-            let currentModel = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first!
+            guard let currentModel = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first else {
+                print("Warning: No models available for currentModelId")
+                return nil
+            }
             return currentModel.modelName
         }
     }

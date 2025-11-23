@@ -7,27 +7,37 @@
 
 import Foundation
 
-/// Model configuration for parsing from config json
-struct ModelConfig: Codable {
-    let id: String
-    let displayName: String
-    let iconName: String
+/// Model configuration from the new /api/app/models endpoint
+struct AppModelConfig: Codable {
+    let modelName: String
+    let image: String
+    let repo: String
+    let endpoint: String
+    let name: String
+    let nameShort: String
     let description: String
-    let fullName: String
-    let modelId: String
-    let isFree: Bool
+    let details: String
+    let parameters: String
+    let contextWindow: String
+    let recommendedUse: String
+    let supportedLanguages: String
+    let type: String
+    let chat: Bool?
+    let paid: Bool
+    let multimodal: Bool
 }
 
-/// Remote configuration structure
+// The /api/app/models endpoint returns an array directly, not wrapped in an object
+
+/// Remote configuration structure (mobile-specific settings only)
 struct RemoteConfig: Codable {
-    let models: [ModelConfig]
     let apiKey: String
     let chatConfig: ChatConfig
     let minSupportedVersion: String
-    
+
     struct ChatConfig: Codable {
         let maxMessagesPerRequest: Int
-        let systemPrompt: String
+        let systemPrompt: String?
         let rules: String?
     }
 }
@@ -35,39 +45,59 @@ struct RemoteConfig: Codable {
 /// Model type structure to replace enum for dynamic configuration
 struct ModelType: Identifiable, Codable, Hashable, Equatable {
     let id: String
-    private let config: ModelConfig
-    
-    init(id: String, config: ModelConfig) {
-        self.id = id
-        self.config = config
+    private let appConfig: AppModelConfig
+
+    init(from appModelConfig: AppModelConfig) {
+        self.id = appModelConfig.modelName
+        self.appConfig = appModelConfig
     }
-    
+
     // Display name for UI
-    var displayName: String { config.displayName }
-    
-    // Icon name (from local assets)
-    var iconName: String { config.iconName }
-    
+    var displayName: String { appConfig.nameShort }
+
+    // Icon name (from local assets) - derive from image filename
+    var iconName: String {
+        // Extract icon name from filename like "openai.png"
+        let imageName = appConfig.image.replacingOccurrences(of: ".png", with: "")
+
+        // Map to iOS icon names
+        switch imageName {
+        case "openai": return "openai-icon"
+        case "deepseek": return "deepseek-icon"
+        case "llama": return "llama-icon"
+        case "qwen": return "qwen-icon"
+        case "mistral": return "mistral-icon"
+        case "nomic": return "default-model-icon" // Use default until we have nomic icon
+        case "docling": return "default-model-icon" // Use default until we have docling icon
+        default: return "default-model-icon" // Default fallback
+        }
+    }
+
     // Model description
-    var description: String { config.description }
-    
+    var description: String { appConfig.description }
+
     // Full model name
-    var fullName: String { config.fullName }
-    
-    // Additional properties
-    var modelNameSimple: String { displayName }
-    var modelName: String { config.modelId }
-    var image: String { "\(Constants.UI.modelIconPath)\(iconName)\(Constants.UI.modelIconExtension)" }
-    var name: String { fullName }
-    
-    // Add property to check if model is free
-    var isFree: Bool { config.isFree }
-    
+    var fullName: String { appConfig.name }
+
+    // Model identifier used for API calls
+    var modelName: String { appConfig.modelName }
+
+    // Check if model is free (inverse of paid)
+    var isFree: Bool { !appConfig.paid }
+
+    // Additional properties from new config
+    var details: String { appConfig.details }
+    var parameters: String { appConfig.parameters }
+    var contextWindow: String { appConfig.contextWindow }
+    var type: String { appConfig.type }
+    var isMultimodal: Bool { appConfig.multimodal }
+    var isChat: Bool { appConfig.chat ?? (appConfig.type == "chat") }
+
     // For Hashable conformance
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
-    
+
     // For Equatable conformance
     static func == (lhs: ModelType, rhs: ModelType) -> Bool {
         lhs.id == rhs.id
@@ -80,8 +110,9 @@ class AppConfig: ObservableObject {
     static let shared = AppConfig()
     
     @Published private(set) var config: RemoteConfig?
+    @Published private(set) var appModels: [AppModelConfig] = []
     private let configURL = Constants.Config.configURL
-    private let mockConfigURL = Bundle.main.url(forResource: Constants.Config.mockConfigFileName, withExtension: Constants.Config.mockConfigFileExtension)!
+    private let modelsURL = Constants.Config.modelsURL
     
     // Add initialization state tracking
     @Published private(set) var isInitialized = false
@@ -107,10 +138,8 @@ class AppConfig: ObservableObject {
     @Published private(set) var networkMonitor = NetworkMonitor()
     
     private init() {
-        
         // Load remote configuration
         Task {
-            // await loadMockConfig()
             await loadRemoteConfig()
         }
     }
@@ -129,25 +158,38 @@ class AppConfig: ObservableObject {
                 )
                 return
             }
-            
-            let (data, _) = try await URLSession.shared.data(from: configURL)
-            let remoteConfig = try JSONDecoder().decode(RemoteConfig.self, from: data)
-            
+
+            // Fetch config and models in parallel
+            async let configData = URLSession.shared.data(from: configURL)
+            async let modelsData = URLSession.shared.data(from: modelsURL)
+
+            // Parse config - this is essential, so we need it to succeed
+            let (configDataResult, _) = try await configData
+            let remoteConfig = try JSONDecoder().decode(RemoteConfig.self, from: configDataResult)
+
+            // Parse models - both endpoints must succeed
+            let (modelsDataResult, _) = try await modelsData
+            // The API returns an array directly, not wrapped in an object
+            let allModels = try JSONDecoder().decode([AppModelConfig].self, from: modelsDataResult)
+
+            // Store ALL models (including title models for internal use)
+            self.appModels = allModels
+
             self.config = remoteConfig
             updateAvailableModels()
-            
-            // If no current model is set, try to load the last selected model
+
+            // If no current model is set, try to load the last selected model or use default
             if currentModel == nil {
                 loadLastSelectedModel()
             }
-            
+
             // Confirm current model is still valid
             if let currentModel = currentModel,
                !availableModels.contains(currentModel) {
-                // Fall back to first available model if current is no longer valid
-                self.currentModel = availableModels.first
+                // Fall back to first available model (preferring free model)
+                self.currentModel = availableModels.first(where: { $0.isFree }) ?? availableModels.first
             }
-            
+
             // Clear any previous error
             initializationError = nil
             // Set initialization as complete
@@ -157,51 +199,23 @@ class AppConfig: ObservableObject {
         }
     }
     
-    private func loadMockConfig() {
-        do {
-            // Try loading from mock_config.json in the bundle
-            guard let mockConfigURL = Bundle.main.url(forResource: Constants.Config.mockConfigFileName, withExtension: Constants.Config.mockConfigFileExtension) else {
-                let error = NSError(
-                    domain: Constants.Config.ErrorDomain.domain,
-                    code: Constants.Config.ErrorDomain.configNotFoundCode,
-                    userInfo: [
-                        NSLocalizedDescriptionKey: Constants.Config.ErrorDomain.configNotFoundDescription,
-                        NSLocalizedRecoverySuggestionErrorKey: Constants.Config.ErrorDomain.configNotFoundRecoverySuggestion
-                    ]
-                )
-                initializationError = error
-                return
-            }
-            
-            let data = try Data(contentsOf: mockConfigURL)
-            config = try JSONDecoder().decode(RemoteConfig.self, from: data)
-            
-            // Update available models from config
-            updateAvailableModels()
-            
-            // Load last selected model or use first available
-            loadLastSelectedModel()
-            
-            isInitialized = true
-        } catch {
-            initializationError = error
-        }
-    }
-    
-    // Update available models from config
+    // Update available models from app models
     private func updateAvailableModels() {
-        guard let modelConfigs = config?.models else { return }
-        availableModels = modelConfigs.map { ModelType(id: $0.id, config: $0) }
+        // Filter models for UI display - exclude title and other non-chat types
+        let chatCompatibleModels = appModels.filter { model in
+            Self.isModelSupportedInApp(model)
+        }
+        availableModels = chatCompatibleModels.map { ModelType(from: $0) }
     }
-    
+
     // Load the last selected model from UserDefaults
     private func loadLastSelectedModel() {
         if let savedModelId = UserDefaults.standard.string(forKey: "lastSelectedModel"),
-           let modelConfig = config?.models.first(where: { $0.id == savedModelId }) {
-            currentModel = ModelType(id: savedModelId, config: modelConfig)
+           let appModel = appModels.first(where: { $0.modelName == savedModelId }) {
+            currentModel = ModelType(from: appModel)
         } else {
-            // Fall back to first available model
-            currentModel = availableModels.first
+            // Fall back to first free model, or first available model
+            currentModel = availableModels.first(where: { $0.isFree }) ?? availableModels.first
         }
     }
     
@@ -214,12 +228,7 @@ class AppConfig: ObservableObject {
     }
     
     // MARK: - Model configuration
-    
-    func getModelConfig(_ type: ModelType) -> ModelConfig? {
-        return config?.models.first { $0.id == type.id }
-    }
-    
-    
+
     var apiKey: String {
         config!.apiKey
     }
@@ -241,7 +250,7 @@ class AppConfig: ObservableObject {
     }
     
     var systemPrompt: String {
-        config!.chatConfig.systemPrompt
+        config?.chatConfig.systemPrompt ?? "You are Tin, a helpful AI assistant created by Tinfoil."
     }
     
     var rules: String {
@@ -293,6 +302,15 @@ class AppConfig: ObservableObject {
         availableModels
     }
     
+    /// Check if a model should be shown in the app's model selection
+    private static func isModelSupportedInApp(_ model: AppModelConfig) -> Bool {
+        // Only show models explicitly marked as chat models in the UI
+        // Code, title, and other specialized models are not shown
+
+        // Only include models with type "chat"
+        return model.type == "chat"
+    }
+
     /// Get filtered model types based on authentication status
     func filteredModelTypes(isAuthenticated: Bool, hasActiveSubscription: Bool) -> [ModelType] {
         if isAuthenticated && hasActiveSubscription {

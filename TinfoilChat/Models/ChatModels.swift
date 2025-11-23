@@ -121,7 +121,10 @@ struct Chat: Identifiable, Codable {
         locallyModified: Bool = true,
         updatedAt: Date? = nil
     ) -> Chat {
-        let model = modelType ?? AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first!
+        // Try to use the provided model, fall back to current model, then first available
+        guard let model = modelType ?? AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first else {
+            fatalError("Cannot create Chat without available models. Ensure AppConfig is initialized before creating chats.")
+        }
         return Chat(
             id: id,
             title: title,

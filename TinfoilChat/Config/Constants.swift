@@ -15,8 +15,7 @@ enum Constants {
 
     enum Config {
         static let configURL = URL(string: "https://api.tinfoil.sh/api/mobile/config")!
-        static let mockConfigFileName = "mock_config"
-        static let mockConfigFileExtension = "json"
+        static let modelsURL = URL(string: "https://api.tinfoil.sh/api/app/models")!
 
         enum ErrorDomain {
             static let domain = "Tinfoil"
