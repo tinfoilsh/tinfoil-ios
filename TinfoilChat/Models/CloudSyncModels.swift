@@ -47,22 +47,25 @@ struct StoredChat: Codable {
         self.hasActiveStream = chat.hasActiveStream
     }
     
-    func toChat() -> Chat {
-        // For chats from R2 without modelType, caller should have set a default
-        // but we'll use a fallback just in case
-        let model = modelType ?? ModelType(
-            id: "gpt-4o",
-            config: ModelConfig(
-                id: "gpt-4o",
-                displayName: "GPT-4",
-                iconName: "gpt-4o",
-                description: "OpenAI GPT-4",
-                fullName: "GPT-4 Omni",
-                modelId: "openai/gpt-4o",
-                isFree: false
-            )
-        )
-        
+    @MainActor
+    func toChat() -> Chat? {
+        // For chats from R2 without modelType, try to find a suitable model
+        let model: ModelType
+        if let existingModel = modelType {
+            model = existingModel
+        } else {
+            // Fallback: use current model or first available
+            // If no models are available, this indicates a serious initialization problem
+            if let currentModel = AppConfig.shared.currentModel {
+                model = currentModel
+            } else if let firstModel = AppConfig.shared.availableModels.first {
+                model = firstModel
+            } else {
+                // Cannot create chat without models - this should only happen during initialization
+                return nil
+            }
+        }
+
         var chat = Chat(
             id: id,
             title: title,
@@ -78,12 +81,12 @@ struct StoredChat: Codable {
             decryptionFailed: decryptionFailed ?? false,
             encryptedData: encryptedData
         )
-        
+
         // Preserve streaming state
         if let hasActiveStream = hasActiveStream {
             chat.hasActiveStream = hasActiveStream
         }
-        
+
         return chat
     }
     

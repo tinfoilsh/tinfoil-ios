@@ -234,7 +234,12 @@ class ChatViewModel: ObservableObject {
     
     init(authManager: AuthManager? = nil) {
         // Initialize with last selected model from AppConfig (which now persists)
-        self.currentModel = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first!
+        // The app should ensure AppConfig is initialized before creating ChatViewModel
+        guard let model = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first else {
+            // This should never happen in production if app initialization is correct
+            fatalError("ChatViewModel cannot be initialized without available models. Ensure AppConfig loads models before creating ChatViewModel.")
+        }
+        self.currentModel = model
         
         // Load persisted last sync date (will be loaded per-user when auth is set)
         // Initial load happens in the authManager didSet
@@ -718,7 +723,7 @@ class ChatViewModel: ObservableObject {
                 }
                 
                 // Create the stream with proper parameters
-                let modelId = AppConfig.shared.getModelConfig(currentModel)?.modelId ?? ""
+                let modelId = currentModel.modelName
                 
                 // Add system message first with language preference
                 let settingsManager = SettingsManager.shared
@@ -1121,7 +1126,9 @@ class ChatViewModel: ObservableObject {
 
                                 if let generated = await self.generateLLMTitle(from: messagesSnapshot) {
                                     // Re-fetch the latest chat after await to avoid using stale IDs
-                                    guard var current = self.currentChat, current.messages.count >= 2, current.needsGeneratedTitle else { return }
+                                    guard var current = self.currentChat, current.messages.count >= 2, current.needsGeneratedTitle else {
+                                        return
+                                    }
                                     current.title = generated
                                     current.titleState = .generated
                                     current.locallyModified = true
@@ -1835,7 +1842,7 @@ class ChatViewModel: ObservableObject {
         isLoading = false
         
         // Check if we need a premium key for this model
-        let isPremiumModel = AppConfig.shared.getModelConfig(modelType)?.isFree == false
+        let isPremiumModel = !modelType.isFree
         
         // If switching to premium model, verify authentication and subscription
         if isPremiumModel {
@@ -2481,13 +2488,20 @@ class ChatViewModel: ObservableObject {
         )
         
         await MainActor.run {
-            // Convert and append new chats
-            let newChats = result.chats.map { $0.toChat() }
-            
+            // Convert and append new chats - filter out any that fail to convert
+            let newChats = result.chats.compactMap { storedChat -> Chat? in
+                if let chat = storedChat.toChat() {
+                    return chat
+                } else {
+                    print("Warning: Could not convert StoredChat to Chat during pagination - skipping chat \(storedChat.id)")
+                    return nil
+                }
+            }
+
             // Filter out any duplicates
             let existingIds = Set(self.chats.map { $0.id })
             let uniqueNewChats = newChats.filter { !existingIds.contains($0.id) }
-            
+
             // DON'T save paginated chats to storage - keep them in memory only
             // Only append to the visible chats array
             if !uniqueNewChats.isEmpty {
@@ -2848,11 +2862,22 @@ extension ChatViewModel {
         // Require at least one message
         guard !messages.isEmpty else { return nil }
 
-        // Pick a free model, prefer a llama-free-like id
+        // Look for a title generation model first (search ALL models, not just availableModels)
+        // Title models are not shown in UI but are available for internal use
+        let allModelTypes = AppConfig.shared.appModels.map { ModelType(from: $0) }
+
+        // Prefer a free title model if available
+        let titleModel = allModelTypes.first { $0.type == "title" && $0.isFree }
+
+        // Fall back to any free chat model
         let freeModels = AppConfig.shared.availableModels.filter { $0.isFree }
-        guard !freeModels.isEmpty else { return nil }
-        let preferred = freeModels.first { $0.modelName.lowercased().contains("llama") && $0.modelName.lowercased().contains("free") }
-        let modelToUse = preferred ?? freeModels[0]
+
+        guard let modelToUse = titleModel ?? freeModels.first else {
+            return nil
+        }
+
+        // Title models don't stream
+        let shouldStream = modelToUse.type != "title"
 
         // Prepare conversation snippet (first few messages)
         let snippet = messages.prefix(4).map { msg -> String in
@@ -2879,29 +2904,41 @@ extension ChatViewModel {
             content: "Generate a title for this conversation:\n\n\(snippet)"
         )
 
+
         let query = ChatQueryBuilder.buildQuery(
             modelId: modelToUse.modelName,
             systemPrompt: titlePrompt,
             rules: "",
             conversationMessages: [userMessage],
-            maxMessages: 1
+            maxMessages: 1,
+            stream: shouldStream
         )
 
-        // Collect streamed content
+        // Collect response - use appropriate method based on streaming
         var buffer = ""
         do {
-            let stream: AsyncThrowingStream<ChatStreamResult, Error> = client.chatsStream(query: query)
-            for try await chunk in stream {
-                if let piece = chunk.choices.first?.delta.content, !piece.isEmpty {
-                    buffer += piece
+            if shouldStream {
+                // Use streaming API for chat models
+                let stream: AsyncThrowingStream<ChatStreamResult, Error> = client.chatsStream(query: query)
+                for try await chunk in stream {
+                    if let deltaContent = chunk.choices.first?.delta.content, !deltaContent.isEmpty {
+                        buffer += deltaContent
+                    }
                 }
+            } else {
+                // Use non-streaming API for title models
+                // OpenAI/TinfoilAI has a chats method that returns ChatResult
+                let result: ChatResult = try await client.chats(query: query)
+                buffer = result.choices.first?.message.content ?? ""
             }
         } catch {
             return nil
         }
 
         let raw = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return nil }
+        guard !raw.isEmpty else {
+            return nil
+        }
 
         // Clean quotes and clamp length
         let clean = raw

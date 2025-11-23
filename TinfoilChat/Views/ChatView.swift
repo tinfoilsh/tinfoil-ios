@@ -766,7 +766,7 @@ struct ModelPicker: View {
                     viewModel.changeModel(to: model)
                 }) {
                     Label {
-                        Text(model.modelNameSimple)
+                        Text(model.displayName)
                     } icon: {
                         Image(model.iconName)
                             .resizable()
