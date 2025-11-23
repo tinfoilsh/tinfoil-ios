@@ -70,12 +70,25 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         let currentChatId = viewModel.currentChat?.id
-        let chatIdChanged = context.coordinator.lastChatId != currentChatId
+        let previousChatId = context.coordinator.lastChatId
+        let chatIdChanged = previousChatId != currentChatId
+
+        // Detect ID conversion (temp → permanent) by checking if message IDs match
+        // This is more reliable than checking wrappers since wrappers only exist for rendered cells
+        let currentMessageIds = Set(viewModel.messages.map { $0.id })
+        let isIdConversion = chatIdChanged && !currentMessageIds.isEmpty &&
+            currentMessageIds == context.coordinator.lastMessageIds
+
         if chatIdChanged {
             context.coordinator.lastChatId = currentChatId
-            context.coordinator.messageWrappers.removeAll()
-            context.coordinator.shownMessageIds.removeAll()
-            context.coordinator.heightCache.removeAll()
+
+            if !isIdConversion {
+                context.coordinator.messageWrappers.removeAll()
+                context.coordinator.shownMessageIds.removeAll()
+            }
+            context.coordinator.lastMessageIds = currentMessageIds
+        } else if currentMessageIds != context.coordinator.lastMessageIds {
+            context.coordinator.lastMessageIds = currentMessageIds
         }
 
         let isDarkModeChanged = context.coordinator.lastIsDarkMode != isDarkMode
@@ -89,12 +102,10 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
-        if messageCountChanged || chatIdChanged {
+        if messageCountChanged || (chatIdChanged && !isIdConversion) {
             context.coordinator.lastMessageCount = messages.count
             context.coordinator.lastStreamingHash = streamingContentHash
-            if !chatIdChanged {
-                context.coordinator.heightCache.removeAll()
-            }
+            context.coordinator.heightCache.removeAll()
             tableView.reloadData()
         } else if streamingHashChanged && !messages.isEmpty {
             context.coordinator.lastStreamingHash = streamingContentHash
@@ -196,6 +207,7 @@ struct MessageTableView: UIViewRepresentable {
         var lastKeyboardHeight: CGFloat = 0
         var lastIsDarkMode: Bool = false
         var lastChatId: String? = nil
+        var lastMessageIds: Set<String> = []
         private var isDragging = false
         var messageWrappers: [String: ObservableMessageWrapper] = [:]
         var shouldScrollToBottomAfterLayout = false

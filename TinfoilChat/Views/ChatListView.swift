@@ -114,10 +114,7 @@ struct ChatListView: View {
                 }
             }
         }
-        .onChange(of: viewModel.currentChat?.id) { oldId, newId in
-            // Only reset scroll and fade if we're actually switching to a different chat
-            guard oldId != newId else { return }
-
+        .onChange(of: viewModel.currentChat?.createdAt) { _, _ in
             userHasScrolled = false
             viewModel.isScrollInteractionActive = false
 
