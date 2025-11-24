@@ -2083,10 +2083,22 @@ class ChatViewModel: ObservableObject {
                     // Initialize encryption - this will load existing key from keychain
                     let key = try await EncryptionService.shared.initialize()
                     self.encryptionKey = key
-                    
+
+                    // Retry decryption for any previously failed chats now that key is loaded
+                    let decryptedCount = await cloudSync.retryDecryptionWithNewKey(onProgress: nil)
+                    if decryptedCount > 0 {
+                        if let userId = self.currentUserId {
+                            let updatedChats = Chat.loadFromDefaults(userId: userId)
+                            await MainActor.run {
+                                let sortedChats = updatedChats.sorted { $0.createdAt > $1.createdAt }
+                                self.chats = sortedChats
+                                normalizeChatsArray()
+                            }
+                        }
+                    }
+
                     // If we have anonymous chats to sync, force re-encryption with proper key
                     if self.hasAnonymousChatsToSync {
-                        print("Re-encrypting anonymous chats with user's key")
                         // Force all local chats to be marked for sync
                         if let userId = self.currentUserId {
                             var updatedChats = Chat.loadFromDefaults(userId: userId)
@@ -2098,7 +2110,7 @@ class ChatViewModel: ObservableObject {
                         }
                         self.hasAnonymousChatsToSync = false
                     }
-                    
+
                     // Now proceed with cloud sync regardless of whether key was new or existing
                     await initializeCloudSync()
                     

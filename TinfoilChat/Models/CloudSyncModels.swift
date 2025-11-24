@@ -16,7 +16,7 @@ struct StoredChat: Codable {
     var messages: [Message]
     var createdAt: Date      // Will be encoded as ISO string for API
     var updatedAt: Date      // Will be encoded as ISO string for API
-    var modelType: ModelType?  // Optional for R2 data compatibility
+    var modelType: ModelType?  // Not synced - local UI preference only
     var language: String?
     var userId: String?
     
@@ -49,21 +49,16 @@ struct StoredChat: Codable {
     
     @MainActor
     func toChat() -> Chat? {
-        // For chats from R2 without modelType, try to find a suitable model
+        // Use existing modelType, or fall back to current/first available model
         let model: ModelType
         if let existingModel = modelType {
             model = existingModel
+        } else if let currentModel = AppConfig.shared.currentModel {
+            model = currentModel
+        } else if let firstModel = AppConfig.shared.availableModels.first {
+            model = firstModel
         } else {
-            // Fallback: use current model or first available
-            // If no models are available, this indicates a serious initialization problem
-            if let currentModel = AppConfig.shared.currentModel {
-                model = currentModel
-            } else if let firstModel = AppConfig.shared.availableModels.first {
-                model = firstModel
-            } else {
-                // Cannot create chat without models - this should only happen during initialization
-                return nil
-            }
+            return nil
         }
 
         var chat = Chat(
@@ -82,7 +77,6 @@ struct StoredChat: Codable {
             encryptedData: encryptedData
         )
 
-        // Preserve streaming state
         if let hasActiveStream = hasActiveStream {
             chat.hasActiveStream = hasActiveStream
         }
@@ -93,35 +87,34 @@ struct StoredChat: Codable {
     // Custom encoding for cross-platform compatibility
     enum CodingKeys: String, CodingKey {
         case id, title, messages, createdAt, updatedAt
-        case modelType, language, userId
+        case language, userId
         case syncVersion, syncedAt, locallyModified
         case decryptionFailed, encryptedData, hasActiveStream
     }
-    
+
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        
+
         try container.encode(id, forKey: .id)
         try container.encode(title, forKey: .title)
         try container.encode(messages, forKey: .messages)
-        
+
         // Dates as ISO strings with fractional seconds (matching JavaScript's toISOString())
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         try container.encode(isoFormatter.string(from: createdAt), forKey: .createdAt)
         try container.encode(isoFormatter.string(from: updatedAt), forKey: .updatedAt)
-        
-        try container.encodeIfPresent(modelType, forKey: .modelType)
+
         try container.encodeIfPresent(language, forKey: .language)
         try container.encodeIfPresent(userId, forKey: .userId)
-        
+
         try container.encode(syncVersion, forKey: .syncVersion)
-        
+
         // syncedAt as milliseconds timestamp if present
         if let syncedAt = syncedAt {
             try container.encode(Int(syncedAt.timeIntervalSince1970 * 1000), forKey: .syncedAt)
         }
-        
+
         try container.encode(locallyModified, forKey: .locallyModified)
         try container.encodeIfPresent(decryptionFailed, forKey: .decryptionFailed)
         try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
@@ -163,9 +156,8 @@ struct StoredChat: Codable {
             updatedAt = Date()
         }
         
-        // R2 stored data from React app doesn't have modelType, language, or userId
-        // These are iOS-specific fields, so we make them optional
-        modelType = try container.decodeIfPresent(ModelType.self, forKey: .modelType)
+        // modelType is not synced - it's a local UI preference
+        modelType = nil
         language = try container.decodeIfPresent(String.self, forKey: .language)
         userId = try container.decodeIfPresent(String.self, forKey: .userId)
         

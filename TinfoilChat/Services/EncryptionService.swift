@@ -134,10 +134,10 @@ class EncryptionService: ObservableObject {
         guard let defaultKey = encryptionKey else {
             throw EncryptionError.keyNotInitialized
         }
-        
+
         let sealedBox = try prepareSealedBox(from: encryptedData)
         let decoder = JSONDecoder()
-        
+
         do {
             let decryptedData = try AES.GCM.open(sealedBox, using: defaultKey)
             let value = try decoder.decode(type, from: decryptedData)
