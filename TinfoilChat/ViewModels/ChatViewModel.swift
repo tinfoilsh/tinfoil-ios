@@ -2092,6 +2092,11 @@ class ChatViewModel: ObservableObject {
                             await MainActor.run {
                                 let sortedChats = updatedChats.sorted { $0.createdAt > $1.createdAt }
                                 self.chats = sortedChats
+                                // Refresh currentChat to show decrypted content
+                                if let currentId = self.currentChat?.id,
+                                   let refreshed = sortedChats.first(where: { $0.id == currentId }) {
+                                    self.currentChat = refreshed
+                                }
                                 normalizeChatsArray()
                             }
                         }
