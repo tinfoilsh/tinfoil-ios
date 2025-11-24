@@ -936,13 +936,12 @@ class CloudSyncService: ObservableObject {
 
         // Get all chats that have encrypted data
         let chatsWithEncryptedData = await getChatsWithEncryptedData()
-        let total = chatsWithEncryptedData.count
-        
+
         // Process chats in batches to avoid blocking the UI
         for i in stride(from: 0, to: chatsWithEncryptedData.count, by: batchSize) {
             let endIndex = min(i + batchSize, chatsWithEncryptedData.count)
             let batch = Array(chatsWithEncryptedData[i..<endIndex])
-            
+
             // Process batch in parallel
             await withTaskGroup(of: Bool.self) { group in
                 for chat in batch {
@@ -952,7 +951,7 @@ class CloudSyncService: ObservableObject {
                         do {
                             // Parse the stored encrypted data
                             guard let contentData = encryptedData.data(using: .utf8) else {
-                                    throw CloudSyncError.invalidBase64
+                                throw CloudSyncError.invalidBase64
                             }
 
                             let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
@@ -962,43 +961,38 @@ class CloudSyncService: ObservableObject {
                                 return false
                             }
                             let decryptedData = decryptionResult.value
-                            
-                            
-                            // Create properly decrypted chat with original data, preserving the original ID
+
                             // Get a model type for decrypted chat (use existing or get default)
                             let modelForChat: ModelType
                             if let existingModel = decryptedData.modelType {
                                 modelForChat = existingModel
                             } else {
-                                // Get default model from config - if none available, skip this chat
-                                let defaultModel = await MainActor.run { 
-                                    return AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first 
+                                let defaultModel = await MainActor.run {
+                                    return AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
                                 }
-                                guard let model = defaultModel else {
-                                    return false
-                                }
+                                guard let model = defaultModel else { return false }
                                 modelForChat = model
                             }
-                            
+
                             // Use decrypted content but preserve metadata dates
                             let updatedChat = StoredChat(
                                 from: Chat(
-                                    id: chat.id,  // Keep original ID (important!)
+                                    id: chat.id,
                                     title: decryptedData.title,
                                     messages: decryptedData.messages,
-                                    createdAt: chat.createdAt,  // Preserve metadata date
+                                    createdAt: chat.createdAt,
                                     modelType: modelForChat,
                                     language: decryptedData.language,
                                     userId: decryptedData.userId,
-                                    syncVersion: chat.syncVersion,  // Preserve sync metadata
-                                    syncedAt: chat.syncedAt,  // Preserve sync metadata
-                                    locallyModified: false,  // Reset modification flag
-                                    updatedAt: chat.updatedAt,  // Preserve metadata date
-                                    decryptionFailed: false,  // Clear the decryption failure flag
-                                    encryptedData: nil  // Clear encrypted data
+                                    syncVersion: chat.syncVersion,
+                                    syncedAt: chat.syncedAt,
+                                    locallyModified: false,
+                                    updatedAt: chat.updatedAt,
+                                    decryptionFailed: false,
+                                    encryptedData: nil
                                 )
                             )
-                            
+
                             await self?.saveChatToStorage(updatedChat)
                             if decryptionResult.usedFallbackKey {
                                 let chatForReencryption = updatedChat
@@ -1022,7 +1016,7 @@ class CloudSyncService: ObservableObject {
             }
             
             // Report progress
-            onProgress?(min(i + batchSize, total), total)
+            onProgress?(min(i + batchSize, chatsWithEncryptedData.count), chatsWithEncryptedData.count)
             
             // Yield to the event loop between batches
             try? await Task.sleep(nanoseconds: 1_000_000) // 1ms
@@ -1034,9 +1028,7 @@ class CloudSyncService: ObservableObject {
     /// Get all chats that have encrypted data stored
     private func getChatsWithEncryptedData() async -> [Chat] {
         let allChats = await getAllChatsFromStorage()
-        return allChats.filter { chat in
-            chat.decryptionFailed && chat.encryptedData != nil
-        }
+        return allChats.filter { $0.decryptionFailed && $0.encryptedData != nil }
     }
     
     /// Re-encrypt all local chats with new key and upload to cloud
