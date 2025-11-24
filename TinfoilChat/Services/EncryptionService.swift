@@ -62,10 +62,10 @@ class EncryptionService: ObservableObject {
     func setKey(_ keyString: String) async throws {
         let (normalizedKey, keyData) = try normalizeKeyInput(keyString)
         let previousKey = loadKeyFromKeychain()
-        
+
         // Create SymmetricKey
         self.encryptionKey = SymmetricKey(data: keyData)
-        
+
         // Store the key in Keychain with prefix
         try saveKeyToKeychain(normalizedKey)
         try updateKeyHistory(withNewKey: normalizedKey, previousKey: previousKey)
@@ -322,20 +322,24 @@ class EncryptionService: ObservableObject {
     
     func saveKeyToKeychain(_ key: String) throws {
         let data = key.data(using: .utf8)!
-        
-        let query: [String: Any] = [
+
+        let deleteQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainKey
+        ]
+
+        SecItemDelete(deleteQuery as CFDictionary)
+
+        let addQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
             kSecAttrAccount as String: keychainKey,
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
-        
-        // Delete any existing item
-        SecItemDelete(query as CFDictionary)
-        
-        // Add new item
-        let status = SecItemAdd(query as CFDictionary, nil)
+
+        let status = SecItemAdd(addQuery as CFDictionary, nil)
         if status != errSecSuccess {
             throw EncryptionError.keychainSaveFailed(status: status)
         }

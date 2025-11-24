@@ -191,11 +191,11 @@ class CloudSyncService: ObservableObject {
         }
         
         
-        // Don't sync blank chats or chats with temporary IDs
-        if chat.isBlankChat || chat.hasTemporaryId {
+        // Don't sync blank chats, chats with temporary IDs, or decryption failure placeholders
+        if chat.isBlankChat || chat.hasTemporaryId || chat.messages.isEmpty {
             return
         }
-        
+
         // Double-check streaming status right before upload
         if streamingTracker.isStreaming(chatId) {
             return
@@ -219,10 +219,10 @@ class CloudSyncService: ObservableObject {
         let unsyncedChats = await getUnsyncedChats()
         
         
-        // Filter out blank chats, chats with temporary IDs, and streaming chats
+        // Filter out blank chats, chats with temporary IDs, empty chats (decryption failure placeholders), and streaming chats
         var chatsToSync: [Chat] = []
         for chat in unsyncedChats {
-            if !chat.isBlankChat && !chat.hasTemporaryId {
+            if !chat.isBlankChat && !chat.hasTemporaryId && !chat.messages.isEmpty {
                 let isStreaming = streamingTracker.isStreaming(chat.id)
                 if !isStreaming {
                     chatsToSync.append(chat)
@@ -577,10 +577,9 @@ class CloudSyncService: ObservableObject {
                                 do {
                                     let decryptionResult = try await self.encryptionService.decrypt(encrypted, as: StoredChat.self)
                                     var decryptedChat = decryptionResult.value
-                                    
+
                                     // Double-check: Even if decryption succeeded, validate the content
                                     if decryptedChat.messages.isEmpty {
-                                        // Empty chat that shouldn't be synced
                                         self.cleanupInvalidRemoteChat(remoteChat)
                                         return (false, nil, nil)
                                     }
@@ -909,12 +908,10 @@ class CloudSyncService: ObservableObject {
         // Do NOT filter out temporary IDs anymore. Some legacy/migrated chats
         // may have UUID-based IDs and must still be downloaded to avoid data loss.
 
-        // Check metadata for blank chats
-        // The API returns messageCount directly as a field
-        if let messageCount = remoteChat.messageCount, messageCount == 0 {
-            return false
-        }
-        
+        // Don't skip based on messageCount - for encrypted chats the server
+        // may not accurately know the message count inside the encrypted blob.
+        // Let decryption determine if the chat is valid.
+
         return true
     }
     
@@ -929,14 +926,14 @@ class CloudSyncService: ObservableObject {
     }
     
     // MARK: - Retry Decryption Methods
-    
+
     /// Retry decryption for chats that failed to decrypt
     func retryDecryptionWithNewKey(
         onProgress: ((Int, Int) -> Void)? = nil,
         batchSize: Int = 5
     ) async -> Int {
         var decryptedCount = 0
-        
+
         // Get all chats that have encrypted data
         let chatsWithEncryptedData = await getChatsWithEncryptedData()
         let total = chatsWithEncryptedData.count
@@ -951,15 +948,15 @@ class CloudSyncService: ObservableObject {
                 for chat in batch {
                     group.addTask { [weak self] in
                         guard let encryptedData = chat.encryptedData else { return false }
-                        
+
                         do {
                             // Parse the stored encrypted data
                             guard let contentData = encryptedData.data(using: .utf8) else {
                                     throw CloudSyncError.invalidBase64
                             }
-                            
+
                             let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
-                            
+
                             // Decrypt the chat data
                             guard let decryptionResult = try await self?.encryptionService.decrypt(encrypted, as: StoredChat.self) else {
                                 return false
@@ -1059,12 +1056,9 @@ class CloudSyncService: ObservableObject {
         }
         
         for chat in allChats {
-            // Skip blank chats
-            if chat.isBlankChat { continue }
-            
-            // Don't skip any chats when re-encrypting with a new key
-            // We want to re-encrypt everything with the new key
-            
+            // Skip blank chats and chats with no messages (decryption failure placeholders)
+            if chat.isBlankChat || chat.messages.isEmpty { continue }
+
             do {
                 // Re-encrypt the chat with the new key by forcing a sync
                 guard await r2Storage.isAuthenticated() else { continue }
