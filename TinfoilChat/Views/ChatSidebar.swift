@@ -18,6 +18,7 @@ struct ChatSidebar: View {
     @State private var editingChatId: String? = nil
     @State private var editingTitle: String = ""
     @State private var deletingChatId: String? = nil
+    @State private var showDeleteAlert: Bool = false
     @State private var showSettings: Bool = false
     @State private var showEncryptedChatAlert: Bool = false
     @State private var selectedEncryptedChat: Chat? = nil
@@ -60,7 +61,7 @@ struct ChatSidebar: View {
             .onReceive(timeUpdateTimer) { _ in
                 currentTime = Date()
             }
-            .alert("Delete Chat", isPresented: .constant(deletingChatId != nil)) {
+            .alert("Delete Chat", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) {
                 deletingChatId = nil
             }
@@ -294,6 +295,7 @@ struct ChatSidebar: View {
     
     private func confirmDelete(_ chat: Chat) {
         deletingChatId = chat.id
+        showDeleteAlert = true
     }
 }
 
