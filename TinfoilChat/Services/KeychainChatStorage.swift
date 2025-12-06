@@ -11,10 +11,9 @@ import Security
 /// Service for securely storing chat data in the iOS Keychain
 class KeychainChatStorage {
     static let shared = KeychainChatStorage()
-    
+
     private let serviceName = "sh.tinfoil.chats"
-    private let accessGroup: String? = nil
-    
+
     private init() {}
     
     /// Save chats to Keychain
@@ -25,16 +24,11 @@ class KeychainChatStorage {
         let encoder = JSONEncoder()
         let data = try encoder.encode(chats)
         
-        // Create base query
-        var query: [String: Any] = [
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
             kSecAttrAccount as String: key
         ]
-        
-        if let accessGroup = accessGroup {
-            query[kSecAttrAccessGroup as String] = accessGroup
-        }
         
         // Attributes for update (only data, not accessibility)
         let updateAttributes: [String: Any] = [
@@ -60,18 +54,14 @@ class KeychainChatStorage {
     /// Load chats from Keychain
     func loadChats(userId: String) -> [Chat]? {
         let key = "chats_\(userId)"
-        
-        var query: [String: Any] = [
+
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
             kSecAttrAccount as String: key,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
-        
-        if let accessGroup = accessGroup {
-            query[kSecAttrAccessGroup as String] = accessGroup
-        }
         
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -103,16 +93,12 @@ class KeychainChatStorage {
     }
     
     private func deleteItem(key: String) {
-        var query: [String: Any] = [
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
             kSecAttrAccount as String: key
         ]
-        
-        if let accessGroup = accessGroup {
-            query[kSecAttrAccessGroup as String] = accessGroup
-        }
-        
+
         SecItemDelete(query as CFDictionary)
     }
 }

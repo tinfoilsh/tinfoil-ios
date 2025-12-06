@@ -107,17 +107,6 @@ class ChatViewModel: ObservableObject {
     
     // View state for verifier
     @Published var verifierView: VerifierView?
-    
-    
-    // Speech-to-text properties
-    @Published var isRecording: Bool = false
-    @Published var transcribedText: String = ""
-    
-    // Audio recording properties
-    private var audioRecorder: AVAudioRecorder?
-    private var audioSession: AVAudioSession = AVAudioSession.sharedInstance()
-    private var recordingURL: URL?
-    
     // Private properties
     private var client: OpenAI?
     private var currentTask: Task<Void, Error>?
@@ -160,12 +149,6 @@ class ChatViewModel: ObservableObject {
     var hasChatAccess: Bool {
         return authManager?.isAuthenticated ?? false
     }
-    
-    // Computed property to check if speech-to-text is available
-    var hasSpeechToTextAccess: Bool {
-        return authManager?.isAuthenticated ?? false
-    }
-    
     // MARK: - Pagination Persistence
     
     private func paginationDefaultsKey(_ suffix: String) -> String? {
@@ -1467,161 +1450,6 @@ class ChatViewModel: ObservableObject {
         self.verifierView = nil
     }
     
-    // MARK: - Speech-to-Text Methods
-    
-    /// Starts speech-to-text recording with microphone permission handling
-    func startSpeechToText() {
-        Task {
-            do {
-                // Request microphone permission
-                let permissionGranted = await requestMicrophonePermission()
-                guard permissionGranted else {
-                    return
-                }
-                
-                await MainActor.run {
-                    self.isRecording = true
-                }
-                
-                // Setup audio session
-                try audioSession.setCategory(.playAndRecord, mode: .default)
-                try audioSession.setActive(true)
-                
-                // Create recording URL
-                let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                recordingURL = documentsPath.appendingPathComponent("recording_\(Date().timeIntervalSince1970).m4a")
-                
-                // Audio recording settings
-                let settings: [String: Any] = [
-                    AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                    AVSampleRateKey: 44100.0,
-                    AVNumberOfChannelsKey: 1,
-                    AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-                ]
-                
-                // Create and start recorder
-                if let url = recordingURL {
-                    audioRecorder = try AVAudioRecorder(url: url, settings: settings)
-                    audioRecorder?.record()
-                }
-                
-            } catch {
-                await MainActor.run {
-                    self.isRecording = false
-                }
-            }
-        }
-    }
-    
-    /// Stops speech-to-text recording and processes the audio
-    func stopSpeechToText() {
-        isRecording = false
-        
-        // Stop recording
-        audioRecorder?.stop()
-        
-        // Deactivate audio session
-        try? audioSession.setActive(false)
-        
-        // Process the recorded audio
-        if let recordingURL = recordingURL {
-            processRecordedAudio(sourceURL: recordingURL)
-        } else {
-        }
-    }
-    
-    /// Requests microphone permission
-    private func requestMicrophonePermission() async -> Bool {
-        if #available(iOS 17.0, *) {
-            return await withCheckedContinuation { continuation in
-                AVAudioApplication.requestRecordPermission { granted in
-                    continuation.resume(returning: granted)
-                }
-            }
-        } else {
-            return await withCheckedContinuation { continuation in
-                audioSession.requestRecordPermission { granted in
-                    continuation.resume(returning: granted)
-                }
-            }
-        }
-    }
-    
-    /// Processes recorded audio file and sends to TinfoilAI for transcription
-    private func processRecordedAudio(sourceURL: URL) {
-        Task {
-            do {
-                let audioData = try Data(contentsOf: sourceURL)
-                
-                // Process the audio data
-                processSpeechToTextWithAudio(audioData: audioData)
-                
-                // Clean up the temporary file
-                try FileManager.default.removeItem(at: sourceURL)
-                
-            } catch {
-                await MainActor.run {
-                    self.transcribedText = "Audio processing failed. Please try again."
-                }
-            }
-        }
-    }
-    
-    /// Processes recorded audio data for speech-to-text conversion using TinfoilAI
-    /// - Parameter audioData: The recorded audio data to be transcribed
-    func processSpeechToTextWithAudio(audioData: Data) {
-        
-        Task {
-            do {
-                let apiKey = await AppConfig.shared.getApiKey()
-                
-                guard !apiKey.isEmpty else {
-                    throw NSError(domain: "TinfoilChat", code: 401,
-                                userInfo: [NSLocalizedDescriptionKey: "Speech-to-text requires authentication. Please sign in to use this feature."])
-                }
-                
-                // Create TinfoilAI client configured for audio processing
-                let audioClient = try await TinfoilAI.create(
-                    apiKey: apiKey
-                )
-                
-                // Create transcription query
-                let transcriptionQuery = AudioTranscriptionQuery(
-                    file: audioData,
-                    fileType: .m4a,
-                    model: "whisper-large-v3-turbo"
-                )
-                
-                // Get transcription from TinfoilAI
-                let transcription = try await audioClient.audioTranscriptions(query: transcriptionQuery)
-                
-                
-                await MainActor.run {
-                    let transcribedText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    
-                    if !transcribedText.isEmpty {
-                        
-                        // Auto-send the transcribed message
-                        self.sendMessage(text: transcribedText)
-                    } else {
-                    }
-                }
-                
-            } catch {
-                await MainActor.run {
-                    
-                    // Set user-friendly error message
-                    let errorMessage = error.localizedDescription
-                    if errorMessage.contains("401") || errorMessage.contains("authentication") {
-                        self.transcribedText = "Speech-to-text requires authentication. Please sign in."
-                    } else {
-                        self.transcribedText = "Speech recognition failed. Please try again."
-                    }
-                }
-            }
-        }
-    }
-    
     // MARK: - Private Methods
 
     /// Normalizes the chats array to ensure exactly one blank chat at position 0
@@ -1977,21 +1805,29 @@ class ChatViewModel: ObservableObject {
         encryptionKey = nil
     }
     
-    /// Handle sign-in by loading user's saved chats
+    /// Handle sign-in by loading user's saved chats and triggering sync
     func handleSignIn() {
+        #if DEBUG
         print("handleSignIn called")
-        
+        #endif
+
         // Prevent duplicate sign-in flows
         guard !isSignInInProgress else {
+            #if DEBUG
             print("handleSignIn: Already in progress, skipping")
+            #endif
             return
         }
-        
+
+        #if DEBUG
         print("handleSignIn: hasChatAccess=\(hasChatAccess), userId=\(currentUserId ?? "nil")")
+        #endif
         
         if hasChatAccess, let userId = currentUserId {
             isSignInInProgress = true
+            #if DEBUG
             print("handleSignIn: Starting sign-in flow for user \(userId)")
+            #endif
             
             // Restore pagination state immediately for better UX on cold start
             loadPersistedPaginationState()
@@ -2043,7 +1879,9 @@ class ChatViewModel: ObservableObject {
             }
             
             if !anonymousChats.isEmpty {
+                #if DEBUG
                 print("Found \(anonymousChats.count) anonymous chats to migrate")
+                #endif
                 // Migrate anonymous chats to the current user
                 for var chat in anonymousChats {
                     chat.userId = userId
@@ -2281,11 +2119,15 @@ class ChatViewModel: ObservableObject {
             try await CloudSyncService.shared.initialize()
             // Perform migration
             let result = try await CloudMigrationService.shared.migrateToCloud(userId: currentUserId)
+            #if DEBUG
             print("Migration completed: migrated=\(result.migratedCount), failed=\(result.failedCount)")
             if !result.errors.isEmpty { print("Migration errors: \(result.errors)") }
+            #endif
         } catch {
             // Proceed regardless; errors will be surfaced in sync if needed
+            #if DEBUG
             print("Migration failed to run: \(error)")
+            #endif
         }
 
         await MainActor.run {
@@ -2415,7 +2257,9 @@ class ChatViewModel: ObservableObject {
                 }
             }
         } catch {
+            #if DEBUG
             print("Failed to perform initial sync: \(error)")
+            #endif
         }
     }
     
@@ -2510,7 +2354,9 @@ class ChatViewModel: ObservableObject {
                 if let chat = storedChat.toChat() {
                     return chat
                 } else {
+                    #if DEBUG
                     print("Warning: Could not convert StoredChat to Chat during pagination - skipping chat \(storedChat.id)")
+                    #endif
                     return nil
                 }
             }

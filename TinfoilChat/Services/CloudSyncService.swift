@@ -746,30 +746,26 @@ class CloudSyncService: ObservableObject {
         }
     }
     
-    // MARK: - Storage Helpers (To be replaced with Core Data)
+    // MARK: - Storage Helpers
     
     private func loadChatFromStorage(_ chatId: String) async -> Chat? {
-        // TODO: Replace with Core Data query
         let chats = Chat.loadFromDefaults(userId: await getCurrentUserId())
         return chats.first { $0.id == chatId }
     }
     
     private func getAllChatsFromStorage() async -> [Chat] {
-        // TODO: Replace with Core Data query
         return Chat.loadFromDefaults(userId: await getCurrentUserId())
     }
     
     private func getUnsyncedChats() async -> [Chat] {
-        // TODO: Replace with Core Data query for locallyModified == true
         let allChats = await getAllChatsFromStorage()
+        // Return chats that are locally modified or never synced
         return allChats.filter { chat in
-            // Return chats that are locally modified or never synced
             chat.locallyModified || chat.syncedAt == nil
         }
     }
     
     private func saveChatToStorage(_ storedChat: StoredChat) async {
-        // TODO: Replace with Core Data save
         let userId = await getCurrentUserId()
         
         var chats = await getAllChatsFromStorage()
@@ -790,7 +786,9 @@ class CloudSyncService: ObservableObject {
         
         // Convert to Chat - may return nil if models aren't available
         guard var chatToSave = chatToConvert.toChat() else {
+            #if DEBUG
             print("Warning: Could not convert StoredChat to Chat - no models available. Skipping chat \(chatToConvert.id)")
+            #endif
             return
         }
 
@@ -849,7 +847,9 @@ class CloudSyncService: ObservableObject {
 
         // Convert to Chat for re-encryption - may fail if models aren't available
         guard var chatForUpload = chat.toChat() else {
+            #if DEBUG
             print("Warning: Could not convert StoredChat to Chat for re-encryption - no models available. Skipping chat \(chat.id)")
+            #endif
             return
         }
 
@@ -878,7 +878,6 @@ class CloudSyncService: ObservableObject {
     }
 
     private func deleteChatFromStorage(_ chatId: String) async {
-        // TODO: Replace with Core Data delete
         var chats = await getAllChatsFromStorage()
         chats.removeAll { $0.id == chatId }
         
