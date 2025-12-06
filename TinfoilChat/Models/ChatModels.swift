@@ -246,7 +246,9 @@ struct Chat: Identifiable, Codable {
             let userIdKey = userId ?? "anonymous"
             try KeychainChatStorage.shared.saveChats(chats, userId: userIdKey)
         } catch {
+            #if DEBUG
             print("Failed to save chats to Keychain: \(error)")
+            #endif
         }
     }
     

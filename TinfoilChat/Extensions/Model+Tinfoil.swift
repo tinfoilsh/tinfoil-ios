@@ -16,7 +16,9 @@ struct TinfoilModel {
     static var currentModelId: String? {
         get async {
             guard let currentModel = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first else {
+                #if DEBUG
                 print("Warning: No models available for currentModelId")
+                #endif
                 return nil
             }
             return currentModel.modelName

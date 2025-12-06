@@ -384,12 +384,10 @@ enum EncryptionError: LocalizedError {
     case invalidKeyFormat
     case invalidKeyCharacters
     case invalidKeyLength
-    case encryptionFailed
-    case decryptionFailed
     case invalidEncryptedData
     case invalidBase64
     case keychainSaveFailed(status: OSStatus)
-    
+
     var errorDescription: String? {
         switch self {
         case .keyNotInitialized:
@@ -400,10 +398,6 @@ enum EncryptionError: LocalizedError {
             return "Key must only contain lowercase letters and numbers after the prefix"
         case .invalidKeyLength:
             return "Key length must be even"
-        case .encryptionFailed:
-            return "Failed to encrypt data"
-        case .decryptionFailed:
-            return "Failed to decrypt data"
         case .invalidEncryptedData:
             return "Missing IV or data in encrypted data"
         case .invalidBase64:

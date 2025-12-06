@@ -30,14 +30,7 @@ struct MessageInputView: View {
     private var isUserAuthenticated: Bool {
         authManager.isAuthenticated
     }
-    
-    // Determine which button to show
-    private var shouldShowMicrophone: Bool {
-        // TODO: make audio recording work
-        // messageText.isEmpty && !viewModel.isLoading && viewModel.hasSpeechToTextAccess
-        false
-    }
-    
+
     @ViewBuilder
     var body: some View {
         if #available(iOS 26, *) {
@@ -97,11 +90,8 @@ struct MessageInputView: View {
 
                     Spacer()
 
-                    // Send/Microphone button
-                    Button(action: handleButtonPress) {
-                        Image(systemName: shouldShowMicrophone ?
-                              (viewModel.isRecording ? "mic.fill" : "mic") :
-                              (viewModel.isLoading ? "stop.fill" : "arrow.up"))
+                    Button(action: sendOrCancelMessage) {
+                        Image(systemName: viewModel.isLoading ? "stop.fill" : "arrow.up")
                             .font(.system(size: 16, weight: .semibold))
                             .frame(width: 24, height: 24)
                             .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
@@ -118,22 +108,6 @@ struct MessageInputView: View {
             .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 26))
             .padding(.horizontal, 12)
             .padding(.bottom, isKeyboardVisible ? 12 : 0)
-            .onChange(of: viewModel.transcribedText) { oldValue, newValue in
-                if !newValue.isEmpty && newValue != oldValue {
-                    // Check if it's an error message (don't auto-send these)
-                    if newValue.contains("requires authentication") || newValue.contains("failed") {
-                        // Show error message in text field for user to see
-                        messageText = newValue
-                        textHeight = Layout.defaultHeight
-                    } else {
-                        // For successful transcriptions, the message is auto-sent by the ViewModel
-                        // We don't need to do anything here since sendMessage is called directly
-                    }
-
-                    // Clear the transcribed text to prevent it from being processed again
-                    viewModel.transcribedText = ""
-                }
-            }
         } else {
             // iOS 25 and below with material effect
             VStack(spacing: 0) {
@@ -191,22 +165,15 @@ struct MessageInputView: View {
 
                     Spacer()
 
-                    // Send/Microphone button
-                    Button(action: handleButtonPress) {
+                    Button(action: sendOrCancelMessage) {
                         ZStack {
                             Circle()
-                                .fill(shouldShowMicrophone ?
-                                      (viewModel.isRecording ? Color.red : (isDarkMode ? Color.white : Color.primary)) :
-                                      (isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight))
+                                .fill(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
                                 .frame(width: 32, height: 32)
 
-                            Image(systemName: shouldShowMicrophone ?
-                                  (viewModel.isRecording ? "mic.fill" : "mic") :
-                                  (viewModel.isLoading ? "stop.fill" : "arrow.up"))
+                            Image(systemName: viewModel.isLoading ? "stop.fill" : "arrow.up")
                                 .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(shouldShowMicrophone ?
-                                               (viewModel.isRecording ? .white : (isDarkMode ? .black : .white)) :
-                                               (isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
+                                .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
                         }
                     }
                     .padding(.trailing, 8)
@@ -219,46 +186,16 @@ struct MessageInputView: View {
             }
             .padding(.horizontal, 12)
             .padding(.bottom, isKeyboardVisible ? 12 : 0)
-            .onChange(of: viewModel.transcribedText) { oldValue, newValue in
-                if !newValue.isEmpty && newValue != oldValue {
-                    // Check if it's an error message (don't auto-send these)
-                    if newValue.contains("requires authentication") || newValue.contains("failed") {
-                        // Show error message in text field for user to see
-                        messageText = newValue
-                        textHeight = Layout.defaultHeight
-                    } else {
-                        // For successful transcriptions, the message is auto-sent by the ViewModel
-                        // We don't need to do anything here since sendMessage is called directly
-                    }
-
-                    // Clear the transcribed text to prevent it from being processed again
-                    viewModel.transcribedText = ""
-                }
-            }
         }
     }
-    
-    
-    /// Handles the send button action - either sends a message or cancels generation
+
     private func sendOrCancelMessage() {
         if viewModel.isLoading {
             viewModel.cancelGeneration()
         } else if !messageText.isEmpty {
             viewModel.sendMessage(text: messageText)
             messageText = ""
-            textHeight = Layout.defaultHeight // Reset height when message is sent
-        }
-    }
-    
-    private func handleButtonPress() {
-        if shouldShowMicrophone {
-            if viewModel.isRecording {
-                viewModel.stopSpeechToText()
-            } else {
-                viewModel.startSpeechToText()
-            }
-        } else {
-            sendOrCancelMessage()
+            textHeight = Layout.defaultHeight
         }
     }
 }

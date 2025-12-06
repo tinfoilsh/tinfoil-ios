@@ -162,10 +162,12 @@ struct ContentView: View {
                     showEncryptionAlert = true
                 }
             }
-            
+
             // Trigger initial sync when user becomes authenticated
             if isAuthenticated {
+                #if DEBUG
                 print("ContentView: Calling handleSignIn because user is authenticated")
+                #endif
                 chatViewModel.handleSignIn()
             }
         }
@@ -214,7 +216,9 @@ struct ContentView: View {
                 chatViewModel.handleSignIn()
             }
         } catch {
+            #if DEBUG
             print("Failed to generate encryption key: \(error)")
+            #endif
         }
     }
     

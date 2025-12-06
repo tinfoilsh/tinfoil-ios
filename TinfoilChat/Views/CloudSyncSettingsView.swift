@@ -162,7 +162,9 @@ struct CloudSyncSettingsView: View {
                         do {
                             try await viewModel.setEncryptionKey(importedKey)
                         } catch {
+                            #if DEBUG
                             print("Failed to change encryption key: \(error)")
+                            #endif
                         }
                     }
                 }
