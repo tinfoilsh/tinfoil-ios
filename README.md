@@ -54,4 +54,4 @@ Please report security vulnerabilities by either:
 - Emailing [security@tinfoil.sh](mailto:security@tinfoil.sh)
 - Opening an issue on GitHub on this repository
 
-We aim to respond to security reports within 24 hours and will keep you updated on our progress.
+We aim to respond to (legitimate) security reports within 24 hours.
