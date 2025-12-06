@@ -17,22 +17,6 @@ enum VerifierStatus {
     case error
 }
 
-/// Extension to convert from TinfoilAI's VerificationStatus to our UI status
-extension VerificationStatus {
-    var uiStatus: VerifierStatus {
-        switch self {
-        case .pending:
-            return .pending
-        case .inProgress:
-            return .loading
-        case .success:
-            return .success
-        case .failure:
-            return .error
-        }
-    }
-}
-
 /// Extension to convert from VerificationStepState.Status to UI status
 extension VerificationStepState.Status {
     var uiStatus: VerifierStatus {
