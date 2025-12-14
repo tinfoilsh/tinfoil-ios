@@ -739,7 +739,7 @@ struct CollapsibleThinkingBox: View {
                     Image("tin")
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 30, height: 30)
+                        .frame(width: 20, height: 20)
                         .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                     HStack(spacing: 4) {
                         if let seconds = generationTimeSeconds {
