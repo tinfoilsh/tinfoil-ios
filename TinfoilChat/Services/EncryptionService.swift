@@ -24,40 +24,44 @@ struct DecryptionResult<T> {
 /// Service for handling end-to-end encryption of chat data
 class EncryptionService: ObservableObject {
     static let shared = EncryptionService()
-    
+
     private let keychainKey = "sh.tinfoil.encryptionKey"
     private let keychainService = "sh.tinfoil.chat"
     private let keychainHistoryKey = "key_history"
     private var encryptionKey: SymmetricKey?
-    
+    private let keychainLock = NSLock()
+
     private init() {}
-    
+
     // MARK: - Key Generation and Management
-    
+
     /// Generate a new encryption key
     func generateKey() -> String {
         let key = SymmetricKey(size: .bits256)
         let keyData = key.withUnsafeBytes { Data($0) }
-        
+
         // Convert to alphanumeric format with key_ prefix (matching React format)
         return "key_" + bytesToAlphanumeric(keyData)
     }
-    
-    /// Initialize with existing key or generate new one
+
+    /// Initialize with existing key (does NOT generate new keys)
     func initialize() async throws -> String {
         // Check if we have a stored key in Keychain
-        if let storedKey = loadKeyFromKeychain() {
-            try await setKey(storedKey)
-            return storedKey
-        } else {
-            // Generate new key
-            let newKey = generateKey()
-            try saveKeyToKeychain(newKey)
-            try await setKey(newKey)
-            return newKey
+        guard let storedKey = loadKeyFromKeychain() else {
+            throw EncryptionError.keyNotInitialized
         }
+
+        try await setKey(storedKey)
+        return storedKey
     }
-    
+
+    /// Generate and save a new encryption key for first-time setup
+    func generateAndSaveNewKey() async throws -> String {
+        let newKey = generateKey()
+        try await setKey(newKey)
+        return newKey
+    }
+
     /// Set encryption key from alphanumeric string
     func setKey(_ keyString: String) async throws {
         let (normalizedKey, keyData) = try normalizeKeyInput(keyString)
@@ -321,31 +325,39 @@ class EncryptionService: ObservableObject {
     // MARK: - Keychain Management
     
     func saveKeyToKeychain(_ key: String) throws {
+        keychainLock.lock()
+        defer { keychainLock.unlock() }
+
         let data = key.data(using: .utf8)!
 
-        let deleteQuery: [String: Any] = [
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
             kSecAttrAccount as String: keychainKey
         ]
 
-        SecItemDelete(deleteQuery as CFDictionary)
-
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: keychainKey,
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        let attributes: [String: Any] = [
+            kSecValueData as String: data
         ]
 
-        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+
+        if status == errSecItemNotFound {
+            var addQuery = query
+            addQuery[kSecValueData as String] = data
+            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            status = SecItemAdd(addQuery as CFDictionary, nil)
+        }
+
         if status != errSecSuccess {
             throw EncryptionError.keychainSaveFailed(status: status)
         }
     }
     
     private func loadKeyFromKeychain() -> String? {
+        keychainLock.lock()
+        defer { keychainLock.unlock() }
+
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
@@ -353,16 +365,16 @@ class EncryptionService: ObservableObject {
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
-        
+
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        
+
         if status == errSecSuccess,
            let data = result as? Data,
            let key = String(data: data, encoding: .utf8) {
             return key
         }
-        
+
         return nil
     }
     
