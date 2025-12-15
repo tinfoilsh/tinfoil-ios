@@ -111,7 +111,7 @@ class AuthManager: ObservableObject {
                 
                 // Handle JSON string with quotes (e.g. "active" instead of active)
                 let cleanedStatus = statusString.replacingOccurrences(of: "\"", with: "")
-                hasActiveSubscription = cleanedStatus == "active"
+                hasActiveSubscription = cleanedStatus == "active" || cleanedStatus == "trialing"
                 
                 
                 // Store in localUserData
@@ -232,7 +232,7 @@ class AuthManager: ObservableObject {
                 
                 await MainActor.run {
                     let wasActive = self.hasActiveSubscription
-                    self.hasActiveSubscription = (chatStatus == "active")
+                    self.hasActiveSubscription = (chatStatus == "active" || chatStatus == "trialing")
                     
                     // Update local user data
                     if self.localUserData != nil {
