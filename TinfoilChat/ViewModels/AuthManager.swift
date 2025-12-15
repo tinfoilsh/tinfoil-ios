@@ -25,6 +25,26 @@ class AuthManager: ObservableObject {
     private let authStateKey = "sh.tinfoil.authState"
     private let userDataKey = "sh.tinfoil.userData"
     private let subscriptionKey = "sh.tinfoil.subscription"
+
+    private func isSubscriptionActive(status: String, expiresAt: String?) -> Bool {
+        if status == "active" || status == "trialing" {
+            return true
+        }
+
+        if status == "canceled", let expiresAt = expiresAt {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let expirationDate = formatter.date(from: expiresAt) {
+                return expirationDate > Date()
+            }
+            formatter.formatOptions = [.withInternetDateTime]
+            if let expirationDate = formatter.date(from: expiresAt) {
+                return expirationDate > Date()
+            }
+        }
+
+        return false
+    }
     
     // Reference to ChatViewModel for handling chat state
     private weak var chatViewModel: ChatViewModel?
@@ -106,14 +126,17 @@ class AuthManager: ObservableObject {
         if let publicMetadata = user.publicMetadata {
             // Check for subscription status in public metadata
             if let subscriptionStatus = publicMetadata["chat_subscription_status"] {
-                // Convert to string and check if it contains "active"
                 let statusString = "\(subscriptionStatus)"
-                
-                // Handle JSON string with quotes (e.g. "active" instead of active)
                 let cleanedStatus = statusString.replacingOccurrences(of: "\"", with: "")
-                hasActiveSubscription = cleanedStatus == "active" || cleanedStatus == "trialing"
-                
-                
+
+                var expiresAt: String? = nil
+                if let expiresAtValue = publicMetadata["chat_subscription_expires_at"] {
+                    let expiresAtString = "\(expiresAtValue)"
+                    expiresAt = expiresAtString.replacingOccurrences(of: "\"", with: "")
+                }
+
+                hasActiveSubscription = isSubscriptionActive(status: cleanedStatus, expiresAt: expiresAt)
+
                 // Store in localUserData
                 localUserData?["subscription_status"] = cleanedStatus
             } else {
@@ -229,11 +252,12 @@ class AuthManager: ObservableObject {
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let publicMetadata = json["public_metadata"] as? [String: Any],
                let chatStatus = publicMetadata["chat_subscription_status"] as? String {
-                
+                let expiresAt = publicMetadata["chat_subscription_expires_at"] as? String
+
                 await MainActor.run {
                     let wasActive = self.hasActiveSubscription
-                    self.hasActiveSubscription = (chatStatus == "active" || chatStatus == "trialing")
-                    
+                    self.hasActiveSubscription = self.isSubscriptionActive(status: chatStatus, expiresAt: expiresAt)
+
                     // Update local user data
                     if self.localUserData != nil {
                         self.localUserData?["subscription_status"] = chatStatus
