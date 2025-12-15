@@ -969,6 +969,7 @@ private struct MarkdownThemeCache {
             .listItem { configuration in
                 configuration.label
                     .markdownMargin(top: 4, bottom: 4)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
         return withBlockElements
