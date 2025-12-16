@@ -15,7 +15,7 @@ enum Constants {
 
     enum Config {
         static let configURL = URL(string: "https://api.tinfoil.sh/api/mobile/config")!
-        static let modelsURL = URL(string: "https://api.tinfoil.sh/api/app/models")!
+        static let modelsURL = URL(string: "https://api.tinfoil.sh/api/app/models?mobile=true")!
 
         enum ErrorDomain {
             static let domain = "Tinfoil"
