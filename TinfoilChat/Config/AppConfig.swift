@@ -31,7 +31,6 @@ struct AppModelConfig: Codable {
 
 /// Remote configuration structure (mobile-specific settings only)
 struct RemoteConfig: Codable {
-    let apiKey: String
     let chatConfig: ChatConfig
     let minSupportedVersion: String
 
@@ -229,10 +228,6 @@ class AppConfig: ObservableObject {
     
     // MARK: - Model configuration
 
-    var apiKey: String {
-        config!.apiKey
-    }
-    
     /// Wait for AppConfig to be fully initialized
     func waitForInitialization() async {
         while config == nil {
