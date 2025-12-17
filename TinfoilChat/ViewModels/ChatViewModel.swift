@@ -814,8 +814,20 @@ class ChatViewModel: ObservableObject {
                 var hasShownFirstChunk = false
 
                 var lastUIUpdateTime = Date.distantPast
-                let uiUpdateInterval: TimeInterval = 0.15
+                let uiUpdateInterval = Constants.Streaming.uiUpdateIntervalSeconds
+                let maxUIUpdateInterval = Constants.Streaming.maxUIUpdateIntervalSeconds
                 var pendingUIUpdate = false
+
+                class StreamState: @unchecked Sendable {
+                    var content = ""
+                    var thoughts: String? = nil
+                    var isThinking = false
+                    var generationTime: TimeInterval? = nil
+                    var lastSnapshot = ""
+                    var lastThoughtsSnapshot: String? = nil
+                    var isActive = true
+                }
+                let streamState = StreamState()
 
                 await MainActor.run {
                     if let chat = self.currentChat,
@@ -825,11 +837,50 @@ class ChatViewModel: ObservableObject {
                         currentThoughts = chat.messages[lastIndex].thoughts
                         generationTimeSeconds = chat.messages[lastIndex].generationTimeSeconds
                         isInThinkingMode = chat.messages[lastIndex].isThinking
+                        streamState.content = responseContent
+                        streamState.thoughts = currentThoughts
+                        streamState.isThinking = isInThinkingMode
+                        streamState.generationTime = generationTimeSeconds
                     }
                     if hapticEnabled {
                         hapticGenerator = UIImpactFeedbackGenerator(style: .light)
                         hapticGenerator?.prepare()
                     }
+                }
+
+                let periodicUpdateTask = Task { @MainActor [weak self, streamState, chunker] in
+                    while !Task.isCancelled && streamState.isActive {
+                        try? await Task.sleep(nanoseconds: UInt64(maxUIUpdateInterval * 1_000_000_000))
+                        guard !Task.isCancelled && streamState.isActive else { break }
+                        guard let self = self else { break }
+                        guard self.currentChat?.id == streamChatId else { break }
+
+                        let hasNewContent = streamState.content != streamState.lastSnapshot ||
+                                            streamState.thoughts != streamState.lastThoughtsSnapshot
+                        if hasNewContent {
+                            streamState.lastSnapshot = streamState.content
+                            streamState.lastThoughtsSnapshot = streamState.thoughts
+
+                            guard var chat = self.currentChat,
+                                  !chat.messages.isEmpty,
+                                  let lastIndex = chat.messages.indices.last else {
+                                continue
+                            }
+
+                            chat.messages[lastIndex].content = streamState.content
+                            chat.messages[lastIndex].thoughts = streamState.thoughts
+                            chat.messages[lastIndex].isThinking = streamState.isThinking
+                            chat.messages[lastIndex].generationTimeSeconds = streamState.generationTime
+                            chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
+
+                            self.updateChat(chat, throttleForStreaming: true)
+                        }
+                    }
+                }
+
+                defer {
+                    streamState.isActive = false
+                    periodicUpdateTask.cancel()
                 }
 
                 for try await chunk in stream {
@@ -996,35 +1047,39 @@ class ChatViewModel: ObservableObject {
 
                     if didMutateState {
                         pendingUIUpdate = true
+                        streamState.content = responseContent
+                        streamState.thoughts = currentThoughts
+                        streamState.isThinking = isInThinkingMode
+                        streamState.generationTime = generationTimeSeconds
+                    }
 
-                        let now = Date()
-                        let timeSinceLastUpdate = now.timeIntervalSince(lastUIUpdateTime)
+                    let now = Date()
+                    let timeSinceLastUpdate = now.timeIntervalSince(lastUIUpdateTime)
 
-                        if timeSinceLastUpdate >= uiUpdateInterval {
-                            lastUIUpdateTime = now
-                            pendingUIUpdate = false
-                            let currentChunks = chunker.getAllChunks()
+                    if didMutateState && timeSinceLastUpdate >= uiUpdateInterval {
+                        lastUIUpdateTime = now
+                        pendingUIUpdate = false
+                        let currentChunks = chunker.getAllChunks()
 
-                            await MainActor.run { [weak self] in
-                                guard let self = self else { return }
-                                guard self.currentChat?.id == streamChatId else { return }
-                                guard var chat = self.currentChat,
-                                      !chat.messages.isEmpty,
-                                      let lastIndex = chat.messages.indices.last else {
-                                    return
-                                }
-
-                                chat.messages[lastIndex].content = responseContent
-                                chat.messages[lastIndex].thoughts = currentThoughts
-                                chat.messages[lastIndex].isThinking = isInThinkingMode
-                                chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
-
-                                if chat.messages[lastIndex].contentChunks != currentChunks {
-                                    chat.messages[lastIndex].contentChunks = currentChunks
-                                }
-
-                                self.updateChat(chat, throttleForStreaming: true)
+                        await MainActor.run { [weak self] in
+                            guard let self = self else { return }
+                            guard self.currentChat?.id == streamChatId else { return }
+                            guard var chat = self.currentChat,
+                                  !chat.messages.isEmpty,
+                                  let lastIndex = chat.messages.indices.last else {
+                                return
                             }
+
+                            chat.messages[lastIndex].content = responseContent
+                            chat.messages[lastIndex].thoughts = currentThoughts
+                            chat.messages[lastIndex].isThinking = isInThinkingMode
+                            chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
+
+                            if chat.messages[lastIndex].contentChunks != currentChunks {
+                                chat.messages[lastIndex].contentChunks = currentChunks
+                            }
+
+                            self.updateChat(chat, throttleForStreaming: true)
                         }
                     }
                 }
