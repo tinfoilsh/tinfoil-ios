@@ -823,6 +823,7 @@ class ChatViewModel: ObservableObject {
                     var thoughts: String? = nil
                     var isThinking = false
                     var generationTime: TimeInterval? = nil
+                    var chunks: [ContentChunk] = []
                     var lastSnapshot = ""
                     var lastThoughtsSnapshot: String? = nil
                     var isActive = true
@@ -848,7 +849,7 @@ class ChatViewModel: ObservableObject {
                     }
                 }
 
-                let periodicUpdateTask = Task { @MainActor [weak self, streamState, chunker] in
+                let periodicUpdateTask = Task { @MainActor [weak self, streamState] in
                     while !Task.isCancelled && streamState.isActive {
                         try? await Task.sleep(nanoseconds: UInt64(maxUIUpdateInterval * 1_000_000_000))
                         guard !Task.isCancelled && streamState.isActive else { break }
@@ -871,7 +872,7 @@ class ChatViewModel: ObservableObject {
                             chat.messages[lastIndex].thoughts = streamState.thoughts
                             chat.messages[lastIndex].isThinking = streamState.isThinking
                             chat.messages[lastIndex].generationTimeSeconds = streamState.generationTime
-                            chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
+                            chat.messages[lastIndex].contentChunks = streamState.chunks
 
                             self.updateChat(chat, throttleForStreaming: true)
                         }
@@ -1051,6 +1052,7 @@ class ChatViewModel: ObservableObject {
                         streamState.thoughts = currentThoughts
                         streamState.isThinking = isInThinkingMode
                         streamState.generationTime = generationTimeSeconds
+                        streamState.chunks = chunker.getAllChunks()
                     }
 
                     let now = Date()
