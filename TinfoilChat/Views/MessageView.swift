@@ -187,20 +187,7 @@ struct MessageView: View {
                 .presentationDetents([.medium, .large])
         }
     }
-    
-    
-    // Function to copy the entire message
-    private func copyMessage() {
-        // If message has thoughts, combine them with content
-        if let thoughts = message.thoughts {
-            let fullContent = thoughts + "\n\n" + message.content
-            copyMessagePart(fullContent)
-        } else {
-            copyMessagePart(message.content)
-        }
-    }
-    
-    // Function to copy a specific part of the message
+
     private func copyMessagePart(_ text: String) {
         let cleanText = removeThinktags(from: text)
         
