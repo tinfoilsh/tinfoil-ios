@@ -26,8 +26,6 @@ enum Constants {
     }
 
     enum UI {
-        static let modelIconPath = "/model-icons/"
-        static let modelIconExtension = ".png"
         static let scrollToBottomButtonSize: CGFloat = 27
         static let scrollToBottomIconSize: CGFloat = 16
         static let tableMaxColumnWidth: CGFloat = 300
@@ -35,7 +33,6 @@ enum Constants {
 
     enum API {
         static let chatCompletionsEndpoint = "/v1/chat/completions"
-        static let endpointProtocol = "https://"
         static let baseURL = "https://api.tinfoil.sh"
     }
 
@@ -44,12 +41,6 @@ enum Constants {
         static let termsOfServiceURL = URL(string: "https://www.tinfoil.sh/terms")!
         static let privacyPolicyURL = URL(string: "https://www.tinfoil.sh/privacy")!
         static let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
-    }
-
-    enum Proxy {
-        static let enclaveURL = "inference.tinfoil.sh"
-        static let githubRepo = "tinfoilsh/confidential-inference-proxy"
-        static let githubReleaseURL = "https://github.com/tinfoilsh/confidential-inference-proxy/releases"
     }
 
     enum Pagination {
