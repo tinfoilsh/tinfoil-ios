@@ -294,9 +294,14 @@ class ChatViewModel: ObservableObject {
     private func setupAutoSyncTimer() {
         // Invalidate existing timer if any
         autoSyncTimer?.invalidate()
-        
+
         // Do not start auto-sync until user decides how to handle legacy data
         if isMigrationDecisionPending {
+            return
+        }
+
+        // Do not start auto-sync until encryption key is set up
+        if !EncryptionService.shared.hasEncryptionKey() {
             return
         }
         
@@ -310,6 +315,12 @@ class ChatViewModel: ObservableObject {
                 if self.isMigrationDecisionPending {
                     return
                 }
+
+                // Gate auto-sync if no encryption key is set
+                if !EncryptionService.shared.hasEncryptionKey() {
+                    return
+                }
+
                 // Only sync if authenticated
                 guard self.authManager?.isAuthenticated == true else {
                     return
@@ -391,13 +402,19 @@ class ChatViewModel: ObservableObject {
                     if self?.isMigrationDecisionPending == true {
                         return
                     }
+
+                    // Skip sync if no encryption key is set
+                    if !EncryptionService.shared.hasEncryptionKey() {
+                        return
+                    }
+
                     self?.setupAutoSyncTimer()
-                    
+
                     // Perform immediate sync when returning from background
                     if let syncResult = await self?.cloudSync.syncAllChats() {
                         // Update last sync date
                         self?.lastSyncDate = Date()
-                        
+
                         // Update chats if needed
                         if syncResult.downloaded > 0 {
                             await self?.updateChatsAfterSync()
@@ -2616,6 +2633,12 @@ class ChatViewModel: ObservableObject {
         if isMigrationDecisionPending {
             return
         }
+
+        // Gate sync until encryption key is set up
+        if !EncryptionService.shared.hasEncryptionKey() {
+            return
+        }
+
         await MainActor.run {
             self.isSyncing = true
             self.syncErrors = []
