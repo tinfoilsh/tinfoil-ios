@@ -275,6 +275,12 @@ class ProfileManager: ObservableObject {
         guard await profileSync.isAuthenticated() else {
             return
         }
+
+        // Skip if no encryption key is set
+        guard EncryptionService.shared.hasEncryptionKey() else {
+            return
+        }
+
         // Prevent overlapping pulls
         guard !isPulling else { return }
         isPulling = true
@@ -314,7 +320,12 @@ class ProfileManager: ObservableObject {
         guard await profileSync.isAuthenticated() else {
             return
         }
-        
+
+        // Skip if no encryption key is set
+        guard EncryptionService.shared.hasEncryptionKey() else {
+            return
+        }
+
         // Avoid overlapping uploads
         guard !isPushing else { return }
         

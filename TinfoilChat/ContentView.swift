@@ -60,6 +60,14 @@ struct ContentView: View {
                         isAuthenticated: authManager.isAuthenticated,
                         hasActiveSubscription: authManager.hasActiveSubscription
                     )
+
+                    // Check if we need to show encryption prompt on appear
+                    // (handles case where auth was already complete before view mounted)
+                    if authManager.isAuthenticated && !authManager.isLoading &&
+                       !EncryptionService.shared.hasEncryptionKey() &&
+                       !chatViewModel.showMigrationPrompt {
+                        showEncryptionAlert = true
+                    }
                 }
             }
         }
@@ -208,7 +216,7 @@ struct ContentView: View {
             let newKey = EncryptionService.shared.generateKey()
             // Use ChatViewModel API so it initializes encryption and retries any needed decryption flows
             try await chatViewModel.setEncryptionKey(newKey)
-            
+
             // Show alert with the key to save
             await MainActor.run {
                 showGeneratedKeyAlert(newKey)
@@ -221,7 +229,7 @@ struct ContentView: View {
             #endif
         }
     }
-    
+
     private func showGeneratedKeyAlert(_ key: String) {
         let alert = UIAlertController(
             title: "Encryption Key Created",
