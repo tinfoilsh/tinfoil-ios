@@ -1441,10 +1441,7 @@ class ChatViewModel: ObservableObject {
                             chat.messages[lastIndex].content = "Error: \(userFriendlyError)"
                             chat.messages[lastIndex].streamError = userFriendlyError
                         }
-                        
-                        // Trigger error haptic feedback
-                        Message.triggerErrorFeedback()
-                        
+
                         self.updateChat(chat)
                     }
                 }
