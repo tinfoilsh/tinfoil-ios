@@ -54,9 +54,4 @@ enum Constants {
         static let clientInitTimeoutSeconds: TimeInterval = 60.0
         static let backgroundTaskName = "CompleteStreamingResponse"
     }
-
-    enum Streaming {
-        static let uiUpdateIntervalSeconds: TimeInterval = 0.15
-        static let maxUIUpdateIntervalSeconds: TimeInterval = 1.0
-    }
 }
