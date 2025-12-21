@@ -57,6 +57,7 @@ class StreamingMarkdownChunker {
         return result
     }
 
+    @discardableResult
     func appendToken(_ token: String) -> Bool {
         workingBuffer += token
 

@@ -23,14 +23,6 @@ struct MessageTableView: UIViewRepresentable {
         viewModel.messages
     }
 
-    private var streamingContentHash: Int {
-        guard !messages.isEmpty, isLoading else { return 0 }
-        let lastMessage = messages[messages.count - 1]
-        let contentChunksHash = lastMessage.contentChunks.hashValue
-        let thinkingHash = (lastMessage.isThinking ? 1 : 0) ^ (lastMessage.thoughts?.count ?? 0)
-        return contentChunksHash ^ thinkingHash
-    }
-
     func makeUIView(context: Context) -> UITableView {
         let tableView = UITableView(frame: .zero, style: .plain)
         tableView.backgroundColor = .clear
@@ -93,7 +85,6 @@ struct MessageTableView: UIViewRepresentable {
 
         let isDarkModeChanged = context.coordinator.lastIsDarkMode != isDarkMode
         let messageCountChanged = context.coordinator.lastMessageCount != messages.count
-        let streamingHashChanged = context.coordinator.lastStreamingHash != streamingContentHash
 
         if isDarkModeChanged {
             context.coordinator.lastIsDarkMode = isDarkMode
@@ -104,49 +95,46 @@ struct MessageTableView: UIViewRepresentable {
 
         if messageCountChanged || (chatIdChanged && !isIdConversion) {
             context.coordinator.lastMessageCount = messages.count
-            context.coordinator.lastStreamingHash = streamingContentHash
             context.coordinator.heightCache.removeAll()
             tableView.reloadData()
-        } else if streamingHashChanged && !messages.isEmpty {
-            context.coordinator.lastStreamingHash = streamingContentHash
+        } else if isLoading && !messages.isEmpty {
+            // During streaming, update the last message wrapper directly
+            guard let lastMessage = messages.last,
+                  let wrapper = context.coordinator.messageWrappers[lastMessage.id] else { return }
 
-            let lastMessage = messages[messages.count - 1]
-            if let wrapper = context.coordinator.messageWrappers[lastMessage.id] {
-                let isLastMessage = true
-                let isArchived = messages.count - 1 < archivedMessagesStartIndex
-                let showArchiveSeparator = messages.count - 1 == archivedMessagesStartIndex && archivedMessagesStartIndex > 0
+            let isArchived = messages.count - 1 < archivedMessagesStartIndex
+            let showArchiveSeparator = messages.count - 1 == archivedMessagesStartIndex && archivedMessagesStartIndex > 0
 
-                let screenHeight = UIScreen.main.bounds.height
-                let currentBufferHeight = screenHeight * wrapper.bufferMultiplier
-                let threshold = currentBufferHeight * 0.8
+            // Check if buffer needs extending before content grows too large
+            let screenHeight = UIScreen.main.bounds.height
+            let currentBufferHeight = screenHeight * wrapper.bufferMultiplier
+            let threshold = currentBufferHeight * 0.8
+            let needsBufferExtension = wrapper.actualContentHeight > threshold && wrapper.actualContentHeight > wrapper.lastExtendedAtHeight + 50
 
-                let needsBufferExtension = wrapper.actualContentHeight > threshold && wrapper.actualContentHeight > wrapper.lastExtendedAtHeight + 50
+            let coordinator = context.coordinator
+            DispatchQueue.main.async {
+                guard let currentMessage = coordinator.parent.messages.last else { return }
 
-                DispatchQueue.main.async {
-                    wrapper.update(
-                        message: lastMessage,
-                        isDarkMode: isDarkMode,
-                        isLastMessage: isLastMessage,
-                        isLoading: isLoading,
-                        isArchived: isArchived,
-                        showArchiveSeparator: showArchiveSeparator
-                    )
+                wrapper.update(
+                    message: currentMessage,
+                    isDarkMode: coordinator.parent.isDarkMode,
+                    isLastMessage: true,
+                    isLoading: coordinator.parent.isLoading,
+                    isArchived: isArchived,
+                    showArchiveSeparator: showArchiveSeparator
+                )
 
-                    if needsBufferExtension {
-                        CATransaction.begin()
-                        CATransaction.setDisableActions(true)
+                if needsBufferExtension {
+                    CATransaction.begin()
+                    CATransaction.setDisableActions(true)
 
-                        let currentOffset = tableView.contentOffset.y
+                    let currentOffset = tableView.contentOffset.y
+                    wrapper.bufferMultiplier += 1.0
+                    wrapper.lastExtendedAtHeight = wrapper.actualContentHeight
+                    tableView.layoutIfNeeded()
+                    tableView.contentOffset.y = currentOffset
 
-                        wrapper.bufferMultiplier += 1.0
-                        wrapper.lastExtendedAtHeight = wrapper.actualContentHeight
-
-                        tableView.layoutIfNeeded()
-
-                        tableView.contentOffset.y = currentOffset
-
-                        CATransaction.commit()
-                    }
+                    CATransaction.commit()
                 }
             }
         }
@@ -202,7 +190,6 @@ struct MessageTableView: UIViewRepresentable {
         var lastScrollTrigger: UUID?
         var lastMessageCount: Int = 0
         var lastIsLoading: Bool = false
-        var lastStreamingHash: Int = 0
         var cellReuseIdentifierSuffix: String = ""
         var lastKeyboardHeight: CGFloat = 0
         var lastIsDarkMode: Bool = false
@@ -450,6 +437,9 @@ class ObservableMessageWrapper: ObservableObject {
         let contentChanged = self.message.content != message.content ||
                             self.message.thoughts != message.thoughts ||
                             self.message.contentChunks != message.contentChunks ||
+                            self.message.isThinking != message.isThinking ||
+                            self.message.isCollapsed != message.isCollapsed ||
+                            self.message.generationTimeSeconds != message.generationTimeSeconds ||
                             self.isDarkMode != isDarkMode
 
         let metadataChanged = self.isLastMessage != isLastMessage ||
