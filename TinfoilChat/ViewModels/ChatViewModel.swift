@@ -484,6 +484,9 @@ class ChatViewModel: ObservableObject {
                     }
                 )
 
+                // Brief delay to allow the verifier's network connections to close
+                try? await Task.sleep(nanoseconds: 500_000_000)
+
                 // Mark client initialization as complete
                 await MainActor.run {
                     self.isClientInitializing = false
@@ -987,23 +990,28 @@ class ChatViewModel: ObservableObject {
                         }
                     }
 
-                    // Update UI on each chunk
+                    // Update UI on each chunk (fire-and-forget to avoid blocking stream consumption)
                     if didMutateState {
                         let currentChunks = chunker.getAllChunks()
+                        let content = responseContent
+                        let thoughts = currentThoughts
+                        let thinking = isInThinkingMode
+                        let genTime = generationTimeSeconds
 
-                        await MainActor.run { [weak self] in
+                        Task { @MainActor [weak self] in
                             guard let self = self else { return }
                             guard self.currentChat?.id == streamChatId else { return }
                             guard var chat = self.currentChat,
+                                  chat.hasActiveStream,
                                   !chat.messages.isEmpty,
                                   let lastIndex = chat.messages.indices.last else {
                                 return
                             }
 
-                            chat.messages[lastIndex].content = responseContent
-                            chat.messages[lastIndex].thoughts = currentThoughts
-                            chat.messages[lastIndex].isThinking = isInThinkingMode
-                            chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
+                            chat.messages[lastIndex].content = content
+                            chat.messages[lastIndex].thoughts = thoughts
+                            chat.messages[lastIndex].isThinking = thinking
+                            chat.messages[lastIndex].generationTimeSeconds = genTime
                             chat.messages[lastIndex].contentChunks = currentChunks
 
                             self.updateChat(chat, throttleForStreaming: true)
@@ -1477,7 +1485,8 @@ class ChatViewModel: ObservableObject {
         }
 
         chat.messages[messageIndex].isCollapsed = collapsed
-        updateChat(chat)
+        // During streaming, use throttled update to avoid disk I/O interfering with the stream
+        updateChat(chat, throttleForStreaming: chat.hasActiveStream)
     }
 
     /// Adds a message to the current chat
