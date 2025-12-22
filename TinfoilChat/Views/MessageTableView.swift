@@ -100,8 +100,10 @@ struct MessageTableView: UIViewRepresentable {
 
         if isDarkModeChanged {
             context.coordinator.lastIsDarkMode = isDarkMode
-            for wrapper in context.coordinator.messageWrappers.values {
-                wrapper.isDarkMode = isDarkMode
+            DispatchQueue.main.async {
+                for wrapper in context.coordinator.messageWrappers.values {
+                    wrapper.isDarkMode = isDarkMode
+                }
             }
         }
 
@@ -492,12 +494,14 @@ class ObservableMessageWrapper: ObservableObject {
             cachedHeightKey = nil
         }
 
-        self.message = message
-        self.isDarkMode = isDarkMode
-        self.isLastMessage = isLastMessage
-        self.isLoading = isLoading
-        self.isArchived = isArchived
-        self.showArchiveSeparator = showArchiveSeparator
+        DispatchQueue.main.async {
+            self.message = message
+            self.isDarkMode = isDarkMode
+            self.isLastMessage = isLastMessage
+            self.isLoading = isLoading
+            self.isArchived = isArchived
+            self.showArchiveSeparator = showArchiveSeparator
+        }
     }
 
     func getCacheKey() -> Int {
