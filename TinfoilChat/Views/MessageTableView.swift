@@ -338,7 +338,7 @@ struct MessageTableView: UIViewRepresentable {
 
             if tableView.contentInset.bottom != targetInset {
                 tableView.contentInset.bottom = targetInset
-                tableView.scrollIndicatorInsets.bottom = targetInset
+                tableView.verticalScrollIndicatorInsets.bottom = targetInset
             }
         }
 
