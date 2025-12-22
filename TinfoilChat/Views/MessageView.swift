@@ -61,7 +61,8 @@ struct MessageView: View {
                             isCollapsible: !message.isThinking,
                             isStreaming: message.isThinking && isLoading && isLastMessage,
                             generationTimeSeconds: message.generationTimeSeconds,
-                            messageCollapsed: message.isCollapsed
+                            messageCollapsed: message.isCollapsed,
+                            thinkingSummary: isLastMessage && message.isThinking ? viewModel.thinkingSummary : nil
                         )
                         
                                 if !message.content.isEmpty {
@@ -90,7 +91,8 @@ struct MessageView: View {
                             isCollapsible: message.content.contains("</think>"),
                             isStreaming: isLoading && isLastMessage,
                             generationTimeSeconds: message.generationTimeSeconds,
-                            messageCollapsed: message.isCollapsed
+                            messageCollapsed: message.isCollapsed,
+                            thinkingSummary: isLastMessage && !message.content.contains("</think>") ? viewModel.thinkingSummary : nil
                         )
                         
                         // Remainder: text after </think> if present
@@ -684,6 +686,7 @@ struct CollapsibleThinkingBox: View {
     let isStreaming: Bool
     let generationTimeSeconds: Double?
     let messageCollapsed: Bool
+    let thinkingSummary: String?
 
     @State private var isCollapsed: Bool
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
@@ -695,7 +698,8 @@ struct CollapsibleThinkingBox: View {
         isCollapsible: Bool,
         isStreaming: Bool,
         generationTimeSeconds: Double?,
-        messageCollapsed: Bool
+        messageCollapsed: Bool,
+        thinkingSummary: String? = nil
     ) {
         self.messageId = messageId
         self.thinkingText = thinkingText
@@ -704,6 +708,7 @@ struct CollapsibleThinkingBox: View {
         self.isStreaming = isStreaming
         self.generationTimeSeconds = generationTimeSeconds
         self.messageCollapsed = messageCollapsed
+        self.thinkingSummary = thinkingSummary
         _isCollapsed = State(initialValue: messageCollapsed)
     }
 
@@ -728,24 +733,34 @@ struct CollapsibleThinkingBox: View {
                         .scaledToFit()
                         .frame(width: 20, height: 20)
                         .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
-                    HStack(spacing: 4) {
-                        if let seconds = generationTimeSeconds {
+                    if let seconds = generationTimeSeconds {
+                        HStack(spacing: 4) {
                             Text("Thought")
                                 .font(.system(size: 16))
                                 .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                             Text("for \(String(format: "%.1f", seconds))s")
                                 .font(.subheadline)
                                 .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
-                        } else if isStreaming {
-                            Text("Thinking")
-                                .font(.system(size: 16))
-                                .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
-                            InlineLoadingDotsView(isDarkMode: isDarkMode)
-                        } else {
-                            Text("Thinking")
-                                .font(.system(size: 16))
-                                .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                         }
+                    } else if isStreaming {
+                        if let summary = thinkingSummary, !summary.isEmpty {
+                            Text(summary)
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        } else {
+                            HStack(spacing: 4) {
+                                Text("Thinking")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
+                                InlineLoadingDotsView(isDarkMode: isDarkMode)
+                            }
+                        }
+                    } else {
+                        Text("Thinking")
+                            .font(.system(size: 16))
+                            .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                     }
                     Spacer()
                     Image(systemName: "chevron.down")

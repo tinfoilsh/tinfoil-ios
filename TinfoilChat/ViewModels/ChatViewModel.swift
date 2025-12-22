@@ -18,6 +18,7 @@ class ChatViewModel: ObservableObject {
     @Published var chats: [Chat] = []
     @Published var currentChat: Chat?
     @Published var isLoading: Bool = false
+    @Published var thinkingSummary: String = ""
     @Published var showVerifierSheet: Bool = false
     @Published var scrollTargetMessageId: String? = nil 
     @Published var scrollTargetOffset: CGFloat = 0 
@@ -890,12 +891,24 @@ class ChatViewModel: ObservableObject {
                         thoughtsBuffer = reasoningContent
                         currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                         didMutateState = true
+                        // Reset summary service for new thinking session
+                        Task { @MainActor in
+                            ThinkingSummaryService.shared.reset()
+                        }
                     } else if isUsingReasoningFormat {
                         if !reasoningContent.isEmpty {
                             thoughtsBuffer += reasoningContent
                             currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                             isInThinkingMode = true
                             didMutateState = true
+                            // Generate thinking summary (reuse existing client)
+                            let currentThoughtsForSummary = thoughtsBuffer
+                            let summaryClient = client
+                            Task { @MainActor [weak self] in
+                                ThinkingSummaryService.shared.generateSummary(thoughts: currentThoughtsForSummary, client: summaryClient) { summary in
+                                    self?.thinkingSummary = summary
+                                }
+                            }
                         }
 
                         if !content.isEmpty && isInThinkingMode {
@@ -905,6 +918,10 @@ class ChatViewModel: ObservableObject {
                             isInThinkingMode = false
                             thinkStartTime = nil
                             currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                            // Clear thinking summary when thinking ends
+                            Task { @MainActor [weak self] in
+                                self?.thinkingSummary = ""
+                            }
                             // Inline appendToResponse
                             if responseContent.isEmpty {
                                 responseContent = content
@@ -940,6 +957,10 @@ class ChatViewModel: ObservableObject {
                                     thoughtsBuffer = afterThink
                                     currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                                     didMutateState = true
+                                    // Reset summary service for new thinking session
+                                    Task { @MainActor in
+                                        ThinkingSummaryService.shared.reset()
+                                    }
                                 } else {
                                     if responseContent.isEmpty {
                                         responseContent = processContent
@@ -956,6 +977,10 @@ class ChatViewModel: ObservableObject {
                                 thoughtsBuffer += beforeEnd
                                 currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                                 isInThinkingMode = false
+                                // Clear thinking summary when thinking ends
+                                Task { @MainActor [weak self] in
+                                    self?.thinkingSummary = ""
+                                }
 
                                 let afterEnd = String(content[endRange.upperBound...])
                                 if responseContent.isEmpty {
@@ -978,6 +1003,14 @@ class ChatViewModel: ObservableObject {
                                 currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                                 isInThinkingMode = true
                                 didMutateState = true
+                                // Generate thinking summary (reuse existing client)
+                                let currentThoughtsForSummary = thoughtsBuffer
+                                let summaryClient = client
+                                Task { @MainActor [weak self] in
+                                    ThinkingSummaryService.shared.generateSummary(thoughts: currentThoughtsForSummary, client: summaryClient) { summary in
+                                        self?.thinkingSummary = summary
+                                    }
+                                }
                             }
                         } else {
                             if responseContent.isEmpty {
@@ -1061,6 +1094,7 @@ class ChatViewModel: ObservableObject {
                         }
 
                         // Finalize all message content
+                        self.thinkingSummary = ""
                         if !chat.messages.isEmpty, let lastIndex = chat.messages.indices.last {
                             chunker.finalize()
                             chat.messages[lastIndex].content = responseContent
