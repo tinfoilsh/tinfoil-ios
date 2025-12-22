@@ -112,7 +112,7 @@ class AppConfig: ObservableObject {
     @Published private(set) var config: RemoteConfig?
     @Published private(set) var appModels: [AppModelConfig] = []
     private let configURL = Constants.Config.configURL
-    private let modelsURL = Constants.Config.modelsURL
+    private let allModelsURL = Constants.Config.allModelsURL
     
     // Add initialization state tracking
     @Published private(set) var isInitialized = false
@@ -161,7 +161,7 @@ class AppConfig: ObservableObject {
 
             // Fetch config and models in parallel
             async let configData = URLSession.shared.data(from: configURL)
-            async let modelsData = URLSession.shared.data(from: modelsURL)
+            async let modelsData = URLSession.shared.data(from: allModelsURL)
 
             // Parse config - this is essential, so we need it to succeed
             let (configDataResult, _) = try await configData
@@ -316,5 +316,10 @@ class AppConfig: ObservableObject {
             // Return all models for non-premium users (they'll see locks on premium ones)
             return availableModels
         }
+    }
+
+    /// Get the title model for generating titles and thinking summaries
+    var titleModel: AppModelConfig? {
+        appModels.first { $0.type == "title" }
     }
 } 

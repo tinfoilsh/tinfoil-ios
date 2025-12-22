@@ -16,6 +16,7 @@ enum Constants {
     enum Config {
         static let configURL = URL(string: "https://api.tinfoil.sh/api/config/mobile")!
         static let modelsURL = URL(string: "https://api.tinfoil.sh/api/config/models?mobile=true&chat=true")!
+        static let allModelsURL = URL(string: "https://api.tinfoil.sh/api/config/models")!
 
         enum ErrorDomain {
             static let domain = "Tinfoil"
@@ -53,5 +54,12 @@ enum Constants {
         static let autoSyncIntervalSeconds: TimeInterval = 60.0
         static let clientInitTimeoutSeconds: TimeInterval = 60.0
         static let backgroundTaskName = "CompleteStreamingResponse"
+    }
+
+    enum ThinkingSummary {
+        static let minContentLength = 100
+        static let minNewContentLength = 50
+        static let maxTokens = 150
+        static let systemPrompt = "Summarize the following thought process in a brief phrase that captures the main idea."
     }
 }
