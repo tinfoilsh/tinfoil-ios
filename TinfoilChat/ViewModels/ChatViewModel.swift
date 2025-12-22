@@ -26,7 +26,7 @@ class ChatViewModel: ObservableObject {
     @Published var shouldFocusInput: Bool = false
     @Published var isScrollInteractionActive: Bool = false
     @Published var isAtBottom: Bool = true
-    @Published var isClientInitializing: Bool = true
+    @Published var isClientInitializing: Bool = false
 
     // Verification properties - consolidated to reduce update frequency
     struct VerificationInfo {
@@ -116,6 +116,7 @@ class ChatViewModel: ObservableObject {
     private var willResignActiveObserver: NSObjectProtocol?
     private var streamUpdateTimer: Timer?
     private var pendingStreamUpdate: Chat?
+    private var lastKnownAuthState: Bool?
     
     // Auth reference for Premium features
     @Published var authManager: AuthManager? {
@@ -452,9 +453,19 @@ class ChatViewModel: ObservableObject {
     }
     
     private func setupTinfoilClient() {
+        // Prevent concurrent initialization
+        guard !isClientInitializing else {
+            return
+        }
+
+        isClientInitializing = true
         verification.error = nil
         verification.isVerifying = true
-        isClientInitializing = true
+
+        // Shutdown existing client before creating new one
+        let oldClient = client
+        client = nil
+        oldClient?.shutdown()
 
         Task {
             do {
@@ -1708,12 +1719,16 @@ class ChatViewModel: ObservableObject {
     
     /// Updates the current model if needed based on auth status changes
     func updateModelBasedOnAuthStatus(isAuthenticated: Bool, hasActiveSubscription: Bool) {
-        // Clear any cached API key when auth status changes
-        APIKeyManager.shared.clearApiKey()
-        
-        // Setup Tinfoil client with fresh credentials after auth state changes
-        setupTinfoilClient()
-        
+        // Only reinitialize client if auth state actually changed (not just subscription)
+        let authStateChanged = lastKnownAuthState != isAuthenticated
+        lastKnownAuthState = isAuthenticated
+
+        if authStateChanged {
+            // Clear cached API key and reinitialize client only when auth changes
+            APIKeyManager.shared.clearApiKey()
+            setupTinfoilClient()
+        }
+
         // Get available models based on auth status
         let availableModels = AppConfig.shared.filteredModelTypes(
             isAuthenticated: isAuthenticated,
