@@ -169,6 +169,12 @@ struct MessageTableView: UIViewRepresentable {
                     isArchived: isArchived,
                     showArchiveSeparator: showArchiveSeparator
                 )
+
+                // Reset buffer properties for next streaming session
+                wrapper.bufferMultiplier = 1.0
+                wrapper.actualContentHeight = 0
+                wrapper.lastExtendedAtHeight = 0
+                wrapper.lastReportedHeight = 0
             }
 
             DispatchQueue.main.async {
@@ -176,6 +182,7 @@ struct MessageTableView: UIViewRepresentable {
                 CATransaction.setDisableActions(true)
 
                 let currentOffset = tableView.contentOffset.y
+                context.coordinator.updateContentInset()
                 tableView.layoutIfNeeded()
                 tableView.contentOffset.y = currentOffset
 
