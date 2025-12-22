@@ -119,11 +119,10 @@ struct MessageTableView: UIViewRepresentable {
                 let isArchived = messages.count - 1 < archivedMessagesStartIndex
                 let showArchiveSeparator = messages.count - 1 == archivedMessagesStartIndex && archivedMessagesStartIndex > 0
 
-                // Check if buffer needs extending before content grows too large
                 let screenHeight = UIScreen.main.bounds.height
                 let currentBufferHeight = screenHeight * wrapper.bufferMultiplier
-                let threshold = currentBufferHeight * 0.8
-                let needsBufferExtension = wrapper.actualContentHeight > threshold && wrapper.actualContentHeight > wrapper.lastExtendedAtHeight + 50
+                let threshold = currentBufferHeight * 0.9
+                let needsBufferExtension = wrapper.actualContentHeight > threshold
 
                 let coordinator = context.coordinator
                 DispatchQueue.main.async {
@@ -139,16 +138,9 @@ struct MessageTableView: UIViewRepresentable {
                     )
 
                     if needsBufferExtension {
-                        CATransaction.begin()
-                        CATransaction.setDisableActions(true)
-
-                        let currentOffset = tableView.contentOffset.y
-                        wrapper.bufferMultiplier += 1.0
-                        wrapper.lastExtendedAtHeight = wrapper.actualContentHeight
-                        tableView.layoutIfNeeded()
-                        tableView.contentOffset.y = currentOffset
-
-                        CATransaction.commit()
+                        wrapper.bufferMultiplier += 10.0
+                        tableView.beginUpdates()
+                        tableView.endUpdates()
                     }
                 }
             }
@@ -173,22 +165,17 @@ struct MessageTableView: UIViewRepresentable {
                 )
 
                 // Reset buffer properties for next streaming session
-                wrapper.bufferMultiplier = 1.0
+                wrapper.bufferMultiplier = 50.0
                 wrapper.actualContentHeight = 0
-                wrapper.lastExtendedAtHeight = 0
-                wrapper.lastReportedHeight = 0
             }
 
             DispatchQueue.main.async {
-                CATransaction.begin()
-                CATransaction.setDisableActions(true)
-
-                let currentOffset = tableView.contentOffset.y
-                context.coordinator.updateContentInset()
-                tableView.layoutIfNeeded()
-                tableView.contentOffset.y = currentOffset
-
-                CATransaction.commit()
+                UIView.performWithoutAnimation {
+                    let currentOffset = tableView.contentOffset.y
+                    context.coordinator.updateContentInset()
+                    tableView.layoutIfNeeded()
+                    tableView.contentOffset.y = currentOffset
+                }
             }
         }
 
@@ -373,8 +360,10 @@ struct MessageTableView: UIViewRepresentable {
             }
 
             if tableView.contentInset.bottom != targetInset {
-                tableView.contentInset.bottom = targetInset
-                tableView.verticalScrollIndicatorInsets.bottom = targetInset
+                UIView.performWithoutAnimation {
+                    tableView.contentInset.bottom = targetInset
+                    tableView.verticalScrollIndicatorInsets.bottom = targetInset
+                }
             }
         }
 
@@ -453,10 +442,8 @@ class ObservableMessageWrapper: ObservableObject {
     @Published var isArchived: Bool
     @Published var showArchiveSeparator: Bool
     @Published var shouldAnimateAppearance: Bool = false
+    var bufferMultiplier: CGFloat = 50.0
     var actualContentHeight: CGFloat = 0
-    var bufferMultiplier: CGFloat = 1.0
-    var lastExtendedAtHeight: CGFloat = 0
-    var lastReportedHeight: CGFloat = 0
     var cachedHeight: CGFloat?
     var cachedHeightKey: Int?
 
@@ -569,11 +556,7 @@ struct ObservableMessageCell: View {
                         }
                     )
                     .onPreferenceChange(StreamingContentHeightKey.self) { height in
-                        let heightDiff = abs(height - wrapper.lastReportedHeight)
-                        if heightDiff > 5 {
-                            wrapper.actualContentHeight = height
-                            wrapper.lastReportedHeight = height
-                        }
+                        wrapper.actualContentHeight = height
                     }
                 }
             }
