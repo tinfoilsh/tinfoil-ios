@@ -56,6 +56,10 @@ enum Constants {
         static let backgroundTaskName = "CompleteStreamingResponse"
     }
 
+    enum Verification {
+        static let networkRetryDelaySeconds: TimeInterval = 2.0
+    }
+
     enum ThinkingSummary {
         static let minContentLength = 100
         static let minNewContentLength = 50

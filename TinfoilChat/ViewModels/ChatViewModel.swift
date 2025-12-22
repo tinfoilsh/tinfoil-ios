@@ -114,6 +114,7 @@ class ChatViewModel: ObservableObject {
     private var autoSyncTimer: Timer?
     private var didBecomeActiveObserver: NSObjectProtocol?
     private var willResignActiveObserver: NSObjectProtocol?
+    private var networkStatusCancellable: AnyCancellable?
     private var streamUpdateTimer: Timer?
     private var pendingStreamUpdate: Chat?
     private var lastKnownAuthState: Bool?
@@ -258,7 +259,10 @@ class ChatViewModel: ObservableObject {
 
         // Setup app lifecycle observers
         setupAppLifecycleObservers()
-        
+
+        // Setup network status observer for automatic retry on reconnection
+        setupNetworkStatusObserver()
+
         // If app opens and user is already signed in, check legacy data immediately
         if authManager?.isAuthenticated == true {
             if CloudMigrationService.shared.isMigrationNeeded(userId: currentUserId) {
@@ -267,7 +271,7 @@ class ChatViewModel: ObservableObject {
                 self.showMigrationPrompt = true
             }
         }
-        
+
         // Initial sync will be triggered when authManager is set (see authManager didSet)
 
         // Setup Tinfoil client immediately
@@ -278,11 +282,15 @@ class ChatViewModel: ObservableObject {
         // Stop auto-sync timer
         autoSyncTimer?.invalidate()
         autoSyncTimer = nil
-        
+
         // Stop stream update timer
         streamUpdateTimer?.invalidate()
         streamUpdateTimer = nil
-        
+
+        // Cancel network status observer
+        networkStatusCancellable?.cancel()
+        networkStatusCancellable = nil
+
         // Remove app lifecycle observers
         if let observer = didBecomeActiveObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -451,7 +459,24 @@ class ChatViewModel: ObservableObject {
             }
         }
     }
-    
+
+    private func setupNetworkStatusObserver() {
+        networkStatusCancellable = AppConfig.shared.networkMonitor.$isConnected
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] isConnected in
+                guard let self = self, isConnected else { return }
+
+                // Only retry if verification failed (has error) and not currently initializing
+                guard self.verificationError != nil && !self.isVerifying && !self.isClientInitializing else { return }
+
+                // Retry after a short delay to let the network stabilize
+                DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Verification.networkRetryDelaySeconds) { [weak self] in
+                    self?.retryClientSetup()
+                }
+            }
+    }
+
     private func setupTinfoilClient() {
         // Prevent concurrent initialization
         guard !isClientInitializing else {
