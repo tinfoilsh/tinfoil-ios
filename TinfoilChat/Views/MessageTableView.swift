@@ -164,9 +164,10 @@ struct MessageTableView: UIViewRepresentable {
                     showArchiveSeparator: showArchiveSeparator
                 )
 
-                // Reset buffer properties for next streaming session
-                wrapper.bufferMultiplier = 50.0
-                wrapper.actualContentHeight = 0
+                DispatchQueue.main.async {
+                    wrapper.bufferMultiplier = 50.0
+                    wrapper.actualContentHeight = 0
+                }
             }
 
             DispatchQueue.main.async {

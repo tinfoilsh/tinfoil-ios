@@ -281,7 +281,9 @@ struct CustomTextEditor: UIViewRepresentable {
         let newHeight = min(MessageInputView.Layout.maximumHeight, max(MessageInputView.Layout.minimumHeight, size.height))
 
         if textHeight != newHeight {
-            textHeight = newHeight
+            DispatchQueue.main.async {
+                self.textHeight = newHeight
+            }
         }
     }
     
