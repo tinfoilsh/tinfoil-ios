@@ -7,6 +7,7 @@
 
 import Foundation
 import OpenAI
+import TinfoilAI
 
 /// Service for generating thinking summaries during streaming
 @MainActor
@@ -23,9 +24,9 @@ class ThinkingSummaryService {
     /// Generate a summary of the thinking content
     /// - Parameters:
     ///   - thoughts: The current thinking text to summarize
-    ///   - client: The OpenAI client to use for generation (reuse existing client)
+    ///   - client: The TinfoilAI client to use for generation (reuse existing client)
     ///   - completion: Called with the generated summary on the main actor
-    func generateSummary(thoughts: String, client: OpenAI, completion: @escaping @MainActor (String) -> Void) {
+    func generateSummary(thoughts: String, client: TinfoilAI, completion: @escaping @MainActor (String) -> Void) {
         guard let titleModel = AppConfig.shared.titleModel else {
             return
         }

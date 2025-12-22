@@ -109,7 +109,7 @@ class ChatViewModel: ObservableObject {
     // View state for verifier
     @Published var verifierView: VerifierView?
     // Private properties
-    private var client: OpenAI?
+    private var client: TinfoilAI?
     private var currentTask: Task<Void, Error>?
     private var autoSyncTimer: Timer?
     private var didBecomeActiveObserver: NSObjectProtocol?
