@@ -1361,29 +1361,13 @@ class ChatViewModel: ObservableObject {
                     if var chat = self.currentChat,
                        !chat.messages.isEmpty {
                         let lastIndex = chat.messages.count - 1
-                        let lastMessage = chat.messages[lastIndex]
-                        
-                        // Check if we got partial content before the error
-                        let hasPartialContent = !lastMessage.content.isEmpty || lastMessage.thoughts != nil
-                        
+
                         // Format a more user-friendly error message based on the error type
                         let userFriendlyError = formatUserFriendlyError(error)
-                        
-                        // Handle network connection lost differently if we have partial content
-                        let nsError = error as NSError
-                        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorNetworkConnectionLost && hasPartialContent {
-                            // Keep partial content and append a note about the interruption
-                            if !chat.messages[lastIndex].content.isEmpty {
-                                chat.messages[lastIndex].content += "\n\n[Response interrupted: Network connection lost]"
-                            } else {
-                                chat.messages[lastIndex].content = "[Response interrupted: Network connection lost]"
-                            }
-                            chat.messages[lastIndex].streamError = "Network connection lost - response may be incomplete"
-                        } else {
-                            // For other errors or when no partial content exists, show error message
-                            chat.messages[lastIndex].content = "Error: \(userFriendlyError)"
-                            chat.messages[lastIndex].streamError = userFriendlyError
-                        }
+
+                        // Set the stream error - the ErrorMessageView will display it nicely
+                        // Keep any partial content that was received
+                        chat.messages[lastIndex].streamError = userFriendlyError
 
                         self.updateChat(chat)
                     }
@@ -1451,7 +1435,38 @@ class ChatViewModel: ObservableObject {
         self.showVerifierSheet = false
     }
 
-    
+    /// Regenerates the last assistant response by removing it and resending the last user message
+    func regenerateLastResponse() {
+        guard let chat = currentChat,
+              !isLoading else {
+            return
+        }
+
+        // Find the last user message
+        guard let lastUserMessageIndex = chat.messages.lastIndex(where: { $0.role == .user }) else {
+            return
+        }
+
+        let userMessageContent = chat.messages[lastUserMessageIndex].content
+
+        // Remove all messages from the last user message onwards (including the failed assistant response)
+        var updatedChat = chat
+        updatedChat.messages = Array(chat.messages.prefix(lastUserMessageIndex))
+        updatedChat.locallyModified = true
+        updatedChat.updatedAt = Date()
+
+        // Update both currentChat and chats array directly
+        currentChat = updatedChat
+        if let index = chats.firstIndex(where: { $0.id == chat.id }) {
+            chats[index] = updatedChat
+        }
+        objectWillChange.send()
+
+        // Save and immediately resend
+        saveChats()
+        sendMessage(text: userMessageContent)
+    }
+
     /// Shows the verifier sheet with current verification state
     func showVerifier() {
         verifierView = VerifierView()

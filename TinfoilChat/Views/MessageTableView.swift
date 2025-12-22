@@ -80,7 +80,19 @@ struct MessageTableView: UIViewRepresentable {
             }
             context.coordinator.lastMessageIds = currentMessageIds
         } else if currentMessageIds != context.coordinator.lastMessageIds {
+            // Message IDs changed without chat ID changing (e.g., regenerate)
+            let idsWereReplaced = !currentMessageIds.isEmpty &&
+                                  !context.coordinator.lastMessageIds.isEmpty &&
+                                  currentMessageIds.isDisjoint(with: context.coordinator.lastMessageIds)
+
+            if idsWereReplaced {
+                // All message IDs are different - clear stale wrappers
+                context.coordinator.messageWrappers.removeAll()
+                context.coordinator.shownMessageIds.removeAll()
+                context.coordinator.heightCache.removeAll()
+            }
             context.coordinator.lastMessageIds = currentMessageIds
+            tableView.reloadData()
         }
 
         let isDarkModeChanged = context.coordinator.lastIsDarkMode != isDarkMode
@@ -144,6 +156,21 @@ struct MessageTableView: UIViewRepresentable {
         context.coordinator.lastIsLoading = isLoading
 
         if isLoadingChanged && !isLoading {
+            // Streaming just ended - update the last message wrapper to reflect final state (including any errors)
+            if let lastMessage = messages.last,
+               let wrapper = context.coordinator.messageWrappers[lastMessage.id] {
+                let isArchived = messages.count - 1 < archivedMessagesStartIndex
+                let showArchiveSeparator = messages.count - 1 == archivedMessagesStartIndex && archivedMessagesStartIndex > 0
+                wrapper.update(
+                    message: lastMessage,
+                    isDarkMode: isDarkMode,
+                    isLastMessage: true,
+                    isLoading: false,
+                    isArchived: isArchived,
+                    showArchiveSeparator: showArchiveSeparator
+                )
+            }
+
             DispatchQueue.main.async {
                 CATransaction.begin()
                 CATransaction.setDisableActions(true)
@@ -441,6 +468,7 @@ class ObservableMessageWrapper: ObservableObject {
                             self.message.isThinking != message.isThinking ||
                             self.message.isCollapsed != message.isCollapsed ||
                             self.message.generationTimeSeconds != message.generationTimeSeconds ||
+                            self.message.streamError != message.streamError ||
                             self.isDarkMode != isDarkMode
 
         let metadataChanged = self.isLastMessage != isLastMessage ||

@@ -115,9 +115,7 @@ struct MessageView: View {
                 }
 
                 else if !message.content.isEmpty {
-                    if message.streamError != nil {
-                        ErrorMessageView(errorMessage: message.streamError!, isDarkMode: isDarkMode)
-                    } else if message.role == .user {
+                    if message.role == .user {
                         AdaptiveMarkdownText(content: message.content, isDarkMode: isDarkMode)
                     } else if !message.contentChunks.isEmpty {
                         ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
@@ -127,6 +125,16 @@ struct MessageView: View {
                             .equatable()
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                }
+
+                // Show error box with regenerate button if stream failed
+                if message.streamError != nil && message.role == .assistant {
+                    ErrorMessageView(
+                        errorMessage: message.streamError!,
+                        isDarkMode: isDarkMode,
+                        onRegenerate: isLastMessage ? { viewModel.regenerateLastResponse() } : nil
+                    )
+                    .padding(.top, message.content.isEmpty && message.thoughts == nil ? 0 : 8)
                 }
                 
                 // Add copy button for assistant messages (only when not streaming)
@@ -1023,34 +1031,54 @@ struct ChunkView: View, Equatable {
 struct ErrorMessageView: View {
     let errorMessage: String
     let isDarkMode: Bool
-    
+    var onRegenerate: (() -> Void)? = nil
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.red)
-                    .font(.system(size: 20))
-                
-                Text("Error")
-                    .font(.headline)
-                    .foregroundColor(.red)
-                
+            HStack(spacing: 8) {
+                Image(systemName: "wifi.exclamationmark")
+                    .foregroundColor(.orange)
+                    .font(.system(size: 16))
+
+                Text("Connection Lost")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(isDarkMode ? .white : .black)
+
                 Spacer()
             }
-            
+
             Text(errorMessage)
-                .font(.subheadline)
-                .foregroundColor(isDarkMode ? .white : .black)
+                .font(.caption)
+                .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
                 .multilineTextAlignment(.leading)
+
+            if let onRegenerate = onRegenerate {
+                Button(action: onRegenerate) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .medium))
+                        Text("Regenerate")
+                            .font(.subheadline.weight(.medium))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.orange)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.red.opacity(0.1))
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.orange.opacity(0.1))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
                 )
         )
     }
