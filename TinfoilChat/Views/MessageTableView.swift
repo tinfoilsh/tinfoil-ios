@@ -99,42 +99,43 @@ struct MessageTableView: UIViewRepresentable {
             tableView.reloadData()
         } else if isLoading && !messages.isEmpty {
             // During streaming, update the last message wrapper directly
-            guard let lastMessage = messages.last,
-                  let wrapper = context.coordinator.messageWrappers[lastMessage.id] else { return }
+            if let lastMessage = messages.last,
+               let wrapper = context.coordinator.messageWrappers[lastMessage.id] {
 
-            let isArchived = messages.count - 1 < archivedMessagesStartIndex
-            let showArchiveSeparator = messages.count - 1 == archivedMessagesStartIndex && archivedMessagesStartIndex > 0
+                let isArchived = messages.count - 1 < archivedMessagesStartIndex
+                let showArchiveSeparator = messages.count - 1 == archivedMessagesStartIndex && archivedMessagesStartIndex > 0
 
-            // Check if buffer needs extending before content grows too large
-            let screenHeight = UIScreen.main.bounds.height
-            let currentBufferHeight = screenHeight * wrapper.bufferMultiplier
-            let threshold = currentBufferHeight * 0.8
-            let needsBufferExtension = wrapper.actualContentHeight > threshold && wrapper.actualContentHeight > wrapper.lastExtendedAtHeight + 50
+                // Check if buffer needs extending before content grows too large
+                let screenHeight = UIScreen.main.bounds.height
+                let currentBufferHeight = screenHeight * wrapper.bufferMultiplier
+                let threshold = currentBufferHeight * 0.8
+                let needsBufferExtension = wrapper.actualContentHeight > threshold && wrapper.actualContentHeight > wrapper.lastExtendedAtHeight + 50
 
-            let coordinator = context.coordinator
-            DispatchQueue.main.async {
-                guard let currentMessage = coordinator.parent.messages.last else { return }
+                let coordinator = context.coordinator
+                DispatchQueue.main.async {
+                    guard let currentMessage = coordinator.parent.messages.last else { return }
 
-                wrapper.update(
-                    message: currentMessage,
-                    isDarkMode: coordinator.parent.isDarkMode,
-                    isLastMessage: true,
-                    isLoading: coordinator.parent.isLoading,
-                    isArchived: isArchived,
-                    showArchiveSeparator: showArchiveSeparator
-                )
+                    wrapper.update(
+                        message: currentMessage,
+                        isDarkMode: coordinator.parent.isDarkMode,
+                        isLastMessage: true,
+                        isLoading: coordinator.parent.isLoading,
+                        isArchived: isArchived,
+                        showArchiveSeparator: showArchiveSeparator
+                    )
 
-                if needsBufferExtension {
-                    CATransaction.begin()
-                    CATransaction.setDisableActions(true)
+                    if needsBufferExtension {
+                        CATransaction.begin()
+                        CATransaction.setDisableActions(true)
 
-                    let currentOffset = tableView.contentOffset.y
-                    wrapper.bufferMultiplier += 1.0
-                    wrapper.lastExtendedAtHeight = wrapper.actualContentHeight
-                    tableView.layoutIfNeeded()
-                    tableView.contentOffset.y = currentOffset
+                        let currentOffset = tableView.contentOffset.y
+                        wrapper.bufferMultiplier += 1.0
+                        wrapper.lastExtendedAtHeight = wrapper.actualContentHeight
+                        tableView.layoutIfNeeded()
+                        tableView.contentOffset.y = currentOffset
 
-                    CATransaction.commit()
+                        CATransaction.commit()
+                    }
                 }
             }
         }
