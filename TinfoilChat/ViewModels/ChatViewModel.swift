@@ -740,7 +740,9 @@ class ChatViewModel: ObservableObject {
                 }
             }
             
-            do {
+            var hasRetriedWithFreshKey = false
+
+            retryLoop: do {
                 // Wait for client initialization if needed
                 if client == nil || isClientInitializing {
                     // If client setup hasn't started, start it
@@ -761,7 +763,7 @@ class ChatViewModel: ObservableObject {
                     throw NSError(domain: "TinfoilChat", code: 1,
                                 userInfo: [NSLocalizedDescriptionKey: "Service temporarily unavailable. Please try again."])
                 }
-                
+
                 // Create the stream with proper parameters
                 let modelId = currentModel.modelName
                 
@@ -1266,14 +1268,30 @@ class ChatViewModel: ObservableObject {
                     }
                 }
             } catch {
+                // Check if this is a 401 auth error and we haven't retried yet
+                let shouldRetry = await MainActor.run {
+                    if !hasRetriedWithFreshKey && self.isAuthenticationError(error) {
+                        return true
+                    }
+                    return false
+                }
+
+                if shouldRetry {
+                    hasRetriedWithFreshKey = true
+                    await self.refreshClientForRetry()
+                    if await MainActor.run(body: { self.client != nil }) {
+                        continue retryLoop
+                    }
+                }
+
                 // Handle error
                 await MainActor.run {
                     self.isLoading = false
-                    
+
                     // Mark the chat as no longer having an active stream
                     if var chat = self.currentChat {
                         chat.hasActiveStream = false
-                        
+
                         // Force any pending stream updates to save immediately
                         self.streamUpdateTimer?.invalidate()
                         self.streamUpdateTimer = nil
@@ -1442,7 +1460,36 @@ class ChatViewModel: ObservableObject {
         // Default error message if nothing specific matches
         return "An error occurred: \(error.localizedDescription)"
     }
-    
+
+    /// Checks if an error is an authentication error (401)
+    private func isAuthenticationError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+
+        if nsError.domain == "TinfoilChat" && nsError.code == 401 {
+            return true
+        }
+
+        if let httpResponse = nsError.userInfo[NSUnderlyingErrorKey] as? HTTPURLResponse,
+           httpResponse.statusCode == 401 {
+            return true
+        }
+
+        return false
+    }
+
+    /// Refreshes the API key and recreates the client
+    private func refreshClientForRetry() async {
+        APIKeyManager.shared.clearApiKey()
+        setupTinfoilClient()
+
+        // Wait for client initialization to complete
+        let maxWaitTime = Constants.Sync.clientInitTimeoutSeconds
+        let startTime = Date()
+        while isClientInitializing && Date().timeIntervalSince(startTime) < maxWaitTime {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        }
+    }
+
     /// Cancels the current message generation
     func cancelGeneration() {
         currentTask?.cancel()
