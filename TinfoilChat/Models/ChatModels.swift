@@ -385,78 +385,84 @@ enum HapticFeedback {
 /// Manages API key retrieval for premium models
 class APIKeyManager {
     static let shared = APIKeyManager()
-    
+
     private var apiKey: String?
+    private var apiKeyFetchedAt: Date?
     private let apiKeyEndpoint = "\(Constants.API.baseURL)/api/keys/chat"
-    private let keychainKey = "tinfoil_premium_api_key"
-    
-    private init() {
-        // Load cached API key from Keychain on init
-        self.apiKey = KeychainHelper.shared.loadString(for: keychainKey)
-    }
-    
+
+    private init() {}
+
     /// Retrieves the API key for premium models
     /// - Returns: API key string or empty string if unavailable
     func getApiKey() async -> String {
-        // Return cached key if available
-        if let existingKey = apiKey {
+        if let existingKey = apiKey,
+           let fetchedAt = apiKeyFetchedAt,
+           Date().timeIntervalSince(fetchedAt) < Constants.API.chatKeyTTLSeconds {
             return existingKey
         }
-        
+
+        return await fetchFreshApiKey()
+    }
+
+    /// Forces a fresh API key fetch, ignoring any cached value
+    /// - Returns: API key string or empty string if unavailable
+    func fetchFreshApiKey() async -> String {
+        clearApiKey()
+
         do {
             // Try to load Clerk if it's not loaded
             let isLoaded = await Clerk.shared.isLoaded
-            
+
             if !isLoaded {
                 try await Clerk.shared.load()
             }
-            
+
             // Try a few times with a small delay for the session to be available
             for attempt in 1...3 {
                 let session = await Clerk.shared.session
                 if let session = session,
                    let tokenResource = session.lastActiveToken {
-                    
+
                     // Create URL request with auth header
                     var request = URLRequest(url: URL(string: apiKeyEndpoint)!)
                     request.httpMethod = "GET"
                     request.addValue("Bearer \(tokenResource.jwt)", forHTTPHeaderField: "Authorization")
-                    
+
                     // Fetch API key from server
                     let (data, response) = try await URLSession.shared.data(for: request)
-                    
-                    guard let httpResponse = response as? HTTPURLResponse, 
+
+                    guard let httpResponse = response as? HTTPURLResponse,
                           httpResponse.statusCode == 200 else {
                         return ""
                     }
-                    
+
                     // Parse response
                     if let responseDict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                        let key = responseDict["key"] as? String {
-                        // Cache key in memory and Keychain
+                        // Cache key in memory
                         self.apiKey = key
-                        KeychainHelper.shared.save(key, for: keychainKey)
+                        self.apiKeyFetchedAt = Date()
                         return key
                     }
-                    
+
                     return ""
                 }
-                
+
                 // Wait a bit before trying again (only for first 2 attempts)
                 if attempt < 3 {
                     try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
                 }
             }
-            
+
             return ""
         } catch {
             return ""
         }
     }
-    
+
     /// Clears the cached API key
     func clearApiKey() {
         apiKey = nil
-        KeychainHelper.shared.delete(for: keychainKey)
+        apiKeyFetchedAt = nil
     }
 }
