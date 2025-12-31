@@ -159,45 +159,39 @@ class AuthManager: ObservableObject {
     }
     
     func initializeAuthState() async {
+        guard let clerk = self.clerk else {
+            isLoading = false
+            return
+        }
+
         do {
-            guard let clerk = self.clerk else {
-                isLoading = false
-                return
-            }
-            
-            // Make sure Clerk is loaded
             if !clerk.isLoaded {
                 try await clerk.load()
-            } else {
             }
-            
-            // Update authentication status based on whether user is signed in
-            let wasAuthenticated = isAuthenticated
-            isAuthenticated = clerk.user != nil
-            
-            // Get user data if authenticated
-            if isAuthenticated, let user = clerk.user {
-                updateUserData(from: user)
-                
-                // Log in to RevenueCat with Clerk user ID
-                await RevenueCatManager.shared.loginUser(user.id)
-            } else {
-                if wasAuthenticated {
-                    // User was authenticated but isn't anymore
-                    clearAuthState()
-                    
-                    // Log out from RevenueCat
-                    await RevenueCatManager.shared.logoutUser()
-                }
-                hasActiveSubscription = false
-            }
-            
-            // Finish loading regardless of authentication state
-            isLoading = false
-            
         } catch {
+            // Network or other error loading Clerk - preserve cached auth state
+            // User will remain "authenticated" based on cached state until we can verify
             isLoading = false
+            return
         }
+
+        // Clerk loaded successfully - now we can trust clerk.user state
+        let wasAuthenticated = isAuthenticated
+        isAuthenticated = clerk.user != nil
+
+        if isAuthenticated, let user = clerk.user {
+            updateUserData(from: user)
+            await RevenueCatManager.shared.loginUser(user.id)
+        } else {
+            if wasAuthenticated {
+                // User was authenticated but Clerk confirms they're no longer signed in
+                clearAuthState()
+                await RevenueCatManager.shared.logoutUser()
+            }
+            hasActiveSubscription = false
+        }
+
+        isLoading = false
     }
     
     private func clearAuthState() {
