@@ -134,7 +134,8 @@ struct MessageTableView: UIViewRepresentable {
                         isLastMessage: true,
                         isLoading: coordinator.parent.isLoading,
                         isArchived: isArchived,
-                        showArchiveSeparator: showArchiveSeparator
+                        showArchiveSeparator: showArchiveSeparator,
+                        messageIndex: coordinator.parent.messages.count - 1
                     )
 
                     if needsBufferExtension {
@@ -161,7 +162,8 @@ struct MessageTableView: UIViewRepresentable {
                     isLastMessage: true,
                     isLoading: false,
                     isArchived: isArchived,
-                    showArchiveSeparator: showArchiveSeparator
+                    showArchiveSeparator: showArchiveSeparator,
+                    messageIndex: messages.count - 1
                 )
 
                 DispatchQueue.main.async {
@@ -230,16 +232,16 @@ struct MessageTableView: UIViewRepresentable {
             self.parent = parent
         }
 
-        func getOrCreateWrapper(for message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool) -> ObservableMessageWrapper {
+        func getOrCreateWrapper(for message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool, messageIndex: Int) -> ObservableMessageWrapper {
             if let existing = messageWrappers[message.id] {
-                existing.update(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator)
+                existing.update(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator, messageIndex: messageIndex)
                 // Never re-animate existing messages
                 existing.shouldAnimateAppearance = false
                 return existing
             } else {
                 let isFirstTimeShown = !shownMessageIds.contains(message.id)
                 shownMessageIds.insert(message.id)
-                let wrapper = ObservableMessageWrapper(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator, shouldAnimateAppearance: isFirstTimeShown)
+                let wrapper = ObservableMessageWrapper(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator, shouldAnimateAppearance: isFirstTimeShown, messageIndex: messageIndex)
                 messageWrappers[message.id] = wrapper
                 return wrapper
             }
@@ -292,7 +294,8 @@ struct MessageTableView: UIViewRepresentable {
                     isLastMessage: isLastMessage,
                     isLoading: parent.isLoading && isLastMessage,
                     isArchived: isArchived,
-                    showArchiveSeparator: showArchiveSeparator
+                    showArchiveSeparator: showArchiveSeparator,
+                    messageIndex: indexPath.row
                 )
 
                 // Always recreate the content configuration to ensure correct wrapper is used
@@ -443,12 +446,13 @@ class ObservableMessageWrapper: ObservableObject {
     @Published var isArchived: Bool
     @Published var showArchiveSeparator: Bool
     @Published var shouldAnimateAppearance: Bool = false
+    @Published var messageIndex: Int
     var bufferMultiplier: CGFloat = 50.0
     var actualContentHeight: CGFloat = 0
     var cachedHeight: CGFloat?
     var cachedHeightKey: Int?
 
-    init(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool, shouldAnimateAppearance: Bool = true) {
+    init(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool, shouldAnimateAppearance: Bool = true, messageIndex: Int = 0) {
         self.message = message
         self.isDarkMode = isDarkMode
         self.isLastMessage = isLastMessage
@@ -456,9 +460,10 @@ class ObservableMessageWrapper: ObservableObject {
         self.isArchived = isArchived
         self.showArchiveSeparator = showArchiveSeparator
         self.shouldAnimateAppearance = shouldAnimateAppearance
+        self.messageIndex = messageIndex
     }
 
-    func update(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool) {
+    func update(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool, messageIndex: Int) {
         let contentChanged = self.message.content != message.content ||
                             self.message.thoughts != message.thoughts ||
                             self.message.contentChunks != message.contentChunks ||
@@ -471,7 +476,8 @@ class ObservableMessageWrapper: ObservableObject {
         let metadataChanged = self.isLastMessage != isLastMessage ||
                               self.isLoading != isLoading ||
                               self.isArchived != isArchived ||
-                              self.showArchiveSeparator != showArchiveSeparator
+                              self.showArchiveSeparator != showArchiveSeparator ||
+                              self.messageIndex != messageIndex
 
         if !contentChanged && !metadataChanged {
             return
@@ -489,6 +495,7 @@ class ObservableMessageWrapper: ObservableObject {
             self.isLoading = isLoading
             self.isArchived = isArchived
             self.showArchiveSeparator = showArchiveSeparator
+            self.messageIndex = messageIndex
         }
     }
 
@@ -539,7 +546,8 @@ struct ObservableMessageCell: View {
                     message: wrapper.message,
                     isDarkMode: wrapper.isDarkMode,
                     isLastMessage: wrapper.isLastMessage,
-                    isLoading: wrapper.isLoading
+                    isLoading: wrapper.isLoading,
+                    messageIndex: wrapper.messageIndex
                 )
                 .environmentObject(viewModel)
                 .opacity(wrapper.isArchived ? 0.6 : 1.0)

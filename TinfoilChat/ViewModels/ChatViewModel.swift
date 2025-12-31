@@ -317,7 +317,7 @@ class ChatViewModel: ObservableObject {
         
         
         // Create timer that fires at regular intervals
-        autoSyncTimer = Timer.scheduledTimer(withTimeInterval: Constants.Sync.autoSyncIntervalSeconds, repeats: true) { [weak self] _ in
+        autoSyncTimer = Timer.scheduledTimer(withTimeInterval: Constants.Sync.chatSyncIntervalSeconds, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self = self else { return }
                 
@@ -1537,6 +1537,55 @@ class ChatViewModel: ObservableObject {
         // Save and immediately resend
         saveChats()
         sendMessage(text: userMessageContent)
+    }
+
+    /// Edits a user message at a specific index, removing all messages after it and resending with new content
+    /// - Parameters:
+    ///   - messageIndex: The index of the user message to edit
+    ///   - newContent: The new content for the message
+    func editMessage(at messageIndex: Int, newContent: String) {
+        guard let chat = currentChat,
+              !isLoading,
+              messageIndex >= 0,
+              messageIndex < chat.messages.count,
+              chat.messages[messageIndex].role == .user else {
+            return
+        }
+
+        let trimmedContent = newContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedContent.isEmpty else { return }
+
+        // Truncate to remove the edited message and all messages after it
+        var updatedChat = chat
+        updatedChat.messages = Array(chat.messages.prefix(messageIndex))
+        updatedChat.locallyModified = true
+        updatedChat.updatedAt = Date()
+
+        // Update both currentChat and chats array directly
+        currentChat = updatedChat
+        if let index = chats.firstIndex(where: { $0.id == chat.id }) {
+            chats[index] = updatedChat
+        }
+        objectWillChange.send()
+
+        // Save and resend with the new content
+        saveChats()
+        sendMessage(text: trimmedContent)
+    }
+
+    /// Regenerates the response for a user message at a specific index
+    /// - Parameter messageIndex: The index of the user message to regenerate from
+    func regenerateMessage(at messageIndex: Int) {
+        guard let chat = currentChat,
+              !isLoading,
+              messageIndex >= 0,
+              messageIndex < chat.messages.count,
+              chat.messages[messageIndex].role == .user else {
+            return
+        }
+
+        let originalContent = chat.messages[messageIndex].content
+        editMessage(at: messageIndex, newContent: originalContent)
     }
 
     /// Shows the verifier sheet with current verification state
