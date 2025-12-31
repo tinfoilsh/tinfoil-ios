@@ -26,18 +26,22 @@ struct MessageView: View {
     let isDarkMode: Bool
     let isLastMessage: Bool
     let isLoading: Bool
+    let messageIndex: Int
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
     @State private var showCopyFeedback = false
     @State private var cachedParsedContent: (thinkingText: String, remainderText: String, contentHash: Int)? = nil
     @State private var showLongMessageSheet = false
     @State private var showRawContentModal = false
+    @State private var isEditMode = false
+    @State private var editedContent = ""
 
     var body: some View {
         HStack {
             if message.role == .user {
                 Spacer()
             }
-            
+
+            VStack(alignment: .trailing, spacing: 4) {
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
                 // Show the loading dots for a fresh streaming assistant response (but not if we have thoughts or are thinking)
                 if message.role == .assistant &&
@@ -109,14 +113,44 @@ struct MessageView: View {
                 
                 // Display long user messages as an attachment-style preview that expands on tap
                 else if message.role == .user && message.shouldDisplayAsAttachment {
-                    LongMessageAttachmentView(message: message, isDarkMode: isDarkMode) {
-                        showLongMessageSheet = true
+                    if isEditMode {
+                        UserMessageEditView(
+                            content: $editedContent,
+                            isDarkMode: isDarkMode,
+                            onSave: {
+                                viewModel.editMessage(at: messageIndex, newContent: editedContent)
+                                isEditMode = false
+                            },
+                            onCancel: {
+                                isEditMode = false
+                                editedContent = message.content
+                            }
+                        )
+                    } else {
+                        LongMessageAttachmentView(message: message, isDarkMode: isDarkMode) {
+                            showLongMessageSheet = true
+                        }
                     }
                 }
 
                 else if !message.content.isEmpty {
                     if message.role == .user {
-                        AdaptiveMarkdownText(content: message.content, isDarkMode: isDarkMode)
+                        if isEditMode {
+                            UserMessageEditView(
+                                content: $editedContent,
+                                isDarkMode: isDarkMode,
+                                onSave: {
+                                    viewModel.editMessage(at: messageIndex, newContent: editedContent)
+                                    isEditMode = false
+                                },
+                                onCancel: {
+                                    isEditMode = false
+                                    editedContent = message.content
+                                }
+                            )
+                        } else {
+                            AdaptiveMarkdownText(content: message.content, isDarkMode: isDarkMode)
+                        }
                     } else if !message.contentChunks.isEmpty {
                         ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -137,11 +171,11 @@ struct MessageView: View {
                     .padding(.top, message.content.isEmpty && message.thoughts == nil ? 0 : 8)
                 }
                 
-                // Add copy button for assistant messages (only when not streaming)
+                // Add action buttons for assistant messages (only when not streaming)
                 if message.role == .assistant &&
                    (!message.content.isEmpty || message.thoughts != nil) &&
                    !(isLoading && isLastMessage) {
-                    HStack {
+                    HStack(spacing: 16) {
                         Button {
                             Task { @MainActor in
                                 showRawContentModal = true
@@ -157,30 +191,85 @@ struct MessageView: View {
                         }
                         .buttonStyle(PlainButtonStyle())
 
+                        // Regenerate button - only on the last assistant message
+                        if isLastMessage && !viewModel.isLoading && messageIndex > 0 {
+                            Button {
+                                viewModel.regenerateMessage(at: messageIndex - 1)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 12))
+                                    Text("Regenerate")
+                                        .font(.system(size: 12))
+                                }
+                                .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+
                         Spacer()
                     }
                     .padding(.top, 4)
                 }
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, message.role == .user ? 12 : 0)
-            .background {
-                if message.role == .user {
-                    if #available(iOS 26, *) {
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(.thickMaterial)
-                    } else {
-                        Color.userMessageBackground(isDarkMode: isDarkMode)
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, message.role == .user ? 12 : 0)
+                .background {
+                    if message.role == .user {
+                        if #available(iOS 26, *) {
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(.thickMaterial)
+                        } else {
+                            Color.userMessageBackground(isDarkMode: isDarkMode)
+                        }
                     }
                 }
-            }
-            .cornerRadius(16)
-            .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
-            .onLongPressGesture {
-                if (message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil)) ||
-                   (message.role == .user && !message.content.isEmpty) {
-                    Task { @MainActor in
-                        showRawContentModal = true
+                .cornerRadius(16)
+                .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
+                .onLongPressGesture {
+                    if (message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil)) ||
+                       (message.role == .user && !message.content.isEmpty) {
+                        Task { @MainActor in
+                            showRawContentModal = true
+                        }
+                    }
+                }
+                .onChange(of: message.id) { _, _ in
+                    isEditMode = false
+                    editedContent = ""
+                }
+
+                // Action buttons for user messages - outside the bubble
+                if message.role == .user && !message.content.isEmpty && !isEditMode && !viewModel.isLoading {
+                    HStack(spacing: 16) {
+                        Spacer()
+
+                        Button {
+                            viewModel.regenerateMessage(at: messageIndex)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 14))
+                                Text("Regenerate")
+                                    .font(.system(size: 14))
+                            }
+                            .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        Button {
+                            editedContent = message.content
+                            isEditMode = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "square.and.pencil")
+                                    .font(.system(size: 14))
+                                Text("Edit")
+                                    .font(.system(size: 14))
+                            }
+                            .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
                 }
             }
@@ -1081,5 +1170,78 @@ struct ErrorMessageView: View {
                         .stroke(Color.orange.opacity(0.3), lineWidth: 1)
                 )
         )
+    }
+}
+
+struct UserMessageEditView: View {
+    @Binding var content: String
+    let isDarkMode: Bool
+    let onSave: () -> Void
+    let onCancel: () -> Void
+    @FocusState private var isFocused: Bool
+
+    private var textColor: Color {
+        isDarkMode ? .white : .black
+    }
+
+    private var secondaryTextColor: Color {
+        isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5)
+    }
+
+    private var buttonBackgroundColor: Color {
+        isDarkMode ? .white.opacity(0.1) : .black.opacity(0.1)
+    }
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            TextField("Edit message...", text: $content, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.body)
+                .foregroundColor(textColor)
+                .lineLimit(1...10)
+                .focused($isFocused)
+                .onAppear {
+                    isFocused = true
+                }
+                .onSubmit {
+                    if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        onSave()
+                    }
+                }
+
+            HStack(spacing: 8) {
+                Text("Messages below will be deleted and regenerated.")
+                    .font(.system(size: 11))
+                    .foregroundColor(secondaryTextColor)
+
+                Spacer()
+
+                Button(action: onCancel) {
+                    Text("Cancel")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(secondaryTextColor)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(buttonBackgroundColor)
+                        .cornerRadius(6)
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                Button(action: {
+                    if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        onSave()
+                    }
+                }) {
+                    Text("Save")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.blue)
+                        .cornerRadius(6)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
     }
 }

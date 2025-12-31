@@ -289,7 +289,8 @@ struct UIKitScrollView: UIViewRepresentable {
                                 isDarkMode: isDarkMode,
                                 isLoading: true,
                                 estimatedHeight: $estimatedStreamingHeight,
-                                shouldPauseUpdates: !isAtBottom
+                                shouldPauseUpdates: !isAtBottom,
+                                messageIndex: actualIndex
                             )
                             .id(message.id)
                             .padding(.vertical, 8)
@@ -306,7 +307,8 @@ struct UIKitScrollView: UIViewRepresentable {
                                 message: message,
                                 isDarkMode: isDarkMode,
                                 isLastMessage: actualIndex == messages.count - 1,
-                                isLoading: false
+                                isLoading: false,
+                                messageIndex: actualIndex
                             )
                             .id(message.id)
                             .if(isAIMessage && actualIndex == messages.count - 1) { view in
@@ -417,16 +419,18 @@ struct StreamingMessageContainer: View {
     let isLoading: Bool
     @Binding var estimatedHeight: CGFloat
     let shouldPauseUpdates: Bool
+    let messageIndex: Int
 
     @State private var actualHeight: CGFloat = 0
     @State private var displayedMessage: Message
 
-    init(message: Message, isDarkMode: Bool, isLoading: Bool, estimatedHeight: Binding<CGFloat>, shouldPauseUpdates: Bool) {
+    init(message: Message, isDarkMode: Bool, isLoading: Bool, estimatedHeight: Binding<CGFloat>, shouldPauseUpdates: Bool, messageIndex: Int) {
         self.message = message
         self.isDarkMode = isDarkMode
         self.isLoading = isLoading
         self._estimatedHeight = estimatedHeight
         self.shouldPauseUpdates = shouldPauseUpdates
+        self.messageIndex = messageIndex
         self._displayedMessage = State(initialValue: message)
     }
 
@@ -441,7 +445,8 @@ struct StreamingMessageContainer: View {
                 message: displayedMessage,
                 isDarkMode: isDarkMode,
                 isLastMessage: true,
-                isLoading: isLoading
+                isLoading: isLoading,
+                messageIndex: messageIndex
             )
             .background(
                 GeometryReader { geometry in
