@@ -313,7 +313,11 @@ class ProfileSyncService: ObservableObject {
                 return nil
             }
 
-            if httpResponse.statusCode == 401 || httpResponse.statusCode == 404 {
+            if httpResponse.statusCode == 401 {
+                return nil
+            }
+
+            if httpResponse.statusCode == 404 {
                 return ProfileSyncStatus(exists: false, version: nil, lastUpdated: nil)
             }
 
