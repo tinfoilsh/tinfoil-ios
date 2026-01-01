@@ -262,321 +262,319 @@ struct SettingsView: View {
         }
     }
     
+    private var accountSection: some View {
+        Section {
+            if authManager.isAuthenticated {
+                HStack {
+                    userAvatar
+                        .frame(width: 40, height: 40)
+                        .clipShape(Circle())
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let user = clerk.user {
+                            Text("\(user.firstName ?? "") \(user.lastName ?? "")")
+                                .font(.body)
+                                .foregroundColor(.primary)
+                            if let email = user.emailAddresses.first?.emailAddress {
+                                Text(email)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        } else if let userData = authManager.localUserData {
+                            Text((userData["name"] as? String) ?? "User")
+                                .font(.body)
+                                .foregroundColor(.primary)
+                            if let email = userData["email"] as? String {
+                                Text(email)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+
+                Button(action: {
+                    if let user = clerk.user {
+                        editingFirstName = user.firstName ?? ""
+                        editingLastName = user.lastName ?? ""
+                        showProfileEditor = true
+                    }
+                }) {
+                    HStack {
+                        Text("Edit Profile")
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundColor(Color(UIColor.quaternaryLabel))
+                    }
+                }
+
+                Button(action: {
+                    showSignOutConfirmation = true
+                }) {
+                    HStack {
+                        Text("Sign Out")
+                            .foregroundColor(.primary)
+                        Spacer()
+                    }
+                }
+
+                Button(action: {
+                    showDeleteConfirmation = true
+                }) {
+                    HStack {
+                        Text("Delete Account")
+                            .foregroundColor(.red)
+                        Spacer()
+                    }
+                }
+            } else {
+                Button(action: {
+                    showAuthView = true
+                }) {
+                    HStack {
+                        Text("Sign up or Log In")
+                            .foregroundColor(.primary)
+                        Spacer()
+                    }
+                }
+            }
+        } header: {
+            Text("Account")
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+
+    private var preferencesSection: some View {
+        Section {
+            Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
+                .tint(Color.accentPrimary)
+
+            NavigationLink(destination: LanguagePickerView(
+                selectedLanguage: $settings.selectedLanguage,
+                languages: languages
+            )) {
+                HStack {
+                    Text("Default Language")
+                    Spacer()
+                    Text(settings.selectedLanguage)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            if authManager.isAuthenticated {
+                NavigationLink {
+                    CloudSyncSettingsView(
+                        viewModel: chatViewModel,
+                        authManager: authManager
+                    )
+                } label: {
+                    Text("Cloud Sync")
+                }
+            }
+        } header: {
+            Text("Preferences")
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+
+    private var chatSettingsSection: some View {
+        Section {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Messages in Context")
+                        .font(.body)
+                    Text("Maximum number of recent messages sent to the model (1-50). Longer contexts increase network usage and slow down responses.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                HStack(spacing: 8) {
+                    Button(action: {
+                        if settings.maxMessages > 1 {
+                            settings.maxMessages -= 1
+                            ProfileManager.shared.maxPromptMessages = settings.maxMessages
+                        }
+                    }) {
+                        Image(systemName: "minus.circle")
+                            .foregroundColor(settings.maxMessages > 1 ? .accentColor : .gray)
+                    }
+                    .buttonStyle(BorderlessButtonStyle())
+                    .disabled(settings.maxMessages <= 1)
+
+                    Text("\(settings.maxMessages)")
+                        .frame(minWidth: 30)
+                        .font(.system(.body, design: .monospaced))
+
+                    Button(action: {
+                        if settings.maxMessages < 50 {
+                            settings.maxMessages += 1
+                            ProfileManager.shared.maxPromptMessages = settings.maxMessages
+                        }
+                    }) {
+                        Image(systemName: "plus.circle")
+                            .foregroundColor(settings.maxMessages < 50 ? .accentColor : .gray)
+                    }
+                    .buttonStyle(BorderlessButtonStyle())
+                    .disabled(settings.maxMessages >= 50)
+                }
+            }
+            .padding(.vertical, 4)
+
+            NavigationLink(destination: CustomSystemPromptView(
+                isUsingCustomPrompt: $settings.isUsingCustomPrompt,
+                customSystemPrompt: $settings.customSystemPrompt
+            )) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Custom System Prompt")
+                            .font(.body)
+                        Text("Override the default system prompt")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    if profileManager.isUsingCustomPrompt {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                    }
+                }
+            }
+
+            NavigationLink(destination: PersonalizationView()) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Personalization")
+                            .font(.body)
+                        Text("Customize how the AI responds to you")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    if profileManager.isUsingPersonalization || settings.isPersonalizationEnabled {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                    }
+                }
+            }
+        } header: {
+            Text("Chat Settings")
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+
+    private var subscriptionSection: some View {
+        Section {
+            if authManager.hasActiveSubscription {
+                Button(action: {
+                    let isRevenueCat = checkIfRevenueCat()
+                    let url = isRevenueCat
+                        ? URL(string: "https://apps.apple.com/account/subscriptions")!
+                        : URL(string: "https://www.tinfoil.sh/dashboard")!
+                    UIApplication.shared.open(url)
+                }) {
+                    HStack {
+                        Text("Manage Subscription")
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Image(systemName: "arrow.up.forward.square")
+                            .font(.footnote)
+                            .foregroundColor(Color(UIColor.tertiaryLabel))
+                    }
+                }
+            } else {
+                Button(action: {
+                    guard authManager.isAuthenticated else {
+                        showAuthView = true
+                        return
+                    }
+                    if let clerkUserId = authManager.localUserData?["id"] as? String {
+                        Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
+                    }
+                    showPremiumModal = true
+                }) {
+                    HStack {
+                        Text("Subscribe to Premium")
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Text("Unlock all models")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        } header: {
+            Text("Subscription")
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+
+    private var contactSection: some View {
+        Section {
+            Link(destination: URL(string: "mailto:contact@tinfoil.sh")!) {
+                HStack {
+                    Text("Send Email")
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Text("contact@tinfoil.sh")
+                        .font(.caption)
+                        .foregroundColor(colorScheme == .dark ? .white : .black)
+                }
+            }
+        } header: {
+            Text("Contact Us")
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+
+    private var legalSection: some View {
+        Section {
+            Button(action: {
+                UIApplication.shared.open(Constants.Legal.termsOfServiceURL)
+            }) {
+                HStack {
+                    Text("Terms of Service")
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Image(systemName: "arrow.up.forward.square")
+                        .font(.footnote)
+                        .foregroundColor(Color(UIColor.tertiaryLabel))
+                }
+            }
+
+            Button(action: {
+                UIApplication.shared.open(Constants.Legal.privacyPolicyURL)
+            }) {
+                HStack {
+                    Text("Privacy Policy")
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Image(systemName: "arrow.up.forward.square")
+                        .font(.footnote)
+                        .foregroundColor(Color(UIColor.tertiaryLabel))
+                }
+            }
+        } header: {
+            Text("Legal")
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                        // Account Section
-                        Section {
-                            if authManager.isAuthenticated {
-                                // User info row
-                                HStack {
-                                    // Avatar
-                                    userAvatar
-                                        .frame(width: 40, height: 40)
-                                        .clipShape(Circle())
-                                    
-                                    // User info
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        if let user = clerk.user {
-                                            Text("\(user.firstName ?? "") \(user.lastName ?? "")")
-                                                .font(.body)
-                                                .foregroundColor(.primary)
-                                            if let email = user.emailAddresses.first?.emailAddress {
-                                                Text(email)
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-                                            }
-                                        } else if let userData = authManager.localUserData {
-                                            Text((userData["name"] as? String) ?? "User")
-                                                .font(.body)
-                                                .foregroundColor(.primary)
-                                            if let email = userData["email"] as? String {
-                                                Text(email)
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-                                            }
-                                        }
-                                    }
-                                    
-                                    Spacer()
-                                }
-                                .padding(.vertical, 4)
-                                
-                                // Edit Profile
-                                Button(action: {
-                                    if let user = clerk.user {
-                                        editingFirstName = user.firstName ?? ""
-                                        editingLastName = user.lastName ?? ""
-                                        showProfileEditor = true
-                                    }
-                                }) {
-                                    HStack {
-                                        Text("Edit Profile")
-                                            .foregroundColor(.primary)
-                                        Spacer()
-                                        Image(systemName: "chevron.right")
-                                            .font(.caption2)
-                                            .foregroundColor(Color(UIColor.quaternaryLabel))
-                                    }
-                                }
-                                
-                                
-                                // Sign Out
-                                Button(action: {
-                                    showSignOutConfirmation = true
-                                }) {
-                                    HStack {
-                                        Text("Sign Out")
-                                            .foregroundColor(.primary)
-                                        Spacer()
-                                    }
-                                }
-                                
-                                // Delete Account
-                                Button(action: {
-                                    showDeleteConfirmation = true
-                                }) {
-                                    HStack {
-                                        Text("Delete Account")
-                                            .foregroundColor(.red)
-                                        Spacer()
-                                    }
-                                }
-                            } else {
-                                // Sign in button
-                                Button(action: {
-                                    showAuthView = true
-                                }) {
-                                    HStack {
-                                        Text("Sign up or Log In")
-                                            .foregroundColor(.primary)
-                                        Spacer()
-                                    }
-                                }
-                            }
-                        } header: {
-                            Text("Account")
-                        }
-                        .listRowBackground(Color.cardSurface(for: colorScheme))
-                        
-                        // Preferences Section
-                        Section {
-                            Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
-                                .tint(Color.accentPrimary)
-                            
-                            NavigationLink(destination: LanguagePickerView(
-                                selectedLanguage: $settings.selectedLanguage,
-                                languages: languages
-                            )) {
-                                HStack {
-                                    Text("Default Language")
-                                    Spacer()
-                                    Text(settings.selectedLanguage)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            
-                            // Cloud Sync Settings
-                            if authManager.isAuthenticated {
-                                NavigationLink {
-                                    CloudSyncSettingsView(
-                                        viewModel: chatViewModel,
-                                        authManager: authManager
-                                    )
-                                } label: {
-                                    Text("Cloud Sync")
-                                }
-                            }
-                        } header: {
-                            Text("Preferences")
-                        }
-                        .listRowBackground(Color.cardSurface(for: colorScheme))
-                        
-                        // Chat Settings Section
-                        Section {
-                            // Messages in Context
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Messages in Context")
-                                        .font(.body)
-                                    Text("Maximum number of recent messages sent to the model (1-50). Longer contexts increase network usage and slow down responses.")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                Spacer()
-                                HStack(spacing: 8) {
-                                    Button(action: {
-                                        if settings.maxMessages > 1 {
-                                            settings.maxMessages -= 1
-                                            ProfileManager.shared.maxPromptMessages = settings.maxMessages
-                                        }
-                                    }) {
-                                        Image(systemName: "minus.circle")
-                                            .foregroundColor(settings.maxMessages > 1 ? .accentColor : .gray)
-                                    }
-                                    .buttonStyle(BorderlessButtonStyle())
-                                    .disabled(settings.maxMessages <= 1)
-                                    
-                                    Text("\(settings.maxMessages)")
-                                        .frame(minWidth: 30)
-                                        .font(.system(.body, design: .monospaced))
-                                    
-                                    Button(action: {
-                                        if settings.maxMessages < 50 {
-                                            settings.maxMessages += 1
-                                            ProfileManager.shared.maxPromptMessages = settings.maxMessages
-                                        }
-                                    }) {
-                                        Image(systemName: "plus.circle")
-                                            .foregroundColor(settings.maxMessages < 50 ? .accentColor : .gray)
-                                    }
-                                    .buttonStyle(BorderlessButtonStyle())
-                                    .disabled(settings.maxMessages >= 50)
-                                }
-                            }
-                            .padding(.vertical, 4)
-                            
-                            // Custom System Prompt
-                            NavigationLink(destination: CustomSystemPromptView(
-                                isUsingCustomPrompt: $settings.isUsingCustomPrompt,
-                                customSystemPrompt: $settings.customSystemPrompt
-                            )) {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Custom System Prompt")
-                                            .font(.body)
-                                        Text("Override the default system prompt")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    if profileManager.isUsingCustomPrompt {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .font(.caption)
-                                            .foregroundColor(.green)
-                                    }
-                                }
-                            }
-                            
-                            // Personalization
-                            NavigationLink(destination: PersonalizationView()) {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Personalization")
-                                            .font(.body)
-                                        Text("Customize how the AI responds to you")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    if profileManager.isUsingPersonalization || settings.isPersonalizationEnabled {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .font(.caption)
-                                            .foregroundColor(.green)
-                                    }
-                                }
-                            }
-                        } header: {
-                            Text("Chat Settings")
-                        }
-                        .listRowBackground(Color.cardSurface(for: colorScheme))
-                        
-                        // Subscription Section
-                        Section {
-                            if authManager.hasActiveSubscription {
-                                // Manage Subscription
-                                let isRevenueCat = checkIfRevenueCat()
-                                Button(action: {
-                                    let url = isRevenueCat
-                                        ? URL(string: "https://apps.apple.com/account/subscriptions")!
-                                        : URL(string: "https://www.tinfoil.sh/dashboard")!
-                                    UIApplication.shared.open(url)
-                                }) {
-                                    HStack {
-                                        Text("Manage Subscription")
-                                            .foregroundColor(.primary)
-                                        Spacer()
-                                        Image(systemName: "arrow.up.forward.square")
-                                            .font(.footnote)
-                                            .foregroundColor(Color(UIColor.tertiaryLabel))
-                                    }
-                                }
-                            } else {
-                                // Subscribe to Premium
-                                Button(action: {
-                                    guard authManager.isAuthenticated else {
-                                        showAuthView = true
-                                        return
-                                    }
-                                    // Set clerk_user_id attribute right before showing paywall
-                                    if let clerkUserId = authManager.localUserData?["id"] as? String {
-                                        Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
-                                    }
-                                    showPremiumModal = true
-                                }) {
-                                    HStack {
-                                        Text("Subscribe to Premium")
-                                            .foregroundColor(.primary)
-                                        Spacer()
-                                        Text("Unlock all models")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                            }
-                        } header: {
-                            Text("Subscription")
-                        }
-                        .listRowBackground(Color.cardSurface(for: colorScheme))
-                        
-                        // Contact Section
-                        Section {
-                            Link(destination: URL(string: "mailto:contact@tinfoil.sh")!) {
-                                HStack {
-                                    Text("Send Email")
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                    Text("contact@tinfoil.sh")
-                                        .font(.caption)
-                                        .foregroundColor(colorScheme == .dark ? .white : .black)
-                                }
-                            }
-                        } header: {
-                            Text("Contact Us")
-                        }
-                        .listRowBackground(Color.cardSurface(for: colorScheme))
-
-                        // Legal Section
-                        Section {
-                            Button(action: {
-                                UIApplication.shared.open(Constants.Legal.termsOfServiceURL)
-                            }) {
-                                HStack {
-                                    Text("Terms of Service")
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                    Image(systemName: "arrow.up.forward.square")
-                                        .font(.footnote)
-                                        .foregroundColor(Color(UIColor.tertiaryLabel))
-                                }
-                            }
-                            
-                            Button(action: {
-                                UIApplication.shared.open(Constants.Legal.privacyPolicyURL)
-                            }) {
-                                HStack {
-                                    Text("Privacy Policy")
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                    Image(systemName: "arrow.up.forward.square")
-                                        .font(.footnote)
-                                        .foregroundColor(Color(UIColor.tertiaryLabel))
-                                }
-                            }
-                        } header: {
-                            Text("Legal")
-                        }
-                        .listRowBackground(Color.cardSurface(for: colorScheme))
+                accountSection
+                preferencesSection
+                chatSettingsSection
+                subscriptionSection
+                contactSection
+                legalSection
             }
             .scrollContentBackground(.hidden)
             .background(Color.settingsBackground(for: colorScheme))
@@ -687,9 +685,6 @@ struct SettingsView: View {
                     // Clear personalization settings
                     settings.clearPersonalization()
                     ProfileManager.shared.clearProfile()
-
-                    // Clear sync status cache
-                    CloudSyncService.shared.clearSyncStatus()
 
                     await authManager.signOut()
                     dismiss()

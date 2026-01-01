@@ -243,11 +243,12 @@ class ProfileManager: ObservableObject {
         // Cancel any existing timers/tasks
         syncTimer?.invalidate()
         syncLoopTask?.cancel()
-        
+
         // Use an async loop to avoid RunLoop mode issues
+        let intervalNanoseconds = UInt64(Constants.Sync.profileSyncIntervalSeconds * 1_000_000_000)
         syncLoopTask = Task { @MainActor in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                try? await Task.sleep(nanoseconds: intervalNanoseconds)
                 await self.performFullSync()
             }
         }
