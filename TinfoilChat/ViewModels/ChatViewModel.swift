@@ -2307,7 +2307,7 @@ class ChatViewModel: ObservableObject {
         // Try to get pagination token from cloud to enable Load More
         do {
             // Get the list result to check if there are more pages
-            if let listResult = try? await R2StorageService.shared.listChats(
+            if let listResult = try? await CloudStorageService.shared.listChats(
                 limit: Constants.Pagination.chatsPerPage,
                 continuationToken: nil,
                 includeContent: false

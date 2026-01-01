@@ -152,7 +152,7 @@ struct Chat: Identifiable, Codable {
         userId: String? = nil
     ) async throws -> Chat {
         // Generate timestamp-based ID from server
-        let idResponse = try await R2StorageService.shared.generateConversationId()
+        let idResponse = try await CloudStorageService.shared.generateConversationId()
         
         return create(
             id: idResponse.conversationId,
