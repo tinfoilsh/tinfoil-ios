@@ -15,7 +15,7 @@ class ProfileManager: ObservableObject {
     
     // Published properties for UI binding
     @Published var isDarkMode: Bool = true
-    @Published var maxPromptMessages: Int = 10
+    @Published var maxPromptMessages: Int = Constants.Context.defaultMaxMessages
     @Published var language: String = "English"
     
     // Personalization settings
@@ -455,7 +455,7 @@ class ProfileManager: ObservableObject {
     func clearProfile() {
         // Reset to defaults
         isDarkMode = true
-        maxPromptMessages = 10
+        maxPromptMessages = Constants.Context.defaultMaxMessages
         language = "English"
         nickname = ""
         profession = ""

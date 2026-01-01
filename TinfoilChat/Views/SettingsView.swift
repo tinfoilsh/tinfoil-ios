@@ -106,12 +106,10 @@ class SettingsManager: ObservableObject {
         
         // Initialize max messages setting
         if let savedMaxMessages = UserDefaults.standard.object(forKey: "maxPromptMessages") as? Int {
-            // Clamp the restored value to the allowed 1-50 range
-            self.maxMessages = min(max(savedMaxMessages, 1), 50)
+            self.maxMessages = min(max(savedMaxMessages, 1), Constants.Context.maxMessagesLimit)
         } else {
-            // Default to 15 if not set
-            self.maxMessages = 15
-            UserDefaults.standard.set(15, forKey: "maxPromptMessages")
+            self.maxMessages = Constants.Context.defaultMaxMessages
+            UserDefaults.standard.set(Constants.Context.defaultMaxMessages, forKey: "maxPromptMessages")
         }
         
         // Initialize custom system prompt settings
@@ -148,7 +146,7 @@ class SettingsManager: ObservableObject {
         profession = ""
         selectedTraits = []
         additionalContext = ""
-        maxMessages = 15
+        maxMessages = Constants.Context.defaultMaxMessages
         isUsingCustomPrompt = false
         customSystemPrompt = ""
     }
@@ -388,7 +386,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Messages in Context")
                         .font(.body)
-                    Text("Maximum number of recent messages sent to the model (1-50). Longer contexts increase network usage and slow down responses.")
+                    Text("Maximum number of recent messages sent to the model (1-\(Constants.Context.maxMessagesLimit)). Longer contexts increase network usage and slow down responses.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -407,20 +405,20 @@ struct SettingsView: View {
                     .disabled(settings.maxMessages <= 1)
 
                     Text("\(settings.maxMessages)")
-                        .frame(minWidth: 30)
+                        .frame(minWidth: 40)
                         .font(.system(.body, design: .monospaced))
 
                     Button(action: {
-                        if settings.maxMessages < 50 {
+                        if settings.maxMessages < Constants.Context.maxMessagesLimit {
                             settings.maxMessages += 1
                             ProfileManager.shared.maxPromptMessages = settings.maxMessages
                         }
                     }) {
                         Image(systemName: "plus.circle")
-                            .foregroundColor(settings.maxMessages < 50 ? .accentColor : .gray)
+                            .foregroundColor(settings.maxMessages < Constants.Context.maxMessagesLimit ? .accentColor : .gray)
                     }
                     .buttonStyle(BorderlessButtonStyle())
-                    .disabled(settings.maxMessages >= 50)
+                    .disabled(settings.maxMessages >= Constants.Context.maxMessagesLimit)
                 }
             }
             .padding(.vertical, 4)
