@@ -28,6 +28,7 @@ class EncryptionService: ObservableObject {
     private let keychainKey = "sh.tinfoil.encryptionKey"
     private let keychainService = "sh.tinfoil.chat"
     private let keychainHistoryKey = "key_history"
+    private let encryptionKeySetupFlagKey = "encryptionKeyWasSetUp"
     private var encryptionKey: SymmetricKey?
     private let keychainLock = NSLock()
 
@@ -81,7 +82,16 @@ class EncryptionService: ObservableObject {
     }
     
     /// Check if an encryption key exists in the keychain
+    /// Returns true if key exists OR if we previously set up a key (to handle temporary keychain failures)
     func hasEncryptionKey() -> Bool {
+        if loadKeyFromKeychain() != nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: encryptionKeySetupFlagKey)
+    }
+
+    /// Check if the encryption key is actually available (not just previously set up)
+    func isKeyAvailable() -> Bool {
         return loadKeyFromKeychain() != nil
     }
     
@@ -95,6 +105,7 @@ class EncryptionService: ObservableObject {
         encryptionKey = nil
         deleteKeyFromKeychain()
         deleteKeyHistoryFromKeychain()
+        UserDefaults.standard.removeObject(forKey: encryptionKeySetupFlagKey)
     }
     
     // MARK: - Encryption/Decryption
@@ -352,8 +363,10 @@ class EncryptionService: ObservableObject {
         if status != errSecSuccess {
             throw EncryptionError.keychainSaveFailed(status: status)
         }
+
+        UserDefaults.standard.set(true, forKey: encryptionKeySetupFlagKey)
     }
-    
+
     private func loadKeyFromKeychain() -> String? {
         keychainLock.lock()
         defer { keychainLock.unlock() }
