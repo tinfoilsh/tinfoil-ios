@@ -920,10 +920,13 @@ class CloudSyncService: ObservableObject {
                 )
 
                 // Update cached status after full sync
-                if fullResult.errors.isEmpty,
-                   let count = statusCheck.remoteCount,
-                   let updated = statusCheck.remoteLastUpdated {
-                    saveSyncStatus(count: count, lastUpdated: updated)
+                if fullResult.errors.isEmpty {
+                    if let count = statusCheck.remoteCount,
+                       let updated = statusCheck.remoteLastUpdated {
+                        saveSyncStatus(count: count, lastUpdated: updated)
+                    } else {
+                        await refreshSyncStatusCache()
+                    }
                 }
             }
         } else {
@@ -936,10 +939,13 @@ class CloudSyncService: ObservableObject {
             )
 
             // Update cached status after full sync
-            if fullResult.errors.isEmpty,
-               let count = statusCheck.remoteCount,
-               let updated = statusCheck.remoteLastUpdated {
-                saveSyncStatus(count: count, lastUpdated: updated)
+            if fullResult.errors.isEmpty {
+                if let count = statusCheck.remoteCount,
+                   let updated = statusCheck.remoteLastUpdated {
+                    saveSyncStatus(count: count, lastUpdated: updated)
+                } else {
+                    await refreshSyncStatusCache()
+                }
             }
         }
 
@@ -965,6 +971,13 @@ class CloudSyncService: ObservableObject {
         let status = ChatSyncStatus(count: count, lastUpdated: lastUpdated)
         if let data = try? JSONEncoder().encode(status) {
             UserDefaults.standard.set(data, forKey: syncStatusKey)
+        }
+    }
+
+    private func refreshSyncStatusCache() async {
+        if let remoteStatus = try? await cloudStorage.getChatSyncStatus(),
+           let lastUpdated = remoteStatus.lastUpdated {
+            saveSyncStatus(count: remoteStatus.count, lastUpdated: lastUpdated)
         }
     }
 
