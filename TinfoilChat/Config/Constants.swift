@@ -51,6 +51,11 @@ enum Constants {
         static let cleanupThresholdSeconds: TimeInterval = 90     // 1.5 minutes
     }
 
+    enum Context {
+        static let defaultMaxMessages = 75
+        static let maxMessagesLimit = 200
+    }
+
     enum Sync {
         static let chatSyncIntervalSeconds: TimeInterval = 60.0
         static let profileSyncIntervalSeconds: TimeInterval = 300.0  // 5 minutes
