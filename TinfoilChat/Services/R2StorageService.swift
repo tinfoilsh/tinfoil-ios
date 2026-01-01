@@ -282,16 +282,62 @@ class R2StorageService: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.allHTTPHeaderFields = try await getHeaders()
-        
+
         let body = UpdateMetadataRequest(conversationId: chatId, metadata: metadata)
         request.httpBody = try JSONEncoder().encode(body)
-        
+
         let (_, response) = try await URLSession.shared.data(for: request)
-        
+
         guard let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200 else {
             throw R2StorageError.metadataUpdateFailed
         }
+    }
+
+    // MARK: - Sync Status Operations
+
+    /// Get chat sync status (count and lastUpdated) for efficient sync checking
+    func getChatSyncStatus() async throws -> ChatSyncStatus {
+        let url = URL(string: "\(apiBaseURL)/api/chats/sync-status")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.allHTTPHeaderFields = try await getHeaders()
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw R2StorageError.listFailed
+        }
+
+        return try JSONDecoder().decode(ChatSyncStatus.self, from: data)
+    }
+
+    /// Get chats updated since a specific timestamp
+    func getChatsUpdatedSince(since: String, includeContent: Bool = false) async throws -> ChatListResponse {
+        var components = URLComponents(string: "\(apiBaseURL)/api/chats/updated-since")!
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "since", value: since)
+        ]
+
+        if includeContent {
+            queryItems.append(URLQueryItem(name: "includeContent", value: "true"))
+        }
+
+        components.queryItems = queryItems
+
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        request.allHTTPHeaderFields = try await getHeaders()
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw R2StorageError.listFailed
+        }
+
+        return try JSONDecoder().decode(ChatListResponse.self, from: data)
     }
 }
 

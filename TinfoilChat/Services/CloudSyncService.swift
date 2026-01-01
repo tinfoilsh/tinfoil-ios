@@ -72,9 +72,10 @@ class CloudSyncService: ObservableObject {
     private let deletedChatsTracker = DeletedChatsTracker.shared
     private let streamingTracker = StreamingTracker.shared
     private let reencryptionTracker = ReencryptionTracker()
-    
-    // Constants
-    
+
+    // UserDefaults key for sync status cache
+    private let syncStatusKey = "tinfoil-chat-sync-status"
+
     private init() {}
     
     // MARK: - Initialization
@@ -673,7 +674,286 @@ class CloudSyncService: ObservableObject {
         syncErrors = result.errors
         return result
     }
-    
+
+    // MARK: - Smart Sync Operations
+
+    /// Check if sync is needed by comparing with cached status
+    func checkSyncStatus() async -> SyncStatusResult {
+        // Check for local unsynced changes first
+        let unsyncedChats = await getUnsyncedChats()
+        let hasLocalChanges = !unsyncedChats.filter { !$0.isBlankChat && !$0.hasTemporaryId && !$0.messages.isEmpty }.isEmpty
+
+        if hasLocalChanges {
+            return SyncStatusResult(
+                needsSync: true,
+                reason: .localChanges,
+                remoteCount: nil,
+                remoteLastUpdated: nil
+            )
+        }
+
+        // Get remote sync status
+        do {
+            let remoteStatus = try await r2Storage.getChatSyncStatus()
+
+            // Get cached status
+            let cachedStatus = getCachedSyncStatus()
+
+            // Compare with cached status
+            if let cached = cachedStatus {
+                if remoteStatus.count != cached.count {
+                    return SyncStatusResult(
+                        needsSync: true,
+                        reason: .countChanged,
+                        remoteCount: remoteStatus.count,
+                        remoteLastUpdated: remoteStatus.lastUpdated
+                    )
+                }
+
+                if let remoteUpdated = remoteStatus.lastUpdated,
+                   let cachedUpdated = cached.lastUpdated,
+                   remoteUpdated != cachedUpdated {
+                    return SyncStatusResult(
+                        needsSync: true,
+                        reason: .updated,
+                        remoteCount: remoteStatus.count,
+                        remoteLastUpdated: remoteStatus.lastUpdated
+                    )
+                }
+
+                return SyncStatusResult(
+                    needsSync: false,
+                    reason: .noChanges,
+                    remoteCount: remoteStatus.count,
+                    remoteLastUpdated: remoteStatus.lastUpdated
+                )
+            }
+
+            // No cached status - need full sync
+            return SyncStatusResult(
+                needsSync: true,
+                reason: .countChanged,
+                remoteCount: remoteStatus.count,
+                remoteLastUpdated: remoteStatus.lastUpdated
+            )
+        } catch {
+            return SyncStatusResult(
+                needsSync: true,
+                reason: .error,
+                remoteCount: nil,
+                remoteLastUpdated: nil
+            )
+        }
+    }
+
+    /// Sync only chats that changed since last sync
+    private func syncChangedChats(since: String) async -> SyncResult {
+        var result = SyncResult()
+
+        do {
+            let changedChats = try await r2Storage.getChatsUpdatedSince(since: since, includeContent: true)
+
+            _ = try? await encryptionService.initialize()
+
+            var chatsNeedingReencryption: [StoredChat] = []
+
+            for remoteChat in changedChats.conversations {
+                if deletedChatsTracker.isDeleted(remoteChat.id) {
+                    continue
+                }
+
+                if !(await shouldProcessRemoteChat(remoteChat)) {
+                    continue
+                }
+
+                guard let content = remoteChat.content else {
+                    continue
+                }
+
+                do {
+                    guard let contentData = content.data(using: .utf8) else {
+                        throw CloudSyncError.invalidBase64
+                    }
+
+                    let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
+
+                    do {
+                        let decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
+                        var decryptedChat = decryptionResult.value
+
+                        if let createdDate = parseISODate(remoteChat.createdAt) {
+                            decryptedChat.createdAt = createdDate
+                        }
+                        if let updatedDate = parseISODate(remoteChat.updatedAt) {
+                            decryptedChat.updatedAt = updatedDate
+                        }
+
+                        if decryptedChat.modelType == nil {
+                            decryptedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+                        }
+
+                        await saveChatToStorage(decryptedChat)
+                        await markChatAsSynced(decryptedChat.id, version: decryptedChat.syncVersion)
+                        result = SyncResult(
+                            uploaded: result.uploaded,
+                            downloaded: result.downloaded + 1,
+                            errors: result.errors
+                        )
+
+                        if decryptionResult.usedFallbackKey {
+                            chatsNeedingReencryption.append(decryptedChat)
+                        }
+                    } catch {
+                        let placeholder = await createEncryptedPlaceholder(
+                            remoteChat: remoteChat,
+                            encryptedContent: content
+                        )
+                        await saveChatToStorage(placeholder)
+                        result = SyncResult(
+                            uploaded: result.uploaded,
+                            downloaded: result.downloaded + 1,
+                            errors: result.errors
+                        )
+                    }
+                } catch {
+                    let placeholder = await createEncryptedPlaceholder(
+                        remoteChat: remoteChat,
+                        encryptedContent: content
+                    )
+                    await saveChatToStorage(placeholder)
+                    result = SyncResult(
+                        uploaded: result.uploaded,
+                        downloaded: result.downloaded + 1,
+                        errors: result.errors
+                    )
+                }
+            }
+
+            for chat in chatsNeedingReencryption {
+                queueReencryption(for: chat, persistLocal: true)
+            }
+        } catch {
+            result = SyncResult(
+                uploaded: result.uploaded,
+                downloaded: result.downloaded,
+                errors: result.errors + ["Delta sync failed: \(error.localizedDescription)"]
+            )
+        }
+
+        return result
+    }
+
+    /// Smart sync - only sync if changes detected
+    func smartSync() async -> SyncResult {
+        guard !isSyncing else {
+            return SyncResult()
+        }
+
+        guard await r2Storage.isAuthenticated() else {
+            return SyncResult()
+        }
+
+        let statusCheck = await checkSyncStatus()
+
+        if !statusCheck.needsSync {
+            return SyncResult()
+        }
+
+        isSyncing = true
+        syncStatus = "Syncing..."
+        defer {
+            isSyncing = false
+            syncStatus = ""
+            lastSyncDate = Date()
+        }
+
+        var result = SyncResult()
+
+        // First, backup any unsynced local changes
+        if statusCheck.reason == .localChanges {
+            let backupResult = await backupUnsyncedChats()
+            result = SyncResult(
+                uploaded: backupResult.uploaded,
+                downloaded: 0,
+                errors: backupResult.errors
+            )
+        }
+
+        // If only timestamp changed (not count), try delta sync
+        if statusCheck.reason == .updated,
+           let cachedStatus = getCachedSyncStatus(),
+           let lastUpdated = cachedStatus.lastUpdated {
+            let deltaResult = await syncChangedChats(since: lastUpdated)
+            result = SyncResult(
+                uploaded: result.uploaded + deltaResult.uploaded,
+                downloaded: result.downloaded + deltaResult.downloaded,
+                errors: result.errors + deltaResult.errors
+            )
+
+            // Update cached status if delta sync succeeded
+            if deltaResult.errors.isEmpty {
+                if let count = statusCheck.remoteCount,
+                   let updated = statusCheck.remoteLastUpdated {
+                    saveSyncStatus(count: count, lastUpdated: updated)
+                }
+            } else {
+                // Delta sync failed, fall back to full sync
+                let fullResult = await syncAllChats()
+                result = SyncResult(
+                    uploaded: result.uploaded + fullResult.uploaded,
+                    downloaded: result.downloaded + fullResult.downloaded,
+                    errors: fullResult.errors
+                )
+
+                // Update cached status after full sync
+                if fullResult.errors.isEmpty,
+                   let count = statusCheck.remoteCount,
+                   let updated = statusCheck.remoteLastUpdated {
+                    saveSyncStatus(count: count, lastUpdated: updated)
+                }
+            }
+        } else {
+            // Count changed or no cached status - need full sync
+            let fullResult = await syncAllChats()
+            result = SyncResult(
+                uploaded: result.uploaded + fullResult.uploaded,
+                downloaded: result.downloaded + fullResult.downloaded,
+                errors: result.errors + fullResult.errors
+            )
+
+            // Update cached status after full sync
+            if fullResult.errors.isEmpty,
+               let count = statusCheck.remoteCount,
+               let updated = statusCheck.remoteLastUpdated {
+                saveSyncStatus(count: count, lastUpdated: updated)
+            }
+        }
+
+        syncErrors = result.errors
+        return result
+    }
+
+    /// Clear cached sync status (call on logout)
+    func clearSyncStatus() {
+        UserDefaults.standard.removeObject(forKey: syncStatusKey)
+    }
+
+    // MARK: - Sync Status Cache Helpers
+
+    private func getCachedSyncStatus() -> ChatSyncStatus? {
+        guard let data = UserDefaults.standard.data(forKey: syncStatusKey) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(ChatSyncStatus.self, from: data)
+    }
+
+    private func saveSyncStatus(count: Int, lastUpdated: String) {
+        let status = ChatSyncStatus(count: count, lastUpdated: lastUpdated)
+        if let data = try? JSONEncoder().encode(status) {
+            UserDefaults.standard.set(data, forKey: syncStatusKey)
+        }
+    }
+
     // MARK: - Delete Operations
     
     /// Delete a chat from cloud storage

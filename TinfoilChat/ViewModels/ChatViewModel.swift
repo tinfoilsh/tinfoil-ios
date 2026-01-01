@@ -350,8 +350,8 @@ class ChatViewModel: ObservableObject {
                 
                 // Perform sync in background
                 do {
-                    // Sync all chats
-                    let syncResult = await self.cloudSync.syncAllChats()
+                    // Use smart sync for periodic sync (checks if sync is needed first)
+                    let syncResult = await self.cloudSync.smartSync()
                     
                     // Update last sync date after successful sync
                     self.lastSyncDate = Date()

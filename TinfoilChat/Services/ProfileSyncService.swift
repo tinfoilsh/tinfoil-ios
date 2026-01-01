@@ -284,6 +284,48 @@ class ProfileSyncService: ObservableObject {
         cachedProfile = nil
         failedDecryptionData = nil
     }
+
+    // MARK: - Sync Status Operations
+
+    /// Get sync status to check if profile changed without fetching full data
+    func getSyncStatus() async -> ProfileSyncStatus? {
+        guard await isAuthenticated() else {
+            return nil
+        }
+
+        guard let url = URL(string: "\(apiBaseURL)/api/profile/sync-status") else {
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+
+        do {
+            request.allHTTPHeaderFields = try await getHeaders()
+        } catch {
+            return nil
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return nil
+            }
+
+            if httpResponse.statusCode == 401 || httpResponse.statusCode == 404 {
+                return ProfileSyncStatus(exists: false, version: nil, lastUpdated: nil)
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                return nil
+            }
+
+            return try JSONDecoder().decode(ProfileSyncStatus.self, from: data)
+        } catch {
+            return nil
+        }
+    }
 }
 
 // MARK: - Profile Sync Errors

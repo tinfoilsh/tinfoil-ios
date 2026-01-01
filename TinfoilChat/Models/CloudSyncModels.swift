@@ -297,6 +297,38 @@ struct ProfileUploadResponse: Codable {
     let message: String?
 }
 
+// MARK: - Sync Status Models
+
+/// Chat sync status from server (for efficient sync checking)
+struct ChatSyncStatus: Codable {
+    let count: Int
+    let lastUpdated: String?
+}
+
+/// Profile sync status from server (for efficient sync checking)
+struct ProfileSyncStatus: Codable {
+    let exists: Bool
+    let version: Int?
+    let lastUpdated: String?
+}
+
+/// Result of sync status check
+struct SyncStatusResult {
+    let needsSync: Bool
+    let reason: SyncStatusReason
+    let remoteCount: Int?
+    let remoteLastUpdated: String?
+}
+
+/// Reason for needing or not needing sync
+enum SyncStatusReason {
+    case noChanges
+    case countChanged
+    case updated
+    case localChanges
+    case error
+}
+
 // MARK: - Sync State Models
 
 /// Tracks deleted chats to prevent resurrection during sync
