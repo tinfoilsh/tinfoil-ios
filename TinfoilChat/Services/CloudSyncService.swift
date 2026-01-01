@@ -757,6 +757,9 @@ class CloudSyncService: ObservableObject {
 
             var chatsNeedingReencryption: [StoredChat] = []
 
+            let localChats = await getAllChatsFromStorage()
+            let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
+
             for remoteChat in changedChats.conversations {
                 if deletedChatsTracker.isDeleted(remoteChat.id) {
                     continue
@@ -764,6 +767,17 @@ class CloudSyncService: ObservableObject {
 
                 if !(await shouldProcessRemoteChat(remoteChat)) {
                     continue
+                }
+
+                // Skip if chat is locally modified or has active stream
+                if let localChat = localChatMap[remoteChat.id] {
+                    if localChat.locallyModified || localChat.hasActiveStream {
+                        continue
+                    }
+
+                    if streamingTracker.isStreaming(localChat.id) {
+                        continue
+                    }
                 }
 
                 guard let content = remoteChat.content else {
