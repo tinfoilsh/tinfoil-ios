@@ -129,7 +129,30 @@ class SettingsManager: ObservableObject {
             UserDefaults.standard.set(false, forKey: "isPersonalizationEnabled")
         }
     }
-    
+
+    /// Clear all personalization settings (call on logout with data deletion)
+    func clearPersonalization() {
+        // Clear personalization data from UserDefaults
+        UserDefaults.standard.removeObject(forKey: "isPersonalizationEnabled")
+        UserDefaults.standard.removeObject(forKey: "userNickname")
+        UserDefaults.standard.removeObject(forKey: "userProfession")
+        UserDefaults.standard.removeObject(forKey: "userTraits")
+        UserDefaults.standard.removeObject(forKey: "userAdditionalContext")
+        UserDefaults.standard.removeObject(forKey: "maxPromptMessages")
+        UserDefaults.standard.removeObject(forKey: "isUsingCustomPrompt")
+        UserDefaults.standard.removeObject(forKey: "customSystemPrompt")
+
+        // Reset in-memory state to defaults
+        isPersonalizationEnabled = false
+        nickname = ""
+        profession = ""
+        selectedTraits = []
+        additionalContext = ""
+        maxMessages = 15
+        isUsingCustomPrompt = false
+        customSystemPrompt = ""
+    }
+
     // Generate user preferences XML for system prompt
     func generateUserPreferencesXML() -> String {
         guard isPersonalizationEnabled else { return "" }
@@ -657,10 +680,17 @@ struct SettingsView: View {
                     // Clear encryption key and all local data
                     EncryptionService.shared.clearKey()
                     UserDefaults.standard.removeObject(forKey: "hasLaunchedBefore")
-                    
+
                     // Clear all chats from local storage
                     chatViewModel.clearAllLocalChats()
-                    
+
+                    // Clear personalization settings
+                    settings.clearPersonalization()
+                    ProfileManager.shared.clearProfile()
+
+                    // Clear sync status cache
+                    CloudSyncService.shared.clearSyncStatus()
+
                     await authManager.signOut()
                     dismiss()
                 }
