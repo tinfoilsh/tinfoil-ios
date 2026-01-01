@@ -171,7 +171,7 @@ class CloudMigrationService {
                 // If the chat has a temporary (UUID) ID, request a permanent ID from backend
                 var chatForUpload: Chat
                 if chat.hasTemporaryId {
-                    let idResponse = try await R2StorageService.shared.generateConversationId()
+                    let idResponse = try await CloudStorageService.shared.generateConversationId()
                     // Preserve original timestamps and content, just swap the ID
                     chatForUpload = Chat(
                         id: idResponse.conversationId,
@@ -195,11 +195,11 @@ class CloudMigrationService {
                 // Preserve streaming state when reconstructing for upload
                 chatForUpload.hasActiveStream = chat.hasActiveStream
 
-                // Create StoredChat format for R2
+                // Create StoredChat format for cloud storage
                 let storedChat = StoredChat(from: chatForUpload)
-                
-                // Upload to R2
-                try await R2StorageService.shared.uploadChat(storedChat)
+
+                // Upload to cloud
+                try await CloudStorageService.shared.uploadChat(storedChat)
                 migratedCount += 1
                 
                 // Small delay to avoid overwhelming the server

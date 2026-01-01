@@ -67,7 +67,7 @@ class CloudSyncService: ObservableObject {
     // MARK: - Private Properties
     private var uploadQueue: [String: Task<Void, Error>] = [:]
     private var streamingCallbacks: Set<String> = []
-    private let r2Storage = R2StorageService.shared
+    private let cloudStorage = CloudStorageService.shared
     private let encryptionService = EncryptionService.shared
     private let deletedChatsTracker = DeletedChatsTracker.shared
     private let streamingTracker = StreamingTracker.shared
@@ -117,7 +117,7 @@ class CloudSyncService: ObservableObject {
         }
         
         // Set token getter for both R2 storage and ProfileSync
-        r2Storage.setTokenGetter(tokenGetter)
+        cloudStorage.setTokenGetter(tokenGetter)
         ProfileSyncService.shared.setTokenGetter(tokenGetter)
         
     }
@@ -127,7 +127,7 @@ class CloudSyncService: ObservableObject {
     /// Backup a single chat to the cloud with rate limiting
     func backupChat(_ chatId: String, ensureLatestUpload: Bool = false) async throws {
         // Don't attempt backup if not authenticated
-        guard await r2Storage.isAuthenticated() else {
+        guard await cloudStorage.isAuthenticated() else {
             return
         }
         
@@ -204,7 +204,7 @@ class CloudSyncService: ObservableObject {
         
         // Convert to StoredChat and upload
         let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion + 1)
-        try await r2Storage.uploadChat(storedChat)
+        try await cloudStorage.uploadChat(storedChat)
         
         // Mark as synced
         await markChatAsSynced(chatId, version: storedChat.syncVersion)
@@ -241,7 +241,7 @@ class CloudSyncService: ObservableObject {
 
             do {
                 let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion + 1)
-                try await r2Storage.uploadChat(storedChat)
+                try await cloudStorage.uploadChat(storedChat)
                 await markChatAsSynced(chat.id, version: storedChat.syncVersion)
                 result = SyncResult(
                     uploaded: result.uploaded + 1,
@@ -270,7 +270,7 @@ class CloudSyncService: ObservableObject {
     ) async -> PaginatedChatsResult {
         let pageLimit = limit ?? Constants.Pagination.chatsPerPage
         // If not authenticated, fall back to local-only pagination
-        guard await r2Storage.isAuthenticated() else {
+        guard await cloudStorage.isAuthenticated() else {
             if loadLocal {
                 return await loadLocalChatsWithPagination(
                     limit: pageLimit,
@@ -283,7 +283,7 @@ class CloudSyncService: ObservableObject {
         do {
             // Fetch remote chats with pagination
             // includeContent: true to get the encrypted data directly
-            let remoteList = try await r2Storage.listChats(
+            let remoteList = try await cloudStorage.listChats(
                 limit: pageLimit,
                 continuationToken: continuationToken,
                 includeContent: true
@@ -480,7 +480,7 @@ class CloudSyncService: ObservableObject {
         // Then, get list of remote chats with content
         do {
             // Only fetch first page of chats during initial sync to match pagination
-            let remoteList = try await r2Storage.listChats(
+            let remoteList = try await cloudStorage.listChats(
                 limit: Constants.Pagination.chatsPerPage,
                 includeContent: true
             )
@@ -694,7 +694,7 @@ class CloudSyncService: ObservableObject {
 
         // Get remote sync status
         do {
-            let remoteStatus = try await r2Storage.getChatSyncStatus()
+            let remoteStatus = try await cloudStorage.getChatSyncStatus()
 
             // Get cached status
             let cachedStatus = getCachedSyncStatus()
@@ -751,7 +751,7 @@ class CloudSyncService: ObservableObject {
         var result = SyncResult()
 
         do {
-            let changedChats = try await r2Storage.getChatsUpdatedSince(since: since, includeContent: true)
+            let changedChats = try await cloudStorage.getChatsUpdatedSince(since: since, includeContent: true)
 
             _ = try? await encryptionService.initialize()
 
@@ -863,7 +863,7 @@ class CloudSyncService: ObservableObject {
             return SyncResult()
         }
 
-        guard await r2Storage.isAuthenticated() else {
+        guard await cloudStorage.isAuthenticated() else {
             return SyncResult()
         }
 
@@ -976,19 +976,19 @@ class CloudSyncService: ObservableObject {
         deletedChatsTracker.markAsDeleted(chatId)
         
         // Don't attempt deletion if not authenticated
-        guard await r2Storage.isAuthenticated() else {
+        guard await cloudStorage.isAuthenticated() else {
             return
         }
         
         do {
-            try await r2Storage.deleteChat(chatId)
+            try await cloudStorage.deleteChat(chatId)
             
             // Successfully deleted from cloud, can remove from tracker
             deletedChatsTracker.removeFromDeleted(chatId)
             
         } catch {
             // Silently fail if no auth token set
-            if let error = error as? R2StorageError,
+            if let error = error as? CloudStorageError,
                error == .authenticationRequired {
                 return
             }
@@ -1087,7 +1087,7 @@ class CloudSyncService: ObservableObject {
     }
 
     private func performReencryption(for chat: StoredChat, persistLocal: Bool) async {
-        guard await r2Storage.isAuthenticated() else { return }
+        guard await cloudStorage.isAuthenticated() else { return }
 
         // Ensure encryption service is initialized with the current default key
         _ = try? await encryptionService.initialize()
@@ -1118,7 +1118,7 @@ class CloudSyncService: ObservableObject {
         }
 
         do {
-            try await r2Storage.uploadChat(storedForUpload)
+            try await cloudStorage.uploadChat(storedForUpload)
             await markChatAsSynced(chatForUpload.id, version: newVersion)
         } catch {
             #if DEBUG
@@ -1280,7 +1280,7 @@ class CloudSyncService: ObservableObject {
 
             do {
                 // Re-encrypt the chat with the new key by forcing a sync
-                guard await r2Storage.isAuthenticated() else { continue }
+                guard await cloudStorage.isAuthenticated() else { continue }
                 
                 // Increment sync version to force upload
                 var chatToReencrypt = chat
@@ -1292,7 +1292,7 @@ class CloudSyncService: ObservableObject {
                 
                 // Upload to cloud (will be encrypted with new key)
                 let storedChat = StoredChat(from: chatToReencrypt)
-                try await r2Storage.uploadChat(storedChat)
+                try await cloudStorage.uploadChat(storedChat)
                 await markChatAsSynced(chatToReencrypt.id, version: chatToReencrypt.syncVersion)
                 
                 result.uploaded += 1
@@ -1315,7 +1315,7 @@ class CloudSyncService: ObservableObject {
         var errors: [String] = []
 
         // Require authentication to contact backend
-        guard await r2Storage.isAuthenticated() else {
+        guard await cloudStorage.isAuthenticated() else {
             return (0, [])
         }
 
@@ -1327,7 +1327,7 @@ class CloudSyncService: ObservableObject {
         for chat in candidates {
             do {
                 // Get a server-generated conversation ID
-                let idResponse = try await r2Storage.generateConversationId()
+                let idResponse = try await cloudStorage.generateConversationId()
 
                 // Preserve content and metadata while swapping the ID
                 let migratedChat = Chat(
@@ -1347,7 +1347,7 @@ class CloudSyncService: ObservableObject {
                 )
 
                 // Upload under new ID
-                try await r2Storage.uploadChat(StoredChat(from: migratedChat, syncVersion: chat.syncVersion + 1))
+                try await cloudStorage.uploadChat(StoredChat(from: migratedChat, syncVersion: chat.syncVersion + 1))
 
                 // Save new chat locally and delete the old one
                 await saveChatToStorage(StoredChat(from: migratedChat, syncVersion: chat.syncVersion + 1))
@@ -1356,7 +1356,7 @@ class CloudSyncService: ObservableObject {
                 await markChatAsSynced(migratedChat.id, version: chat.syncVersion + 1)
 
                 // Best-effort: delete old remote object if it exists
-                try? await r2Storage.deleteChat(chat.id)
+                try? await cloudStorage.deleteChat(chat.id)
 
                 migrated += 1
             } catch {
