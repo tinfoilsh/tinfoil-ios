@@ -80,9 +80,11 @@ class ThinkingSummaryService {
 
                 if let summary = result.choices.first?.message.content,
                    !summary.isEmpty {
-                    let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
-                    self.currentSummary = trimmedSummary
-                    completion(trimmedSummary)
+                    let cleanSummary = Self.cleanupSummary(summary)
+                    if !cleanSummary.isEmpty {
+                        self.currentSummary = cleanSummary
+                        completion(cleanSummary)
+                    }
                 }
             } catch {
                 // Silently fail - summary is optional enhancement
@@ -102,5 +104,15 @@ class ThinkingSummaryService {
     /// Get the current summary without generating a new one
     var summary: String {
         currentSummary
+    }
+
+    /// Clean up the generated summary: lowercase, remove quotes, dots, and possessives
+    private static func cleanupSummary(_ summary: String) -> String {
+        summary
+            .lowercased()
+            .replacingOccurrences(of: "[\".]", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\b(my|your|yours|mine|our|ours|their|theirs|his|her|hers)\\b", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

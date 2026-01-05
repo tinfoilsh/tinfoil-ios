@@ -2872,33 +2872,25 @@ class ChatViewModel: ObservableObject {
 
 // MARK: - LLM Title Generation
 extension ChatViewModel {
-    /// Generates a concise chat title using a free LLM, based on the first few messages.
+    /// Generates a concise chat title using the title model, based on the assistant's first response.
     fileprivate func generateLLMTitle(from messages: [Message]) async -> String? {
-        // Require at least one message
-        guard !messages.isEmpty else { return nil }
-
-        // Look for a title generation model first (search ALL models, not just availableModels)
-        // Title models are not shown in UI but are available for internal use
-        let allModelTypes = AppConfig.shared.appModels.map { ModelType(from: $0) }
-
-        // Prefer a free title model if available
-        let titleModel = allModelTypes.first { $0.type == "title" && $0.isFree }
-
-        // Fall back to any free chat model
-        let freeModels = AppConfig.shared.availableModels.filter { $0.isFree }
-
-        guard let modelToUse = titleModel ?? freeModels.first else {
+        // Find the first assistant message
+        guard let assistantMessage = messages.first(where: { $0.role == .assistant }),
+              !assistantMessage.content.isEmpty else {
             return nil
         }
 
-        // Title models don't stream
-        let shouldStream = modelToUse.type != "title"
+        // Look for a title generation model
+        let allModelTypes = AppConfig.shared.appModels.map { ModelType(from: $0) }
+        guard let titleModel = allModelTypes.first(where: { $0.type == "title" }) else {
+            return nil
+        }
 
-        // Prepare conversation snippet (first few messages)
-        let snippet = messages.prefix(4).map { msg -> String in
-            let role = (msg.role == .user) ? "USER" : "ASSISTANT"
-            return "\(role): \(msg.content.prefix(500))"
-        }.joined(separator: "\n\n")
+        // Truncate content to word threshold
+        let words = assistantMessage.content.split(separator: " ", omittingEmptySubsequences: true)
+        let truncatedContent = words
+            .prefix(Constants.TitleGeneration.wordThreshold)
+            .joined(separator: " ")
 
         // Ensure client is available
         if client == nil {
@@ -2911,57 +2903,30 @@ extension ChatViewModel {
         }
         guard let client else { return nil }
 
-        let titlePrompt = "You are a conversation title generator. Your job is to generate a title for the following conversation between the USER and the ASSISTANT. Generate a concise, descriptive title (max 15 tokens) for this conversation. Output ONLY the title, nothing else."
-
-        // Create a single user message for the query (system prompt will be handled by ChatQueryBuilder)
-        let userMessage = Message(
-            role: .user,
-            content: "Generate a title for this conversation:\n\n\(snippet)"
+        let query = ChatQuery(
+            messages: [
+                .system(.init(content: .textContent(Constants.TitleGeneration.systemPrompt))),
+                .user(.init(content: .string(truncatedContent)))
+            ],
+            model: titleModel.modelName,
+            maxCompletionTokens: Constants.TitleGeneration.maxTokens
         )
 
-
-        let query = ChatQueryBuilder.buildQuery(
-            modelId: modelToUse.modelName,
-            systemPrompt: titlePrompt,
-            rules: "",
-            conversationMessages: [userMessage],
-            maxMessages: 1,
-            stream: shouldStream
-        )
-
-        // Collect response - use appropriate method based on streaming
-        var buffer = ""
         do {
-            if shouldStream {
-                // Use streaming API for chat models
-                let stream: AsyncThrowingStream<ChatStreamResult, Error> = client.chatsStream(query: query)
-                for try await chunk in stream {
-                    if let deltaContent = chunk.choices.first?.delta.content, !deltaContent.isEmpty {
-                        buffer += deltaContent
-                    }
-                }
-            } else {
-                // Use non-streaming API for title models
-                // OpenAI/TinfoilAI has a chats method that returns ChatResult
-                let result: ChatResult = try await client.chats(query: query)
-                buffer = result.choices.first?.message.content ?? ""
+            let result: ChatResult = try await client.chats(query: query)
+            let title = result.choices.first?.message.content ?? ""
+
+            let cleanTitle = title
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "^[\"']|[\"']$", with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !cleanTitle.isEmpty, cleanTitle.count <= Constants.TitleGeneration.maxTitleLength else {
+                return nil
             }
+            return cleanTitle
         } catch {
             return nil
         }
-
-        let raw = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else {
-            return nil
-        }
-
-        // Clean quotes and clamp length
-        let clean = raw
-            .replacingOccurrences(of: "^\"|\"$", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "^'|'$", with: "", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !clean.isEmpty, clean.count <= 80 else { return nil }
-        return clean
     }
 }
