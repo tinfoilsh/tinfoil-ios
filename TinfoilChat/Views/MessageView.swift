@@ -1221,7 +1221,7 @@ struct UserMessageEditView: View {
                 .textFieldStyle(.plain)
                 .font(.body)
                 .foregroundColor(textColor)
-                .lineLimit(1...20)
+                .lineLimit(1...4)
                 .focused($isFocused)
                 .onAppear {
                     isFocused = true
