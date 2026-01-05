@@ -478,7 +478,6 @@ class ChatViewModel: ObservableObject {
     }
 
     private func setupTinfoilClient() {
-        // Prevent concurrent initialization
         guard !isClientInitializing else {
             return
         }
@@ -487,10 +486,7 @@ class ChatViewModel: ObservableObject {
         verification.error = nil
         verification.isVerifying = true
 
-        // Shutdown existing client before creating new one
-        let oldClient = client
-        client = nil
-        oldClient?.shutdown()
+        client = nil  // Just nil out the old client
 
         Task {
             do {
@@ -500,7 +496,7 @@ class ChatViewModel: ObservableObject {
                 client = try await TinfoilAI.create(
                     apiKey: apiKey,
                     onVerification: { [weak self] verificationDoc in
-                        Task { @MainActor in
+                        DispatchQueue.main.async {
                             guard let self = self else { return }
 
                             self.verificationDocument = verificationDoc
@@ -521,10 +517,6 @@ class ChatViewModel: ObservableObject {
                     }
                 )
 
-                // Brief delay to allow the verifier's network connections to close
-                try? await Task.sleep(nanoseconds: 500_000_000)
-
-                // Mark client initialization as complete
                 await MainActor.run {
                     self.isClientInitializing = false
                 }
@@ -541,7 +533,6 @@ class ChatViewModel: ObservableObject {
             }
         }
     }
-    
     
     func retryClientSetup() {
         guard client == nil || (!isVerified && !isVerifying && verificationError != nil) else {
