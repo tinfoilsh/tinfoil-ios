@@ -220,6 +220,13 @@ struct MessageView: View {
                         Spacer()
                     }
                     .padding(.vertical, 12)
+
+                    // AI disclaimer - only on the last assistant message
+                    if isLastMessage {
+                        Text("AI can make mistakes. Verify important information.")
+                            .font(.system(size: 11))
+                            .foregroundColor(isDarkMode ? .white.opacity(0.35) : .black.opacity(0.35))
+                    }
                 }
                 }
                 .padding(.vertical, 8)
