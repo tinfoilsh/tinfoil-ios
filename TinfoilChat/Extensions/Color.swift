@@ -28,6 +28,8 @@ extension Color {
     static let cardSurfaceLight = Color.white
     static let chatBackgroundDark = Color(hex: "121212")
     static let chatBackgroundLight = Color.white
+    static let actionButtonBackgroundDark = Color.white.opacity(0.08)
+    static let actionButtonBackgroundLight = Color.black.opacity(0.05)
     static let sidebarBackgroundDark = Color(hex: "121212")
     static let sidebarBackgroundLight = Color.white
     static let settingsBackgroundDark = Color(hex: "121212")
@@ -92,5 +94,9 @@ extension Color {
 
     static func userMessageForeground(isDarkMode: Bool) -> Color {
         isDarkMode ? userMessageForegroundDark : userMessageForegroundLight
+    }
+
+    static func actionButtonBackground(isDarkMode: Bool) -> Color {
+        isDarkMode ? actionButtonBackgroundDark : actionButtonBackgroundLight
     }
 }
