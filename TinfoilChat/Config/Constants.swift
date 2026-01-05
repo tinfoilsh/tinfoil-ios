@@ -30,6 +30,7 @@ enum Constants {
         static let scrollToBottomButtonSize: CGFloat = 27
         static let scrollToBottomIconSize: CGFloat = 16
         static let tableMaxColumnWidth: CGFloat = 300
+        static let actionButtonCornerRadius: CGFloat = 6
     }
 
     enum API {

@@ -34,6 +34,8 @@ struct MessageView: View {
     @State private var showRawContentModal = false
     @State private var isEditMode = false
     @State private var editedContent = ""
+    @State private var showUserMessageActions = false
+    @State private var showSelectableText = false
 
     var body: some View {
         HStack {
@@ -175,7 +177,7 @@ struct MessageView: View {
                 if message.role == .assistant &&
                    (!message.content.isEmpty || message.thoughts != nil) &&
                    !(isLoading && isLastMessage) {
-                    HStack(spacing: 16) {
+                    HStack(spacing: 8) {
                         Button {
                             Task { @MainActor in
                                 showRawContentModal = true
@@ -188,6 +190,10 @@ struct MessageView: View {
                                     .font(.system(size: 12))
                             }
                             .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.actionButtonBackground(isDarkMode: isDarkMode))
+                            .cornerRadius(Constants.UI.actionButtonCornerRadius)
                         }
                         .buttonStyle(PlainButtonStyle())
 
@@ -203,13 +209,17 @@ struct MessageView: View {
                                         .font(.system(size: 12))
                                 }
                                 .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.actionButtonBackground(isDarkMode: isDarkMode))
+                                .cornerRadius(Constants.UI.actionButtonCornerRadius)
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
 
                         Spacer()
                     }
-                    .padding(.top, 4)
+                    .padding(.vertical, 12)
                 }
                 }
                 .padding(.vertical, 8)
@@ -227,11 +237,12 @@ struct MessageView: View {
                 .cornerRadius(16)
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
                 .onLongPressGesture {
-                    if (message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil)) ||
-                       (message.role == .user && !message.content.isEmpty) {
+                    if message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil) {
                         Task { @MainActor in
                             showRawContentModal = true
                         }
+                    } else if message.role == .user && !message.content.isEmpty {
+                        showUserMessageActions = true
                     }
                 }
                 .onChange(of: message.id) { _, _ in
@@ -239,39 +250,6 @@ struct MessageView: View {
                     editedContent = ""
                 }
 
-                // Action buttons for user messages - outside the bubble
-                if message.role == .user && !message.content.isEmpty && !isEditMode && !viewModel.isLoading {
-                    HStack(spacing: 16) {
-                        Spacer()
-
-                        Button {
-                            viewModel.regenerateMessage(at: messageIndex)
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: 14))
-                                Text("Regenerate")
-                                    .font(.system(size: 14))
-                            }
-                            .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
-                        }
-                        .buttonStyle(PlainButtonStyle())
-
-                        Button {
-                            editedContent = message.content
-                            isEditMode = true
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "square.and.pencil")
-                                    .font(.system(size: 14))
-                                Text("Edit")
-                                    .font(.system(size: 14))
-                            }
-                            .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                }
             }
         }
         .padding(.horizontal, 4)
@@ -284,6 +262,23 @@ struct MessageView: View {
         .sheet(isPresented: $showRawContentModal) {
             RawContentModalView(message: message)
                 .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showSelectableText) {
+            UserMessageSelectView(content: message.content)
+                .presentationDetents([.medium, .large])
+        }
+        .confirmationDialog("Message Actions", isPresented: $showUserMessageActions, titleVisibility: .hidden) {
+            Button("Copy") {
+                UIPasteboard.general.string = message.content
+            }
+            Button("Edit") {
+                editedContent = message.content
+                isEditMode = true
+            }
+            Button("Select") {
+                showSelectableText = true
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -450,6 +445,30 @@ private struct SelectableTextView: UIViewRepresentable {
             uiView.text = text
         }
         uiView.textColor = colorScheme == .dark ? UIColor(white: 1.0, alpha: 0.92) : UIColor(white: 0.0, alpha: 0.92)
+    }
+}
+
+private struct UserMessageSelectView: View {
+    let content: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            SelectableTextView(text: content)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(20)
+                .background(Color.backgroundPrimary)
+                .navigationTitle("Select Text")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Close") {
+                            dismiss()
+                        }
+                    }
+                }
+        }
+        .preferredColorScheme(.dark)
     }
 }
 
@@ -1193,12 +1212,16 @@ struct UserMessageEditView: View {
     }
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Messages below will be deleted and regenerated.")
+                .font(.system(size: 12))
+                .foregroundColor(secondaryTextColor)
+
             TextField("Edit message...", text: $content, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.body)
                 .foregroundColor(textColor)
-                .lineLimit(1...10)
+                .lineLimit(1...20)
                 .focused($isFocused)
                 .onAppear {
                     isFocused = true
@@ -1210,10 +1233,6 @@ struct UserMessageEditView: View {
                 }
 
             HStack(spacing: 8) {
-                Text("Messages below will be deleted and regenerated.")
-                    .font(.system(size: 11))
-                    .foregroundColor(secondaryTextColor)
-
                 Spacer()
 
                 Button(action: onCancel) {
@@ -1237,7 +1256,7 @@ struct UserMessageEditView: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Color.blue)
+                        .background(Color.accentPrimary)
                         .cornerRadius(6)
                 }
                 .buttonStyle(PlainButtonStyle())
