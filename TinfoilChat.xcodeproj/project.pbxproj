@@ -462,7 +462,7 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tinfoilsh/tinfoil-swift";
 			requirement = {
-				branch = main;
+				branch = "feat/ehbp-support";
 				kind = branch;
 			};
 		};
