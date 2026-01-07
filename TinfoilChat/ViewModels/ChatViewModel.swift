@@ -671,18 +671,17 @@ class ChatViewModel: ObservableObject {
     /// Sends a user message and generates a response
     func sendMessage(text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        
-        
+
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        
-        // Update UI state  
+
+        // Update UI state
         isLoading = true
-        
+
         // Create and add user message
         let userMessage = Message(role: .user, content: text)
         addMessage(userMessage)
-        
+
         // If this is the first message, update creation date (title will be generated after assistant reply)
         if var chat = currentChat, chat.messages.count == 1 {
             // Update creation date to now (when first message is sent)
@@ -692,6 +691,17 @@ class ChatViewModel: ObservableObject {
             // Keep placeholder title for now; generate via LLM after first assistant response
             updateChat(chat)
         }
+
+        generateResponse()
+    }
+
+    /// Generates an assistant response for the current conversation (expects user message to already be in chat)
+    private func generateResponse() {
+        // Dismiss keyboard
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+
+        // Update UI state
+        isLoading = true
 
         // Create initial empty assistant message as a placeholder
         let assistantMessage = Message(role: .assistant, content: "", isCollapsed: true)
@@ -1510,11 +1520,9 @@ class ChatViewModel: ObservableObject {
             return
         }
 
-        let userMessageContent = chat.messages[lastUserMessageIndex].content
-
-        // Remove all messages from the last user message onwards (including the failed assistant response)
+        // Remove only messages AFTER the user message (keep the user message)
         var updatedChat = chat
-        updatedChat.messages = Array(chat.messages.prefix(lastUserMessageIndex))
+        updatedChat.messages = Array(chat.messages.prefix(lastUserMessageIndex + 1))
         updatedChat.locallyModified = true
         updatedChat.updatedAt = Date()
 
@@ -1523,11 +1531,10 @@ class ChatViewModel: ObservableObject {
         if let index = chats.firstIndex(where: { $0.id == chat.id }) {
             chats[index] = updatedChat
         }
-        objectWillChange.send()
 
-        // Save and immediately resend
+        // Save and generate response (without adding user message again)
         saveChats()
-        sendMessage(text: userMessageContent)
+        generateResponse()
     }
 
     /// Edits a user message at a specific index, removing all messages after it and resending with new content
@@ -1557,9 +1564,8 @@ class ChatViewModel: ObservableObject {
         if let index = chats.firstIndex(where: { $0.id == chat.id }) {
             chats[index] = updatedChat
         }
-        objectWillChange.send()
 
-        // Save and resend with the new content
+        // Save and resend with the new content (sendMessage will handle UI updates)
         saveChats()
         sendMessage(text: trimmedContent)
     }
