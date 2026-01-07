@@ -131,6 +131,7 @@ struct ChatListView: View {
         }
         .onChange(of: viewModel.scrollToBottomTrigger) { _, _ in
             userHasScrolled = false
+            viewModel.isScrollInteractionActive = false
             scrollTrigger = UUID()
         }
     }
