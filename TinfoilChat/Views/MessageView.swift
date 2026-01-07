@@ -895,6 +895,7 @@ struct CollapsibleThinkingBox: View {
                                 .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                                 .lineLimit(1)
                                 .truncationMode(.tail)
+                                .modifier(TextPulseAnimation())
                         } else {
                             HStack(spacing: 4) {
                                 Text("Thinking")
@@ -1014,7 +1015,7 @@ struct NoHighlightButtonStyle: ButtonStyle {
 struct PulsingAnimation: ViewModifier {
     let delay: Double
     @State private var isPulsing = false
-    
+
     func body(content: Content) -> some View {
         content
             .scaleEffect(isPulsing ? 1.0 : 0.6)
@@ -1029,6 +1030,23 @@ struct PulsingAnimation: ViewModifier {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     isPulsing = true
                 }
+            }
+    }
+}
+
+struct TextPulseAnimation: ViewModifier {
+    @State private var isPulsing = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isPulsing ? 1.0 : 0.5)
+            .animation(
+                Animation.easeInOut(duration: 1.0)
+                    .repeatForever(autoreverses: true),
+                value: isPulsing
+            )
+            .onAppear {
+                isPulsing = true
             }
     }
 }
