@@ -71,7 +71,7 @@ enum Constants {
     enum ThinkingSummary {
         static let minContentLength = 100
         static let minNewContentLength = 200
-        static let systemPrompt = "You are a consciousness summarizer. Generate a sentence (max 10 words) summarizing the following stream of consciousness. Output ONLY the summary in plain text; NEVER output markdown."
+        static let systemPrompt = "You are a consciousness summarizer. Generate a sentence (MIN 5 words, MAX 10 words) summarizing the following stream of consciousness. Output ONLY the summary in plain text; NEVER output markdown."
     }
 
     enum TitleGeneration {
