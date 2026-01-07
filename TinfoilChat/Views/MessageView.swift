@@ -852,18 +852,13 @@ struct CollapsibleThinkingBox: View {
             }) {
                 HStack {
                     if let seconds = generationTimeSeconds {
-                        HStack(spacing: 4) {
-                            Text("Thought")
-                                .font(.system(size: 16))
-                                .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
-                            Text("for \(String(format: "%.1f", seconds))s")
-                                .font(.subheadline)
-                                .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
-                        }
+                        Text("Thought for \(String(format: "%.1f", seconds))s")
+                            .font(.subheadline)
+                            .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
                     } else if isStreaming {
                         if let summary = thinkingSummary, !summary.isEmpty {
                             Text(summary)
-                                .font(.system(size: 14, weight: .medium))
+                                .font(.subheadline)
                                 .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                                 .lineLimit(1)
                                 .truncationMode(.tail)
