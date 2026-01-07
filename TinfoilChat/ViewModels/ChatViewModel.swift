@@ -26,6 +26,7 @@ class ChatViewModel: ObservableObject {
     @Published var shouldFocusInput: Bool = false
     @Published var isScrollInteractionActive: Bool = false
     @Published var isAtBottom: Bool = true
+    @Published var scrollToBottomTrigger: UUID = UUID()
     @Published var isClientInitializing: Bool = false
 
     // Verification properties - consolidated to reduce update frequency
@@ -1602,6 +1603,9 @@ class ChatViewModel: ObservableObject {
         if let index = chats.firstIndex(where: { $0.id == chat.id }) {
             chats[index] = updatedChat
         }
+
+        isScrollInteractionActive = false
+        scrollToBottomTrigger = UUID()
 
         saveChats()
         generateResponse()
