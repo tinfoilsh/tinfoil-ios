@@ -70,15 +70,12 @@ enum Constants {
 
     enum ThinkingSummary {
         static let minContentLength = 100
-        static let minNewContentLength = 50
-        static let maxTokens = 50
-        static let systemPrompt = "You are a thoughts summarizer. Generate a title or headline (max 5 words) summarizing the following thought process using a few words only. Output ONLY the headline in plain text. NEVER output markdown."
+        static let minNewContentLength = 200
+        static let systemPrompt = "You are a consciousness summarizer. Generate a sentence (max 10 words) summarizing the following stream of consciousness. Output ONLY the summary in plain text; NEVER output markdown."
     }
 
     enum TitleGeneration {
         static let wordThreshold = 100
-        static let maxTokens = 50
-        static let maxTitleLength = 50
-        static let systemPrompt = "You are a title generator. Generate a concise, descriptive title or headline (max 5 words) for the following text blob. Output ONLY the title in plain text. NEVER output markdown."
+        static let systemPrompt = "You are a title generator. Generate a concise, descriptive title (max 5 words) for the following conversation or text blob. Output ONLY the title in plain text. NEVER output markdown."
     }
 }

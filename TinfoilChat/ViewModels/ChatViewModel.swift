@@ -2909,7 +2909,6 @@ extension ChatViewModel {
                 .user(.init(content: .string(truncatedContent)))
             ],
             model: titleModel.modelName,
-            maxCompletionTokens: Constants.TitleGeneration.maxTokens
         )
 
         do {
@@ -2921,7 +2920,7 @@ extension ChatViewModel {
                 .replacingOccurrences(of: "^[\"']|[\"']$", with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            guard !cleanTitle.isEmpty, cleanTitle.count <= Constants.TitleGeneration.maxTitleLength else {
+            guard !cleanTitle.isEmpty else {
                 return nil
             }
             return cleanTitle
