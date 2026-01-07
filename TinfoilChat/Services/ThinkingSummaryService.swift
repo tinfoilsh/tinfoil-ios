@@ -73,7 +73,6 @@ class ThinkingSummaryService {
                         .user(.init(content: .string(thoughts)))
                     ],
                     model: modelName,
-                    maxCompletionTokens: Constants.ThinkingSummary.maxTokens
                 )
 
                 let result = try await client.chats(query: query)
@@ -106,13 +105,13 @@ class ThinkingSummaryService {
         currentSummary
     }
 
-    /// Clean up the generated summary: lowercase, remove quotes, dots, and possessives
+    /// Clean up the generated summary: remove quotes, dots, possessives, and capitalize
     private static func cleanupSummary(_ summary: String) -> String {
-        summary
-            .lowercased()
+        let cleaned = summary
             .replacingOccurrences(of: "[\".]", with: "", options: .regularExpression)
             .replacingOccurrences(of: "\\b(my|your|yours|mine|our|ours|their|theirs|his|her|hers)\\b", with: "", options: .regularExpression)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.prefix(1).uppercased() + cleaned.dropFirst()
     }
 }

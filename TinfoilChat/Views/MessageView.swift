@@ -851,11 +851,6 @@ struct CollapsibleThinkingBox: View {
                 }
             }) {
                 HStack {
-                    Image("tin")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 20, height: 20)
-                        .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                     if let seconds = generationTimeSeconds {
                         HStack(spacing: 4) {
                             Text("Thought")
