@@ -136,6 +136,10 @@ struct OptimizedChatListView: View {
                 isAtBottom = true
             }
         }
+        .onChange(of: viewModel.scrollToBottomTrigger) { _, _ in
+            userHasScrolled = false
+            scrollTrigger = UUID()
+        }
     }
 
     private func setupKeyboardObservers() {
