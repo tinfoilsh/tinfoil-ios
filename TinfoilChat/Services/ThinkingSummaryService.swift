@@ -15,7 +15,6 @@ class ThinkingSummaryService {
     static let shared = ThinkingSummaryService()
 
     private var isGenerating = false
-    private var lastThoughtsLength = 0
     private var currentSummary: String = ""
     private var generationTask: Task<Void, Never>?
 
@@ -31,16 +30,8 @@ class ThinkingSummaryService {
             return
         }
 
-        let thoughtsLength = thoughts.count
-
         // Only generate if we have enough content
-        guard thoughtsLength >= Constants.ThinkingSummary.minContentLength else {
-            return
-        }
-
-        // Only generate if we have enough new content since last generation
-        let newContentLength = thoughtsLength - lastThoughtsLength
-        guard newContentLength >= Constants.ThinkingSummary.minNewContentLength || lastThoughtsLength == 0 else {
+        guard thoughts.count >= Constants.ThinkingSummary.minContentLength else {
             return
         }
 
@@ -49,7 +40,6 @@ class ThinkingSummaryService {
             return
         }
 
-        lastThoughtsLength = thoughtsLength
         isGenerating = true
 
         // Cancel any pending generation
@@ -96,7 +86,6 @@ class ThinkingSummaryService {
         generationTask?.cancel()
         generationTask = nil
         isGenerating = false
-        lastThoughtsLength = 0
         currentSummary = ""
     }
 
