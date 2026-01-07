@@ -896,7 +896,7 @@ struct CollapsibleThinkingBox: View {
                 .padding(.vertical, 16)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(PlainButtonStyle())
+            .buttonStyle(NoHighlightButtonStyle())
             .frame(maxWidth: .infinity)
 
             if !isCollapsed {
@@ -984,6 +984,12 @@ struct InlineLoadingDotsView: View {
             }
         }
         .foregroundColor(isDarkMode ? .white.opacity(0.8) : Color.black.opacity(0.7))
+    }
+}
+
+struct NoHighlightButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
     }
 }
 
