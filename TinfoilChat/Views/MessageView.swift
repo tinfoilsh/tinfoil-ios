@@ -825,6 +825,7 @@ struct CollapsibleThinkingBox: View {
     let thinkingSummary: String?
 
     @State private var isCollapsed: Bool
+    @State private var contentVisible: Bool
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
 
     init(
@@ -846,21 +847,40 @@ struct CollapsibleThinkingBox: View {
         self.messageCollapsed = messageCollapsed
         self.thinkingSummary = thinkingSummary
         _isCollapsed = State(initialValue: messageCollapsed)
+        _contentVisible = State(initialValue: !messageCollapsed)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: {
-                if let tableView = findTableView() {
-                    UIView.performWithoutAnimation {
-                        isCollapsed.toggle()
-                        viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
-                        tableView.beginUpdates()
-                        tableView.endUpdates()
+                let newCollapsed = !isCollapsed
+
+                if newCollapsed {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        contentVisible = false
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        isCollapsed = true
+                        viewModel.setThoughtsCollapsed(for: messageId, collapsed: true)
+                        if let tableView = findTableView() {
+                            UIView.performWithoutAnimation {
+                                tableView.beginUpdates()
+                                tableView.endUpdates()
+                            }
+                        }
                     }
                 } else {
-                    isCollapsed.toggle()
-                    viewModel.setThoughtsCollapsed(for: messageId, collapsed: isCollapsed)
+                    isCollapsed = false
+                    viewModel.setThoughtsCollapsed(for: messageId, collapsed: false)
+                    if let tableView = findTableView() {
+                        UIView.performWithoutAnimation {
+                            tableView.beginUpdates()
+                            tableView.endUpdates()
+                        }
+                    }
+                    withAnimation(.easeIn(duration: 0.2).delay(0.05)) {
+                        contentVisible = true
+                    }
                 }
             }) {
                 HStack {
@@ -910,26 +930,24 @@ struct CollapsibleThinkingBox: View {
                         .padding(.vertical, 12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .opacity(contentVisible ? 1 : 0)
             }
         }
-        .animation(nil, value: isCollapsed)
         .background(Color.clear)
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .stroke(isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2), lineWidth: 1)
         )
-        .cornerRadius(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(.vertical, 4)
-        .clipped()
         .preference(key: ThinkingBoxExpansionPreferenceKey.self, value: !isCollapsed ? messageId : nil)
         .onChange(of: isStreaming) { oldValue, newValue in
         }
         .onChange(of: messageCollapsed) { _, newValue in
             if newValue != isCollapsed {
-                UIView.performWithoutAnimation {
-                    isCollapsed = newValue
-                }
+                isCollapsed = newValue
+                contentVisible = !newValue
             }
         }
     }
