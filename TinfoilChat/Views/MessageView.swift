@@ -34,7 +34,6 @@ struct MessageView: View {
     @State private var showRawContentModal = false
     @State private var isEditMode = false
     @State private var editedContent = ""
-    @State private var showUserMessageActions = false
     @State private var showSelectableText = false
 
     var body: some View {
@@ -190,10 +189,6 @@ struct MessageView: View {
                                     .font(.system(size: 12))
                             }
                             .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.actionButtonBackground(isDarkMode: isDarkMode))
-                            .cornerRadius(Constants.UI.actionButtonCornerRadius)
                         }
                         .buttonStyle(PlainButtonStyle())
 
@@ -209,10 +204,6 @@ struct MessageView: View {
                                         .font(.system(size: 12))
                                 }
                                 .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Color.actionButtonBackground(isDarkMode: isDarkMode))
-                                .cornerRadius(Constants.UI.actionButtonCornerRadius)
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
@@ -228,6 +219,7 @@ struct MessageView: View {
                             .foregroundColor(isDarkMode ? .white.opacity(0.35) : .black.opacity(0.35))
                     }
                 }
+
                 }
                 .padding(.vertical, 8)
                 .padding(.horizontal, message.role == .user ? 12 : 0)
@@ -249,12 +241,46 @@ struct MessageView: View {
                             showRawContentModal = true
                         }
                     } else if message.role == .user && !message.content.isEmpty {
-                        showUserMessageActions = true
+                        showSelectableText = true
                     }
                 }
                 .onChange(of: message.id) { _, _ in
                     isEditMode = false
                     editedContent = ""
+                }
+
+                // Add action buttons for user messages (only when not in edit mode)
+                if message.role == .user && !message.content.isEmpty && !isEditMode {
+                    HStack(spacing: 8) {
+                        Spacer()
+
+                        Button {
+                            UIPasteboard.general.string = message.content
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 12))
+                                Text("Copy")
+                                    .font(.system(size: 12))
+                            }
+                            .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        Button {
+                            editedContent = message.content
+                            isEditMode = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "square.and.pencil")
+                                    .font(.system(size: 12))
+                                Text("Edit")
+                                    .font(.system(size: 12))
+                            }
+                            .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
                 }
 
             }
@@ -273,19 +299,6 @@ struct MessageView: View {
         .sheet(isPresented: $showSelectableText) {
             UserMessageSelectView(content: message.content)
                 .presentationDetents([.medium, .large])
-        }
-        .confirmationDialog("Message Actions", isPresented: $showUserMessageActions, titleVisibility: .hidden) {
-            Button("Copy") {
-                UIPasteboard.general.string = message.content
-            }
-            Button("Edit") {
-                editedContent = message.content
-                isEditMode = true
-            }
-            Button("Select") {
-                showSelectableText = true
-            }
-            Button("Cancel", role: .cancel) {}
         }
     }
 
