@@ -1565,9 +1565,20 @@ class ChatViewModel: ObservableObject {
             chats[index] = updatedChat
         }
 
-        // Save and resend with the new content (sendMessage will handle UI updates)
         saveChats()
-        sendMessage(text: trimmedContent)
+
+        // Dismiss keyboard
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+
+        // Add the user message and generate response directly, bypassing sendMessage.
+        // sendMessage updates createdAt when messages.count == 1, which triggers
+        // tableOpacity = 0 in ChatListView and causes messages to disappear.
+        isLoading = true
+
+        let userMessage = Message(role: .user, content: trimmedContent)
+        addMessage(userMessage)
+
+        generateResponse()
     }
 
     /// Regenerates the response for a user message at a specific index
@@ -1581,8 +1592,19 @@ class ChatViewModel: ObservableObject {
             return
         }
 
-        let originalContent = chat.messages[messageIndex].content
-        editMessage(at: messageIndex, newContent: originalContent)
+        // Keep the user message, only remove messages after it (assistant responses)
+        var updatedChat = chat
+        updatedChat.messages = Array(chat.messages.prefix(messageIndex + 1))
+        updatedChat.locallyModified = true
+        updatedChat.updatedAt = Date()
+
+        currentChat = updatedChat
+        if let index = chats.firstIndex(where: { $0.id == chat.id }) {
+            chats[index] = updatedChat
+        }
+
+        saveChats()
+        generateResponse()
     }
 
     /// Shows the verifier sheet with current verification state
