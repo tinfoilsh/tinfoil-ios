@@ -31,6 +31,14 @@ struct MessageInputView: View {
         authManager.isAuthenticated
     }
 
+    // Check if audio input should be shown
+    private var showAudioButton: Bool {
+        hasPremiumAccess && AppConfig.shared.audioModel != nil
+    }
+
+    // State for pulsing animation
+    @State private var isPulsing = false
+
     @ViewBuilder
     var body: some View {
         if #available(iOS 26, *) {
@@ -90,6 +98,36 @@ struct MessageInputView: View {
 
                     Spacer()
 
+                    // Microphone button
+                    if showAudioButton {
+                        Button(action: handleAudioButtonTap) {
+                            Group {
+                                if viewModel.isTranscribing {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
+                                        .scaleEffect(0.8)
+                                } else {
+                                    Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
+                                        .font(.system(size: 16, weight: .semibold))
+                                }
+                            }
+                            .frame(width: 24, height: 24)
+                            .foregroundColor(viewModel.isRecording ? .red : (isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.circle)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                        .clipShape(.circle)
+                        .tint(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
+                        .opacity(viewModel.isRecording && isPulsing ? 0.5 : 1.0)
+                        .animation(viewModel.isRecording ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true) : .default, value: isPulsing)
+                        .onChange(of: viewModel.isRecording) { _, isRecording in
+                            isPulsing = isRecording
+                        }
+                        .disabled(viewModel.isLoading || viewModel.isTranscribing)
+                        .padding(.trailing, 4)
+                    }
+
                     Button(action: sendOrCancelMessage) {
                         Image(systemName: viewModel.isLoading ? "stop.fill" : "arrow.up")
                             .font(.system(size: 16, weight: .semibold))
@@ -109,7 +147,7 @@ struct MessageInputView: View {
             .padding(.horizontal, 12)
             .padding(.bottom, isKeyboardVisible ? 12 : 0)
         } else {
-            // iOS 25 and below with material effect
+            // Older iOS with material effect
             VStack(spacing: 0) {
                 // Text input area
                 CustomTextEditor(text: $messageText,
@@ -165,6 +203,36 @@ struct MessageInputView: View {
 
                     Spacer()
 
+                    // Microphone button
+                    if showAudioButton {
+                        Button(action: handleAudioButtonTap) {
+                            ZStack {
+                                Circle()
+                                    .fill(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
+                                    .frame(width: 32, height: 32)
+
+                                Group {
+                                    if viewModel.isTranscribing {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
+                                            .font(.system(size: 16, weight: .semibold))
+                                    }
+                                }
+                                .foregroundColor(viewModel.isRecording ? .red : (isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
+                            }
+                        }
+                        .opacity(viewModel.isRecording && isPulsing ? 0.5 : 1.0)
+                        .animation(viewModel.isRecording ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true) : .default, value: isPulsing)
+                        .onChange(of: viewModel.isRecording) { _, isRecording in
+                            isPulsing = isRecording
+                        }
+                        .disabled(viewModel.isLoading || viewModel.isTranscribing)
+                        .padding(.trailing, 4)
+                    }
+
                     Button(action: sendOrCancelMessage) {
                         ZStack {
                             Circle()
@@ -196,6 +264,22 @@ struct MessageInputView: View {
             viewModel.sendMessage(text: messageText)
             messageText = ""
             textHeight = Layout.defaultHeight
+        }
+    }
+
+    private func handleAudioButtonTap() {
+        Task {
+            if viewModel.isRecording {
+                if let transcription = await viewModel.stopAudioRecordingAndTranscribe() {
+                    if messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        messageText = transcription
+                    } else {
+                        messageText += " " + transcription
+                    }
+                }
+            } else {
+                await viewModel.startAudioRecording()
+            }
         }
     }
 }
