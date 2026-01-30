@@ -77,4 +77,10 @@ enum Constants {
         static let wordThreshold = 100
         static let systemPrompt = "Generate a concise, descriptive title of minimum 2 words, maximum 5 words for the following text. NEVER output markdown."
     }
+
+    enum Audio {
+        static let recordingTimeoutSeconds: TimeInterval = 600  // 10 minutes
+        static let sampleRate: Double = 44100.0
+        static let numberOfChannels: Int = 1  // Mono
+    }
 }
