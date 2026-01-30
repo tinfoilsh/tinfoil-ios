@@ -106,9 +106,14 @@ class ChatViewModel: ObservableObject {
     
     // Model properties
     @Published var currentModel: ModelType
-    
+
     // View state for verifier
     @Published var verifierView: VerifierView?
+
+    // Audio recording properties
+    @Published var isRecording: Bool = false
+    @Published var isTranscribing: Bool = false
+    @Published var audioError: String? = nil
     // Private properties
     private var client: TinfoilAI?
     private var currentTask: Task<Void, Error>?
@@ -2959,5 +2964,66 @@ extension ChatViewModel {
         } catch {
             return nil
         }
+    }
+
+    // MARK: - Audio Recording
+
+    /// Check if audio input is available (premium feature with audio model)
+    var canUseAudioInput: Bool {
+        hasPremiumAccess && AppConfig.shared.audioModel != nil
+    }
+
+    /// Start recording audio
+    func startAudioRecording() async {
+        guard canUseAudioInput else { return }
+
+        audioError = nil
+
+        let hasPermission = await AudioRecordingService.shared.requestPermission()
+        guard hasPermission else {
+            audioError = "Microphone access denied"
+            return
+        }
+
+        do {
+            try AudioRecordingService.shared.startRecording()
+            isRecording = true
+        } catch {
+            audioError = error.localizedDescription
+        }
+    }
+
+    /// Stop recording and transcribe the audio
+    func stopAudioRecordingAndTranscribe() async -> String? {
+        guard isRecording else { return nil }
+
+        isRecording = false
+
+        guard let fileURL = AudioRecordingService.shared.stopRecording(),
+              let audioModel = AppConfig.shared.audioModel else {
+            return nil
+        }
+
+        isTranscribing = true
+        defer { isTranscribing = false }
+
+        do {
+            let apiKey = await AppConfig.shared.getApiKey()
+            let transcription = try await AudioRecordingService.shared.transcribe(
+                fileURL: fileURL,
+                apiKey: apiKey,
+                model: audioModel.modelName
+            )
+            return transcription
+        } catch {
+            audioError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Cancel recording without transcribing
+    func cancelAudioRecording() {
+        isRecording = false
+        AudioRecordingService.shared.cancelRecording()
     }
 }
