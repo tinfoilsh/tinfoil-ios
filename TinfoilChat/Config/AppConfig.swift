@@ -322,4 +322,9 @@ class AppConfig: ObservableObject {
     var titleModel: AppModelConfig? {
         appModels.first { $0.type == "title" }
     }
+
+    /// Get the audio model for voice transcription
+    var audioModel: AppModelConfig? {
+        appModels.first { $0.type == "audio" }
+    }
 } 
