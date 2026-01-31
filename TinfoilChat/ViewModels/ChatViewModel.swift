@@ -3004,7 +3004,8 @@ extension ChatViewModel {
         isRecording = false
 
         guard let fileURL = AudioRecordingService.shared.stopRecording(),
-              let audioModel = AppConfig.shared.audioModel else {
+              let audioModel = AppConfig.shared.audioModel,
+              let client = client else {
             return nil
         }
 
@@ -3012,10 +3013,9 @@ extension ChatViewModel {
         defer { isTranscribing = false }
 
         do {
-            let apiKey = await AppConfig.shared.getApiKey()
             let transcription = try await AudioRecordingService.shared.transcribe(
                 fileURL: fileURL,
-                apiKey: apiKey,
+                client: client,
                 model: audioModel.modelName
             )
             return transcription
