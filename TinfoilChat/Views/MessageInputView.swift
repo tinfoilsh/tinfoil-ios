@@ -39,6 +39,14 @@ struct MessageInputView: View {
     // State for pulsing animation
     @State private var isPulsing = false
 
+    // Binding to show audio error alert
+    private var showAudioError: Binding<Bool> {
+        Binding(
+            get: { viewModel.audioError != nil },
+            set: { if !$0 { viewModel.audioError = nil } }
+        )
+    }
+
     @ViewBuilder
     var body: some View {
         inputContent
@@ -49,6 +57,11 @@ struct MessageInputView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("To use voice input, please enable microphone access in Settings.")
+            }
+            .alert("Transcription Error", isPresented: showAudioError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(viewModel.audioError ?? "An error occurred")
             }
     }
 

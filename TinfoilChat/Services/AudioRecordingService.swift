@@ -7,6 +7,8 @@
 
 import Foundation
 import AVFoundation
+import TinfoilAI
+import OpenAI
 
 /// Service for managing audio recording and transcription
 @MainActor
@@ -95,8 +97,8 @@ class AudioRecordingService: NSObject, ObservableObject {
 
     // MARK: - Transcription
 
-    /// Transcribe the recorded audio file
-    func transcribe(fileURL: URL, apiKey: String, model: String) async throws -> String {
+    /// Transcribe the recorded audio file using the TinfoilAI SDK
+    func transcribe(fileURL: URL, client: TinfoilAI, model: String) async throws -> String {
         isTranscribing = true
         defer {
             isTranscribing = false
@@ -109,51 +111,18 @@ class AudioRecordingService: NSObject, ObservableObject {
             throw AudioRecordingError.emptyRecording
         }
 
-        let url = URL(string: "\(Constants.API.baseURL)/v1/audio/transcriptions")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+        let query = AudioTranscriptionQuery(
+            file: audioData,
+            fileType: .m4a,
+            model: model,
+            responseFormat: .json
+        )
 
-        let boundary = UUID().uuidString
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let result = try await client.audioTranscriptions(query: query)
 
-        var body = Data()
+        let transcription = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Add file field
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"recording.m4a\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
-        body.append(audioData)
-        body.append("\r\n".data(using: .utf8)!)
-
-        // Add model field
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n".data(using: .utf8)!)
-        body.append("\(model)\r\n".data(using: .utf8)!)
-
-        // Add response_format field
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n".data(using: .utf8)!)
-        body.append("text\r\n".data(using: .utf8)!)
-
-        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
-
-        request.httpBody = body
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AudioRecordingError.transcriptionFailed("Invalid response")
-        }
-
-        guard httpResponse.statusCode == 200 else {
-            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw AudioRecordingError.transcriptionFailed("Status \(httpResponse.statusCode): \(errorMessage)")
-        }
-
-        // Response format is plain text when response_format=text
-        guard let transcription = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !transcription.isEmpty else {
+        guard !transcription.isEmpty else {
             throw AudioRecordingError.emptyTranscription
         }
 
