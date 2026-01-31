@@ -41,6 +41,19 @@ struct MessageInputView: View {
 
     @ViewBuilder
     var body: some View {
+        inputContent
+            .alert("Microphone Access Required", isPresented: $viewModel.showMicrophonePermissionAlert) {
+                Button("Open Settings") {
+                    openSettings()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("To use voice input, please enable microphone access in Settings.")
+            }
+    }
+
+    @ViewBuilder
+    private var inputContent: some View {
         if #available(iOS 26, *) {
             // iOS 26+ with liquid glass effect
             VStack(spacing: 0) {
@@ -280,6 +293,12 @@ struct MessageInputView: View {
             } else {
                 await viewModel.startAudioRecording()
             }
+        }
+    }
+
+    private func openSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
         }
     }
 }

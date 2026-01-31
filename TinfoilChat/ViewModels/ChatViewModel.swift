@@ -114,6 +114,7 @@ class ChatViewModel: ObservableObject {
     @Published var isRecording: Bool = false
     @Published var isTranscribing: Bool = false
     @Published var audioError: String? = nil
+    @Published var showMicrophonePermissionAlert: Bool = false
     // Private properties
     private var client: TinfoilAI?
     private var currentTask: Task<Void, Error>?
@@ -2979,10 +2980,13 @@ extension ChatViewModel {
 
         audioError = nil
 
-        let hasPermission = await AudioRecordingService.shared.requestPermission()
-        guard hasPermission else {
-            audioError = "Microphone access denied"
-            return
+        // Check if permission was previously denied
+        if !AudioRecordingService.shared.hasPermission {
+            let granted = await AudioRecordingService.shared.requestPermission()
+            if !granted {
+                showMicrophonePermissionAlert = true
+                return
+            }
         }
 
         do {
