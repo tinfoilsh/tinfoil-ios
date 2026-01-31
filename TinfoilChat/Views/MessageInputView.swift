@@ -130,28 +130,23 @@ struct MessageInputView: View {
                             Group {
                                 if viewModel.isTranscribing {
                                     ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .secondary))
                                         .scaleEffect(0.8)
                                 } else {
                                     Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
-                                        .font(.system(size: 16, weight: .semibold))
+                                        .font(.system(size: 20))
                                 }
                             }
                             .frame(width: 24, height: 24)
-                            .foregroundColor(viewModel.isRecording ? .red : (isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
+                            .foregroundColor(viewModel.isRecording ? .red : .secondary)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .buttonBorderShape(.circle)
-                        .glassEffect(.regular.interactive(), in: .circle)
-                        .clipShape(.circle)
-                        .tint(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
                         .opacity(viewModel.isRecording && isPulsing ? 0.5 : 1.0)
                         .animation(viewModel.isRecording ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true) : .default, value: isPulsing)
                         .onChange(of: viewModel.isRecording) { _, isRecording in
                             isPulsing = isRecording
                         }
                         .disabled(viewModel.isLoading || viewModel.isTranscribing)
-                        .padding(.trailing, 4)
+                        .padding(.trailing, 8)
                     }
 
                     Button(action: sendOrCancelMessage) {
@@ -232,23 +227,18 @@ struct MessageInputView: View {
                     // Microphone button
                     if showAudioButton {
                         Button(action: handleAudioButtonTap) {
-                            ZStack {
-                                Circle()
-                                    .fill(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
-                                    .frame(width: 32, height: 32)
-
-                                Group {
-                                    if viewModel.isTranscribing {
-                                        ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle(tint: isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
-                                            .scaleEffect(0.8)
-                                    } else {
-                                        Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
-                                            .font(.system(size: 16, weight: .semibold))
-                                    }
+                            Group {
+                                if viewModel.isTranscribing {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .secondary))
+                                        .scaleEffect(0.8)
+                                } else {
+                                    Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
+                                        .font(.system(size: 20))
                                 }
-                                .foregroundColor(viewModel.isRecording ? .red : (isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight))
                             }
+                            .frame(width: 24, height: 24)
+                            .foregroundColor(viewModel.isRecording ? .red : .secondary)
                         }
                         .opacity(viewModel.isRecording && isPulsing ? 0.5 : 1.0)
                         .animation(viewModel.isRecording ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true) : .default, value: isPulsing)
@@ -256,7 +246,7 @@ struct MessageInputView: View {
                             isPulsing = isRecording
                         }
                         .disabled(viewModel.isLoading || viewModel.isTranscribing)
-                        .padding(.trailing, 4)
+                        .padding(.trailing, 8)
                     }
 
                     Button(action: sendOrCancelMessage) {
