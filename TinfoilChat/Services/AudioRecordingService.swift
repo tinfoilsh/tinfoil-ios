@@ -105,7 +105,9 @@ class AudioRecordingService: NSObject, ObservableObject {
             cleanupRecordingFile()
         }
 
-        let audioData = try Data(contentsOf: fileURL)
+        let audioData = try await Task.detached {
+            try Data(contentsOf: fileURL)
+        }.value
 
         guard !audioData.isEmpty else {
             throw AudioRecordingError.emptyRecording
