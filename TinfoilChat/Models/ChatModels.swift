@@ -261,6 +261,49 @@ enum MessageRole: String, Codable {
     case assistant
 }
 
+// MARK: - Web Search Types
+
+/// Represents a source from web search results
+struct WebSearchSource: Codable, Equatable, Identifiable {
+    let id: String
+    let title: String
+    let url: String
+
+    init(id: String = UUID().uuidString, title: String, url: String) {
+        self.id = id
+        self.title = title
+        self.url = url
+    }
+}
+
+/// Status of a web search operation
+enum WebSearchStatus: String, Codable, Equatable {
+    case searching
+    case completed
+    case failed
+    case blocked
+}
+
+/// State of web search for a message
+struct WebSearchState: Codable, Equatable {
+    var query: String?
+    var status: WebSearchStatus
+    var sources: [WebSearchSource]
+    var reason: String?
+
+    init(
+        query: String? = nil,
+        status: WebSearchStatus = .searching,
+        sources: [WebSearchSource] = [],
+        reason: String? = nil
+    ) {
+        self.query = query
+        self.status = status
+        self.sources = sources
+        self.reason = reason
+    }
+}
+
 /// Represents a single message in a chat
 struct Message: Identifiable, Codable, Equatable {
     let id: String
@@ -274,6 +317,7 @@ struct Message: Identifiable, Codable, Equatable {
     var streamError: String? = nil
     var generationTimeSeconds: Double? = nil
     var contentChunks: [ContentChunk] = []
+    var webSearchState: WebSearchState? = nil
 
     static let longMessageAttachmentThreshold = 1200
     var shouldDisplayAsAttachment: Bool {
@@ -292,7 +336,7 @@ struct Message: Identifiable, Codable, Equatable {
         return formatter
     }()
     
-    init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = []) {
+    init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], webSearchState: WebSearchState? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -302,12 +346,13 @@ struct Message: Identifiable, Codable, Equatable {
         self.isCollapsed = isCollapsed
         self.generationTimeSeconds = generationTimeSeconds
         self.contentChunks = contentChunks
+        self.webSearchState = webSearchState
     }
     
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, generationTimeSeconds, contentChunks
+        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, generationTimeSeconds, contentChunks, webSearchState
     }
     
     init(from decoder: Decoder) throws {
@@ -337,6 +382,7 @@ struct Message: Identifiable, Codable, Equatable {
         streamError = try container.decodeIfPresent(String.self, forKey: .streamError)
         generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)
         contentChunks = try container.decodeIfPresent([ContentChunk].self, forKey: .contentChunks) ?? []
+        webSearchState = try container.decodeIfPresent(WebSearchState.self, forKey: .webSearchState)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -352,6 +398,7 @@ struct Message: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(streamError, forKey: .streamError)
         try container.encodeIfPresent(generationTimeSeconds, forKey: .generationTimeSeconds)
         try container.encode(contentChunks, forKey: .contentChunks)
+        try container.encodeIfPresent(webSearchState, forKey: .webSearchState)
     }
 }
 
