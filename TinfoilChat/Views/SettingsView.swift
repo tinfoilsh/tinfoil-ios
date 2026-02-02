@@ -79,7 +79,14 @@ class SettingsManager: ObservableObject {
             UserDefaults.standard.set(customSystemPrompt, forKey: "customSystemPrompt")
         }
     }
-    
+
+    // Web search toggle
+    @Published var webSearchEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(webSearchEnabled, forKey: "webSearchEnabled")
+        }
+    }
+
     // Available personality traits
     let availableTraits = [
         "witty", "encouraging", "formal", "casual", "analytical", "creative",
@@ -115,7 +122,10 @@ class SettingsManager: ObservableObject {
         // Initialize custom system prompt settings
         self.isUsingCustomPrompt = UserDefaults.standard.object(forKey: "isUsingCustomPrompt") as? Bool ?? false
         self.customSystemPrompt = UserDefaults.standard.string(forKey: "customSystemPrompt") ?? ""
-        
+
+        // Initialize web search setting
+        self.webSearchEnabled = UserDefaults.standard.object(forKey: "webSearchEnabled") as? Bool ?? false
+
         // Ensure defaults are saved if they weren't present
         if UserDefaults.standard.object(forKey: "hapticFeedbackEnabled") == nil {
             UserDefaults.standard.set(true, forKey: "hapticFeedbackEnabled")
