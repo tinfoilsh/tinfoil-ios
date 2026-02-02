@@ -18,6 +18,8 @@ private enum SegmentKind {
     case table(ParsedTable)
 }
 
+
+
 private struct ContentSegment {
     let id: String
     let kind: SegmentKind
@@ -25,8 +27,10 @@ private struct ContentSegment {
     func createView(isDarkMode: Bool) -> AnyView {
         switch kind {
         case .markdown(let text):
+            // Strip citation markers from text - sources shown separately at message level
+            let strippedText = LaTeXMarkdownView.stripCitations(from: text)
             return AnyView(
-                Markdown(text)
+                Markdown(strippedText)
                     .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
                     .markdownCodeSyntaxHighlighter(MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode))
                     .textSelection(.enabled)
@@ -131,6 +135,20 @@ struct LaTeXMarkdownView: View, Equatable {
         .transaction { transaction in
             transaction.animation = nil
         }
+    }
+    
+    /// Strip citation markers from markdown text
+    static func stripCitations(from text: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: "\\[(\\d+)\\]\\(#cite-\\d+~[^)]+\\)", options: []) else {
+            return text
+        }
+        let nsText = text as NSString
+        return regex.stringByReplacingMatches(
+            in: text,
+            options: [],
+            range: NSRange(location: 0, length: nsText.length),
+            withTemplate: ""
+        )
     }
 
     private func getOrCreateSegments() -> [ContentSegment] {
