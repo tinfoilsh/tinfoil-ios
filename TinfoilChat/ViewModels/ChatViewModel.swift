@@ -976,7 +976,7 @@ class ChatViewModel: ObservableObject {
                     let reasoningContent = chunk.choices.first?.delta.reasoning ?? ""
                     var didMutateState = false
 
-                    // Collect sources from annotations
+                    // Collect sources from annotations (no deduplication to preserve citation index mapping)
                     if isWebSearchEnabled, let annotations = chunk.choices.first?.delta.annotations {
                         for annotation in annotations where annotation.type == "url_citation" {
                             if let citation = annotation.urlCitation {
@@ -984,12 +984,14 @@ class ChatViewModel: ObservableObject {
                                     title: citation.title ?? citation.url,
                                     url: citation.url
                                 )
-                                // Avoid duplicates
-                                if !collectedSources.contains(where: { $0.url == source.url }) {
-                                    collectedSources.append(source)
+                                collectedSources.append(source)
+                                // Initialize webSearchState if needed (annotations may arrive before web_search_call event)
+                                if webSearchState == nil {
+                                    webSearchState = WebSearchState(status: .searching, sources: collectedSources)
+                                } else {
                                     webSearchState?.sources = collectedSources
-                                    didMutateState = true
                                 }
+                                didMutateState = true
                             }
                         }
                     }
@@ -1142,6 +1144,7 @@ class ChatViewModel: ObservableObject {
                         let thinking = isInThinkingMode
                         let genTime = generationTimeSeconds
                         let currentWebSearchState = webSearchState
+                        let currentSources = collectedSources
 
                         Task { @MainActor [weak self] in
                             guard let self = self else { return }
@@ -1153,11 +1156,22 @@ class ChatViewModel: ObservableObject {
                                 return
                             }
 
-                            chat.messages[lastIndex].content = content
+                            // Process citations during streaming if we have sources
+                            let processedContent = self.processCitationMarkers(content, sources: currentSources)
+                            let processedChunks = currentChunks.map { chunk in
+                                ContentChunk(
+                                    id: chunk.id,
+                                    type: chunk.type,
+                                    content: self.processCitationMarkers(chunk.content, sources: currentSources),
+                                    isComplete: chunk.isComplete
+                                )
+                            }
+
+                            chat.messages[lastIndex].content = processedContent
                             chat.messages[lastIndex].thoughts = thoughts
                             chat.messages[lastIndex].isThinking = thinking
                             chat.messages[lastIndex].generationTimeSeconds = genTime
-                            chat.messages[lastIndex].contentChunks = currentChunks
+                            chat.messages[lastIndex].contentChunks = processedChunks
                             chat.messages[lastIndex].webSearchState = currentWebSearchState
 
                             self.updateChat(chat, throttleForStreaming: true)
@@ -1211,11 +1225,26 @@ class ChatViewModel: ObservableObject {
                         self.webSearchSummary = ""
                         if !chat.messages.isEmpty, let lastIndex = chat.messages.indices.last {
                             chunker.finalize()
-                            chat.messages[lastIndex].content = responseContent
+                            let processedContent = self.processCitationMarkers(responseContent, sources: collectedSources)
+                            chat.messages[lastIndex].content = processedContent
                             chat.messages[lastIndex].thoughts = currentThoughts
                             chat.messages[lastIndex].isThinking = false
                             chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
-                            chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
+                            // Process citation markers in chunks too since UI renders from chunks
+                            let rawChunks = chunker.getAllChunks()
+                            let processedChunks = rawChunks.map { chunk in
+                                ContentChunk(
+                                    id: chunk.id,
+                                    type: chunk.type,
+                                    content: self.processCitationMarkers(chunk.content, sources: collectedSources),
+                                    isComplete: chunk.isComplete
+                                )
+                            }
+                            chat.messages[lastIndex].contentChunks = processedChunks
+                            // Sync sources with webSearchState (may have missed some due to race condition)
+                            if webSearchState != nil {
+                                webSearchState?.sources = collectedSources
+                            }
                             chat.messages[lastIndex].webSearchState = webSearchState
                         }
 
@@ -3102,5 +3131,47 @@ extension ChatViewModel {
     func cancelAudioRecording() {
         isRecording = false
         AudioRecordingService.shared.cancelRecording()
+    }
+
+    /// Process citation markers (e.g. 【1】) into markdown links.
+    /// Called at stream end to store processed content.
+    private func processCitationMarkers(_ content: String, sources: [WebSearchSource]) -> String {
+        guard !sources.isEmpty else { return content }
+
+        let pattern = "【(\\d+)[^】]*】"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return content
+        }
+
+        let nsContent = content as NSString
+        var result = content
+        var offset = 0
+
+        let matches = regex.matches(in: content, options: [], range: NSRange(location: 0, length: nsContent.length))
+        for match in matches {
+            guard let numRange = Range(match.range(at: 1), in: content),
+                  let num = Int(content[numRange]) else { continue }
+
+            let index = num - 1
+            guard index >= 0, index < sources.count else { continue }
+
+            let source = sources[index]
+
+            let encodedUrl = source.url
+                .replacingOccurrences(of: "(", with: "%28")
+                .replacingOccurrences(of: ")", with: "%29")
+                .replacingOccurrences(of: "|", with: "%7C")
+            let encodedTitle = source.title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? source.title
+
+            let replacement = "[\(num)](#cite-\(num)~\(encodedUrl)~\(encodedTitle))"
+
+            let adjustedRange = NSRange(location: match.range.location + offset, length: match.range.length)
+            if let swiftRange = Range(adjustedRange, in: result) {
+                result.replaceSubrange(swiftRange, with: replacement)
+                offset += replacement.count - match.range.length
+            }
+        }
+
+        return result
     }
 }

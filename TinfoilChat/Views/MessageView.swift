@@ -35,6 +35,7 @@ struct MessageView: View {
     @State private var isEditMode = false
     @State private var editedContent = ""
     @State private var showSelectableText = false
+    @State private var showSourcesSheet = false
 
     var body: some View {
         HStack {
@@ -51,9 +52,26 @@ struct MessageView: View {
                     !message.isThinking &&
                     isLoading &&
                     isLastMessage {
-                    LoadingDotsView(isDarkMode: isDarkMode)
-                        .padding(.horizontal)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 4) {
+                        // Show web search box if searching
+                        if let webSearchState = message.webSearchState {
+                            WebSearchBox(
+                                messageId: message.id,
+                                webSearchState: webSearchState,
+                                isDarkMode: isDarkMode,
+                                messageCollapsed: false,
+                                isStreaming: true,
+                                webSearchSummary: viewModel.webSearchSummary
+                            )
+                        }
+
+                        // Show loading dots if no web search or search is complete
+                        if message.webSearchState == nil || message.webSearchState?.status != .searching {
+                            LoadingDotsView(isDarkMode: isDarkMode)
+                                .padding(.horizontal)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 // If the message is thinking or has thoughts, display them in a thinking box
@@ -69,8 +87,20 @@ struct MessageView: View {
                             messageCollapsed: message.isCollapsed,
                             thinkingSummary: isLastMessage && message.isThinking ? viewModel.thinkingSummary : nil
                         )
-                        
-                                if !message.content.isEmpty {
+
+                        // Web search box (if applicable)
+                        if let webSearchState = message.webSearchState {
+                            WebSearchBox(
+                                messageId: message.id,
+                                webSearchState: webSearchState,
+                                isDarkMode: isDarkMode,
+                                messageCollapsed: message.isCollapsed,
+                                isStreaming: isLoading && isLastMessage,
+                                webSearchSummary: isLastMessage ? viewModel.webSearchSummary : nil
+                            )
+                        }
+
+                        if !message.content.isEmpty {
                             if !message.contentChunks.isEmpty {
                                 ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -152,13 +182,29 @@ struct MessageView: View {
                         } else {
                             AdaptiveMarkdownText(content: message.content, isDarkMode: isDarkMode)
                         }
-                    } else if !message.contentChunks.isEmpty {
-                        ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
-                        LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
-                            .equatable()
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 4) {
+                            // Web search box for non-thinking assistant messages
+                            if let webSearchState = message.webSearchState {
+                                WebSearchBox(
+                                    messageId: message.id,
+                                    webSearchState: webSearchState,
+                                    isDarkMode: isDarkMode,
+                                    messageCollapsed: message.isCollapsed,
+                                    isStreaming: isLoading && isLastMessage,
+                                    webSearchSummary: isLastMessage ? viewModel.webSearchSummary : nil
+                                )
+                            }
+
+                            if !message.contentChunks.isEmpty {
+                                ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else {
+                                LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
+                                    .equatable()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
                     }
                 }
 
@@ -177,6 +223,17 @@ struct MessageView: View {
                    (!message.content.isEmpty || message.thoughts != nil) &&
                    !(isLoading && isLastMessage) {
                     HStack(spacing: 8) {
+                        // Sources button - only show if we have web search sources
+                        if let webSearchState = message.webSearchState,
+                           !webSearchState.sources.isEmpty {
+                            SourcesButton(
+                                sources: webSearchState.sources,
+                                isDarkMode: isDarkMode
+                            ) {
+                                showSourcesSheet = true
+                            }
+                        }
+                        
                         Button {
                             Task { @MainActor in
                                 showRawContentModal = true
@@ -300,6 +357,30 @@ struct MessageView: View {
             UserMessageSelectView(content: message.content)
                 .presentationDetents([.medium, .large])
         }
+        .sheet(isPresented: $showSourcesSheet) {
+            if let sources = message.webSearchState?.sources {
+                SourcesSheetView(sources: sources, isDarkMode: isDarkMode)
+                    .presentationDetents([.medium, .large])
+            }
+        }
+        .environment(\.openURL, OpenURLAction { url in
+            if url.scheme == "cite" {
+                let path = url.absoluteString.dropFirst(5)
+                if let tildeIndex = path.firstIndex(of: "~") {
+                    let afterFirstTilde = path[path.index(after: tildeIndex)...]
+                    if let secondTildeIndex = afterFirstTilde.firstIndex(of: "~") {
+                        let encodedUrl = String(afterFirstTilde[..<secondTildeIndex])
+                        if let decodedUrl = encodedUrl.removingPercentEncoding,
+                           let sourceURL = URL(string: decodedUrl) {
+                            UIApplication.shared.open(sourceURL)
+                            return .handled
+                        }
+                    }
+                }
+                return .handled
+            }
+            return .systemAction
+        })
     }
 
     private func copyMessagePart(_ text: String) {
@@ -1314,5 +1395,164 @@ struct UserMessageEditView: View {
                 .buttonStyle(PlainButtonStyle())
             }
         }
+    }
+}
+
+// MARK: - Sources Button and Sheet
+
+/// Button showing "Sources" with overlapping favicons
+private struct SourcesButton: View {
+    let sources: [WebSearchSource]
+    let isDarkMode: Bool
+    let action: () -> Void
+    
+    private var uniqueDomains: [String] {
+        var seen = Set<String>()
+        var domains: [String] = []
+        for source in sources {
+            let domain = getDomain(from: source.url)
+            if !seen.contains(domain) {
+                seen.insert(domain)
+                domains.append(domain)
+            }
+            if domains.count >= 4 { break }
+        }
+        return domains
+    }
+    
+    private func getDomain(from urlString: String) -> String {
+        guard let url = URL(string: urlString),
+              let host = url.host else {
+            return urlString
+        }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+    
+    private func faviconUrl(for domain: String) -> String {
+        "https://icons.duckduckgo.com/ip3/\(domain).ico"
+    }
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text("Sources")
+                    .font(.system(size: 13, weight: .medium))
+                
+                // Overlapping favicons
+                HStack(spacing: -6) {
+                    ForEach(Array(uniqueDomains.enumerated()), id: \.offset) { index, domain in
+                        AsyncImage(url: URL(string: faviconUrl(for: domain))) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                            case .failure, .empty:
+                                Image(systemName: "globe")
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .foregroundColor(.gray)
+                            @unknown default:
+                                EmptyView()
+                            }
+                        }
+                        .frame(width: 18, height: 18)
+                        .background(isDarkMode ? Color.black : Color.white)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.1), lineWidth: 1))
+                        .zIndex(Double(uniqueDomains.count - index))
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
+            .cornerRadius(20)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .foregroundColor(isDarkMode ? .white : .black)
+    }
+}
+
+/// Sheet view showing all sources
+private struct SourcesSheetView: View {
+    let sources: [WebSearchSource]
+    let isDarkMode: Bool
+    @Environment(\.dismiss) private var dismiss
+    
+    private func getDomain(from urlString: String) -> String {
+        guard let url = URL(string: urlString),
+              let host = url.host else {
+            return urlString
+        }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+    
+    private func faviconUrl(for domain: String) -> String {
+        "https://icons.duckduckgo.com/ip3/\(domain).ico"
+    }
+    
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(sources) { source in
+                    Button {
+                        if let url = URL(string: source.url) {
+                            UIApplication.shared.open(url)
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
+                            AsyncImage(url: URL(string: faviconUrl(for: getDomain(from: source.url)))) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                case .failure, .empty:
+                                    Image(systemName: "globe")
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .foregroundColor(.gray)
+                                @unknown default:
+                                    EmptyView()
+                                }
+                            }
+                            .frame(width: 24, height: 24)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(source.title)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(isDarkMode ? .white : .black)
+                                    .lineLimit(2)
+                                
+                                Text(getDomain(from: source.url))
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.gray)
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .listStyle(.plain)
+            .navigationTitle("Sources")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .preferredColorScheme(isDarkMode ? .dark : .light)
     }
 }

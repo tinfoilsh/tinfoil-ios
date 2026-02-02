@@ -274,6 +274,14 @@ struct WebSearchSource: Codable, Equatable, Identifiable {
         self.title = title
         self.url = url
     }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Generate UUID if id is missing (React app doesn't include it)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        title = try container.decode(String.self, forKey: .title)
+        url = try container.decode(String.self, forKey: .url)
+    }
 }
 
 /// Status of a web search operation
@@ -353,6 +361,7 @@ struct Message: Identifiable, Codable, Equatable {
     
     enum CodingKeys: String, CodingKey {
         case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, generationTimeSeconds, contentChunks, webSearchState
+        case webSearch // Alternative key used by React app
     }
     
     init(from decoder: Decoder) throws {
@@ -382,7 +391,9 @@ struct Message: Identifiable, Codable, Equatable {
         streamError = try container.decodeIfPresent(String.self, forKey: .streamError)
         generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)
         contentChunks = try container.decodeIfPresent([ContentChunk].self, forKey: .contentChunks) ?? []
+        // Try iOS key first, then React key for cross-platform compatibility
         webSearchState = try container.decodeIfPresent(WebSearchState.self, forKey: .webSearchState)
+            ?? container.decodeIfPresent(WebSearchState.self, forKey: .webSearch)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -398,7 +409,8 @@ struct Message: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(streamError, forKey: .streamError)
         try container.encodeIfPresent(generationTimeSeconds, forKey: .generationTimeSeconds)
         try container.encode(contentChunks, forKey: .contentChunks)
-        try container.encodeIfPresent(webSearchState, forKey: .webSearchState)
+        // Encode as "webSearch" for React app compatibility
+        try container.encodeIfPresent(webSearchState, forKey: .webSearch)
     }
 }
 
