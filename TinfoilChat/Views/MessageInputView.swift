@@ -124,6 +124,19 @@ struct MessageInputView: View {
 
                     Spacer()
 
+                    // Web search toggle
+                    Button(action: {
+                        settings.webSearchEnabled.toggle()
+                        HapticFeedback.trigger(.success)
+                    }) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 16))
+                            .foregroundColor(settings.webSearchEnabled
+                                ? .blue
+                                : (isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4)))
+                    }
+                    .padding(.trailing, 4)
+
                     // Microphone button
                     if showAudioButton {
                         Button(action: handleAudioButtonTap) {
@@ -223,6 +236,19 @@ struct MessageInputView: View {
                     .padding(.leading)
 
                     Spacer()
+
+                    // Web search toggle
+                    Button(action: {
+                        settings.webSearchEnabled.toggle()
+                        HapticFeedback.trigger(.success)
+                    }) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 16))
+                            .foregroundColor(settings.webSearchEnabled
+                                ? .blue
+                                : (isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4)))
+                    }
+                    .padding(.trailing, 4)
 
                     // Microphone button
                     if showAudioButton {
