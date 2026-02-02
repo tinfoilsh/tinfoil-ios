@@ -23,6 +23,7 @@ struct ChatQueryBuilder {
     ///   - conversationMessages: The message history from the chat
     ///   - maxMessages: Maximum number of messages to include from history
     ///   - stream: Whether to stream the response (default: true)
+    ///   - webSearchEnabled: Whether to enable web search for this query (default: false)
     /// - Returns: A configured ChatQuery
     static func buildQuery(
         modelId: String,
@@ -30,7 +31,8 @@ struct ChatQueryBuilder {
         rules: String,
         conversationMessages: [Message],
         maxMessages: Int,
-        stream: Bool = true
+        stream: Bool = true,
+        webSearchEnabled: Bool = false
     ) -> ChatQuery {
 
         var messages: [ChatQuery.ChatCompletionMessageParam] = []
@@ -69,6 +71,7 @@ struct ChatQueryBuilder {
         return ChatQuery(
             messages: messages,
             model: modelId,
+            webSearchOptions: webSearchEnabled ? .init() : nil,
             stream: stream
         )
     }

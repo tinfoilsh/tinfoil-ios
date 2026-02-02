@@ -855,7 +855,8 @@ class ChatViewModel: ObservableObject {
                     systemPrompt: systemPrompt,
                     rules: processedRules,
                     conversationMessages: self.messages,
-                    maxMessages: maxMessages
+                    maxMessages: maxMessages,
+                    webSearchEnabled: settingsManager.webSearchEnabled
                 )
                 
                 // Use the OpenAI client's chatsStream method through TinfoilAI
