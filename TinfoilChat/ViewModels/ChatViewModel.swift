@@ -19,6 +19,7 @@ class ChatViewModel: ObservableObject {
     @Published var currentChat: Chat?
     @Published var isLoading: Bool = false
     @Published var thinkingSummary: String = ""
+    @Published var webSearchSummary: String = ""
     @Published var showVerifierSheet: Bool = false
     @Published var scrollTargetMessageId: String? = nil 
     @Published var scrollTargetOffset: CGFloat = 0 
@@ -859,8 +860,53 @@ class ChatViewModel: ObservableObject {
                     webSearchEnabled: settingsManager.webSearchEnabled
                 )
                 
-                // Use the OpenAI client's chatsStream method through TinfoilAI
-                let stream: AsyncThrowingStream<ChatStreamResult, Error> = client.chatsStream(query: chatQuery)
+                // Web search state tracking (needs to be captured for callback)
+                var webSearchState: WebSearchState? = nil
+                var collectedSources: [WebSearchSource] = []
+                let isWebSearchEnabled = settingsManager.webSearchEnabled
+
+                // Create stream with web search callback if enabled
+                let stream: AsyncThrowingStream<ChatStreamResult, Error>
+                if isWebSearchEnabled {
+                    stream = client.chatsStream(query: chatQuery) { [weak self] event in
+                        Task { @MainActor in
+                            guard let self = self else { return }
+
+                            // Update web search state based on event
+                            switch event.status {
+                            case .inProgress, .searching:
+                                webSearchState = WebSearchState(
+                                    query: event.action?.query,
+                                    status: .searching
+                                )
+                                self.webSearchSummary = event.action?.query.map { "Searching: \($0)" } ?? "Searching the web..."
+                            case .completed:
+                                webSearchState?.status = .completed
+                                self.webSearchSummary = ""
+                            case .failed:
+                                webSearchState?.status = .failed
+                                self.webSearchSummary = ""
+                            case .blocked:
+                                webSearchState = WebSearchState(
+                                    query: event.action?.query,
+                                    status: .blocked,
+                                    reason: event.reason
+                                )
+                                self.webSearchSummary = ""
+                            }
+
+                            // Update message with current web search state
+                            if var chat = self.currentChat,
+                               !chat.messages.isEmpty,
+                               let lastIndex = chat.messages.indices.last {
+                                chat.messages[lastIndex].webSearchState = webSearchState
+                                self.updateChat(chat, throttleForStreaming: true)
+                            }
+                        }
+                    }
+                } else {
+                    stream = client.chatsStream(query: chatQuery)
+                }
 
                 var thinkStartTime: Date? = nil
                 var hasThinkTag = false
@@ -929,6 +975,24 @@ class ChatViewModel: ObservableObject {
                     let hasReasoningContent = chunk.choices.first?.delta.reasoning != nil
                     let reasoningContent = chunk.choices.first?.delta.reasoning ?? ""
                     var didMutateState = false
+
+                    // Collect sources from annotations
+                    if isWebSearchEnabled, let annotations = chunk.choices.first?.delta.annotations {
+                        for annotation in annotations where annotation.type == "url_citation" {
+                            if let citation = annotation.urlCitation {
+                                let source = WebSearchSource(
+                                    title: citation.title ?? citation.url,
+                                    url: citation.url
+                                )
+                                // Avoid duplicates
+                                if !collectedSources.contains(where: { $0.url == source.url }) {
+                                    collectedSources.append(source)
+                                    webSearchState?.sources = collectedSources
+                                    didMutateState = true
+                                }
+                            }
+                        }
+                    }
 
                     if hasReasoningContent && !isUsingReasoningFormat && !isInThinkingMode {
                         isUsingReasoningFormat = true
@@ -1077,6 +1141,7 @@ class ChatViewModel: ObservableObject {
                         let thoughts = currentThoughts
                         let thinking = isInThinkingMode
                         let genTime = generationTimeSeconds
+                        let currentWebSearchState = webSearchState
 
                         Task { @MainActor [weak self] in
                             guard let self = self else { return }
@@ -1093,6 +1158,7 @@ class ChatViewModel: ObservableObject {
                             chat.messages[lastIndex].isThinking = thinking
                             chat.messages[lastIndex].generationTimeSeconds = genTime
                             chat.messages[lastIndex].contentChunks = currentChunks
+                            chat.messages[lastIndex].webSearchState = currentWebSearchState
 
                             self.updateChat(chat, throttleForStreaming: true)
                         }
@@ -1142,6 +1208,7 @@ class ChatViewModel: ObservableObject {
 
                         // Finalize all message content
                         self.thinkingSummary = ""
+                        self.webSearchSummary = ""
                         if !chat.messages.isEmpty, let lastIndex = chat.messages.indices.last {
                             chunker.finalize()
                             chat.messages[lastIndex].content = responseContent
@@ -1149,6 +1216,7 @@ class ChatViewModel: ObservableObject {
                             chat.messages[lastIndex].isThinking = false
                             chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
                             chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
+                            chat.messages[lastIndex].webSearchState = webSearchState
                         }
 
                         self.updateChat(chat)
@@ -1296,6 +1364,8 @@ class ChatViewModel: ObservableObject {
                 // Handle error
                 await MainActor.run {
                     self.isLoading = false
+                    self.thinkingSummary = ""
+                    self.webSearchSummary = ""
 
                     // Mark the chat as no longer having an active stream
                     if var chat = self.currentChat {
@@ -1310,7 +1380,7 @@ class ChatViewModel: ObservableObject {
                                 self.saveChats()
                             }
                         }
-                        
+
                         self.updateChat(chat)  // Final update without throttling
                         
                         // Convert temporary ID to permanent ID after streaming completes
@@ -1504,6 +1574,8 @@ class ChatViewModel: ObservableObject {
         currentTask?.cancel()
         currentTask = nil
         isLoading = false
+        thinkingSummary = ""
+        webSearchSummary = ""
 
         // Reset the hasActiveStream property
         if var chat = currentChat {
