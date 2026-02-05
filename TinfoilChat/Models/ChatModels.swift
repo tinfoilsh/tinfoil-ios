@@ -326,6 +326,9 @@ struct Message: Identifiable, Codable, Equatable {
     var generationTimeSeconds: Double? = nil
     var contentChunks: [ContentChunk] = []
     var webSearchState: WebSearchState? = nil
+    var attachments: [Attachment] = []
+    var documentContent: String? = nil
+    var imageBase64: String? = nil
 
     static let longMessageAttachmentThreshold = 1200
     var shouldDisplayAsAttachment: Bool {
@@ -344,7 +347,7 @@ struct Message: Identifiable, Codable, Equatable {
         return formatter
     }()
     
-    init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], webSearchState: WebSearchState? = nil) {
+    init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = [], documentContent: String? = nil, imageBase64: String? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -355,6 +358,9 @@ struct Message: Identifiable, Codable, Equatable {
         self.generationTimeSeconds = generationTimeSeconds
         self.contentChunks = contentChunks
         self.webSearchState = webSearchState
+        self.attachments = attachments
+        self.documentContent = documentContent
+        self.imageBase64 = imageBase64
     }
     
     // MARK: - Codable Implementation
@@ -362,6 +368,7 @@ struct Message: Identifiable, Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, generationTimeSeconds, contentChunks, webSearchState
         case webSearch // Alternative key used by React app
+        case attachments, documentContent, imageBase64
     }
     
     init(from decoder: Decoder) throws {
@@ -394,6 +401,9 @@ struct Message: Identifiable, Codable, Equatable {
         // Try iOS key first, then React key for cross-platform compatibility
         webSearchState = try container.decodeIfPresent(WebSearchState.self, forKey: .webSearchState)
             ?? container.decodeIfPresent(WebSearchState.self, forKey: .webSearch)
+        attachments = try container.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
+        documentContent = try container.decodeIfPresent(String.self, forKey: .documentContent)
+        imageBase64 = try container.decodeIfPresent(String.self, forKey: .imageBase64)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -411,6 +421,11 @@ struct Message: Identifiable, Codable, Equatable {
         try container.encode(contentChunks, forKey: .contentChunks)
         // Encode as "webSearch" for React app compatibility
         try container.encodeIfPresent(webSearchState, forKey: .webSearch)
+        if !attachments.isEmpty {
+            try container.encode(attachments, forKey: .attachments)
+        }
+        try container.encodeIfPresent(documentContent, forKey: .documentContent)
+        try container.encodeIfPresent(imageBase64, forKey: .imageBase64)
     }
 }
 
