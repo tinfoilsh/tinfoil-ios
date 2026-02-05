@@ -3159,7 +3159,10 @@ extension ChatViewModel {
                 .replacingOccurrences(of: "(", with: "%28")
                 .replacingOccurrences(of: ")", with: "%29")
                 .replacingOccurrences(of: "|", with: "%7C")
-            let encodedTitle = source.title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? source.title
+                .replacingOccurrences(of: "~", with: "%7E")
+            let encodedTitle = (source.title
+                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? source.title)
+                .replacingOccurrences(of: "~", with: "%7E")
 
             let replacement = "[\(num)](#cite-\(num)~\(encodedUrl)~\(encodedTitle))"
 
