@@ -117,6 +117,12 @@ class ChatViewModel: ObservableObject {
     @Published var isTranscribing: Bool = false
     @Published var audioError: String? = nil
     @Published var showMicrophonePermissionAlert: Bool = false
+
+    // Attachment properties
+    @Published var pendingAttachments: [Attachment] = []
+    @Published var isProcessingAttachment: Bool = false
+    @Published var attachmentError: String? = nil
+    @Published var pendingImageThumbnails: [String: String] = [:]
     // Private properties
     private var client: TinfoilAI?
     private var currentTask: Task<Void, Error>?
@@ -680,7 +686,9 @@ class ChatViewModel: ObservableObject {
     
     /// Sends a user message and generates a response
     func sendMessage(text: String) {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasAttachments = !pendingAttachments.isEmpty
+        guard hasText || hasAttachments else { return }
 
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -688,8 +696,35 @@ class ChatViewModel: ObservableObject {
         // Update UI state
         isLoading = true
 
+        // Merge attachment data into message fields
+        var combinedDocumentContent: String? = nil
+        var messageImageBase64: String? = nil
+        var messageAttachments: [Attachment] = []
+
+        for attachment in pendingAttachments {
+            messageAttachments.append(attachment)
+            if let docContent = attachment.documentContent, !docContent.isEmpty {
+                if let existing = combinedDocumentContent {
+                    combinedDocumentContent = existing + "\n\n---\n\n" + docContent
+                } else {
+                    combinedDocumentContent = docContent
+                }
+            }
+            if let imgBase64 = attachment.imageBase64, !imgBase64.isEmpty {
+                messageImageBase64 = imgBase64
+            }
+        }
+
+        clearPendingAttachments()
+
         // Create and add user message
-        let userMessage = Message(role: .user, content: text)
+        let userMessage = Message(
+            role: .user,
+            content: text,
+            attachments: messageAttachments,
+            documentContent: combinedDocumentContent,
+            imageBase64: messageImageBase64
+        )
         addMessage(userMessage)
 
         // If this is the first message, update creation date (title will be generated after assistant reply)
@@ -703,6 +738,97 @@ class ChatViewModel: ObservableObject {
         }
 
         generateResponse()
+    }
+
+    // MARK: - Attachment Management
+
+    func addDocumentAttachment(url: URL, fileName: String) {
+        isProcessingAttachment = true
+        attachmentError = nil
+
+        let attachmentId = UUID().uuidString
+        var attachment = Attachment(
+            id: attachmentId,
+            type: .document,
+            fileName: fileName,
+            processingState: .processing
+        )
+        pendingAttachments.append(attachment)
+
+        Task {
+            do {
+                let text = try await DocumentProcessingService.shared.extractText(from: url)
+                let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+
+                attachment.documentContent = text
+                attachment.fileSize = fileSize
+                attachment.processingState = .completed
+
+                if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
+                    pendingAttachments[index] = attachment
+                }
+            } catch {
+                attachment.processingState = .failed
+                if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
+                    pendingAttachments[index] = attachment
+                }
+                attachmentError = error.localizedDescription
+            }
+            isProcessingAttachment = false
+        }
+    }
+
+    func addImageAttachment(data: Data, fileName: String) {
+        isProcessingAttachment = true
+        attachmentError = nil
+
+        let attachmentId = UUID().uuidString
+        var attachment = Attachment(
+            id: attachmentId,
+            type: .image,
+            fileName: fileName,
+            fileSize: Int64(data.count),
+            processingState: .processing
+        )
+        pendingAttachments.append(attachment)
+
+        Task {
+            do {
+                let processed = try await ImageProcessingService.shared.processImage(data: data)
+
+                attachment.imageBase64 = processed.base64
+                attachment.thumbnailBase64 = processed.thumbnailBase64
+                attachment.fileSize = processed.fileSize
+                attachment.processingState = .completed
+
+                if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
+                    pendingAttachments[index] = attachment
+                }
+                pendingImageThumbnails[attachmentId] = processed.thumbnailBase64
+            } catch {
+                attachment.processingState = .failed
+                if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
+                    pendingAttachments[index] = attachment
+                }
+                attachmentError = error.localizedDescription
+            }
+            isProcessingAttachment = false
+        }
+    }
+
+    func removePendingAttachment(id: String) {
+        pendingAttachments.removeAll { $0.id == id }
+        pendingImageThumbnails.removeValue(forKey: id)
+        if pendingAttachments.isEmpty {
+            attachmentError = nil
+        }
+    }
+
+    func clearPendingAttachments() {
+        pendingAttachments.removeAll()
+        pendingImageThumbnails.removeAll()
+        attachmentError = nil
+        isProcessingAttachment = false
     }
 
     /// Generates an assistant response for the current conversation (expects user message to already be in chat)
@@ -859,7 +985,8 @@ class ChatViewModel: ObservableObject {
                     rules: processedRules,
                     conversationMessages: self.messages,
                     maxMessages: maxMessages,
-                    webSearchEnabled: self.isWebSearchEnabled
+                    webSearchEnabled: self.isWebSearchEnabled,
+                    isMultimodal: self.currentModel.isMultimodal
                 )
 
                 // Web search state tracking (needs to be captured for callback)
