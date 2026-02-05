@@ -6,6 +6,7 @@
 //  Copyright © 2026 Tinfoil. All rights reserved.
 
 import SwiftUI
+import UIKit
 
 /// Collapsible box showing web search status and sources
 struct WebSearchBox: View {
@@ -182,13 +183,46 @@ struct WebSearchBox: View {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 isCollapsed = true
+                if let tableView = findTableView() {
+                    UIView.performWithoutAnimation {
+                        tableView.beginUpdates()
+                        tableView.endUpdates()
+                    }
+                }
             }
         } else {
             isCollapsed = false
+            if let tableView = findTableView() {
+                UIView.performWithoutAnimation {
+                    tableView.beginUpdates()
+                    tableView.endUpdates()
+                }
+            }
             withAnimation(.easeIn(duration: 0.2).delay(0.05)) {
                 contentVisible = true
             }
         }
+    }
+    
+    private func findTableView() -> UITableView? {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first else {
+            return nil
+        }
+
+        func findTableView(in view: UIView) -> UITableView? {
+            if let tableView = view as? UITableView {
+                return tableView
+            }
+            for subview in view.subviews {
+                if let found = findTableView(in: subview) {
+                    return found
+                }
+            }
+            return nil
+        }
+
+        return findTableView(in: window)
     }
 }
 
