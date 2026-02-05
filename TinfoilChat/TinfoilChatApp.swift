@@ -157,6 +157,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             // options.attachViewHierarchy = true // This adds the view hierarchy to the error events
         }
 
+        // Ignore SIGPIPE so broken streaming connections surface as errors instead of crashes.
+        // Must be set after SentrySDK.start which installs its own signal handlers.
+        signal(SIGPIPE, SIG_IGN)
+
         return true
     }
 
