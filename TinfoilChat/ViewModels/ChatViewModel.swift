@@ -216,13 +216,13 @@ class ChatViewModel: ObservableObject {
     // Computed property for verification status message
     var verificationStatusMessage: String {
         if isVerifying {
-            return "Verification in progress..."
+            return "Verifying privacy..."
         } else if isVerified {
-            return "Verified. This chat is private."
-        } else if let error = verificationError {
-            return "Verification failed: \(error)"
+            return "Chat is private."
+        } else if let _ = verificationError {
+            return "Verification failed."
         } else {
-            return "Verification needed"
+            return "Verification needed."
         }
     }
     
