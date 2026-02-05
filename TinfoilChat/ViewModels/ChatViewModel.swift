@@ -1158,14 +1158,7 @@ class ChatViewModel: ObservableObject {
 
                             // Process citations during streaming if we have sources
                             let processedContent = self.processCitationMarkers(content, sources: currentSources)
-                            let processedChunks = currentChunks.map { chunk in
-                                ContentChunk(
-                                    id: chunk.id,
-                                    type: chunk.type,
-                                    content: self.processCitationMarkers(chunk.content, sources: currentSources),
-                                    isComplete: chunk.isComplete
-                                )
-                            }
+                            let processedChunks = self.processChunksWithCitations(currentChunks, sources: currentSources)
 
                             chat.messages[lastIndex].content = processedContent
                             chat.messages[lastIndex].thoughts = thoughts
@@ -1231,15 +1224,7 @@ class ChatViewModel: ObservableObject {
                             chat.messages[lastIndex].isThinking = false
                             chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
                             // Process citation markers in chunks too since UI renders from chunks
-                            let rawChunks = chunker.getAllChunks()
-                            let processedChunks = rawChunks.map { chunk in
-                                ContentChunk(
-                                    id: chunk.id,
-                                    type: chunk.type,
-                                    content: self.processCitationMarkers(chunk.content, sources: collectedSources),
-                                    isComplete: chunk.isComplete
-                                )
-                            }
+                            let processedChunks = self.processChunksWithCitations(chunker.getAllChunks(), sources: collectedSources)
                             chat.messages[lastIndex].contentChunks = processedChunks
                             // Sync sources with webSearchState (may have missed some due to race condition)
                             webSearchState?.sources = collectedSources
@@ -3129,6 +3114,17 @@ extension ChatViewModel {
     func cancelAudioRecording() {
         isRecording = false
         AudioRecordingService.shared.cancelRecording()
+    }
+
+    private func processChunksWithCitations(_ chunks: [ContentChunk], sources: [WebSearchSource]) -> [ContentChunk] {
+        chunks.map { chunk in
+            ContentChunk(
+                id: chunk.id,
+                type: chunk.type,
+                content: processCitationMarkers(chunk.content, sources: sources),
+                isComplete: chunk.isComplete
+            )
+        }
     }
 
     /// Process citation markers (e.g. 【1】) into markdown links.
