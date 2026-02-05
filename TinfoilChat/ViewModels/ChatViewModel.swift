@@ -235,7 +235,8 @@ class ChatViewModel: ObservableObject {
             fatalError("ChatViewModel cannot be initialized without available models. Ensure AppConfig loads models before creating ChatViewModel.")
         }
         self.currentModel = model
-        
+        self.isWebSearchEnabled = SettingsManager.shared.webSearchEnabled
+
         // Load persisted last sync date (will be loaded per-user when auth is set)
         // Initial load happens in the authManager didSet
         
@@ -858,13 +859,13 @@ class ChatViewModel: ObservableObject {
                     rules: processedRules,
                     conversationMessages: self.messages,
                     maxMessages: maxMessages,
-                    webSearchEnabled: settingsManager.webSearchEnabled
+                    webSearchEnabled: self.isWebSearchEnabled
                 )
-                
+
                 // Web search state tracking (needs to be captured for callback)
                 var webSearchState: WebSearchState? = nil
                 var collectedSources: [WebSearchSource] = []
-                let isWebSearchEnabled = settingsManager.webSearchEnabled
+                let isWebSearchEnabled = self.isWebSearchEnabled
 
                 // Create stream with web search callback if enabled
                 let stream: AsyncThrowingStream<ChatStreamResult, Error>
