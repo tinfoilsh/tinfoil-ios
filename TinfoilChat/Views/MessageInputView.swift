@@ -124,18 +124,7 @@ struct MessageInputView: View {
 
                     Spacer()
 
-                    // Web search toggle
-                    Button(action: {
-                        settings.webSearchEnabled.toggle()
-                        HapticFeedback.trigger(.success)
-                    }) {
-                        Image(systemName: "globe")
-                            .font(.system(size: 16))
-                            .foregroundColor(settings.webSearchEnabled
-                                ? .blue
-                                : (isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4)))
-                    }
-                    .padding(.trailing, 4)
+                    webSearchButton
 
                     // Microphone button
                     if showAudioButton {
@@ -237,18 +226,7 @@ struct MessageInputView: View {
 
                     Spacer()
 
-                    // Web search toggle
-                    Button(action: {
-                        settings.webSearchEnabled.toggle()
-                        HapticFeedback.trigger(.success)
-                    }) {
-                        Image(systemName: "globe")
-                            .font(.system(size: 16))
-                            .foregroundColor(settings.webSearchEnabled
-                                ? .blue
-                                : (isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4)))
-                    }
-                    .padding(.trailing, 4)
+                    webSearchButton
 
                     // Microphone button
                     if showAudioButton {
@@ -297,6 +275,35 @@ struct MessageInputView: View {
             .padding(.horizontal, 12)
             .padding(.bottom, isKeyboardVisible ? 12 : 0)
         }
+    }
+
+    @ViewBuilder
+    private var webSearchButton: some View {
+        Button(action: {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                viewModel.isWebSearchEnabled.toggle()
+            }
+        }) {
+            if viewModel.isWebSearchEnabled {
+                HStack(spacing: 6) {
+                    Image(systemName: "globe")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Search")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.accentPrimary.opacity(0.15))
+                .clipShape(Capsule())
+                .foregroundColor(.accentPrimary)
+            } else {
+                Image(systemName: "globe")
+                    .font(.system(size: 20))
+                    .foregroundColor(.secondary)
+                    .frame(width: 24, height: 24)
+            }
+        }
+        .padding(.trailing, 8)
     }
 
     private func sendOrCancelMessage() {
