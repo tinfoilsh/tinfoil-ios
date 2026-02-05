@@ -83,5 +83,16 @@ enum Constants {
         static let sampleRate: Double = 44100.0
         static let numberOfChannels: Int = 1  // Mono
     }
+
+    enum Attachments {
+        static let maxImageDimension: CGFloat = 768
+        static let imageCompressionQuality: CGFloat = 0.85
+        static let maxFileSizeBytes: Int64 = 20 * 1024 * 1024      // 20 MB
+        static let maxImageSizeBytes: Int64 = 10 * 1024 * 1024     // 10 MB
+        static let previewThumbnailSize: CGFloat = 60
+        static let previewMaxWidth: CGFloat = 200
+        static let supportedDocumentExtensions: Set<String> = ["pdf", "txt", "md", "csv", "html"]
+        static let supportedImageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic"]
+    }
 }
  
