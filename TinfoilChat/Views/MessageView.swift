@@ -77,18 +77,7 @@ struct MessageView: View {
                 // If the message is thinking or has thoughts, display them in a thinking box
                 else if message.isThinking || message.thoughts != nil {
                     VStack(alignment: .leading, spacing: 4) {
-                        CollapsibleThinkingBox(
-                            messageId: message.id,
-                            thinkingText: message.thoughts ?? "",
-                            isDarkMode: isDarkMode,
-                            isCollapsible: !message.isThinking,
-                            isStreaming: message.isThinking && isLoading && isLastMessage,
-                            generationTimeSeconds: message.generationTimeSeconds,
-                            messageCollapsed: message.isCollapsed,
-                            thinkingSummary: isLastMessage && message.isThinking ? viewModel.thinkingSummary : nil
-                        )
-
-                        // Web search box (if applicable)
+                        // Web search box (if applicable) - shown before thoughts since search happens first
                         if let webSearchState = message.webSearchState {
                             WebSearchBox(
                                 messageId: message.id,
@@ -99,6 +88,17 @@ struct MessageView: View {
                                 webSearchSummary: isLastMessage ? viewModel.webSearchSummary : nil
                             )
                         }
+
+                        CollapsibleThinkingBox(
+                            messageId: message.id,
+                            thinkingText: message.thoughts ?? "",
+                            isDarkMode: isDarkMode,
+                            isCollapsible: !message.isThinking,
+                            isStreaming: message.isThinking && isLoading && isLastMessage,
+                            generationTimeSeconds: message.generationTimeSeconds,
+                            messageCollapsed: message.isCollapsed,
+                            thinkingSummary: isLastMessage && message.isThinking ? viewModel.thinkingSummary : nil
+                        )
 
                         if !message.content.isEmpty {
                             if !message.contentChunks.isEmpty {
