@@ -24,6 +24,7 @@ struct ChatQueryBuilder {
     ///   - maxMessages: Maximum number of messages to include from history
     ///   - stream: Whether to stream the response (default: true)
     ///   - webSearchEnabled: Whether to enable web search for this query (default: false)
+    ///   - isMultimodal: Whether the current model supports image content parts
     /// - Returns: A configured ChatQuery
     static func buildQuery(
         modelId: String,
@@ -32,7 +33,8 @@ struct ChatQueryBuilder {
         conversationMessages: [Message],
         maxMessages: Int,
         stream: Bool = true,
-        webSearchEnabled: Bool = false
+        webSearchEnabled: Bool = false,
+        isMultimodal: Bool = false
     ) -> ChatQuery {
 
         var messages: [ChatQuery.ChatCompletionMessageParam] = []
@@ -62,7 +64,24 @@ struct ChatQueryBuilder {
                     hasAddedSystemInstructions = true
                 }
 
-                messages.append(.user(.init(content: .string(userContent))))
+                // Prepend document content as context when present
+                if let docContent = msg.documentContent, !docContent.isEmpty {
+                    userContent = "---\nDocument content:\n\(docContent)\n---\n\n\(userContent)"
+                }
+
+                // Use multimodal content parts when model supports it and message has an image
+                if isMultimodal, let imageBase64 = msg.imageBase64, !imageBase64.isEmpty {
+                    var parts: [ChatQuery.ChatCompletionMessageParam.UserMessageParam.Content.ContentPart] = []
+                    parts.append(.text(.init(text: userContent)))
+                    let imageUrl = ContentPartImageParam.ImageURL(
+                        url: "data:image/jpeg;base64,\(imageBase64)",
+                        detail: .auto
+                    )
+                    parts.append(.image(.init(imageUrl: imageUrl)))
+                    messages.append(.user(.init(content: .contentParts(parts))))
+                } else {
+                    messages.append(.user(.init(content: .string(userContent))))
+                }
             } else if !msg.content.isEmpty {
                 messages.append(.assistant(.init(content: .textContent(msg.content))))
             }
