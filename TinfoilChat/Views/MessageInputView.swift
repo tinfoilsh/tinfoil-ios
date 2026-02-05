@@ -129,26 +129,41 @@ struct MessageInputView: View {
                     // Microphone button
                     if showAudioButton {
                         Button(action: handleAudioButtonTap) {
-                            Group {
-                                if viewModel.isTranscribing {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .secondary))
-                                        .scaleEffect(0.8)
-                                } else {
-                                    Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
-                                        .font(.system(size: 20))
+                            ZStack {
+                                if viewModel.isRecording {
+                                    // Pulsating background when recording
+                                    Circle()
+                                        .fill(Color.red.opacity(0.2))
+                                        .frame(width: 44, height: 44)
+                                        .scaleEffect(isPulsing ? 1.1 : 0.9)
+                                        .animation(
+                                            .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
+                                            value: isPulsing
+                                        )
                                 }
+                                
+                                Group {
+                                    if viewModel.isTranscribing {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .secondary))
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
+                                            .font(.system(size: 20)) // Increased size as requested
+                                    }
+                                }
+                                .frame(width: 32, height: 32)
+                                .foregroundColor(viewModel.isRecording ? .red : .secondary)
                             }
-                            .frame(width: 24, height: 24)
-                            .foregroundColor(viewModel.isRecording ? .red : .secondary)
+                            // Restrict button layout size to match send button (32x32)
+                            // so the larger pulsating circle doesn't affect bar height
+                            .frame(width: 32, height: 32)
                         }
-                        .opacity(viewModel.isRecording && isPulsing ? 0.5 : 1.0)
-                        .animation(viewModel.isRecording ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true) : .default, value: isPulsing)
                         .onChange(of: viewModel.isRecording) { _, isRecording in
                             isPulsing = isRecording
                         }
                         .disabled(viewModel.isLoading || viewModel.isTranscribing)
-                        .padding(.trailing, 8)
+                        .padding(.trailing, 4)
                     }
 
                     Button(action: sendOrCancelMessage) {
@@ -231,26 +246,41 @@ struct MessageInputView: View {
                     // Microphone button
                     if showAudioButton {
                         Button(action: handleAudioButtonTap) {
-                            Group {
-                                if viewModel.isTranscribing {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .secondary))
-                                        .scaleEffect(0.8)
-                                } else {
-                                    Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
-                                        .font(.system(size: 20))
+                            ZStack {
+                                if viewModel.isRecording {
+                                    // Pulsating background when recording
+                                    Circle()
+                                        .fill(Color.red.opacity(0.2))
+                                        .frame(width: 44, height: 44)
+                                        .scaleEffect(isPulsing ? 1.1 : 0.9)
+                                        .animation(
+                                            .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
+                                            value: isPulsing
+                                        )
                                 }
+                                
+                                Group {
+                                    if viewModel.isTranscribing {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .secondary))
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
+                                            .font(.system(size: 20)) // Increased size as requested
+                                    }
+                                }
+                                .frame(width: 32, height: 32)
+                                .foregroundColor(viewModel.isRecording ? .red : .secondary)
                             }
-                            .frame(width: 24, height: 24)
-                            .foregroundColor(viewModel.isRecording ? .red : .secondary)
+                            // Restrict button layout size to match send button (32x32)
+                            // so the larger pulsating circle doesn't affect bar height
+                            .frame(width: 32, height: 32)
                         }
-                        .opacity(viewModel.isRecording && isPulsing ? 0.5 : 1.0)
-                        .animation(viewModel.isRecording ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true) : .default, value: isPulsing)
                         .onChange(of: viewModel.isRecording) { _, isRecording in
                             isPulsing = isRecording
                         }
                         .disabled(viewModel.isLoading || viewModel.isTranscribing)
-                        .padding(.trailing, 8)
+                        .padding(.trailing, 4)
                     }
 
                     Button(action: sendOrCancelMessage) {
