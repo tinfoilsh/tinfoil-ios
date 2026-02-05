@@ -312,6 +312,7 @@ struct MessageInputView: View {
         Button(action: {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                 viewModel.isWebSearchEnabled.toggle()
+                settings.webSearchEnabled = viewModel.isWebSearchEnabled
             }
         }) {
             if viewModel.isWebSearchEnabled {
