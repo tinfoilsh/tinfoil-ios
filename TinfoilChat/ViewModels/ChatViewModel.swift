@@ -1242,9 +1242,7 @@ class ChatViewModel: ObservableObject {
                             }
                             chat.messages[lastIndex].contentChunks = processedChunks
                             // Sync sources with webSearchState (may have missed some due to race condition)
-                            if webSearchState != nil {
-                                webSearchState?.sources = collectedSources
-                            }
+                            webSearchState?.sources = collectedSources
                             chat.messages[lastIndex].webSearchState = webSearchState
                         }
 
