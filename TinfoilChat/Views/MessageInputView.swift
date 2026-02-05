@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import PhotosUI
 
 /// Input area for typing messages, including model verification status and send button
 struct MessageInputView: View {
@@ -39,11 +40,22 @@ struct MessageInputView: View {
     // State for pulsing animation
     @State private var isPulsing = false
 
+    // Attachment picker state
+    @State private var showDocumentPicker = false
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+
     // Binding to show audio error alert
     private var showAudioError: Binding<Bool> {
         Binding(
             get: { viewModel.audioError != nil },
             set: { if !$0 { viewModel.audioError = nil } }
+        )
+    }
+
+    private var showAttachmentError: Binding<Bool> {
+        Binding(
+            get: { viewModel.attachmentError != nil },
+            set: { if !$0 { viewModel.attachmentError = nil } }
         )
     }
 
@@ -62,6 +74,26 @@ struct MessageInputView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(viewModel.audioError ?? "An error occurred")
+            }
+            .alert("Attachment Error", isPresented: showAttachmentError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(viewModel.attachmentError ?? "An error occurred")
+            }
+            .sheet(isPresented: $showDocumentPicker) {
+                DocumentPickerView { url, fileName in
+                    viewModel.addDocumentAttachment(url: url, fileName: fileName)
+                }
+            }
+            .onChange(of: selectedPhotoItem) { _, newItem in
+                guard let newItem else { return }
+                Task {
+                    if let data = try? await newItem.loadTransferable(type: Data.self) {
+                        let fileName = "Photo.jpg"
+                        viewModel.addImageAttachment(data: data, fileName: fileName)
+                    }
+                    selectedPhotoItem = nil
+                }
             }
     }
 
@@ -123,6 +155,8 @@ struct MessageInputView: View {
                     .padding(.leading)
 
                     Spacer()
+
+                    attachButton
 
                     webSearchButton
 
@@ -241,6 +275,8 @@ struct MessageInputView: View {
 
                     Spacer()
 
+                    attachButton
+
                     webSearchButton
 
                     // Microphone button
@@ -308,6 +344,27 @@ struct MessageInputView: View {
     }
 
     @ViewBuilder
+    private var attachButton: some View {
+        Menu {
+            PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                Label("Photo Library", systemImage: "photo")
+            }
+            Button {
+                showDocumentPicker = true
+            } label: {
+                Label("Document", systemImage: "doc")
+            }
+        } label: {
+            Image(systemName: "paperclip")
+                .font(.system(size: 20))
+                .foregroundColor(.secondary)
+                .frame(width: 24, height: 24)
+        }
+        .disabled(viewModel.isLoading || viewModel.isProcessingAttachment)
+        .padding(.trailing, 8)
+    }
+
+    @ViewBuilder
     private var webSearchButton: some View {
         Button(action: {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
@@ -340,7 +397,7 @@ struct MessageInputView: View {
     private func sendOrCancelMessage() {
         if viewModel.isLoading {
             viewModel.cancelGeneration()
-        } else if !messageText.isEmpty {
+        } else if !messageText.isEmpty || !viewModel.pendingAttachments.isEmpty {
             viewModel.sendMessage(text: messageText)
             messageText = ""
             textHeight = Layout.defaultHeight
