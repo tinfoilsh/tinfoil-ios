@@ -29,6 +29,7 @@ class ChatViewModel: ObservableObject {
     @Published var isAtBottom: Bool = true
     @Published var scrollToBottomTrigger: UUID = UUID()
     @Published var isClientInitializing: Bool = false
+    @Published var isWebSearchEnabled: Bool = false
 
     // Verification properties - consolidated to reduce update frequency
     struct VerificationInfo {
