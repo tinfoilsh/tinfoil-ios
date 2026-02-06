@@ -377,10 +377,12 @@ struct MessageInputView: View {
     @ViewBuilder
     private var attachButton: some View {
         Menu {
-            Button {
-                showPhotoPicker = true
-            } label: {
-                Label("Photo Library", systemImage: "photo")
+            if viewModel.currentModel.isMultimodal {
+                Button {
+                    showPhotoPicker = true
+                } label: {
+                    Label("Photo Library", systemImage: "photo")
+                }
             }
             Button {
                 showDocumentPicker = true
