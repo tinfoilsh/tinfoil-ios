@@ -44,15 +44,15 @@ struct MessageView: View {
             }
 
             VStack(alignment: .trailing, spacing: 4) {
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
-                // Show attachment indicators for user messages
-                if message.role == .user && !message.attachments.isEmpty {
-                    MessageAttachmentIndicator(
-                        attachments: message.attachments,
-                        isDarkMode: isDarkMode
-                    )
-                }
+            // Show attachment indicators above the message bubble
+            if message.role == .user && !message.attachments.isEmpty {
+                MessageAttachmentIndicator(
+                    attachments: message.attachments,
+                    isDarkMode: isDarkMode
+                )
+            }
 
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
                 // Show the loading dots for a fresh streaming assistant response (but not if we have thoughts or are thinking)
                 if message.role == .assistant &&
                     message.content.isEmpty &&

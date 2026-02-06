@@ -69,12 +69,6 @@ private struct AttachmentPreviewChip: View {
                     }
                 }
             }
-
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 16))
-                    .foregroundColor(.secondary)
-            }
         }
         .padding(6)
         .background(
@@ -82,6 +76,14 @@ private struct AttachmentPreviewChip: View {
                 .fill(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
         )
         .frame(maxWidth: Constants.Attachments.previewMaxWidth)
+        .overlay(alignment: .topTrailing) {
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(.secondary)
+            }
+            .offset(x: 6, y: -6)
+        }
     }
 
     @ViewBuilder
