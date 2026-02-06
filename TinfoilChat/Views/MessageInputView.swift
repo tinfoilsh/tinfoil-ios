@@ -42,6 +42,7 @@ struct MessageInputView: View {
 
     // Attachment picker state
     @State private var showDocumentPicker = false
+    @State private var showPhotoPicker = false
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
 
     // Binding to show audio error alert
@@ -85,8 +86,16 @@ struct MessageInputView: View {
                     viewModel.addDocumentAttachment(url: url, fileName: fileName)
                 }
             }
+            .sheet(isPresented: $showPhotoPicker) {
+                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                    Text("Select a Photo")
+                }
+                .photosPickerStyle(.inline)
+                .presentationDetents([.medium, .large])
+            }
             .onChange(of: selectedPhotoItem) { _, newItem in
                 guard let newItem else { return }
+                showPhotoPicker = false
                 Task {
                     if let data = try? await newItem.loadTransferable(type: Data.self) {
                         let fileName = "Photo.jpg"
@@ -368,7 +377,9 @@ struct MessageInputView: View {
     @ViewBuilder
     private var attachButton: some View {
         Menu {
-            PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+            Button {
+                showPhotoPicker = true
+            } label: {
                 Label("Photo Library", systemImage: "photo")
             }
             Button {
