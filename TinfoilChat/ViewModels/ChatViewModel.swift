@@ -1161,8 +1161,9 @@ class ChatViewModel: ObservableObject {
                             isInThinkingMode = false
                             thinkStartTime = nil
                             currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                            // Clear thinking summary when thinking ends
+                            // Clear thinking summary and cancel any in-flight summary generation
                             Task { @MainActor [weak self] in
+                                ThinkingSummaryService.shared.reset()
                                 self?.thinkingSummary = ""
                             }
                             // Inline appendToResponse
@@ -1220,8 +1221,9 @@ class ChatViewModel: ObservableObject {
                                 thoughtsBuffer += beforeEnd
                                 currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                                 isInThinkingMode = false
-                                // Clear thinking summary when thinking ends
+                                // Clear thinking summary and cancel any in-flight summary generation
                                 Task { @MainActor [weak self] in
+                                    ThinkingSummaryService.shared.reset()
                                     self?.thinkingSummary = ""
                                 }
 
@@ -1344,6 +1346,7 @@ class ChatViewModel: ObservableObject {
                         }
 
                         // Finalize all message content
+                        ThinkingSummaryService.shared.reset()
                         self.thinkingSummary = ""
                         self.webSearchSummary = ""
                         if !chat.messages.isEmpty, let lastIndex = chat.messages.indices.last {
