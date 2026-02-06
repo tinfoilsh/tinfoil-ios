@@ -102,6 +102,17 @@ struct MessageInputView: View {
         if #available(iOS 26, *) {
             // iOS 26+ with liquid glass effect
             VStack(spacing: 0) {
+                // Attachment preview bar
+                if !viewModel.pendingAttachments.isEmpty {
+                    AttachmentPreviewBar(
+                        attachments: viewModel.pendingAttachments,
+                        thumbnails: viewModel.pendingImageThumbnails,
+                        onRemove: { id in viewModel.removePendingAttachment(id: id) }
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                }
+
                 // Text input area
                 CustomTextEditor(text: $messageText,
                                  textHeight: $textHeight,
@@ -221,6 +232,17 @@ struct MessageInputView: View {
         } else {
             // Older iOS with material effect
             VStack(spacing: 0) {
+                // Attachment preview bar
+                if !viewModel.pendingAttachments.isEmpty {
+                    AttachmentPreviewBar(
+                        attachments: viewModel.pendingAttachments,
+                        thumbnails: viewModel.pendingImageThumbnails,
+                        onRemove: { id in viewModel.removePendingAttachment(id: id) }
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                }
+
                 // Text input area
                 CustomTextEditor(text: $messageText,
                                  textHeight: $textHeight,
