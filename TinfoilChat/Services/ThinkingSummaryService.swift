@@ -67,6 +67,8 @@ class ThinkingSummaryService {
 
                 let result = try await client.chats(query: query)
 
+                guard !Task.isCancelled else { return }
+
                 if let summary = result.choices.first?.message.content,
                    !summary.isEmpty {
                     let cleanSummary = Self.cleanupSummary(summary)
