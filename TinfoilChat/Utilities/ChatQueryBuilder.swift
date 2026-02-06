@@ -73,7 +73,7 @@ struct ChatQueryBuilder {
                 if isMultimodal, let imageBase64 = msg.imageBase64, !imageBase64.isEmpty {
                     var parts: [ChatQuery.ChatCompletionMessageParam.UserMessageParam.Content.ContentPart] = []
                     parts.append(.text(.init(text: userContent)))
-                    let imageUrl = ContentPartImageParam.ImageURL(
+                    let imageUrl = ChatQuery.ChatCompletionMessageParam.ContentPartImageParam.ImageURL(
                         url: "data:image/jpeg;base64,\(imageBase64)",
                         detail: .auto
                     )
