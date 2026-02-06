@@ -132,6 +132,7 @@ class ChatViewModel: ObservableObject {
     private var networkStatusCancellable: AnyCancellable?
     private var streamUpdateTimer: Timer?
     private var pendingStreamUpdate: Chat?
+    private var pendingSaveTask: Task<Void, Never>?
     private var lastKnownAuthState: Bool?
     
     // Auth reference for Premium features
@@ -1999,21 +2000,21 @@ class ChatViewModel: ObservableObject {
             // Only save first page of chats + unsaved chats (to prevent persisting paginated data)
             // Keep encrypted chats that failed to decrypt
             let nonEmptyChats = chats.filter { !$0.messages.isEmpty || $0.decryptionFailed }
-            
+
             // Separate into categories
             let oneMinuteAgo = Date().addingTimeInterval(-Constants.Pagination.cleanupThresholdSeconds)
             let syncedChats = nonEmptyChats.filter { chat in
-                !chat.isBlankChat && 
+                !chat.isBlankChat &&
                 !chat.hasTemporaryId &&
                 chat.createdAt < oneMinuteAgo
             }.sorted { $0.createdAt > $1.createdAt }
-            
+
             let unsavedChats = nonEmptyChats.filter { $0.isBlankChat || $0.hasTemporaryId }
             let recentChats = nonEmptyChats.filter { $0.createdAt >= oneMinuteAgo }
-            
+
             // Only save first page of synced chats + all unsaved/recent chats
             let chatsToSave = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + unsavedChats + recentChats
-            
+
             // Remove duplicates
             var seen = Set<String>()
             let uniqueChatsToSave = chatsToSave.filter { chat in
@@ -2023,7 +2024,7 @@ class ChatViewModel: ObservableObject {
                 seen.insert(chat.id)
                 return true
             }
-            
+
             // Always include the current chat to ensure latest changes (e.g., title) are persisted
             var chatsToPersist = uniqueChatsToSave
             if let current = currentChat, (!current.messages.isEmpty || current.decryptionFailed) {
@@ -2032,7 +2033,12 @@ class ChatViewModel: ObservableObject {
                 }
             }
 
-            Chat.saveToDefaults(chatsToPersist, userId: currentUserId)
+            let userId = currentUserId
+            let previous = pendingSaveTask
+            pendingSaveTask = Task.detached(priority: .utility) {
+                await previous?.value
+                Chat.saveToDefaults(chatsToPersist, userId: userId)
+            }
             
             // Trigger cloud backup for the current chat if it has messages and permanent ID
             // Don't try to backup chats with temporary IDs or while streaming
