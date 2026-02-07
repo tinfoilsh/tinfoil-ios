@@ -319,13 +319,29 @@ struct MessageInputView: View {
     @ViewBuilder
     private var webSearchButton: some View {
         Button(action: {
-            viewModel.isWebSearchEnabled.toggle()
-            settings.webSearchEnabled = viewModel.isWebSearchEnabled
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                viewModel.isWebSearchEnabled.toggle()
+                settings.webSearchEnabled = viewModel.isWebSearchEnabled
+            }
         }) {
-            Image(systemName: "globe")
-                .font(.system(size: 20))
-                .foregroundColor(viewModel.isWebSearchEnabled ? .blue : .secondary)
-                .frame(width: 24, height: 24)
+            if viewModel.isWebSearchEnabled {
+                HStack(spacing: 6) {
+                    Image(systemName: "globe")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Web Search")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.accentPrimary.opacity(0.15))
+                .clipShape(Capsule())
+                .foregroundColor(.accentPrimary)
+            } else {
+                Image(systemName: "globe")
+                    .font(.system(size: 20))
+                    .foregroundColor(.secondary)
+                    .frame(width: 24, height: 24)
+            }
         }
         .padding(.leading, 8)
     }
