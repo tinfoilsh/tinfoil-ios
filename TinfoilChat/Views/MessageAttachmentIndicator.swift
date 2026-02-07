@@ -19,19 +19,22 @@ struct MessageAttachmentIndicator: View {
             .filter { $0.type == .image && $0.imageBase64 != nil }
     }
 
+    private var imageAttachments: [Attachment] {
+        attachments.filter { $0.type == .image }
+    }
+
+    private var documentAttachments: [Attachment] {
+        attachments.filter { $0.type == .document }
+    }
+
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
-            ForEach(attachments) { attachment in
+            if !imageAttachments.isEmpty {
+                imageGrid
+            }
+
+            ForEach(documentAttachments) { attachment in
                 AttachmentChip(attachment: attachment, isDarkMode: isDarkMode)
-                    .onTapGesture {
-                        if attachment.type == .image && attachment.imageBase64 != nil {
-                            let images = allConversationImages
-                            if let index = images.firstIndex(where: { $0.id == attachment.id }) {
-                                initialImageIndex = index
-                                showImageViewer = true
-                            }
-                        }
-                    }
             }
         }
         .padding(.bottom, 4)
@@ -40,6 +43,25 @@ struct MessageAttachmentIndicator: View {
                 images: allConversationImages,
                 initialIndex: initialImageIndex
             )
+        }
+    }
+
+    @ViewBuilder
+    private var imageGrid: some View {
+        let size = Constants.Attachments.messageThumbnailSize
+        HStack(spacing: 4) {
+            ForEach(imageAttachments) { attachment in
+                ImageThumbnail(attachment: attachment, size: size)
+                    .onTapGesture {
+                        if attachment.imageBase64 != nil {
+                            let images = allConversationImages
+                            if let index = images.firstIndex(where: { $0.id == attachment.id }) {
+                                initialImageIndex = index
+                                showImageViewer = true
+                            }
+                        }
+                    }
+            }
         }
     }
 }
@@ -85,6 +107,31 @@ private struct AttachmentChip: View {
         case "csv": return "tablecells"
         case "md": return "text.document"
         default: return "doc.text"
+        }
+    }
+}
+
+private struct ImageThumbnail: View {
+    let attachment: Attachment
+    let size: CGFloat
+
+    var body: some View {
+        if let base64 = attachment.thumbnailBase64,
+           let data = Data(base64Encoded: base64),
+           let uiImage = UIImage(data: data) {
+            Image(uiImage: uiImage)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        } else {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.gray.opacity(0.3))
+                .frame(width: size, height: size)
+                .overlay {
+                    Image(systemName: "photo")
+                        .foregroundColor(.gray)
+                }
         }
     }
 }
