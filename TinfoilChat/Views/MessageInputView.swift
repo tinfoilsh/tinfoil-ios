@@ -43,7 +43,7 @@ struct MessageInputView: View {
     // Attachment picker state
     @State private var showDocumentPicker = false
     @State private var showPhotoPicker = false
-    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
 
     // Binding to show audio error alert
     private var showAudioError: Binding<Bool> {
@@ -86,23 +86,23 @@ struct MessageInputView: View {
                     viewModel.addDocumentAttachment(url: url, fileName: fileName)
                 }
             }
-            .sheet(isPresented: $showPhotoPicker) {
-                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                    Text("Select a Photo")
-                }
-                .photosPickerStyle(.inline)
-                .presentationDetents([.medium, .large])
-            }
-            .onChange(of: selectedPhotoItem) { _, newItem in
-                guard let newItem else { return }
-                showPhotoPicker = false
-                Task {
-                    if let data = try? await newItem.loadTransferable(type: Data.self) {
-                        let fileName = "Photo.jpg"
-                        viewModel.addImageAttachment(data: data, fileName: fileName)
+            .sheet(isPresented: $showPhotoPicker, onDismiss: processSelectedPhotos) {
+                NavigationStack {
+                    PhotosPicker(selection: $selectedPhotoItems, matching: .images) {
+                        Text("Select Photos")
                     }
-                    selectedPhotoItem = nil
+                    .photosPickerStyle(.inline)
+                    .navigationTitle("Select Photos")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") {
+                                showPhotoPicker = false
+                            }
+                        }
+                    }
                 }
+                .presentationDetents([.medium, .large])
             }
     }
 
@@ -420,6 +420,19 @@ struct MessageInputView: View {
             viewModel.sendMessage(text: messageText)
             messageText = ""
             textHeight = Layout.defaultHeight
+        }
+    }
+
+    private func processSelectedPhotos() {
+        let items = selectedPhotoItems
+        selectedPhotoItems = []
+        for (index, item) in items.enumerated() {
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    let fileName = items.count > 1 ? "Photo \(index + 1).jpg" : "Photo.jpg"
+                    viewModel.addImageAttachment(data: data, fileName: fileName)
+                }
+            }
         }
     }
 
