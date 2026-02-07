@@ -211,7 +211,12 @@ struct ChatContainer: View {
                     .opacity(isSidebarOpen ? 1 : 0)
                     .animation(.easeInOut(duration: 0.2), value: isSidebarOpen)
             }
-            // Only show toolbar items when chat has messages (not a new/blank chat)
+            if authManager.isAuthenticated {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    VerificationStatusIndicator(viewModel: viewModel)
+                }
+            }
+            // Only show model picker and new chat button when chat has messages (not a new/blank chat)
             if authManager.isAuthenticated && !(viewModel.currentChat?.isBlankChat ?? true) {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     ModelPicker(viewModel: viewModel)
@@ -744,6 +749,81 @@ extension View {
             self.toolbarBackground(.hidden, for: .navigationBar)
         } else {
             self
+        }
+    }
+}
+
+/// Verification status indicator for the navigation bar
+struct VerificationStatusIndicator: View {
+    @ObservedObject var viewModel: TinfoilChat.ChatViewModel
+    @State private var isCollapsed = false
+    @State private var collapseTask: Task<Void, Never>?
+
+    private var iconName: String {
+        if viewModel.isVerified && viewModel.verificationError == nil {
+            return "lock.fill"
+        } else if viewModel.isVerifying {
+            return "lock.open.fill"
+        } else {
+            return "exclamationmark.shield.fill"
+        }
+    }
+
+    private var iconColor: Color {
+        if viewModel.isVerified && viewModel.verificationError == nil {
+            return .green
+        } else if viewModel.isVerifying {
+            return .orange
+        } else {
+            return .red
+        }
+    }
+
+    private var statusText: String {
+        if viewModel.isVerifying {
+            return "Verifying..."
+        } else if viewModel.isVerified && viewModel.verificationError == nil {
+            return "Privacy verified"
+        } else {
+            return ""
+        }
+    }
+
+    private var showText: Bool {
+        !isCollapsed && !statusText.isEmpty
+    }
+
+    var body: some View {
+        Button(action: { viewModel.showVerifier() }) {
+            HStack(spacing: 4) {
+                Image(systemName: iconName)
+                    .foregroundColor(iconColor)
+                    .font(.system(size: 14))
+
+                if showText {
+                    Text(statusText)
+                        .font(.caption)
+                        .foregroundColor(iconColor)
+                        .fixedSize()
+                }
+            }
+        }
+        .onChange(of: viewModel.isVerified) { _, isVerified in
+            if isVerified && viewModel.verificationError == nil {
+                collapseTask?.cancel()
+                collapseTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: UInt64(Constants.Verification.collapseDelaySeconds * 1_000_000_000))
+                    guard !Task.isCancelled else { return }
+                    isCollapsed = true
+                }
+            }
+        }
+        .onChange(of: viewModel.isVerifying) { _, isVerifying in
+            if isVerifying {
+                collapseTask?.cancel()
+                collapseTask = nil
+                isCollapsed = false
+            }
         }
     }
 }

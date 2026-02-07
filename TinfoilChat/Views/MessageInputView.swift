@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 import PhotosUI
 
-/// Input area for typing messages, including model verification status and send button
+/// Input area for typing messages, including attachments and send button
 struct MessageInputView: View {
     // MARK: - Constants
     fileprivate enum Layout {
@@ -15,7 +15,6 @@ struct MessageInputView: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject private var authManager: AuthManager
-    @State private var showErrorPopover = false
     @State private var textHeight: CGFloat = Layout.defaultHeight
     @ObservedObject private var settings = SettingsManager.shared
     var isKeyboardVisible: Bool = false
@@ -133,47 +132,8 @@ struct MessageInputView: View {
                     .frame(height: textHeight)
                     .padding(.horizontal)
 
-                // Bottom row with shield and send button
+                // Bottom row with action buttons
                 HStack {
-                    // Shield status indicator
-                    Button(action: {
-                        viewModel.showVerifier()
-                    }) {
-                        HStack {
-                            Image(systemName: viewModel.isVerified && viewModel.verificationError == nil ? "lock.fill" :
-                                              viewModel.isVerifying ? "shield" : "exclamationmark.shield.fill")
-                                .foregroundColor(viewModel.isVerified && viewModel.verificationError == nil ? .green :
-                                                viewModel.isVerifying ? .orange : .red)
-                                .font(.caption)
-                            if let error = viewModel.verificationError {
-                                HStack(spacing: 4) {
-                                    Text("Verification failed")
-                                        .font(.caption)
-                                        .foregroundColor(.red)
-                                    Button(action: {
-                                        showErrorPopover.toggle()
-                                    }) {
-                                        Image(systemName: "info.circle")
-                                            .font(.caption)
-                                            .foregroundColor(.red)
-                                    }
-                                    .alert(isPresented: $showErrorPopover) {
-                                        Alert(
-                                            title: Text("Verification Error"),
-                                            message: Text(error),
-                                            dismissButton: .default(Text("OK"))
-                                        )
-                                    }
-                                }
-                            } else {
-                                Text(viewModel.verificationStatusMessage)
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                            }
-                        }
-                    }
-                    .padding(.leading)
-
                     Spacer()
 
                     attachButton
@@ -195,7 +155,7 @@ struct MessageInputView: View {
                                             value: isPulsing
                                         )
                                 }
-                                
+
                                 Group {
                                     if viewModel.isTranscribing {
                                         ProgressView()
@@ -203,14 +163,12 @@ struct MessageInputView: View {
                                             .scaleEffect(0.8)
                                     } else {
                                         Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
-                                            .font(.system(size: 20)) // Increased size as requested
+                                            .font(.system(size: 20))
                                     }
                                 }
                                 .frame(width: 32, height: 32)
                                 .foregroundColor(viewModel.isRecording ? .red : .secondary)
                             }
-                            // Restrict button layout size to match send button (32x32)
-                            // so the larger pulsating circle doesn't affect bar height
                             .frame(width: 32, height: 32)
                         }
                         .onChange(of: viewModel.isRecording) { _, isRecording in
@@ -263,47 +221,8 @@ struct MessageInputView: View {
                     .frame(height: textHeight)
                     .padding(.horizontal)
 
-                // Bottom row with shield and send button
+                // Bottom row with action buttons
                 HStack {
-                    // Shield status indicator
-                    Button(action: {
-                        viewModel.showVerifier()
-                    }) {
-                        HStack {
-                            Image(systemName: viewModel.isVerified && viewModel.verificationError == nil ? "lock.fill" :
-                                              viewModel.isVerifying ? "shield" : "exclamationmark.shield.fill")
-                                .foregroundColor(viewModel.isVerified && viewModel.verificationError == nil ? .green :
-                                                viewModel.isVerifying ? .orange : .red)
-                                .font(.caption)
-                            if let error = viewModel.verificationError {
-                                HStack(spacing: 4) {
-                                    Text("Verification failed")
-                                        .font(.caption)
-                                        .foregroundColor(.red)
-                                    Button(action: {
-                                        showErrorPopover.toggle()
-                                    }) {
-                                        Image(systemName: "info.circle")
-                                            .font(.caption)
-                                            .foregroundColor(.red)
-                                    }
-                                    .alert(isPresented: $showErrorPopover) {
-                                        Alert(
-                                            title: Text("Verification Error"),
-                                            message: Text(error),
-                                            dismissButton: .default(Text("OK"))
-                                        )
-                                    }
-                                }
-                            } else {
-                                Text(viewModel.verificationStatusMessage)
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                            }
-                        }
-                    }
-                    .padding(.leading)
-
                     Spacer()
 
                     attachButton
@@ -325,7 +244,7 @@ struct MessageInputView: View {
                                             value: isPulsing
                                         )
                                 }
-                                
+
                                 Group {
                                     if viewModel.isTranscribing {
                                         ProgressView()
@@ -333,14 +252,12 @@ struct MessageInputView: View {
                                             .scaleEffect(0.8)
                                     } else {
                                         Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
-                                            .font(.system(size: 20)) // Increased size as requested
+                                            .font(.system(size: 20))
                                     }
                                 }
                                 .frame(width: 32, height: 32)
                                 .foregroundColor(viewModel.isRecording ? .red : .secondary)
                             }
-                            // Restrict button layout size to match send button (32x32)
-                            // so the larger pulsating circle doesn't affect bar height
                             .frame(width: 32, height: 32)
                         }
                         .onChange(of: viewModel.isRecording) { _, isRecording in
