@@ -40,9 +40,16 @@ struct MessageInputView: View {
     @State private var isPulsing = false
 
     // Attachment picker state
+    @State private var showAddSheet = false
     @State private var showDocumentPicker = false
     @State private var showPhotoPicker = false
+    @State private var showCamera = false
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var pendingPickerAction: PickerAction?
+
+    private enum PickerAction {
+        case camera, photos, files
+    }
 
     // Binding to show audio error alert
     private var showAudioError: Binding<Bool> {
@@ -102,6 +109,42 @@ struct MessageInputView: View {
                     }
                 }
                 .presentationDetents([.medium, .large])
+            }
+            .fullScreenCover(isPresented: $showCamera) {
+                CameraPickerView { image in
+                    if let data = image.jpegData(compressionQuality: CGFloat(Constants.Attachments.imageCompressionQuality)) {
+                        viewModel.addImageAttachment(data: data, fileName: "Camera Photo.jpg")
+                    }
+                }
+                .ignoresSafeArea()
+            }
+            .sheet(isPresented: $showAddSheet, onDismiss: {
+                guard let action = pendingPickerAction else { return }
+                pendingPickerAction = nil
+                switch action {
+                case .camera: showCamera = true
+                case .photos: showPhotoPicker = true
+                case .files: showDocumentPicker = true
+                }
+            }) {
+                AddToSheetView(
+                    viewModel: viewModel,
+                    isDarkMode: isDarkMode,
+                    onCamera: {
+                        pendingPickerAction = .camera
+                        showAddSheet = false
+                    },
+                    onPhotos: {
+                        pendingPickerAction = .photos
+                        showAddSheet = false
+                    },
+                    onFiles: {
+                        pendingPickerAction = .files
+                        showAddSheet = false
+                    }
+                )
+                .environmentObject(authManager)
+                .presentationDetents([.height(340)])
             }
     }
 
@@ -293,21 +336,10 @@ struct MessageInputView: View {
 
     @ViewBuilder
     private var attachButton: some View {
-        Menu {
-            if viewModel.currentModel.isMultimodal {
-                Button {
-                    showPhotoPicker = true
-                } label: {
-                    Label("Photo Library", systemImage: "photo")
-                }
-            }
-            Button {
-                showDocumentPicker = true
-            } label: {
-                Label("Document", systemImage: "doc")
-            }
+        Button {
+            showAddSheet = true
         } label: {
-            Image(systemName: "paperclip")
+            Image(systemName: "plus")
                 .font(.system(size: 20))
                 .foregroundColor(.secondary)
                 .frame(width: 24, height: 24)
@@ -388,6 +420,121 @@ struct MessageInputView: View {
     private func openSettings() {
         if let url = URL(string: UIApplication.openSettingsURLString) {
             UIApplication.shared.open(url)
+        }
+    }
+}
+
+/// Bottom sheet presented from the "+" button with attachment options and model selector
+struct AddToSheetView: View {
+    @ObservedObject var viewModel: TinfoilChat.ChatViewModel
+    @EnvironmentObject private var authManager: AuthManager
+    let isDarkMode: Bool
+    let onCamera: () -> Void
+    let onPhotos: () -> Void
+    let onFiles: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private var availableModels: [ModelType] {
+        AppConfig.shared.filteredModelTypes(
+            isAuthenticated: authManager.isAuthenticated,
+            hasActiveSubscription: authManager.hasActiveSubscription
+        )
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                // Attachment buttons
+                HStack(spacing: 12) {
+                    if viewModel.currentModel.isMultimodal {
+                        attachmentButton(icon: "camera", label: "Camera") {
+                            onCamera()
+                        }
+                        attachmentButton(icon: "photo.on.rectangle", label: "Photos") {
+                            onPhotos()
+                        }
+                    }
+                    attachmentButton(icon: "doc.badge.arrow.up", label: "Files") {
+                        onFiles()
+                    }
+                }
+                .padding(.horizontal, 20)
+
+                Divider()
+                    .padding(.horizontal, 20)
+
+                // Model selector
+                Text("Select a Model")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, -12)
+
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 16) {
+                            ForEach(availableModels) { model in
+                                ModelTab(
+                                    model: model,
+                                    isSelected: viewModel.currentModel.id == model.id,
+                                    isDarkMode: isDarkMode,
+                                    isEnabled: model.isFree || (authManager.isAuthenticated && authManager.hasActiveSubscription),
+                                    showPricingLabel: !(authManager.isAuthenticated && authManager.hasActiveSubscription),
+                                    style: .regular
+                                ) {
+                                    let canUse = model.isFree || (authManager.isAuthenticated && authManager.hasActiveSubscription)
+                                    if canUse {
+                                        viewModel.changeModel(to: model)
+                                    }
+                                }
+                                .id(model.id)
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            withAnimation {
+                                proxy.scrollTo(viewModel.currentModel.id, anchor: .center)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.top, 8)
+            .navigationTitle("Add to Chat")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 24))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func attachmentButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 22))
+                Text(label)
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .foregroundColor(.primary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 72)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(.secondarySystemGroupedBackground))
+            )
         }
     }
 }

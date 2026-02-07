@@ -216,12 +216,8 @@ struct ChatContainer: View {
                     VerificationStatusIndicator(viewModel: viewModel)
                 }
             }
-            // Only show model picker and new chat button when chat has messages (not a new/blank chat)
+            // Only show new chat button when chat has messages (not a new/blank chat)
             if authManager.isAuthenticated && !(viewModel.currentChat?.isBlankChat ?? true) {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    ModelPicker(viewModel: viewModel)
-                }
-
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: createNewChat) {
                         Image(systemName: "plus")
@@ -577,31 +573,86 @@ struct TabbedWelcomeView: View {
 
 /// Individual model tab component
 struct ModelTab: View {
+    enum Style {
+        case compact
+        case regular
+
+        var iconSize: CGFloat {
+            switch self {
+            case .compact: return 20
+            case .regular: return 36
+            }
+        }
+
+        var nameFont: CGFloat {
+            switch self {
+            case .compact: return 9
+            case .regular: return 13
+            }
+        }
+
+        var cardSize: CGSize {
+            switch self {
+            case .compact: return CGSize(width: 88, height: 72)
+            case .regular: return CGSize(width: 120, height: 110)
+            }
+        }
+
+        var cornerRadius: CGFloat {
+            switch self {
+            case .compact: return 12
+            case .regular: return 16
+            }
+        }
+
+        var checkmarkSize: CGFloat {
+            switch self {
+            case .compact: return 10
+            case .regular: return 16
+            }
+        }
+
+        var checkmarkIconSize: CGFloat {
+            switch self {
+            case .compact: return 6
+            case .regular: return 9
+            }
+        }
+
+        var spacing: CGFloat {
+            switch self {
+            case .compact: return 4
+            case .regular: return 8
+            }
+        }
+    }
+
     let model: ModelType
     let isSelected: Bool
     let isDarkMode: Bool
     let isEnabled: Bool
     let showPricingLabel: Bool
+    var style: Style = .compact
     let onTap: () -> Void
-    
+
     var body: some View {
         Button(action: onTap) {
-            VStack(spacing: 4) {
+            VStack(spacing: style.spacing) {
                 // Model icon
                 Image(model.iconName)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 20, height: 20)
+                    .frame(width: style.iconSize, height: style.iconSize)
                     .opacity(isEnabled ? 1.0 : 0.7)
-                
+
                 // Model name
                 Text(model.displayName)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: style.nameFont, weight: .medium))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .opacity(isEnabled ? 1.0 : 0.7)
-                
+
                 // Free/Premium indicator (only shown for non-premium users)
                 if showPricingLabel {
                     Text(model.isFree ? "Free" : "Premium")
@@ -611,56 +662,56 @@ struct ModelTab: View {
                         .padding(.vertical, 1)
                         .background(
                             RoundedRectangle(cornerRadius: 4)
-                                .fill(isEnabled ? 
+                                .fill(isEnabled ?
                                       (model.isFree ? Color.green : Color.orange).opacity(0.1) :
                                       Color.gray.opacity(0.1))
                         )
                 }
             }
             .foregroundColor(isEnabled ? (isSelected ? .primary : .secondary) : .gray)
-            .frame(width: 88, height: 72)
+            .frame(width: style.cardSize.width, height: style.cardSize.height)
             .background(
                 ZStack {
                     // Base background
                     if #available(iOS 26, *) {
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: style.cornerRadius)
                             .fill(.thickMaterial)
                             .opacity(isEnabled ? 1.0 : 0.7)
                     } else {
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: style.cornerRadius)
                             .fill(Color.chatSurface(isDarkMode: isDarkMode))
                             .opacity(isEnabled ? 1.0 : 0.7)
                     }
 
                     // Selected state background
                     if isSelected {
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: style.cornerRadius)
                             .fill(Color.accentPrimary.opacity(0.15))
                     }
-                    
+
                     // Subtle border for unselected enabled items
                     if !isSelected && isEnabled {
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: style.cornerRadius)
                             .strokeBorder(Color.gray.opacity(0.2), lineWidth: 1)
                     }
-                    
-                    // Selection indicator - small dot in top right
+
+                    // Selection indicator
                     if isSelected {
                         VStack {
                             HStack {
                                 Spacer()
                                 Circle()
                                     .fill(Color.accentPrimary)
-                                    .frame(width: 10, height: 10)
+                                    .frame(width: style.checkmarkSize, height: style.checkmarkSize)
                                     .overlay(
                                         Image(systemName: "checkmark")
-                                            .font(.system(size: 6, weight: .bold))
+                                            .font(.system(size: style.checkmarkIconSize, weight: .bold))
                                             .foregroundColor(.white)
                                     )
                             }
                             Spacer()
                         }
-                        .padding(4)
+                        .padding(style == .compact ? 4 : 8)
                     }
                 }
             )
