@@ -266,9 +266,11 @@ class AuthManager: ObservableObject {
                     // Save subscription state
                     UserDefaults.standard.set(self.hasActiveSubscription, forKey: self.subscriptionKey)
                     
-                    // Post notification that subscription status was updated
-                    NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
-                    
+                    // Post notification only when subscription status actually changed
+                    if self.hasActiveSubscription != wasActive {
+                        NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                    }
+
                     // If subscription became active, clear cached API key to force refetch
                     if self.hasActiveSubscription && !wasActive {
                         APIKeyManager.shared.clearApiKey()
