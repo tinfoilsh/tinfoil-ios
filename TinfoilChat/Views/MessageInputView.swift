@@ -333,9 +333,9 @@ struct MessageInputView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Color.accentPrimary.opacity(0.15))
+                .background(Color.secondary.opacity(0.15))
                 .clipShape(Capsule())
-                .foregroundColor(.accentPrimary)
+                .foregroundColor(.primary)
             } else {
                 Image(systemName: "globe")
                     .font(.system(size: 20))
