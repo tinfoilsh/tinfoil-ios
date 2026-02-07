@@ -754,7 +754,7 @@ struct VerificationStatusIndicator: View {
 
     private var iconColor: Color {
         if viewModel.isVerified && viewModel.verificationError == nil {
-            return .green
+            return isCollapsed ? .primary : .green
         } else if viewModel.isVerifying {
             return .orange
         } else {
