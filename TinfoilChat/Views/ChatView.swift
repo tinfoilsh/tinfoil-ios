@@ -406,10 +406,9 @@ struct TabbedWelcomeView: View {
     @ObservedObject var authManager: AuthManager
     let onRequestSignIn: () -> Void
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
-    @State private var selectedModelId: String = ""
+    @State private var selectedModelId: String = AppConfig.shared.currentModel?.id ?? ""
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var revenueCat = RevenueCatManager.shared
-    @State private var refreshID = UUID()
     @State private var showPremiumModal = false
     @State private var isWaitingForSubscription = false
     
@@ -487,12 +486,7 @@ struct TabbedWelcomeView: View {
                     }
                     .frame(height: 100)
                     .onAppear {
-                        // Scroll to selected model when view appears
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            withAnimation {
-                                proxy.scrollTo(selectedModelId, anchor: .center)
-                            }
-                        }
+                        proxy.scrollTo(selectedModelId, anchor: .center)
                     }
                     .onChange(of: selectedModelId) { _, newModelId in
                         // Scroll to newly selected model
@@ -509,8 +503,7 @@ struct TabbedWelcomeView: View {
                     authManager: authManager,
                     onSuccess: {
                         isWaitingForSubscription = false
-                        refreshID = UUID()
-                        
+
                         // Create a new chat to show premium models
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             if !viewModel.messages.isEmpty {
@@ -535,11 +528,6 @@ struct TabbedWelcomeView: View {
         .onChange(of: viewModel.currentModel) { _, newModel in
             selectedModelId = newModel.id
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SubscriptionStatusUpdated"))) { _ in
-            // Refresh view when subscription status changes
-            refreshID = UUID()
-        }
-        .id(refreshID)
         .sheet(isPresented: $showPremiumModal) {
             PaywallView(displayCloseButton: true)
                 .onPurchaseCompleted { _ in
