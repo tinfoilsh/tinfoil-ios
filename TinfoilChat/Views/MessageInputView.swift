@@ -447,8 +447,10 @@ struct AddToSheetView: View {
                 // Attachment buttons
                 HStack(spacing: 12) {
                     if viewModel.currentModel.isMultimodal {
-                        attachmentButton(icon: "camera", label: "Camera") {
-                            onCamera()
+                        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                            attachmentButton(icon: "camera", label: "Camera") {
+                                onCamera()
+                            }
                         }
                         attachmentButton(icon: "photo.on.rectangle", label: "Photos") {
                             onPhotos()
