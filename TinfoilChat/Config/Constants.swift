@@ -66,6 +66,7 @@ enum Constants {
 
     enum Verification {
         static let networkRetryDelaySeconds: TimeInterval = 2.0
+        static let collapseDelaySeconds: TimeInterval = 3.0
     }
 
     enum ThinkingSummary {
