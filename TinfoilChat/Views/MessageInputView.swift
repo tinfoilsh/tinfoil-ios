@@ -134,11 +134,11 @@ struct MessageInputView: View {
 
                 // Bottom row with action buttons
                 HStack {
-                    Spacer()
-
                     attachButton
 
                     webSearchButton
+
+                    Spacer()
 
                     // Microphone button
                     if showAudioButton {
@@ -223,11 +223,11 @@ struct MessageInputView: View {
 
                 // Bottom row with action buttons
                 HStack {
-                    Spacer()
-
                     attachButton
 
                     webSearchButton
+
+                    Spacer()
 
                     // Microphone button
                     if showAudioButton {
@@ -313,7 +313,7 @@ struct MessageInputView: View {
                 .frame(width: 24, height: 24)
         }
         .disabled(viewModel.isLoading || viewModel.isProcessingAttachment)
-        .padding(.trailing, 8)
+        .padding(.leading, 8)
     }
 
     @ViewBuilder
@@ -327,7 +327,7 @@ struct MessageInputView: View {
                 .foregroundColor(viewModel.isWebSearchEnabled ? .blue : .secondary)
                 .frame(width: 24, height: 24)
         }
-        .padding(.trailing, 8)
+        .padding(.leading, 8)
     }
 
     private func sendOrCancelMessage() {
