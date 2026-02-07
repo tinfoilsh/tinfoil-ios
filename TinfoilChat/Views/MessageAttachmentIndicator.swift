@@ -6,12 +6,16 @@
 
 import SwiftUI
 
+private struct ImageViewerConfig: Identifiable {
+    let id = UUID()
+    let initialIndex: Int
+}
+
 struct MessageAttachmentIndicator: View {
     let attachments: [Attachment]
     let isDarkMode: Bool
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
-    @State private var showImageViewer = false
-    @State private var initialImageIndex: Int = 0
+    @State private var imageViewerConfig: ImageViewerConfig?
 
     private var allConversationImages: [Attachment] {
         (viewModel.currentChat?.messages ?? [])
@@ -38,10 +42,11 @@ struct MessageAttachmentIndicator: View {
             }
         }
         .padding(.bottom, 4)
-        .fullScreenCover(isPresented: $showImageViewer) {
+        .fullScreenCover(item: $imageViewerConfig) { config in
             ImageViewerOverlay(
                 images: allConversationImages,
-                initialIndex: initialImageIndex
+                initialIndex: config.initialIndex,
+                onDismiss: { imageViewerConfig = nil }
             )
         }
     }
@@ -60,8 +65,7 @@ struct MessageAttachmentIndicator: View {
                                 if attachment.imageBase64 != nil {
                                     let images = allConversationImages
                                     if let index = images.firstIndex(where: { $0.id == attachment.id }) {
-                                        initialImageIndex = index
-                                        showImageViewer = true
+                                        imageViewerConfig = ImageViewerConfig(initialIndex: index)
                                     }
                                 }
                             }
@@ -145,14 +149,25 @@ private struct ImageThumbnail: View {
 private struct ImageViewerOverlay: View {
     let images: [Attachment]
     let initialIndex: Int
-    @Environment(\.dismiss) private var dismiss
-    @State private var currentIndex: Int = 0
-    @State private var scale: CGFloat = 1.0
-    @State private var lastScale: CGFloat = 1.0
+    let onDismiss: () -> Void
+    @State private var currentIndex: Int
+    @State private var dragOffset: CGFloat = 0
+    @State private var isDraggingVertically = false
+
+    init(images: [Attachment], initialIndex: Int, onDismiss: @escaping () -> Void) {
+        self.images = images
+        self.initialIndex = initialIndex
+        self.onDismiss = onDismiss
+        _currentIndex = State(initialValue: initialIndex)
+    }
+
+    private var backgroundOpacity: Double {
+        1.0 - min(abs(dragOffset) / 300.0, 0.5)
+    }
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.black.opacity(backgroundOpacity).ignoresSafeArea()
 
             TabView(selection: $currentIndex) {
                 ForEach(Array(images.enumerated()), id: \.element.id) { index, attachment in
@@ -162,6 +177,28 @@ private struct ImageViewerOverlay: View {
             }
             .tabViewStyle(.page(indexDisplayMode: images.count > 1 ? .automatic : .never))
             .ignoresSafeArea()
+            .offset(y: dragOffset)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 20)
+                    .onChanged { value in
+                        if !isDraggingVertically {
+                            isDraggingVertically = abs(value.translation.height) > abs(value.translation.width)
+                        }
+                        if isDraggingVertically {
+                            dragOffset = value.translation.height
+                        }
+                    }
+                    .onEnded { value in
+                        if isDraggingVertically && abs(value.translation.height) > 100 {
+                            onDismiss()
+                        } else {
+                            withAnimation(.interactiveSpring()) {
+                                dragOffset = 0
+                            }
+                        }
+                        isDraggingVertically = false
+                    }
+            )
 
             // Close button + counter
             VStack {
@@ -178,7 +215,7 @@ private struct ImageViewerOverlay: View {
                     Spacer()
 
                     Button {
-                        dismiss()
+                        onDismiss()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 30))
@@ -221,10 +258,7 @@ private struct ImageViewerOverlay: View {
                 }
             }
         }
-        .statusBarHidden()
-        .onAppear {
-            currentIndex = initialIndex
-        }
+        .persistentSystemOverlays(.hidden)
     }
 }
 
@@ -241,6 +275,14 @@ private struct ZoomableImagePage: View {
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
     @State private var decodedImage: UIImage?
+
+    init(attachment: Attachment) {
+        self.attachment = attachment
+        if let base64 = attachment.imageBase64,
+           let data = Data(base64Encoded: base64) {
+            _decodedImage = State(initialValue: UIImage(data: data))
+        }
+    }
 
     var body: some View {
         Group {
@@ -265,13 +307,6 @@ private struct ZoomableImagePage: View {
                             lastScale = 1.0
                         }
                     }
-            }
-        }
-        .onAppear {
-            if decodedImage == nil,
-               let base64 = attachment.imageBase64,
-               let data = Data(base64Encoded: base64) {
-                decodedImage = UIImage(data: data)
             }
         }
     }
