@@ -92,6 +92,7 @@ enum Constants {
         static let previewThumbnailSize: CGFloat = 60
         static let previewMaxWidth: CGFloat = 200
         static let messageThumbnailSize: CGFloat = 80
+        static let messageThumbnailColumns: Int = 3
         static let supportedDocumentExtensions: Set<String> = ["pdf", "txt", "md", "csv", "html"]
         static let supportedImageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic"]
     }

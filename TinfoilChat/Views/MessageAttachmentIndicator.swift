@@ -49,18 +49,24 @@ struct MessageAttachmentIndicator: View {
     @ViewBuilder
     private var imageGrid: some View {
         let size = Constants.Attachments.messageThumbnailSize
-        HStack(spacing: 4) {
-            ForEach(imageAttachments) { attachment in
-                ImageThumbnail(attachment: attachment, size: size)
-                    .onTapGesture {
-                        if attachment.imageBase64 != nil {
-                            let images = allConversationImages
-                            if let index = images.firstIndex(where: { $0.id == attachment.id }) {
-                                initialImageIndex = index
-                                showImageViewer = true
+        let columns = Constants.Attachments.messageThumbnailColumns
+        let rows = imageAttachments.chunked(into: columns)
+        VStack(alignment: .trailing, spacing: 4) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 4) {
+                    ForEach(row) { attachment in
+                        ImageThumbnail(attachment: attachment, size: size)
+                            .onTapGesture {
+                                if attachment.imageBase64 != nil {
+                                    let images = allConversationImages
+                                    if let index = images.firstIndex(where: { $0.id == attachment.id }) {
+                                        initialImageIndex = index
+                                        showImageViewer = true
+                                    }
+                                }
                             }
-                        }
                     }
+                }
             }
         }
     }
@@ -218,6 +224,14 @@ private struct ImageViewerOverlay: View {
         .statusBarHidden()
         .onAppear {
             currentIndex = initialIndex
+        }
+    }
+}
+
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
         }
     }
 }
