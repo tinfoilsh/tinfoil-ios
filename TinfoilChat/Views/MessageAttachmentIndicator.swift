@@ -240,31 +240,39 @@ private struct ZoomableImagePage: View {
     let attachment: Attachment
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
+    @State private var decodedImage: UIImage?
 
     var body: some View {
-        if let base64 = attachment.imageBase64,
-           let data = Data(base64Encoded: base64),
-           let uiImage = UIImage(data: data) {
-            Image(uiImage: uiImage)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .scaleEffect(scale)
-                .gesture(
-                    MagnifyGesture()
-                        .onChanged { value in
-                            scale = lastScale * value.magnification
+        Group {
+            if let uiImage = decodedImage {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .scaleEffect(scale)
+                    .gesture(
+                        MagnifyGesture()
+                            .onChanged { value in
+                                scale = lastScale * value.magnification
+                            }
+                            .onEnded { _ in
+                                lastScale = max(1.0, scale)
+                                scale = lastScale
+                            }
+                    )
+                    .onTapGesture(count: 2) {
+                        withAnimation {
+                            scale = 1.0
+                            lastScale = 1.0
                         }
-                        .onEnded { _ in
-                            lastScale = max(1.0, scale)
-                            scale = lastScale
-                        }
-                )
-                .onTapGesture(count: 2) {
-                    withAnimation {
-                        scale = 1.0
-                        lastScale = 1.0
                     }
-                }
+            }
+        }
+        .onAppear {
+            if decodedImage == nil,
+               let base64 = attachment.imageBase64,
+               let data = Data(base64Encoded: base64) {
+                decodedImage = UIImage(data: data)
+            }
         }
     }
 }
