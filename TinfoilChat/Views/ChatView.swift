@@ -449,11 +449,6 @@ struct TabbedWelcomeView: View {
             
             // Model selection tabs
             VStack(spacing: 2) {
-                Text("Choose an AI model")
-                    .font(.system(size: 14, weight: .regular))
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 32)
-                
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 16) {
