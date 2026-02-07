@@ -286,10 +286,10 @@ struct MessageView: View {
                 }
 
                 }
-                .padding(.vertical, 8)
-                .padding(.horizontal, message.role == .user ? 12 : 0)
+                .padding(.vertical, message.role == .user && message.content.isEmpty ? 0 : 8)
+                .padding(.horizontal, message.role == .user && !message.content.isEmpty ? 12 : 0)
                 .background {
-                    if message.role == .user {
+                    if message.role == .user && !message.content.isEmpty {
                         if #available(iOS 26, *) {
                             RoundedRectangle(cornerRadius: 16)
                                 .fill(.thickMaterial)
