@@ -647,10 +647,10 @@ class ChatViewModel: ObservableObject {
                 currentChat = chats.first
             }
             
-            saveChats()
-            
-            // Delete from cloud
+            // Delete from file storage and cloud
+            let userId = currentUserId
             Task {
+                await Chat.deleteChatFromStorage(chatId: id, userId: userId)
                 do {
                     try await cloudSync.deleteFromCloud(id)
                 } catch {
@@ -680,10 +680,10 @@ class ChatViewModel: ObservableObject {
             if currentChat?.id == id {
                 currentChat = updatedChat
             }
-            saveChats()
+            saveChat(updatedChat)
         }
     }
-    
+
     /// Sends a user message and generates a response
     func sendMessage(text: String) {
         let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1337,10 +1337,10 @@ class ChatViewModel: ObservableObject {
 
                         self.streamUpdateTimer?.invalidate()
                         self.streamUpdateTimer = nil
-                        if self.pendingStreamUpdate != nil {
+                        if let pending = self.pendingStreamUpdate {
                             self.pendingStreamUpdate = nil
                             if self.hasChatAccess {
-                                self.saveChats()
+                                self.saveChat(pending)
                             }
                         }
 
@@ -1424,10 +1424,10 @@ class ChatViewModel: ObservableObject {
                         // Force any pending stream updates to save immediately
                         self.streamUpdateTimer?.invalidate()
                         self.streamUpdateTimer = nil
-                        if self.pendingStreamUpdate != nil {
+                        if let pending = self.pendingStreamUpdate {
                             self.pendingStreamUpdate = nil
                             if self.hasChatAccess {
-                                self.saveChats()
+                                self.saveChat(pending)
                             }
                         }
 
@@ -1569,7 +1569,7 @@ class ChatViewModel: ObservableObject {
         }
 
         // Save and generate response (without adding user message again)
-        saveChats()
+        saveChat(updatedChat)
         generateResponse()
     }
 
@@ -1601,7 +1601,7 @@ class ChatViewModel: ObservableObject {
             chats[index] = updatedChat
         }
 
-        saveChats()
+        saveChat(updatedChat)
 
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -1642,7 +1642,7 @@ class ChatViewModel: ObservableObject {
         isScrollInteractionActive = false
         scrollToBottomTrigger = UUID()
 
-        saveChats()
+        saveChat(updatedChat)
         generateResponse()
     }
 
@@ -1664,18 +1664,17 @@ class ChatViewModel: ObservableObject {
         guard authManager?.isAuthenticated == true else { return }
 
         streamingTracker.endStreaming(chatId)
-        saveChats()
+
+        guard let latestChat = self.chats.first(where: { $0.id == chatId }) else {
+            return
+        }
+        saveChat(latestChat)
 
         Task { @MainActor in
-            guard let latestChat = self.chats.first(where: { $0.id == chatId }) else {
-                return
-            }
-
             await self.cloudSync.backupChat(latestChat.id)
 
             if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
-                let updatedChats = Chat.loadFromDefaults(userId: self.currentUserId)
-                if let syncedChat = updatedChats.first(where: { $0.id == latestChat.id }) {
+                if let syncedChat = await Chat.loadChat(chatId: latestChat.id, userId: self.currentUserId) {
                     self.chats[index] = syncedChat
                     if self.currentChat?.id == latestChat.id {
                         self.currentChat = syncedChat
@@ -1798,10 +1797,10 @@ class ChatViewModel: ObservableObject {
                 streamUpdateTimer?.invalidate()
                 streamUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
                     Task { @MainActor in
-                        if let _ = self?.pendingStreamUpdate {
+                        if let pending = self?.pendingStreamUpdate {
                             self?.pendingStreamUpdate = nil
                             if self?.hasChatAccess == true {
-                                self?.saveChats()
+                                self?.saveChat(pending)
                             }
                         }
                     }
@@ -1809,83 +1808,48 @@ class ChatViewModel: ObservableObject {
             } else {
                 // Save immediately for non-streaming updates
                 if hasChatAccess {
-                    saveChats()
+                    saveChat(updatedChat)
                 }
             }
         } else {
             // Chat not found in array - this shouldn't happen but handle it
             chats.insert(updatedChat, at: 0)
-            
+
             // Update currentChat if it's the one being updated
             if currentChat?.id == chat.id {
                 currentChat = updatedChat
             }
-            
+
             // IMPORTANT: Preserve pagination state when inserting new chats
             // Adding a new chat doesn't affect whether more chats are available to load
             // The hasMoreChats flag should remain unchanged
-            
+
             // Save chats for all authenticated users
             if hasChatAccess {
-                saveChats()
+                saveChat(updatedChat)
             }
         }
     }
     
-    /// Saves chats to UserDefaults and triggers cloud backup
-    private func saveChats() {
-        // Save chats for all authenticated users
-        if hasChatAccess {
-            // Only save first page of chats + unsaved chats (to prevent persisting paginated data)
-            // Keep encrypted chats that failed to decrypt
-            let nonEmptyChats = chats.filter { !$0.messages.isEmpty || $0.decryptionFailed }
+    /// Saves a single chat to per-chat file storage and triggers cloud backup
+    private func saveChat(_ chat: Chat? = nil) {
+        guard hasChatAccess else { return }
 
-            // Separate into categories
-            let oneMinuteAgo = Date().addingTimeInterval(-Constants.Pagination.cleanupThresholdSeconds)
-            let syncedChats = nonEmptyChats.filter { chat in
-                !chat.isBlankChat &&
-                chat.createdAt < oneMinuteAgo
-            }.sorted { $0.createdAt > $1.createdAt }
+        let chatToSave = chat ?? currentChat
+        guard let chatToSave = chatToSave,
+              !chatToSave.messages.isEmpty || chatToSave.decryptionFailed else { return }
 
-            let unsavedChats = nonEmptyChats.filter { $0.isBlankChat }
-            let recentChats = nonEmptyChats.filter { $0.createdAt >= oneMinuteAgo }
+        let userId = currentUserId
+        let previous = pendingSaveTask
+        pendingSaveTask = Task.detached(priority: .utility) {
+            await previous?.value
+            await Chat.saveChat(chatToSave, userId: userId)
+        }
 
-            // Only save first page of synced chats + all unsaved/recent chats
-            let chatsToSave = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + unsavedChats + recentChats
-
-            // Remove duplicates
-            var seen = Set<String>()
-            let uniqueChatsToSave = chatsToSave.filter { chat in
-                if seen.contains(chat.id) {
-                    return false
-                }
-                seen.insert(chat.id)
-                return true
-            }
-
-            // Always include the current chat to ensure latest changes (e.g., title) are persisted
-            var chatsToPersist = uniqueChatsToSave
-            if let current = currentChat, (!current.messages.isEmpty || current.decryptionFailed) {
-                if !chatsToPersist.contains(where: { $0.id == current.id }) {
-                    chatsToPersist.append(current)
-                }
-            }
-
-            let userId = currentUserId
-            let previous = pendingSaveTask
-            pendingSaveTask = Task.detached(priority: .utility) {
-                await previous?.value
-                Chat.saveToDefaults(chatsToPersist, userId: userId)
-            }
-            
-            // Trigger cloud backup for the current chat if it has messages and permanent ID
-            // Don't try to backup chats with temporary IDs or while streaming
-            if let currentChat = currentChat,
-               !currentChat.messages.isEmpty,
-               !currentChat.hasActiveStream {
-                Task {
-                    await cloudSync.backupChat(currentChat.id)
-                }
+        // Trigger cloud backup if the chat has messages and no active stream
+        if !chatToSave.messages.isEmpty && !chatToSave.hasActiveStream {
+            Task {
+                await cloudSync.backupChat(chatToSave.id)
             }
         }
     }
@@ -1962,20 +1926,24 @@ class ChatViewModel: ObservableObject {
         
         // If user upgraded to premium, load saved chats if any
         if isAuthenticated && hasActiveSubscription && chats.count <= 1 {
-            let savedChats = Chat.loadFromDefaults(userId: currentUserId)
-            if !savedChats.isEmpty {
-                let previouslySelectedId = currentChat?.id
-                chats = savedChats
+            Task {
+                let index = await Chat.loadChatIndex(userId: currentUserId)
+                let sortedIndex = index.sorted { $0.createdAt > $1.createdAt }
+                let firstPageIds = sortedIndex.prefix(Constants.Pagination.chatsPerPage).map(\.id)
+                let savedChats = await Chat.loadChats(chatIds: firstPageIds, userId: currentUserId)
+                guard !savedChats.isEmpty else { return }
+                let previouslySelectedId = self.currentChat?.id
+                self.chats = savedChats.sorted { $0.createdAt > $1.createdAt }
 
                 // Preserve existing selection when possible so we don't jump to a blank chat
                 if let chatId = previouslySelectedId,
-                   let restoredChat = chats.first(where: { $0.id == chatId }) {
-                    currentChat = restoredChat
-                } else if currentChat == nil {
-                    currentChat = chats.first
+                   let restoredChat = self.chats.first(where: { $0.id == chatId }) {
+                    self.currentChat = restoredChat
+                } else if self.currentChat == nil {
+                    self.currentChat = self.chats.first
                 }
 
-                ensureBlankChatAtTop()
+                self.ensureBlankChatAtTop()
             }
         }
     }
@@ -1986,9 +1954,9 @@ class ChatViewModel: ObservableObject {
         autoSyncTimer?.invalidate()
         autoSyncTimer = nil
         
-        // Save current chats before clearing them (they're already associated with the user ID)
-        if hasChatAccess {
-            saveChats()
+        // Save current chat before clearing (it's already associated with the user ID)
+        if hasChatAccess, let chat = currentChat {
+            saveChat(chat)
         }
         
         // Reset to a free model when signing out
@@ -2022,9 +1990,10 @@ class ChatViewModel: ObservableObject {
         chats.removeAll()
         currentChat = nil
         
-        // Clear from UserDefaults storage
-        if let userId = currentUserId {
-            Chat.saveToDefaults([], userId: userId)
+        // Clear from file storage
+        let userId = currentUserId
+        Task {
+            await Chat.deleteAllChatsFromStorage(userId: userId)
         }
         
         // Reset sync state
@@ -2129,9 +2098,8 @@ class ChatViewModel: ObservableObject {
                     if let index = chats.firstIndex(where: { $0.id == chat.id }) {
                         chats[index] = chat
                     }
+                    saveChat(chat)
                 }
-                // Save the updated chats
-                saveChats()
                 
                 // Mark that we have anonymous chats that need to be synced after encryption setup
                 Task { @MainActor in
@@ -2163,31 +2131,32 @@ class ChatViewModel: ObservableObject {
                     // Retry decryption for any previously failed chats now that key is loaded
                     let decryptedCount = await cloudSync.retryDecryptionWithNewKey(onProgress: nil)
                     if decryptedCount > 0 {
-                        if let userId = self.currentUserId {
-                            let updatedChats = Chat.loadFromDefaults(userId: userId)
-                            await MainActor.run {
-                                let sortedChats = updatedChats.sorted { $0.createdAt > $1.createdAt }
-                                self.chats = sortedChats
-                                // Refresh currentChat to show decrypted content
-                                if let currentId = self.currentChat?.id,
-                                   let refreshed = sortedChats.first(where: { $0.id == currentId }) {
-                                    self.currentChat = refreshed
-                                }
-                                normalizeChatsArray()
+                        let userId = self.currentUserId
+                        let index = await Chat.loadChatIndex(userId: userId)
+                        let sortedIndex = index.sorted { $0.createdAt > $1.createdAt }
+                        let firstPageIds = sortedIndex.prefix(Constants.Pagination.chatsPerPage).map(\.id)
+                        let loadedChats = await Chat.loadChats(chatIds: firstPageIds, userId: userId)
+                        await MainActor.run {
+                            let sortedChats = loadedChats.sorted { $0.createdAt > $1.createdAt }
+                            self.chats = sortedChats
+                            // Refresh currentChat to show decrypted content
+                            if let currentId = self.currentChat?.id,
+                               let refreshed = sortedChats.first(where: { $0.id == currentId }) {
+                                self.currentChat = refreshed
                             }
+                            normalizeChatsArray()
                         }
                     }
 
                     // If we have anonymous chats to sync, force re-encryption with proper key
                     if self.hasAnonymousChatsToSync {
                         // Force all local chats to be marked for sync
-                        if let userId = self.currentUserId {
-                            var updatedChats = Chat.loadFromDefaults(userId: userId)
-                            for i in 0..<updatedChats.count {
-                                updatedChats[i].locallyModified = true
-                                updatedChats[i].syncVersion = 0
-                            }
-                            Chat.saveToDefaults(updatedChats, userId: userId)
+                        let userId = self.currentUserId
+                        let allChats = await EncryptedFileStorage.shared.loadAllChats(userId: userId ?? "")
+                        for var chat in allChats {
+                            chat.locallyModified = true
+                            chat.syncVersion = 0
+                            await Chat.saveChat(chat, userId: userId)
                         }
                         self.hasAnonymousChatsToSync = false
                     }
@@ -2255,26 +2224,20 @@ class ChatViewModel: ObservableObject {
             // Perform sync
             let _ = await cloudSync.syncAllChats()
             
-            // Load and display synced chats
+            // Load and display synced chats from file index
             if let userId = currentUserId {
-                let loadedChats = Chat.loadFromDefaults(userId: userId)
-                
-                // Debug: Check what we loaded
-                for _ in loadedChats.prefix(5) {
-                }
-                
-                let sortedChats = loadedChats.sorted { $0.createdAt > $1.createdAt }
-                
-                // Include encrypted chats that failed to decrypt (they have decryptionFailed flag)
-                // Only filter out truly blank chats (not encrypted ones)
-                let displayableChats = sortedChats.filter { chat in
-                    // Show if: has messages OR failed to decrypt OR has a non-blank title
-                    !chat.messages.isEmpty || chat.decryptionFailed || !chat.needsGeneratedTitle
-                }
-                
-                // Take first page of displayable chats
-                let firstPage = Array(displayableChats.prefix(Constants.Pagination.chatsPerPage))
-                
+                let index = await Chat.loadChatIndex(userId: userId)
+
+                // Sort by createdAt descending, filter displayable entries
+                let displayableEntries = index
+                    .sorted { $0.createdAt > $1.createdAt }
+                    .filter { $0.messageCount > 0 || $0.decryptionFailed || $0.titleState != .placeholder }
+
+                // Load first page of full chat objects
+                let firstPageIds = displayableEntries.prefix(Constants.Pagination.chatsPerPage).map(\.id)
+                let firstPage = await Chat.loadChats(chatIds: firstPageIds, userId: userId)
+                    .sorted { $0.createdAt > $1.createdAt }
+
                 await MainActor.run {
                     // Set chats and normalize to ensure exactly one blank chat at position 0
                     self.chats = firstPage
@@ -2287,10 +2250,10 @@ class ChatViewModel: ObservableObject {
 
                     // Mark that we've loaded the initial page
                     self.hasLoadedInitialPage = true
-                    self.isPaginationActive = displayableChats.count > 0
-                    
+                    self.isPaginationActive = displayableEntries.count > 0
+
                     // Set hasMoreChats based on total count
-                    self.hasMoreChats = displayableChats.count > Constants.Pagination.chatsPerPage
+                    self.hasMoreChats = displayableEntries.count > Constants.Pagination.chatsPerPage
                 }
             }
             
@@ -2474,15 +2437,17 @@ class ChatViewModel: ObservableObject {
             // Setup pagination after sync
             await setupPaginationForAppRestart()
             
-            // Load and display chats after sync
+            // Load and display chats after sync from file index
             if let userId = currentUserId {
-                let loadedChats = Chat.loadFromDefaults(userId: userId)
-                await MainActor.run {
-                    let nonBlankChats = loadedChats.filter { !$0.isBlankChat }
-                    let sortedNonBlankChats = nonBlankChats.sorted { $0.createdAt > $1.createdAt }
+                let index = await Chat.loadChatIndex(userId: userId)
+                let sortedIndex = index
+                    .filter { $0.messageCount > 0 || $0.decryptionFailed }
+                    .sorted { $0.createdAt > $1.createdAt }
+                let firstPageIds = sortedIndex.prefix(Constants.Pagination.chatsPerPage).map(\.id)
+                let loadedChats = await Chat.loadChats(chatIds: firstPageIds, userId: userId)
 
-                    // Set chats and normalize to ensure exactly one blank chat at position 0
-                    self.chats = sortedNonBlankChats
+                await MainActor.run {
+                    self.chats = loadedChats.sorted { $0.createdAt > $1.createdAt }
                     normalizeChatsArray()
                 }
             }
@@ -2494,53 +2459,9 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Clean up chats beyond first page (called on app launch to ensure clean state)
+    /// With per-chat file storage, each chat is its own file so no blob trimming is needed.
     private func cleanupPaginatedChats() async {
-        guard let userId = currentUserId else { return }
-        
-        // Load all chats from storage
-        let allChats = Chat.loadFromDefaults(userId: userId)
-        
-        // Filter synced chats (not blank, not temporary, and older than 1 minute to avoid deleting just-created chats)
-        let oneMinuteAgo = Date().addingTimeInterval(-Constants.Pagination.cleanupThresholdSeconds)
-        let syncedChats = allChats.filter { chat in
-            !chat.isBlankChat &&
-            chat.createdAt < oneMinuteAgo  // Only clean up chats older than 1 minute
-        }.sorted { $0.createdAt > $1.createdAt }
-
-        // Also keep all recent chats (created in last minute) regardless of count
-        let recentChats = allChats.filter { chat in
-            chat.createdAt >= oneMinuteAgo
-        }
-
-        // If we have more than first page of old synced chats, keep only the first page
-        if syncedChats.count > Constants.Pagination.chatsPerPage {
-
-            // Keep first page of synced chats + all unsaved chats (blank) + recent chats
-            let chatsToKeep = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) +
-                             allChats.filter { chat in chat.isBlankChat } +
-                             recentChats
-            
-            // Remove duplicates based on chat ID
-            var seen = Set<String>()
-            let uniqueChats = chatsToKeep.filter { chat in
-                if seen.contains(chat.id) {
-                    return false
-                }
-                seen.insert(chat.id)
-                return true
-            }
-            
-            Chat.saveToDefaults(uniqueChats, userId: userId)
-
-            await MainActor.run {
-                let nonBlankChats = uniqueChats.filter { !$0.isBlankChat }
-                let sortedNonBlankChats = nonBlankChats.sorted { $0.createdAt > $1.createdAt }
-
-                // Set chats and normalize to ensure exactly one blank chat at position 0
-                self.chats = sortedNonBlankChats
-                normalizeChatsArray()
-            }
-        }
+        // No-op: per-chat file storage doesn't need blob trimming
     }
     
     /// Load more chats (called when user scrolls to bottom)
@@ -2619,23 +2540,27 @@ class ChatViewModel: ObservableObject {
         // IMPORTANT: Preserve the current chat ID so it stays in the array even if beyond first page
         let currentChatId = self.currentChat?.id
 
-        // Load all chats from storage (includes newly synced ones)
-        let allChats = Chat.loadFromDefaults(userId: userId)
-        
+        // Load index from file storage (includes newly synced ones)
+        let index = await Chat.loadChatIndex(userId: userId)
+
         // IMPORTANT: Preserve locally modified chats and chats with active streams
-        // Create a map of locally modified chats to preserve them
         let locallyModifiedChats = chats.filter { $0.locallyModified || $0.hasActiveStream || streamingTracker.isStreaming($0.id) }
         let locallyModifiedIds = Set(locallyModifiedChats.map { $0.id })
-        
-        // Filter out locally modified chats from the synced data to avoid overwriting them
-        let syncedChatsFromStorage = allChats.filter { !locallyModifiedIds.contains($0.id) }
-        
-        // Combine: locally modified chats + synced chats
+
+        // Determine which chat IDs from the index to load (excluding locally modified)
+        let indexEntries = index.filter { !locallyModifiedIds.contains($0.id) }
+            .sorted { $0.createdAt > $1.createdAt }
+
+        // Load first page worth of synced chats from files
+        let idsToLoad = indexEntries.prefix(Constants.Pagination.chatsPerPage).map(\.id)
+        let syncedChatsFromStorage = await Chat.loadChats(chatIds: idsToLoad, userId: userId)
+
+        // Combine: locally modified chats + synced chats from files
         let combinedChats = locallyModifiedChats + syncedChatsFromStorage
-        
+
         // Sort by creation date (newest first)
         let sortedChats = combinedChats.sorted { $0.createdAt > $1.createdAt }
-        
+
         // Keep track of currently loaded chat IDs to preserve pagination
         let currentlyLoadedIds = Set(chats.map { $0.id })
         
@@ -2701,11 +2626,12 @@ class ChatViewModel: ObservableObject {
         
         // Update hasMoreChats conservatively to preserve server-provided pagination
         let displayedSyncedChats = chats.filter { !$0.isBlankChat }.count
+        let totalIndexEntries = index.count
 
-        // Set to true if we clearly have more locally than are displayed
-        if syncedChats.count > displayedSyncedChats {
+        // Set to true if we clearly have more in the index than are displayed
+        if totalIndexEntries > displayedSyncedChats {
             self.hasMoreChats = true
-        } else if self.paginationToken == nil && syncedChats.count <= Constants.Pagination.chatsPerPage {
+        } else if self.paginationToken == nil && totalIndexEntries <= Constants.Pagination.chatsPerPage {
             // Only set to false when not using remote pagination and we are certain the total fits on one page
             self.hasMoreChats = false
         }
@@ -2722,61 +2648,17 @@ class ChatViewModel: ObservableObject {
     /// Reset pagination and reload all chats from storage (used after sync)
     @MainActor
     private func resetPaginationAndReloadChats() async {
-        // If pagination is active, we need to carefully handle the reload
-        if isPaginationActive {
-            // Don't reset pagination token during sync
-            // Just reload the currently loaded chats
-            if let userId = currentUserId {
-                let allChats = Chat.loadFromDefaults(userId: userId)
-                
-                // Sort by creation date (newest first)
-                let sortedChats = allChats.sorted { $0.createdAt > $1.createdAt }
-                
-                // Always keep recently created chats (within last 2 minutes) to avoid losing just-sent messages
-                let twoMinutesAgo = Date().addingTimeInterval(-Constants.Pagination.recentChatThresholdSeconds)
-                let recentChats = sortedChats.filter { $0.createdAt >= twoMinutesAgo }
-                
-                // Take the first page worth of chats (10) plus any blank/temporary/recent chats
-                let syncedChats = sortedChats.filter {
-                    !$0.isBlankChat &&
-                    $0.createdAt < twoMinutesAgo
-                }
-                let unsavedChats = sortedChats.filter { $0.isBlankChat }
-                
-                // Keep first page of synced chats + all unsaved chats + all recent chats
-                let chatsToShow = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + unsavedChats + recentChats
+        guard let userId = currentUserId else { return }
 
-                // Sort by createdAt (newest first)
-                let sortedChatsToShow = chatsToShow.sorted { $0.createdAt > $1.createdAt }
+        let index = await Chat.loadChatIndex(userId: userId)
+        let sortedIndex = index.sorted { $0.createdAt > $1.createdAt }
+        let nonBlankEntries = sortedIndex.filter { $0.messageCount > 0 || $0.decryptionFailed }
+        let firstPageIds = nonBlankEntries.prefix(Constants.Pagination.chatsPerPage).map(\.id)
+        let loadedChats = await Chat.loadChats(chatIds: firstPageIds, userId: userId)
 
-                // Set chats and normalize to ensure exactly one blank chat at position 0
-                self.chats = sortedChatsToShow
-                normalizeChatsArray()
-                
-                // Update hasMoreChats based on whether there are more chats beyond the first page
-                self.hasMoreChats = syncedChats.count > Constants.Pagination.chatsPerPage
-            }
-        } else {
-            // Not using pagination yet or pagination needs to be reset
-            // This happens after initial sync or when pagination hasn't been set up
-            if let userId = currentUserId {
-                let allChats = Chat.loadFromDefaults(userId: userId)
-
-                // Filter out blank chats and sort by creation date (newest first)
-                let nonBlankChats = allChats.filter { !$0.isBlankChat }
-                let sortedNonBlankChats = nonBlankChats.sorted { $0.createdAt > $1.createdAt }
-
-                // Take only first page of non-blank chats initially
-                let firstPageNonBlankChats = Array(sortedNonBlankChats.prefix(Constants.Pagination.chatsPerPage))
-
-                // Set chats and normalize to ensure exactly one blank chat at position 0
-                self.chats = firstPageNonBlankChats
-                normalizeChatsArray()
-
-                // Set up pagination based on whether there are more non-blank chats
-                self.hasMoreChats = nonBlankChats.count > Constants.Pagination.chatsPerPage
-            }
-        }
+        self.chats = loadedChats.sorted { $0.createdAt > $1.createdAt }
+        normalizeChatsArray()
+        self.hasMoreChats = nonBlankEntries.count > Constants.Pagination.chatsPerPage
     }
     
     /// Perform a full sync with the cloud
@@ -2853,13 +2735,14 @@ class ChatViewModel: ObservableObject {
                 
                 // Reload chats immediately after decryption to show decrypted chats
                 if decryptedCount > 0 {
-                    if let userId = self.currentUserId {
-                        let updatedChats = Chat.loadFromDefaults(userId: userId)
-                        await MainActor.run {
-                            let sortedChats = updatedChats.sorted { $0.createdAt > $1.createdAt }
-                            self.chats = sortedChats
-                            normalizeChatsArray()
-                        }
+                    let userId = self.currentUserId
+                    let index = await Chat.loadChatIndex(userId: userId)
+                    let sortedIndex = index.sorted { $0.createdAt > $1.createdAt }
+                    let firstPageIds = sortedIndex.prefix(Constants.Pagination.chatsPerPage).map(\.id)
+                    let loadedChats = await Chat.loadChats(chatIds: firstPageIds, userId: userId)
+                    await MainActor.run {
+                        self.chats = loadedChats.sorted { $0.createdAt > $1.createdAt }
+                        normalizeChatsArray()
                     }
                 }
                 
@@ -2920,13 +2803,14 @@ class ChatViewModel: ObservableObject {
         }
         
         // Reload chats after decryption
-        if let userId = currentUserId {
-            let updatedChats = Chat.loadFromDefaults(userId: userId)
-            await MainActor.run {
-                let sortedChats = updatedChats.sorted { $0.createdAt > $1.createdAt }
-                self.chats = sortedChats
-                normalizeChatsArray()
-            }
+        let userId = currentUserId
+        let index = await Chat.loadChatIndex(userId: userId)
+        let sortedIndex = index.sorted { $0.createdAt > $1.createdAt }
+        let firstPageIds = sortedIndex.prefix(Constants.Pagination.chatsPerPage).map(\.id)
+        let loadedChats = await Chat.loadChats(chatIds: firstPageIds, userId: userId)
+        await MainActor.run {
+            self.chats = loadedChats.sorted { $0.createdAt > $1.createdAt }
+            normalizeChatsArray()
         }
     }
     
