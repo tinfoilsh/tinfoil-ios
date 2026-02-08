@@ -241,6 +241,7 @@ struct RemoteChat: Codable {
     let syncVersion: Int?  // Optional - for version tracking
     let size: Int?  // Optional - file size
     let content: String?  // Encrypted chat content (optional in list)
+    let projectId: String?  // Project association (returned by all-updated-since)
 }
 
 /// Request for generating conversation ID
