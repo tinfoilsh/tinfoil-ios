@@ -38,6 +38,7 @@ struct Chat: Identifiable, Codable {
     
     // For handling encrypted chats that failed to decrypt
     var decryptionFailed: Bool = false
+    var dataCorrupted: Bool = false
     var encryptedData: String?
 
     // Project association (used by React, preserved by iOS)
@@ -86,6 +87,7 @@ struct Chat: Identifiable, Codable {
         locallyModified: Bool = true,
         updatedAt: Date? = nil,
         decryptionFailed: Bool = false,
+        dataCorrupted: Bool = false,
         encryptedData: String? = nil,
         projectId: String? = nil)
     {
@@ -104,6 +106,7 @@ struct Chat: Identifiable, Codable {
         self.locallyModified = locallyModified
         self.updatedAt = updatedAt ?? createdAt
         self.decryptionFailed = decryptionFailed
+        self.dataCorrupted = dataCorrupted
         self.encryptedData = encryptedData
         self.projectId = projectId
     }
@@ -151,7 +154,7 @@ struct Chat: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, title, titleState, messages, hasActiveStream, createdAt, modelType, language, userId
         case syncVersion, syncedAt, locallyModified, updatedAt
-        case decryptionFailed, encryptedData, projectId
+        case decryptionFailed, dataCorrupted, encryptedData, projectId
     }
 
     init(from decoder: Decoder) throws {
@@ -175,6 +178,7 @@ struct Chat: Identifiable, Codable {
         
         // Encryption fields
         decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed) ?? false
+        dataCorrupted = try container.decodeIfPresent(Bool.self, forKey: .dataCorrupted) ?? false
         encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
     }
@@ -199,6 +203,7 @@ struct Chat: Identifiable, Codable {
         
         // Encryption fields
         try container.encode(decryptionFailed, forKey: .decryptionFailed)
+        try container.encode(dataCorrupted, forKey: .dataCorrupted)
         try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
         try container.encodeIfPresent(projectId, forKey: .projectId)
     }

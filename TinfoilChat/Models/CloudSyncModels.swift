@@ -27,6 +27,7 @@ struct StoredChat: Codable {
     
     // For handling encrypted chats that failed to decrypt
     var decryptionFailed: Bool?
+    var dataCorrupted: Bool?
     var encryptedData: String?
     
     // Project association (used by React, preserved by iOS)
@@ -47,6 +48,7 @@ struct StoredChat: Codable {
         self.syncVersion = syncVersion
         self.syncedAt = nil
         self.locallyModified = true
+        self.dataCorrupted = chat.dataCorrupted
         self.projectId = chat.projectId
         self.hasActiveStream = chat.hasActiveStream
     }
@@ -78,6 +80,7 @@ struct StoredChat: Codable {
             locallyModified: locallyModified,
             updatedAt: updatedAt,
             decryptionFailed: decryptionFailed ?? false,
+            dataCorrupted: dataCorrupted ?? false,
             encryptedData: encryptedData,
             projectId: projectId
         )
@@ -94,7 +97,7 @@ struct StoredChat: Codable {
         case id, title, messages, createdAt, updatedAt
         case language, userId
         case syncVersion, syncedAt, locallyModified
-        case decryptionFailed, encryptedData, projectId, hasActiveStream
+        case decryptionFailed, dataCorrupted, encryptedData, projectId, hasActiveStream
     }
 
     func encode(to encoder: Encoder) throws {
@@ -122,6 +125,7 @@ struct StoredChat: Codable {
 
         try container.encode(locallyModified, forKey: .locallyModified)
         try container.encodeIfPresent(decryptionFailed, forKey: .decryptionFailed)
+        try container.encodeIfPresent(dataCorrupted, forKey: .dataCorrupted)
         try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
         try container.encodeIfPresent(projectId, forKey: .projectId)
         try container.encodeIfPresent(hasActiveStream, forKey: .hasActiveStream)
@@ -179,6 +183,7 @@ struct StoredChat: Codable {
         
         locallyModified = try container.decodeIfPresent(Bool.self, forKey: .locallyModified) ?? false
         decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed)
+        dataCorrupted = try container.decodeIfPresent(Bool.self, forKey: .dataCorrupted)
         encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
         hasActiveStream = try container.decodeIfPresent(Bool.self, forKey: .hasActiveStream)
