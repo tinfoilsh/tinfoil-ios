@@ -21,6 +21,15 @@ actor EncryptedFileStorage {
 
     // MARK: - Directory / Path Helpers
 
+    /// Sanitize a path component by removing path separators and parent-directory sequences
+    /// to prevent path traversal attacks from server-controlled values.
+    private func sanitizePathComponent(_ component: String) -> String {
+        return component
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "\\", with: "_")
+            .replacingOccurrences(of: "..", with: "_")
+    }
+
     private func chatsDirectory(userId: String) throws -> URL {
         let appSupport = try fileManager.url(
             for: .applicationSupportDirectory,
@@ -32,7 +41,7 @@ actor EncryptedFileStorage {
         let chatsDir = appSupport
             .appendingPathComponent("tinfoil", isDirectory: true)
             .appendingPathComponent("chats", isDirectory: true)
-            .appendingPathComponent(userId, isDirectory: true)
+            .appendingPathComponent(sanitizePathComponent(userId), isDirectory: true)
 
         if !fileManager.fileExists(atPath: chatsDir.path) {
             try fileManager.createDirectory(
@@ -48,7 +57,7 @@ actor EncryptedFileStorage {
     private func chatFilePath(chatId: String, userId: String, isCorrupted: Bool) throws -> URL {
         let dir = try chatsDirectory(userId: userId)
         let ext = isCorrupted ? "raw" : "enc"
-        return dir.appendingPathComponent("\(chatId).\(ext)")
+        return dir.appendingPathComponent("\(sanitizePathComponent(chatId)).\(ext)")
     }
 
     private func indexFilePath(userId: String) throws -> URL {
