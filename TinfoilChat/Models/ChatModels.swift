@@ -287,6 +287,12 @@ struct WebSearchState: Codable, Equatable {
     }
 }
 
+/// Image data for multimodal support, matching React's { base64: string; mimeType: string }
+struct ImageData: Codable, Equatable {
+    let base64: String
+    let mimeType: String
+}
+
 /// Represents a single message in a chat
 struct Message: Identifiable, Codable, Equatable {
     let id: String
@@ -303,7 +309,7 @@ struct Message: Identifiable, Codable, Equatable {
     var webSearchState: WebSearchState? = nil
     var attachments: [Attachment] = []
     var documentContent: String? = nil
-    var imageBase64: String? = nil
+    var imageData: [ImageData]? = nil
 
     static let longMessageAttachmentThreshold = 1200
     var shouldDisplayAsAttachment: Bool {
@@ -322,7 +328,7 @@ struct Message: Identifiable, Codable, Equatable {
         return formatter
     }()
     
-    init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = [], documentContent: String? = nil, imageBase64: String? = nil) {
+    init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = [], documentContent: String? = nil, imageData: [ImageData]? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -335,7 +341,7 @@ struct Message: Identifiable, Codable, Equatable {
         self.webSearchState = webSearchState
         self.attachments = attachments
         self.documentContent = documentContent
-        self.imageBase64 = imageBase64
+        self.imageData = imageData
     }
     
     // MARK: - Codable Implementation
@@ -343,7 +349,8 @@ struct Message: Identifiable, Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, generationTimeSeconds, contentChunks, webSearchState
         case webSearch // Alternative key used by React app
-        case attachments, documentContent, imageBase64
+        case attachments, documentContent, imageData
+        case imageBase64 // Legacy iOS key for backward compatibility
     }
     
     init(from decoder: Decoder) throws {
@@ -378,7 +385,14 @@ struct Message: Identifiable, Codable, Equatable {
             ?? container.decodeIfPresent(WebSearchState.self, forKey: .webSearch)
         attachments = try container.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
         documentContent = try container.decodeIfPresent(String.self, forKey: .documentContent)
-        imageBase64 = try container.decodeIfPresent(String.self, forKey: .imageBase64)
+        // Try React's imageData array first, fall back to legacy iOS imageBase64 string
+        if let data = try container.decodeIfPresent([ImageData].self, forKey: .imageData) {
+            imageData = data
+        } else if let legacyBase64 = try container.decodeIfPresent(String.self, forKey: .imageBase64) {
+            imageData = [ImageData(base64: legacyBase64, mimeType: "image/jpeg")]
+        } else {
+            imageData = nil
+        }
     }
     
     func encode(to encoder: Encoder) throws {
@@ -400,7 +414,7 @@ struct Message: Identifiable, Codable, Equatable {
             try container.encode(attachments, forKey: .attachments)
         }
         try container.encodeIfPresent(documentContent, forKey: .documentContent)
-        try container.encodeIfPresent(imageBase64, forKey: .imageBase64)
+        try container.encodeIfPresent(imageData, forKey: .imageData)
     }
 }
 

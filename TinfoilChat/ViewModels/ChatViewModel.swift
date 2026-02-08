@@ -698,7 +698,7 @@ class ChatViewModel: ObservableObject {
 
         // Merge attachment data into message fields
         var combinedDocumentContent: String? = nil
-        var messageImageBase64: String? = nil
+        var messageImageData: [ImageData] = []
         var messageAttachments: [Attachment] = []
 
         for attachment in pendingAttachments {
@@ -711,7 +711,7 @@ class ChatViewModel: ObservableObject {
                 }
             }
             if let imgBase64 = attachment.imageBase64, !imgBase64.isEmpty {
-                messageImageBase64 = imgBase64
+                messageImageData.append(ImageData(base64: imgBase64, mimeType: "image/jpeg"))
             }
         }
 
@@ -723,7 +723,7 @@ class ChatViewModel: ObservableObject {
             content: text,
             attachments: messageAttachments,
             documentContent: combinedDocumentContent,
-            imageBase64: messageImageBase64
+            imageData: messageImageData.isEmpty ? nil : messageImageData
         )
         addMessage(userMessage)
 
