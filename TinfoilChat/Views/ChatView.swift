@@ -823,24 +823,26 @@ struct VerificationStatusIndicator: View {
         }
     }
 
-    private var showText: Bool {
-        !isCollapsed && !statusText.isEmpty
-    }
 
     var body: some View {
         Button(action: { viewModel.showVerifier() }) {
-            HStack(spacing: 4) {
+            HStack(spacing: isCollapsed ? 0 : 4) {
                 Image(systemName: iconName)
-                    .foregroundColor(iconColor)
+                    .foregroundStyle(iconColor)
                     .font(.system(size: 14))
 
-                if showText {
+                if !statusText.isEmpty {
                     Text(statusText)
                         .font(.caption)
-                        .foregroundColor(iconColor)
-                        .fixedSize()
+                        .foregroundStyle(iconColor)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .opacity(isCollapsed ? 0 : 1)
+                        .frame(width: isCollapsed ? 0 : nil, alignment: .leading)
+                        .clipped()
                 }
             }
+            .animation(.easeInOut(duration: 0.35), value: isCollapsed)
         }
         .onChange(of: viewModel.isVerified) { _, isVerified in
             if isVerified && viewModel.verificationError == nil {
