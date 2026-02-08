@@ -651,14 +651,7 @@ class CloudSyncService: ObservableObject {
             // Delete local chats that were deleted on another device
             if let cachedStatus = getCachedSyncStatus(),
                let lastUpdated = cachedStatus.lastUpdated {
-                do {
-                    let deleted = try await cloudStorage.getDeletedChatsSince(since: lastUpdated)
-                    for id in deleted.deletedIds {
-                        await deleteChatFromStorage(id)
-                    }
-                } catch {
-                    // Non-fatal: continue even if deletion check fails
-                }
+                await deleteRemotelyDeletedChats(since: lastUpdated)
             }
 
             // Refresh cached sync status so subsequent smart-syncs have up-to-date info
@@ -848,14 +841,7 @@ class CloudSyncService: ObservableObject {
             }
 
             // Delete local chats that were deleted on another device
-            do {
-                let deleted = try await cloudStorage.getDeletedChatsSince(since: since)
-                for id in deleted.deletedIds {
-                    await deleteChatFromStorage(id)
-                }
-            } catch {
-                // Non-fatal: continue even if deletion check fails
-            }
+            await deleteRemotelyDeletedChats(since: since)
         } catch {
             result = SyncResult(
                 uploaded: result.uploaded,
@@ -1147,6 +1133,18 @@ class CloudSyncService: ObservableObject {
             #if DEBUG
             print("[CloudSync] Failed to re-encrypt chat \(chat.id): \(error)")
             #endif
+        }
+    }
+
+    /// Delete local chats that were deleted on another device since `since` timestamp.
+    private func deleteRemotelyDeletedChats(since: String) async {
+        do {
+            let deleted = try await cloudStorage.getDeletedChatsSince(since: since)
+            for id in deleted.deletedIds {
+                await deleteChatFromStorage(id)
+            }
+        } catch {
+            // Non-fatal: continue even if deletion check fails
         }
     }
 
