@@ -139,17 +139,13 @@ actor EncryptedFileStorage {
         // Try .enc file first
         let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
         if fileManager.fileExists(atPath: encPath.path) {
-            let data = try Data(contentsOf: encPath)
-            let encrypted = try decoder.decode(EncryptedData.self, from: data)
-            let decryptionResult = try await encryptionService.decrypt(encrypted, as: Data.self)
-            return try decoder.decode(Chat.self, from: decryptionResult.value)
+            return try await loadChatFromFile(encPath, isRaw: false)
         }
 
         // Try .raw file
         let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
         if fileManager.fileExists(atPath: rawPath.path) {
-            let data = try Data(contentsOf: rawPath)
-            return try decoder.decode(Chat.self, from: data)
+            return try await loadChatFromFile(rawPath, isRaw: true)
         }
 
         // Neither exists — remove stale index entry if present
