@@ -77,7 +77,7 @@ actor EncryptedFileStorage {
         do {
             let data = try Data(contentsOf: indexPath)
             let decryptionResult = try await encryptionService.decrypt(
-                JSONDecoder().decode(EncryptedData.self, from: data),
+                decoder.decode(EncryptedData.self, from: data),
                 as: [ChatIndexEntry].self
             )
             return decryptionResult.value
