@@ -313,6 +313,27 @@ class CloudStorageService: ObservableObject {
         return try JSONDecoder().decode(ChatSyncStatus.self, from: data)
     }
 
+    /// Get IDs of chats deleted since a specific timestamp
+    func getDeletedChatsSince(since: String) async throws -> DeletedChatsResponse {
+        var components = URLComponents(string: "\(apiBaseURL)/api/chats/deleted-since")!
+        components.queryItems = [
+            URLQueryItem(name: "since", value: since)
+        ]
+
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        request.allHTTPHeaderFields = try await getHeaders()
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw CloudStorageError.listFailed
+        }
+
+        return try JSONDecoder().decode(DeletedChatsResponse.self, from: data)
+    }
+
     /// Get chats updated since a specific timestamp
     func getChatsUpdatedSince(since: String, includeContent: Bool = false) async throws -> ChatListResponse {
         var components = URLComponents(string: "\(apiBaseURL)/api/chats/updated-since")!

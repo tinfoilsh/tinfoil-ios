@@ -455,10 +455,9 @@ class CloudSyncService: ObservableObject {
     /// Sync all chats (upload local changes, download remote changes)
     func syncAllChats() async -> SyncResult {
         guard !isSyncing else {
-            // Already syncing; treat as a no-op without surfacing an error
             return SyncResult()
         }
-        
+
         isSyncing = true
         syncStatus = "Syncing..."
         defer {
@@ -466,9 +465,15 @@ class CloudSyncService: ObservableObject {
             syncStatus = ""
             lastSyncDate = Date()
         }
-        
+
+        let result = await doSyncAllChats()
+        syncErrors = result.errors
+        return result
+    }
+
+    private func doSyncAllChats() async -> SyncResult {
         var result = SyncResult()
-        
+
         // First, backup any unsynced local changes
         let backupResult = await backupUnsyncedChats()
         result = SyncResult(
@@ -476,27 +481,24 @@ class CloudSyncService: ObservableObject {
             downloaded: 0,
             errors: backupResult.errors
         )
-        
+
         // Then, get list of remote chats with content
         do {
-            // Only fetch first page of chats during initial sync to match pagination
             let remoteList = try await cloudStorage.listChats(
                 limit: Constants.Pagination.chatsPerPage,
                 includeContent: true
             )
-            
-            
+
             let localChats = await getAllChatsFromStorage()
-            
+
             // Initialize encryption if available; continue even without a key so we can at least
             // fetch metadata and store encrypted placeholders. Decryption will be attempted per-chat.
             _ = try? await encryptionService.initialize()
-            
+
             // Create maps for easy lookup
             let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
             let remoteConversations = remoteList.conversations
-            let remoteChatMap = Dictionary(uniqueKeysWithValues: remoteConversations.map { ($0.id, $0) })
-            
+
             // Process remote chats sequentially to avoid connection exhaustion
             var chatsNeedingReencryption: [StoredChat] = []
 
@@ -645,24 +647,20 @@ class CloudSyncService: ObservableObject {
             for chat in chatsNeedingReencryption {
                 queueReencryption(for: chat, persistLocal: true)
             }
-            
-            // Delete local chats that were deleted remotely (only for first page)
-            // Filter for synced chats that aren't blank or temporary
-            let sortedSyncedLocalChats = localChats
-                .filter { chat in
-                    chat.syncedAt != nil && !chat.isBlankChat && !chat.hasTemporaryId
-                }
-                .sorted { $0.createdAt > $1.createdAt } // Descending (newest first)
-            
-            let localChatsInFirstPage = Array(sortedSyncedLocalChats.prefix(Constants.Pagination.chatsPerPage))
-            
-            for localChat in localChatsInFirstPage {
-                if !remoteChatMap.keys.contains(localChat.id) {
-                    // This chat should be in the first page but isn't in remote - it was deleted
-                    await deleteChatFromStorage(localChat.id)
+
+            // Delete local chats that were deleted on another device
+            if let cachedStatus = getCachedSyncStatus(),
+               let lastUpdated = cachedStatus.lastUpdated {
+                do {
+                    let deleted = try await cloudStorage.getDeletedChatsSince(since: lastUpdated)
+                    for id in deleted.deletedIds {
+                        await deleteChatFromStorage(id)
+                    }
+                } catch {
+                    // Non-fatal: continue even if deletion check fails
                 }
             }
-            
+
         } catch {
             result = SyncResult(
                 uploaded: result.uploaded,
@@ -670,8 +668,7 @@ class CloudSyncService: ObservableObject {
                 errors: result.errors + ["Sync failed: \(error.localizedDescription)"]
             )
         }
-        
-        syncErrors = result.errors
+
         return result
     }
 
@@ -846,6 +843,16 @@ class CloudSyncService: ObservableObject {
             for chat in chatsNeedingReencryption {
                 queueReencryption(for: chat, persistLocal: true)
             }
+
+            // Delete local chats that were deleted on another device
+            do {
+                let deleted = try await cloudStorage.getDeletedChatsSince(since: since)
+                for id in deleted.deletedIds {
+                    await deleteChatFromStorage(id)
+                }
+            } catch {
+                // Non-fatal: continue even if deletion check fails
+            }
         } catch {
             result = SyncResult(
                 uploaded: result.uploaded,
@@ -912,7 +919,7 @@ class CloudSyncService: ObservableObject {
                 }
             } else {
                 // Delta sync failed, fall back to full sync
-                let fullResult = await syncAllChats()
+                let fullResult = await doSyncAllChats()
                 result = SyncResult(
                     uploaded: result.uploaded + fullResult.uploaded,
                     downloaded: result.downloaded + fullResult.downloaded,
@@ -931,7 +938,7 @@ class CloudSyncService: ObservableObject {
             }
         } else {
             // Count changed or no cached status - need full sync
-            let fullResult = await syncAllChats()
+            let fullResult = await doSyncAllChats()
             result = SyncResult(
                 uploaded: result.uploaded + fullResult.uploaded,
                 downloaded: result.downloaded + fullResult.downloaded,
