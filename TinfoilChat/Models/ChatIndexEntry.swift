@@ -28,7 +28,7 @@ struct ChatIndexEntry: Codable, Identifiable, Equatable {
 
     /// Whether this entry represents a chat worth showing in the sidebar
     var isDisplayable: Bool {
-        messageCount > 0 || decryptionFailed || titleState != .placeholder
+        projectId == nil && (messageCount > 0 || decryptionFailed || titleState != .placeholder)
     }
 
     init(from chat: Chat) {
