@@ -250,7 +250,7 @@ struct Chat: Identifiable, Codable {
 
     static func deleteAllChatsFromStorage(userId: String?) async {
         guard let userId = userId else { return }
-        try? EncryptedFileStorage.shared.deleteAllChats(userId: userId)
+        try? await EncryptedFileStorage.shared.deleteAllChats(userId: userId)
     }
 
     // MARK: - Title Generation handled via LLM (see ChatViewModel.generateLLMTitle)
