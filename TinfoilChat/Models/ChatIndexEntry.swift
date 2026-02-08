@@ -26,6 +26,11 @@ struct ChatIndexEntry: Codable, Identifiable, Equatable {
     var userId: String?
     var language: String?
 
+    /// Whether this entry represents a chat worth showing in the sidebar
+    var isDisplayable: Bool {
+        messageCount > 0 || decryptionFailed || titleState != .placeholder
+    }
+
     init(from chat: Chat) {
         self.id = chat.id
         self.title = chat.title

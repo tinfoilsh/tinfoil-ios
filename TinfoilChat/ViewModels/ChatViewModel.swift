@@ -2217,7 +2217,7 @@ class ChatViewModel: ObservableObject {
             // Load and display synced chats from file index
             let result = await loadFirstPageOfChats(
                 userId: currentUserId,
-                filter: { $0.messageCount > 0 || $0.decryptionFailed || $0.titleState != .placeholder }
+                filter: \.isDisplayable
             )
 
             await MainActor.run {
@@ -2420,7 +2420,7 @@ class ChatViewModel: ObservableObject {
             // Load and display chats after sync from file index
             let result = await loadFirstPageOfChats(
                 userId: currentUserId,
-                filter: { $0.messageCount > 0 || $0.decryptionFailed }
+                filter: \.isDisplayable
             )
             await MainActor.run {
                 self.chats = result.chats
@@ -2635,7 +2635,7 @@ class ChatViewModel: ObservableObject {
     private func resetPaginationAndReloadChats() async {
         let result = await loadFirstPageOfChats(
             userId: currentUserId,
-            filter: { $0.messageCount > 0 || $0.decryptionFailed }
+            filter: \.isDisplayable
         )
         self.chats = result.chats
         normalizeChatsArray()
