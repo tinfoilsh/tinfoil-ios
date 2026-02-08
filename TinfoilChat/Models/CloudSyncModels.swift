@@ -29,6 +29,9 @@ struct StoredChat: Codable {
     var decryptionFailed: Bool?
     var encryptedData: String?
     
+    // Project association (used by React, preserved by iOS)
+    var projectId: String?
+
     // For tracking streaming state
     var hasActiveStream: Bool?
     
@@ -44,6 +47,7 @@ struct StoredChat: Codable {
         self.syncVersion = syncVersion
         self.syncedAt = nil
         self.locallyModified = true
+        self.projectId = chat.projectId
         self.hasActiveStream = chat.hasActiveStream
     }
     
@@ -74,7 +78,8 @@ struct StoredChat: Codable {
             locallyModified: locallyModified,
             updatedAt: updatedAt,
             decryptionFailed: decryptionFailed ?? false,
-            encryptedData: encryptedData
+            encryptedData: encryptedData,
+            projectId: projectId
         )
 
         if let hasActiveStream = hasActiveStream {
@@ -89,7 +94,7 @@ struct StoredChat: Codable {
         case id, title, messages, createdAt, updatedAt
         case language, userId
         case syncVersion, syncedAt, locallyModified
-        case decryptionFailed, encryptedData, hasActiveStream
+        case decryptionFailed, encryptedData, projectId, hasActiveStream
     }
 
     func encode(to encoder: Encoder) throws {
@@ -118,6 +123,7 @@ struct StoredChat: Codable {
         try container.encode(locallyModified, forKey: .locallyModified)
         try container.encodeIfPresent(decryptionFailed, forKey: .decryptionFailed)
         try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
+        try container.encodeIfPresent(projectId, forKey: .projectId)
         try container.encodeIfPresent(hasActiveStream, forKey: .hasActiveStream)
     }
     
@@ -174,6 +180,7 @@ struct StoredChat: Codable {
         locallyModified = try container.decodeIfPresent(Bool.self, forKey: .locallyModified) ?? false
         decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed)
         encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
+        projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
         hasActiveStream = try container.decodeIfPresent(Bool.self, forKey: .hasActiveStream)
     }
 }
@@ -248,6 +255,7 @@ struct UploadConversationRequest: Codable {
     let conversationId: String
     let data: String  // JSON stringified encrypted data
     let metadata: [String: String]
+    let projectId: String?
 }
 
 /// Request for updating metadata

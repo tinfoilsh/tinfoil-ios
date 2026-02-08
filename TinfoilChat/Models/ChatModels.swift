@@ -39,7 +39,10 @@ struct Chat: Identifiable, Codable {
     // For handling encrypted chats that failed to decrypt
     var decryptionFailed: Bool = false
     var encryptedData: String?
-    
+
+    // Project association (used by React, preserved by iOS)
+    var projectId: String?
+
     // Computed properties for sync filtering
     var isBlankChat: Bool {
         // Don't treat failed-to-decrypt chats as blank
@@ -83,7 +86,8 @@ struct Chat: Identifiable, Codable {
         locallyModified: Bool = true,
         updatedAt: Date? = nil,
         decryptionFailed: Bool = false,
-        encryptedData: String? = nil) 
+        encryptedData: String? = nil,
+        projectId: String? = nil)
     {
         let resolvedTitleState = titleState ?? Chat.deriveTitleState(for: title, messages: messages)
 
@@ -101,6 +105,7 @@ struct Chat: Identifiable, Codable {
         self.updatedAt = updatedAt ?? createdAt
         self.decryptionFailed = decryptionFailed
         self.encryptedData = encryptedData
+        self.projectId = projectId
     }
     
     // MARK: - Factory Methods
@@ -146,9 +151,9 @@ struct Chat: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, title, titleState, messages, hasActiveStream, createdAt, modelType, language, userId
         case syncVersion, syncedAt, locallyModified, updatedAt
-        case decryptionFailed, encryptedData
+        case decryptionFailed, encryptedData, projectId
     }
-    
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
@@ -171,8 +176,9 @@ struct Chat: Identifiable, Codable {
         // Encryption fields
         decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed) ?? false
         encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
+        projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
     }
-    
+
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
@@ -194,6 +200,7 @@ struct Chat: Identifiable, Codable {
         // Encryption fields
         try container.encode(decryptionFailed, forKey: .decryptionFailed)
         try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
+        try container.encodeIfPresent(projectId, forKey: .projectId)
     }
     
     // MARK: - Haptic Feedback Methods
@@ -287,6 +294,25 @@ struct WebSearchState: Codable, Equatable {
     }
 }
 
+/// URL citation from web search results, matching React's Annotation type
+struct URLCitation: Codable, Equatable {
+    let title: String
+    let url: String
+    let start_index: Int?
+    let end_index: Int?
+}
+
+/// Annotation wrapper, matching React's { type: 'url_citation', url_citation: URLCitation }
+struct Annotation: Codable, Equatable {
+    let type: String
+    let url_citation: URLCitation
+}
+
+/// Document name reference, matching React's { name: string }
+struct DocumentName: Codable, Equatable {
+    let name: String
+}
+
 /// Image data for multimodal support, matching React's { base64: string; mimeType: string }
 struct ImageData: Codable, Equatable {
     let base64: String
@@ -310,6 +336,15 @@ struct Message: Identifiable, Codable, Equatable {
     var attachments: [Attachment] = []
     var documentContent: String? = nil
     var imageData: [ImageData]? = nil
+
+    // Passthrough fields for cross-platform round-trip (used by React, preserved by iOS)
+    var thinkingDuration: Double? = nil
+    var isError: Bool? = nil
+    var multimodalText: String? = nil
+    var documents: [DocumentName]? = nil
+    var webSearchBeforeThinking: Bool? = nil
+    var annotations: [Annotation]? = nil
+    var searchReasoning: String? = nil
 
     static let longMessageAttachmentThreshold = 1200
     var shouldDisplayAsAttachment: Bool {
@@ -351,6 +386,8 @@ struct Message: Identifiable, Codable, Equatable {
         case webSearch // Alternative key used by React app
         case attachments, documentContent, imageData
         case imageBase64 // Legacy iOS key for backward compatibility
+        case thinkingDuration, isError, multimodalText, documents
+        case webSearchBeforeThinking, annotations, searchReasoning
     }
     
     init(from decoder: Decoder) throws {
@@ -393,6 +430,15 @@ struct Message: Identifiable, Codable, Equatable {
         } else {
             imageData = nil
         }
+
+        // Passthrough fields for cross-platform round-trip
+        thinkingDuration = try container.decodeIfPresent(Double.self, forKey: .thinkingDuration)
+        isError = try container.decodeIfPresent(Bool.self, forKey: .isError)
+        multimodalText = try container.decodeIfPresent(String.self, forKey: .multimodalText)
+        documents = try container.decodeIfPresent([DocumentName].self, forKey: .documents)
+        webSearchBeforeThinking = try container.decodeIfPresent(Bool.self, forKey: .webSearchBeforeThinking)
+        annotations = try container.decodeIfPresent([Annotation].self, forKey: .annotations)
+        searchReasoning = try container.decodeIfPresent(String.self, forKey: .searchReasoning)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -415,6 +461,15 @@ struct Message: Identifiable, Codable, Equatable {
         }
         try container.encodeIfPresent(documentContent, forKey: .documentContent)
         try container.encodeIfPresent(imageData, forKey: .imageData)
+
+        // Passthrough fields for cross-platform round-trip
+        try container.encodeIfPresent(thinkingDuration, forKey: .thinkingDuration)
+        try container.encodeIfPresent(isError, forKey: .isError)
+        try container.encodeIfPresent(multimodalText, forKey: .multimodalText)
+        try container.encodeIfPresent(documents, forKey: .documents)
+        try container.encodeIfPresent(webSearchBeforeThinking, forKey: .webSearchBeforeThinking)
+        try container.encodeIfPresent(annotations, forKey: .annotations)
+        try container.encodeIfPresent(searchReasoning, forKey: .searchReasoning)
     }
 }
 

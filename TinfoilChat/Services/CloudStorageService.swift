@@ -123,7 +123,8 @@ class CloudStorageService: ObservableObject {
         let body = UploadConversationRequest(
             conversationId: chat.id,
             data: encryptedString,
-            metadata: metadata
+            metadata: metadata,
+            projectId: chat.projectId
         )
         request.httpBody = try JSONEncoder().encode(body)
 
