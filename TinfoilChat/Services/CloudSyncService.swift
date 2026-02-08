@@ -532,7 +532,7 @@ class CloudSyncService: ObservableObject {
                 }
 
                 let shouldProcess = localChat == nil ||
-                    (!remoteTimestamp.isNaN && remoteTimestamp > (localChat?.updatedAt.timeIntervalSince1970 ?? 0)) ||
+                    (!remoteTimestamp.isNaN && remoteTimestamp > (localChat?.syncedAt?.timeIntervalSince1970 ?? 0)) ||
                     (localChat?.decryptionFailed == true)
 
                 if shouldProcess, let content = remoteChat.content {
@@ -660,6 +660,9 @@ class CloudSyncService: ObservableObject {
                     // Non-fatal: continue even if deletion check fails
                 }
             }
+
+            // Refresh cached sync status so subsequent smart-syncs have up-to-date info
+            await refreshSyncStatusCache()
 
         } catch {
             result = SyncResult(
