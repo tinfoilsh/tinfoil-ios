@@ -391,7 +391,6 @@ class ChatViewModel: ObservableObject {
                     
                     // Also backup current chat if it has changes
                     if let currentChat = await MainActor.run(body: { self.currentChat }),
-                       !currentChat.hasTemporaryId,
                        !currentChat.messages.isEmpty,
                        !currentChat.hasActiveStream {
                         try await self.cloudSync.backupChat(currentChat.id)
@@ -1870,11 +1869,10 @@ class ChatViewModel: ObservableObject {
             let oneMinuteAgo = Date().addingTimeInterval(-Constants.Pagination.cleanupThresholdSeconds)
             let syncedChats = nonEmptyChats.filter { chat in
                 !chat.isBlankChat &&
-                !chat.hasTemporaryId &&
                 chat.createdAt < oneMinuteAgo
             }.sorted { $0.createdAt > $1.createdAt }
 
-            let unsavedChats = nonEmptyChats.filter { $0.isBlankChat || $0.hasTemporaryId }
+            let unsavedChats = nonEmptyChats.filter { $0.isBlankChat }
             let recentChats = nonEmptyChats.filter { $0.createdAt >= oneMinuteAgo }
 
             // Only save first page of synced chats + all unsaved/recent chats
@@ -1907,9 +1905,8 @@ class ChatViewModel: ObservableObject {
             
             // Trigger cloud backup for the current chat if it has messages and permanent ID
             // Don't try to backup chats with temporary IDs or while streaming
-            if let currentChat = currentChat, 
+            if let currentChat = currentChat,
                !currentChat.messages.isEmpty,
-               !currentChat.hasTemporaryId,
                !currentChat.hasActiveStream {
                 Task {
                     do {
@@ -2433,14 +2430,6 @@ class ChatViewModel: ObservableObject {
             // Initialize cloud sync service and perform initial sync
             await initializeCloudSync()
 
-            // Migrate any local chats that still have temporary IDs to server IDs
-            let migrationResult = await cloudSync.migrateTemporaryIdChats()
-            if !migrationResult.errors.isEmpty {
-                await MainActor.run {
-                    self.syncErrors.append(contentsOf: migrationResult.errors)
-                }
-            }
-            
             // Sync user profile settings
             await ProfileManager.shared.performFullSync()
             
@@ -2542,22 +2531,21 @@ class ChatViewModel: ObservableObject {
         // Filter synced chats (not blank, not temporary, and older than 1 minute to avoid deleting just-created chats)
         let oneMinuteAgo = Date().addingTimeInterval(-Constants.Pagination.cleanupThresholdSeconds)
         let syncedChats = allChats.filter { chat in
-            !chat.isBlankChat && 
-            !chat.hasTemporaryId &&
+            !chat.isBlankChat &&
             chat.createdAt < oneMinuteAgo  // Only clean up chats older than 1 minute
         }.sorted { $0.createdAt > $1.createdAt }
-        
+
         // Also keep all recent chats (created in last minute) regardless of count
         let recentChats = allChats.filter { chat in
             chat.createdAt >= oneMinuteAgo
         }
-        
+
         // If we have more than first page of old synced chats, keep only the first page
         if syncedChats.count > Constants.Pagination.chatsPerPage {
-            
-            // Keep first page of synced chats + all unsaved chats (blank/temporary) + recent chats
-            let chatsToKeep = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + 
-                             allChats.filter { chat in chat.isBlankChat || chat.hasTemporaryId } +
+
+            // Keep first page of synced chats + all unsaved chats (blank) + recent chats
+            let chatsToKeep = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) +
+                             allChats.filter { chat in chat.isBlankChat } +
                              recentChats
             
             // Remove duplicates based on chat ID
@@ -2681,15 +2669,13 @@ class ChatViewModel: ObservableObject {
         
         // Separate chats into categories
         let twoMinutesAgo = Date().addingTimeInterval(-Constants.Pagination.recentChatThresholdSeconds)
-        let unsavedChats = sortedChats.filter { $0.isBlankChat || $0.hasTemporaryId }
+        let unsavedChats = sortedChats.filter { $0.isBlankChat }
         let recentChats = sortedChats.filter {
             $0.createdAt >= twoMinutesAgo &&
-            !$0.isBlankChat &&
-            !$0.hasTemporaryId
+            !$0.isBlankChat
         }
         let syncedChats = sortedChats.filter {
             !$0.isBlankChat &&
-            !$0.hasTemporaryId &&
             $0.createdAt < twoMinutesAgo
         }
         
@@ -2742,7 +2728,7 @@ class ChatViewModel: ObservableObject {
         }
         
         // Update hasMoreChats conservatively to preserve server-provided pagination
-        let displayedSyncedChats = chats.filter { !$0.isBlankChat && !$0.hasTemporaryId }.count
+        let displayedSyncedChats = chats.filter { !$0.isBlankChat }.count
 
         // Set to true if we clearly have more locally than are displayed
         if syncedChats.count > displayedSyncedChats {
@@ -2779,12 +2765,11 @@ class ChatViewModel: ObservableObject {
                 let recentChats = sortedChats.filter { $0.createdAt >= twoMinutesAgo }
                 
                 // Take the first page worth of chats (10) plus any blank/temporary/recent chats
-                let syncedChats = sortedChats.filter { 
-                    !$0.isBlankChat && 
-                    !$0.hasTemporaryId && 
-                    $0.createdAt < twoMinutesAgo 
+                let syncedChats = sortedChats.filter {
+                    !$0.isBlankChat &&
+                    $0.createdAt < twoMinutesAgo
                 }
-                let unsavedChats = sortedChats.filter { $0.isBlankChat || $0.hasTemporaryId }
+                let unsavedChats = sortedChats.filter { $0.isBlankChat }
                 
                 // Keep first page of synced chats + all unsaved chats + all recent chats
                 let chatsToShow = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + unsavedChats + recentChats
