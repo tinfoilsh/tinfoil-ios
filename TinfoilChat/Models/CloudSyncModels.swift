@@ -435,17 +435,4 @@ class StreamingTracker {
         streamEndCallbacks[chatId]?.append(callback)
     }
     
-    /// Update chat ID when it changes (e.g., from temporary to permanent ID)
-    func updateChatId(from oldId: String, to newId: String) {
-        if streamingChats.contains(oldId) {
-            streamingChats.remove(oldId)
-            streamingChats.insert(newId)
-        }
-        
-        // Move any callbacks to the new ID
-        if let callbacks = streamEndCallbacks[oldId] {
-            streamEndCallbacks[newId] = callbacks
-            streamEndCallbacks.removeValue(forKey: oldId)
-        }
-    }
 }
