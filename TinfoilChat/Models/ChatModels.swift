@@ -243,6 +243,11 @@ struct Chat: Identifiable, Codable {
         return (try? await EncryptedFileStorage.shared.loadChats(chatIds: chatIds, userId: userId)) ?? []
     }
 
+    static func loadAllChats(userId: String?) async -> [Chat] {
+        guard let userId = userId else { return [] }
+        return (try? await EncryptedFileStorage.shared.loadAllChats(userId: userId)) ?? []
+    }
+
     static func deleteChatFromStorage(chatId: String, userId: String?) async {
         guard let userId = userId else { return }
         try? await EncryptedFileStorage.shared.deleteChat(chatId: chatId, userId: userId)
