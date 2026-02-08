@@ -83,17 +83,6 @@ class CloudMigrationService {
             }
         }
 
-        // 2) Check Keychain-based local storage (recent local-only versions)
-        // Anonymous chats (pre-sign-in local history)
-        if let anonChats = KeychainChatStorage.shared.loadChats(userId: "anonymous"), !anonChats.isEmpty {
-            return true
-        }
-        // User-scoped local chats that were saved without cloud (defensive check)
-        if let userId = userId,
-           let userChats = KeychainChatStorage.shared.loadChats(userId: userId), !userChats.isEmpty {
-            return true
-        }
-
         return false
     }
     
@@ -138,15 +127,6 @@ class CloudMigrationService {
                 }
             }
 
-            // Also pull any Keychain-stored local chats for this user (defensive)
-            if let keychainChats = KeychainChatStorage.shared.loadChats(userId: userId) {
-                allChats.append(contentsOf: keychainChats)
-            }
-        }
-
-        // Also pull any Keychain-stored anonymous chats
-        if let anonKeychainChats = KeychainChatStorage.shared.loadChats(userId: "anonymous") {
-            allChats.append(contentsOf: anonKeychainChats)
         }
         
         // Remove duplicates based on chat ID
@@ -221,11 +201,6 @@ class CloudMigrationService {
             UserDefaults.standard.removeObject(forKey: userKey)
         }
 
-        // Also clear Keychain-based local storage that we've migrated away from
-        KeychainChatStorage.shared.deleteChats(userId: "anonymous")
-        if let userId = userId {
-            KeychainChatStorage.shared.deleteChats(userId: userId)
-        }
     }
     
     /// Reset migration status (useful for testing)
@@ -265,11 +240,6 @@ class CloudMigrationService {
             UserDefaults.standard.removeObject(forKey: userKey)
         }
 
-        // Also clear any Keychain-stored local chats
-        KeychainChatStorage.shared.deleteChats(userId: "anonymous")
-        if let userId = userId {
-            KeychainChatStorage.shared.deleteChats(userId: userId)
-        }
         // Mark migration as complete so we don't prompt again
         UserDefaults.standard.set(true, forKey: migrationKey(for: userId))
         // Clear any in-progress flag

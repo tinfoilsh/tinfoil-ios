@@ -43,7 +43,7 @@ The app is structured around several key components:
 
 - **[ViewModels/ChatViewModel.swift](TinfoilChat/ViewModels/ChatViewModel.swift)**: Core chat logic and streaming message handling
 - **[Services/EncryptionService.swift](TinfoilChat/Services/EncryptionService.swift)**: AES-GCM encryption for local chat storage
-- **[Services/KeychainChatStorage.swift](TinfoilChat/Services/KeychainChatStorage.swift)**: Secure storage in iOS Keychain
+- **[Services/EncryptedFileStorage.swift](TinfoilChat/Services/EncryptedFileStorage.swift)**: Per-chat encrypted file storage
 - **[Services/CloudSyncService.swift](TinfoilChat/Services/CloudSyncService.swift)**: Encrypted cloud backup functionality
 - **[Extensions/Model+Tinfoil.swift](TinfoilChat/Extensions/Model+Tinfoil.swift)**: Integration with Tinfoil Swift SDK
 
