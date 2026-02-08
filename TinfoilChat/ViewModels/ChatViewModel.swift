@@ -1329,68 +1329,60 @@ class ChatViewModel: ObservableObject {
                     currentThoughts = nil
                 }
 
-                await MainActor.run {
+                // Finalize message content and prepare chat for save
+                var finalizedChat: Chat? = await MainActor.run {
                     self.isLoading = false
 
-                    if var chat = self.currentChat {
-                        chat.hasActiveStream = false
+                    guard var chat = self.currentChat else { return nil }
+                    chat.hasActiveStream = false
 
-                        self.streamUpdateTimer?.invalidate()
-                        self.streamUpdateTimer = nil
-                        if let pending = self.pendingStreamUpdate {
-                            self.pendingStreamUpdate = nil
-                            if self.hasChatAccess {
-                                self.saveChat(pending)
-                            }
+                    self.streamUpdateTimer?.invalidate()
+                    self.streamUpdateTimer = nil
+                    if let pending = self.pendingStreamUpdate {
+                        self.pendingStreamUpdate = nil
+                        if self.hasChatAccess {
+                            self.saveChat(pending)
                         }
+                    }
 
-                        // Finalize all message content
-                        ThinkingSummaryService.shared.reset()
-                        self.thinkingSummary = ""
-                        self.webSearchSummary = ""
-                        if !chat.messages.isEmpty, let lastIndex = chat.messages.indices.last {
-                            chunker.finalize()
-                            let processedContent = self.processCitationMarkers(responseContent, sources: collectedSources)
-                            chat.messages[lastIndex].content = processedContent
-                            chat.messages[lastIndex].thoughts = currentThoughts
-                            chat.messages[lastIndex].isThinking = false
-                            chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
-                            // Process citation markers in chunks too since UI renders from chunks
-                            let processedChunks = self.processChunksWithCitations(chunker.getAllChunks(), sources: collectedSources)
-                            chat.messages[lastIndex].contentChunks = processedChunks
-                            // Sync sources with webSearchState (may have missed some due to race condition)
-                            webSearchState?.sources = collectedSources
-                            chat.messages[lastIndex].webSearchState = webSearchState
+                    // Finalize all message content
+                    ThinkingSummaryService.shared.reset()
+                    self.thinkingSummary = ""
+                    self.webSearchSummary = ""
+                    if !chat.messages.isEmpty, let lastIndex = chat.messages.indices.last {
+                        chunker.finalize()
+                        let processedContent = self.processCitationMarkers(responseContent, sources: collectedSources)
+                        chat.messages[lastIndex].content = processedContent
+                        chat.messages[lastIndex].thoughts = currentThoughts
+                        chat.messages[lastIndex].isThinking = false
+                        chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
+                        // Process citation markers in chunks too since UI renders from chunks
+                        let processedChunks = self.processChunksWithCitations(chunker.getAllChunks(), sources: collectedSources)
+                        chat.messages[lastIndex].contentChunks = processedChunks
+                        // Sync sources with webSearchState (may have missed some due to race condition)
+                        webSearchState?.sources = collectedSources
+                        chat.messages[lastIndex].webSearchState = webSearchState
+                    }
+
+                    return chat
+                }
+
+                // Generate title before save to avoid uploading placeholder title
+                if var chat = finalizedChat, chat.needsGeneratedTitle && chat.messages.count >= 2 {
+                    if let generated = await self.generateLLMTitle(from: chat.messages) {
+                        chat.title = generated
+                        chat.titleState = .generated
+                        finalizedChat = chat
+                        await MainActor.run {
+                            Chat.triggerSuccessFeedback()
                         }
+                    }
+                }
 
+                // Single save + cloud sync with the resolved title
+                await MainActor.run {
+                    if let chat = finalizedChat {
                         self.updateChat(chat)
-
-                        // If this was the first exchange and title is still placeholder, generate via LLM
-                        if chat.needsGeneratedTitle && chat.messages.count >= 2 {
-                            Task { @MainActor in
-                                // Snapshot messages for the LLM prompt now
-                                let messagesSnapshot = self.currentChat?.messages ?? []
-                                guard !messagesSnapshot.isEmpty else { return }
-
-                                if let generated = await self.generateLLMTitle(from: messagesSnapshot) {
-                                    // Re-fetch the latest chat after await to avoid using stale IDs
-                                    guard var current = self.currentChat, current.messages.count >= 2, current.needsGeneratedTitle else {
-                                        return
-                                    }
-                                    current.title = generated
-                                    current.titleState = .generated
-                                    current.locallyModified = true
-                                    current.updatedAt = Date()
-                                    self.updateChat(current)
-                                    // Force an immediate cloud backup to propagate the new title
-                                    Task {
-                                        await self.cloudSync.backupChat(current.id, ensureLatestUpload: true)
-                                    }
-                                    Chat.triggerSuccessFeedback()
-                                }
-                            }
-                        }
-                        
                         self.endStreamingAndBackup(chatId: chat.id)
                     }
                 }
