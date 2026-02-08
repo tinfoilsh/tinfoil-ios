@@ -1660,7 +1660,7 @@ class ChatViewModel: ObservableObject {
     
     // MARK: - Private Methods
 
-    private func endStreamingAndBackup(chatId: UUID) {
+    private func endStreamingAndBackup(chatId: String) {
         guard authManager?.isAuthenticated == true else { return }
 
         streamingTracker.endStreaming(chatId)
