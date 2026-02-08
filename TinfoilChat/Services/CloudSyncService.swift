@@ -775,6 +775,14 @@ class CloudSyncService: ObservableObject {
     private func syncChangedChats(since: String) async -> SyncResult {
         var result = SyncResult()
 
+        // Backup any unsynced local changes first (matches doSyncAllChats behavior)
+        let backupResult = await backupUnsyncedChats()
+        result = SyncResult(
+            uploaded: backupResult.uploaded,
+            downloaded: 0,
+            errors: backupResult.errors
+        )
+
         do {
             let changedChats = try await cloudStorage.getChatsUpdatedSince(since: since, includeContent: true)
 
@@ -902,6 +910,9 @@ class CloudSyncService: ObservableObject {
 
             // Delete local chats that were deleted on another device
             await deleteRemotelyDeletedChats(since: since)
+
+            // Refresh cached sync status so subsequent smart-syncs have up-to-date info
+            await refreshSyncStatusCache()
         } catch {
             result = SyncResult(
                 uploaded: result.uploaded,
@@ -939,16 +950,6 @@ class CloudSyncService: ObservableObject {
 
         var result = SyncResult()
 
-        // First, backup any unsynced local changes
-        if statusCheck.reason == .localChanges {
-            let backupResult = await backupUnsyncedChats()
-            result = SyncResult(
-                uploaded: backupResult.uploaded,
-                downloaded: 0,
-                errors: backupResult.errors
-            )
-        }
-
         // If only timestamp changed (not count), try delta sync
         if statusCheck.reason == .updated,
            let cachedStatus = getCachedSyncStatus(),
@@ -960,13 +961,7 @@ class CloudSyncService: ObservableObject {
                 errors: result.errors + deltaResult.errors
             )
 
-            // Update cached status if delta sync succeeded
-            if deltaResult.errors.isEmpty {
-                if let count = statusCheck.remoteCount,
-                   let updated = statusCheck.remoteLastUpdated {
-                    saveSyncStatus(count: count, lastUpdated: updated)
-                }
-            } else {
+            if !deltaResult.errors.isEmpty {
                 // Delta sync failed, fall back to full sync
                 let fullResult = await doSyncAllChats()
                 result = SyncResult(
@@ -974,35 +969,15 @@ class CloudSyncService: ObservableObject {
                     downloaded: result.downloaded + fullResult.downloaded,
                     errors: fullResult.errors
                 )
-
-                // Update cached status after full sync
-                if fullResult.errors.isEmpty {
-                    if let count = statusCheck.remoteCount,
-                       let updated = statusCheck.remoteLastUpdated {
-                        saveSyncStatus(count: count, lastUpdated: updated)
-                    } else {
-                        await refreshSyncStatusCache()
-                    }
-                }
             }
         } else {
-            // Count changed or no cached status - need full sync
+            // Count changed, local changes, or no cached status - need full sync
             let fullResult = await doSyncAllChats()
             result = SyncResult(
                 uploaded: result.uploaded + fullResult.uploaded,
                 downloaded: result.downloaded + fullResult.downloaded,
                 errors: result.errors + fullResult.errors
             )
-
-            // Update cached status after full sync
-            if fullResult.errors.isEmpty {
-                if let count = statusCheck.remoteCount,
-                   let updated = statusCheck.remoteLastUpdated {
-                    saveSyncStatus(count: count, lastUpdated: updated)
-                } else {
-                    await refreshSyncStatusCache()
-                }
-            }
         }
 
         syncErrors = result.errors
