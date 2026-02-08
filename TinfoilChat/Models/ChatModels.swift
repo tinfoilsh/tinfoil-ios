@@ -239,6 +239,44 @@ struct Chat: Identifiable, Codable {
         return []
     }
     
+    // MARK: - Per-Chat File Storage Methods
+
+    static func saveChat(_ chat: Chat, userId: String?) async {
+        guard let userId = userId else { return }
+        do {
+            try await EncryptedFileStorage.shared.saveChat(chat, userId: userId)
+        } catch {
+            #if DEBUG
+            print("Failed to save chat to file storage: \(error)")
+            #endif
+        }
+    }
+
+    static func loadChatIndex(userId: String?) async -> [ChatIndexEntry] {
+        guard let userId = userId else { return [] }
+        return (try? await EncryptedFileStorage.shared.loadIndex(userId: userId)) ?? []
+    }
+
+    static func loadChat(chatId: String, userId: String?) async -> Chat? {
+        guard let userId = userId else { return nil }
+        return try? await EncryptedFileStorage.shared.loadChat(chatId: chatId, userId: userId)
+    }
+
+    static func loadChats(chatIds: [String], userId: String?) async -> [Chat] {
+        guard let userId = userId else { return [] }
+        return (try? await EncryptedFileStorage.shared.loadChats(chatIds: chatIds, userId: userId)) ?? []
+    }
+
+    static func deleteChatFromStorage(chatId: String, userId: String?) async {
+        guard let userId = userId else { return }
+        try? await EncryptedFileStorage.shared.deleteChat(chatId: chatId, userId: userId)
+    }
+
+    static func deleteAllChatsFromStorage(userId: String?) async {
+        guard let userId = userId else { return }
+        try? EncryptedFileStorage.shared.deleteAllChats(userId: userId)
+    }
+
     // MARK: - Title Generation handled via LLM (see ChatViewModel.generateLLMTitle)
 }
 
