@@ -46,14 +46,16 @@ struct Chat: Identifiable, Codable {
         return messages.isEmpty && !decryptionFailed
     }
     
-    var hasTemporaryId: Bool {
-        // Temporary IDs are UUID-based (no underscore), permanent IDs have timestamp format (with underscore)
-        // Format: {reverseTimestamp}_{randomSuffix} for permanent IDs
-        return !id.contains("_")
-    }
-    
     var needsGeneratedTitle: Bool {
         return titleState == .placeholder
+    }
+
+    /// Generates a permanent reverse-timestamp ID locally (matching the web app format).
+    /// Format: {reverseTimestamp padded to 13 digits}_{UUID}
+    static func generateReverseId(timestampMs: Int = Int(Date().timeIntervalSince1970 * 1000)) -> String {
+        let reverseTimestamp = Constants.Sync.maxReverseTimestamp - timestampMs
+        let reverseTsStr = String(format: "%013d", reverseTimestamp)
+        return "\(reverseTsStr)_\(UUID().uuidString)"
     }
 
     static func deriveTitleState(for title: String, messages: [Message]) -> TitleState {
@@ -68,8 +70,8 @@ struct Chat: Identifiable, Codable {
     }
 
     init(
-        id: String = UUID().uuidString, 
-        title: String = Chat.placeholderTitle, 
+        id: String = Chat.generateReverseId(),
+        title: String = Chat.placeholderTitle,
         titleState: TitleState? = nil,
         messages: [Message] = [], 
         createdAt: Date = Date(),
@@ -102,12 +104,11 @@ struct Chat: Identifiable, Codable {
     }
     
     // MARK: - Factory Methods
-    
+
     /// Creates a new chat with the current model from AppConfig
-    /// Note: For cloud sync, use createWithTimestampId() to get server-generated IDs
     @MainActor
     static func create(
-        id: String = UUID().uuidString,
+        id: String = Chat.generateReverseId(),
         title: String = Chat.placeholderTitle,
         titleState: TitleState? = nil,
         messages: [Message] = [],
@@ -137,32 +138,6 @@ struct Chat: Identifiable, Codable {
             syncedAt: syncedAt,
             locallyModified: locallyModified,
             updatedAt: updatedAt
-        )
-    }
-    
-    /// Creates a new chat with a server-generated timestamp ID for proper cloud sync
-    @MainActor
-    static func createWithTimestampId(
-        title: String = Chat.placeholderTitle,
-        titleState: TitleState? = nil,
-        messages: [Message] = [],
-        createdAt: Date = Date(),
-        modelType: ModelType? = nil,
-        language: String? = nil,
-        userId: String? = nil
-    ) async throws -> Chat {
-        // Generate timestamp-based ID from server
-        let idResponse = try await CloudStorageService.shared.generateConversationId()
-        
-        return create(
-            id: idResponse.conversationId,
-            title: title,
-            titleState: titleState,
-            messages: messages,
-            createdAt: createdAt,
-            modelType: modelType,
-            language: language,
-            userId: userId
         )
     }
     
