@@ -54,7 +54,7 @@ struct Chat: Identifiable, Codable {
     /// Format: {reverseTimestamp padded to 13 digits}_{UUID}
     static func generateReverseId(timestampMs: Int = Int(Date().timeIntervalSince1970 * 1000)) -> String {
         let reverseTimestamp = Constants.Sync.maxReverseTimestamp - timestampMs
-        let reverseTsStr = String(format: "%013d", reverseTimestamp)
+        let reverseTsStr = String(format: "%0\(Constants.Sync.reverseTimestampDigits)d", reverseTimestamp)
         return "\(reverseTsStr)_\(UUID().uuidString)"
     }
 
