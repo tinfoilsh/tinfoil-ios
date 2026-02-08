@@ -215,30 +215,6 @@ struct Chat: Identifiable, Codable {
         HapticFeedback.trigger(.success)
     }
 
-    // MARK: - Secure Storage Methods
-    
-    static func saveToDefaults(_ chats: [Chat], userId: String?) {
-        do {
-            let userIdKey = userId ?? "anonymous"
-            try KeychainChatStorage.shared.saveChats(chats, userId: userIdKey)
-        } catch {
-            #if DEBUG
-            print("Failed to save chats to Keychain: \(error)")
-            #endif
-        }
-    }
-    
-    static func loadFromDefaults(userId: String?) -> [Chat] {
-        let userIdKey = userId ?? "anonymous"
-        
-        // Load from Keychain - migration to cloud is handled separately by CloudMigrationService
-        if let chats = KeychainChatStorage.shared.loadChats(userId: userIdKey) {
-            return chats.sorted { $0.createdAt > $1.createdAt }
-        }
-        
-        return []
-    }
-    
     // MARK: - Per-Chat File Storage Methods
 
     static func saveChat(_ chat: Chat, userId: String?) async {
