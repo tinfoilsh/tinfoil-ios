@@ -711,7 +711,7 @@ class ChatViewModel: ObservableObject {
                 }
             }
             if let imgBase64 = attachment.imageBase64, !imgBase64.isEmpty {
-                messageImageData.append(ImageData(base64: imgBase64, mimeType: "image/jpeg"))
+                messageImageData.append(ImageData(base64: imgBase64, mimeType: Constants.Attachments.defaultImageMimeType))
             }
         }
 
