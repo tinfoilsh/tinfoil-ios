@@ -1832,24 +1832,21 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Saves a single chat to per-chat file storage and triggers cloud backup
-    private func saveChat(_ chat: Chat? = nil) {
+    private func saveChat(_ chat: Chat) {
         guard hasChatAccess else { return }
-
-        let chatToSave = chat ?? currentChat
-        guard let chatToSave = chatToSave,
-              !chatToSave.messages.isEmpty || chatToSave.decryptionFailed else { return }
+        guard !chat.messages.isEmpty || chat.decryptionFailed else { return }
 
         let userId = currentUserId
         let previous = pendingSaveTask
         pendingSaveTask = Task.detached(priority: .utility) {
             await previous?.value
-            await Chat.saveChat(chatToSave, userId: userId)
+            await Chat.saveChat(chat, userId: userId)
         }
 
         // Trigger cloud backup if the chat has messages and no active stream
-        if !chatToSave.messages.isEmpty && !chatToSave.hasActiveStream {
+        if !chat.messages.isEmpty && !chat.hasActiveStream {
             Task {
-                await cloudSync.backupChat(chatToSave.id)
+                await cloudSync.backupChat(chat.id)
             }
         }
     }
