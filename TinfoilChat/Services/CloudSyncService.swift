@@ -1063,10 +1063,7 @@ class CloudSyncService: ObservableObject {
         let userId = await getCurrentUserId()
         
         var chats = await getAllChatsFromStorage()
-        
-        // Find existing chat to preserve createdAt if it exists
-        let existingChat = chats.first { $0.id == storedChat.id }
-        
+
         // Remove existing chat if present
         chats.removeAll { $0.id == storedChat.id }
         
@@ -1084,12 +1081,6 @@ class CloudSyncService: ObservableObject {
             print("Warning: Could not convert StoredChat to Chat - no models available. Skipping chat \(chatToConvert.id)")
             #endif
             return
-        }
-
-        // IMPORTANT: Preserve original createdAt date if chat already exists locally
-        // Only update content, not creation timestamp
-        if let existingChat = existingChat {
-            chatToSave.createdAt = existingChat.createdAt
         }
 
         // Add updated chat
