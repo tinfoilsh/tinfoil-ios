@@ -102,6 +102,7 @@ enum Constants {
         static let messageThumbnailColumns: Int = 3
         static let supportedDocumentExtensions: Set<String> = ["pdf", "txt", "md", "csv", "html"]
         static let supportedImageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic"]
+        static let defaultImageMimeType = "image/jpeg"
     }
 }
  

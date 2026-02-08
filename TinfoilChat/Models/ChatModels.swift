@@ -431,7 +431,7 @@ struct Message: Identifiable, Codable, Equatable {
         if let data = try container.decodeIfPresent([ImageData].self, forKey: .imageData) {
             imageData = data
         } else if let legacyBase64 = try container.decodeIfPresent(String.self, forKey: .imageBase64) {
-            imageData = [ImageData(base64: legacyBase64, mimeType: "image/jpeg")]
+            imageData = [ImageData(base64: legacyBase64, mimeType: Constants.Attachments.defaultImageMimeType)]
         } else {
             imageData = nil
         }
