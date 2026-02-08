@@ -192,8 +192,8 @@ class CloudSyncService: ObservableObject {
         }
         
         
-        // Don't sync blank chats, chats with temporary IDs, or decryption failure placeholders
-        if chat.isBlankChat || chat.hasTemporaryId || chat.messages.isEmpty {
+        // Don't sync blank chats or decryption failure placeholders
+        if chat.isBlankChat || chat.messages.isEmpty {
             return
         }
 
@@ -220,10 +220,10 @@ class CloudSyncService: ObservableObject {
         let unsyncedChats = await getUnsyncedChats()
         
         
-        // Filter out blank chats, chats with temporary IDs, empty chats (decryption failure placeholders), and streaming chats
+        // Filter out blank chats, empty chats (decryption failure placeholders), and streaming chats
         var chatsToSync: [Chat] = []
         for chat in unsyncedChats {
-            if !chat.isBlankChat && !chat.hasTemporaryId && !chat.messages.isEmpty {
+            if !chat.isBlankChat && !chat.messages.isEmpty {
                 let isStreaming = streamingTracker.isStreaming(chat.id)
                 if !isStreaming {
                     chatsToSync.append(chat)
@@ -678,7 +678,7 @@ class CloudSyncService: ObservableObject {
     func checkSyncStatus() async -> SyncStatusResult {
         // Check for local unsynced changes first
         let unsyncedChats = await getUnsyncedChats()
-        let hasLocalChanges = !unsyncedChats.filter { !$0.isBlankChat && !$0.hasTemporaryId && !$0.messages.isEmpty }.isEmpty
+        let hasLocalChanges = !unsyncedChats.filter { !$0.isBlankChat && !$0.messages.isEmpty }.isEmpty
 
         if hasLocalChanges {
             return SyncStatusResult(
@@ -1328,64 +1328,6 @@ class CloudSyncService: ObservableObject {
         return result
     }
 
-    /// Migrate local chats that still use temporary (UUID) IDs to server-generated IDs
-    /// Steps per chat: request new ID, upload under new ID, update local storage, delete old remote (best-effort)
-    func migrateTemporaryIdChats() async -> (migrated: Int, errors: [String]) {
-        var migrated = 0
-        var errors: [String] = []
-
-        // Require authentication to contact backend
-        guard await cloudStorage.isAuthenticated() else {
-            return (0, [])
-        }
-
-        let allChats = await getAllChatsFromStorage()
-        let candidates = allChats.filter { $0.hasTemporaryId && !$0.isBlankChat }
-
-        if candidates.isEmpty { return (0, []) }
-
-        for chat in candidates {
-            do {
-                // Get a server-generated conversation ID
-                let idResponse = try await cloudStorage.generateConversationId()
-
-                // Preserve content and metadata while swapping the ID
-                let migratedChat = Chat(
-                    id: idResponse.conversationId,
-                    title: chat.title,
-                    messages: chat.messages,
-                    createdAt: chat.createdAt,
-                    modelType: chat.modelType,
-                    language: chat.language,
-                    userId: chat.userId,
-                    syncVersion: chat.syncVersion,
-                    syncedAt: chat.syncedAt,
-                    locallyModified: true, // force upload
-                    updatedAt: Date(),
-                    decryptionFailed: chat.decryptionFailed,
-                    encryptedData: chat.encryptedData
-                )
-
-                // Upload under new ID
-                try await cloudStorage.uploadChat(StoredChat(from: migratedChat, syncVersion: chat.syncVersion + 1))
-
-                // Save new chat locally and delete the old one
-                await saveChatToStorage(StoredChat(from: migratedChat, syncVersion: chat.syncVersion + 1))
-                await deleteChatFromStorage(chat.id)
-                // Mark migrated chat as synced to prevent repeated uploads
-                await markChatAsSynced(migratedChat.id, version: chat.syncVersion + 1)
-
-                // Best-effort: delete old remote object if it exists
-                try? await cloudStorage.deleteChat(chat.id)
-
-                migrated += 1
-            } catch {
-                errors.append("Failed to migrate chat \(chat.id): \(error.localizedDescription)")
-            }
-        }
-
-        return (migrated, errors)
-    }
 }
 
 // MARK: - Cloud Sync Errors
