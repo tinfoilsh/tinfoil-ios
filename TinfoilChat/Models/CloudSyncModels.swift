@@ -213,6 +213,11 @@ struct ChatListResponse: Codable {
     let hasMore: Bool
 }
 
+/// Response from deleted-since API
+struct DeletedChatsResponse: Codable {
+    let deletedIds: [String]
+}
+
 /// Remote chat metadata from API
 struct RemoteChat: Codable {
     let id: String
