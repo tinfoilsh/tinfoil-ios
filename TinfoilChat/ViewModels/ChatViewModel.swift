@@ -393,9 +393,9 @@ class ChatViewModel: ObservableObject {
                     if let currentChat = await MainActor.run(body: { self.currentChat }),
                        !currentChat.messages.isEmpty,
                        !currentChat.hasActiveStream {
-                        try await self.cloudSync.backupChat(currentChat.id)
+                        await self.cloudSync.backupChat(currentChat.id)
                     }
-                    
+
                     // Sync profile settings periodically
                     await ProfileManager.shared.syncFromCloud()
                 } catch {
@@ -1384,7 +1384,7 @@ class ChatViewModel: ObservableObject {
                                     self.updateChat(current)
                                     // Force an immediate cloud backup to propagate the new title
                                     Task {
-                                        try? await self.cloudSync.backupChat(current.id, ensureLatestUpload: true)
+                                        await self.cloudSync.backupChat(current.id, ensureLatestUpload: true)
                                     }
                                     Chat.triggerSuccessFeedback()
                                 }
@@ -1667,23 +1667,20 @@ class ChatViewModel: ObservableObject {
         saveChats()
 
         Task { @MainActor in
-            do {
-                guard let latestChat = self.chats.first(where: { $0.id == chatId }) else {
-                    return
-                }
+            guard let latestChat = self.chats.first(where: { $0.id == chatId }) else {
+                return
+            }
 
-                try await self.cloudSync.backupChat(latestChat.id)
+            await self.cloudSync.backupChat(latestChat.id)
 
-                if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
-                    let updatedChats = Chat.loadFromDefaults(userId: self.currentUserId)
-                    if let syncedChat = updatedChats.first(where: { $0.id == latestChat.id }) {
-                        self.chats[index] = syncedChat
-                        if self.currentChat?.id == latestChat.id {
-                            self.currentChat = syncedChat
-                        }
+            if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
+                let updatedChats = Chat.loadFromDefaults(userId: self.currentUserId)
+                if let syncedChat = updatedChats.first(where: { $0.id == latestChat.id }) {
+                    self.chats[index] = syncedChat
+                    if self.currentChat?.id == latestChat.id {
+                        self.currentChat = syncedChat
                     }
                 }
-            } catch {
             }
         }
     }
@@ -1887,10 +1884,7 @@ class ChatViewModel: ObservableObject {
                !currentChat.messages.isEmpty,
                !currentChat.hasActiveStream {
                 Task {
-                    do {
-                        try await cloudSync.backupChat(currentChat.id)
-                    } catch {
-                    }
+                    await cloudSync.backupChat(currentChat.id)
                 }
             }
         }

@@ -217,7 +217,7 @@ class CloudSyncService: ObservableObject {
     // MARK: - Single Chat Backup
     
     /// Backup a single chat to the cloud, coalescing rapid successive calls
-    func backupChat(_ chatId: String, ensureLatestUpload: Bool = false) async throws {
+    func backupChat(_ chatId: String, ensureLatestUpload: Bool = false) async {
         // Don't attempt backup if not authenticated
         guard await cloudStorage.isAuthenticated() else {
             return
@@ -250,7 +250,7 @@ class CloudSyncService: ObservableObject {
                     
                     
                     // Re-trigger the backup after streaming ends
-                    try? await self?.backupChat(chatId)
+                    await self?.backupChat(chatId)
                 }
             }
             
@@ -523,6 +523,28 @@ class CloudSyncService: ObservableObject {
         return placeholderChat
     }
     
+    /// Download a remote chat by ID, apply metadata dates, and save locally.
+    /// Returns `true` if the chat was downloaded and saved, `false` on failure.
+    private func downloadAndSaveRemoteChat(_ remoteChat: RemoteChat) async throws {
+        guard var downloadedChat = try await cloudStorage.downloadChat(remoteChat.id) else {
+            return
+        }
+
+        if let createdDate = parseISODate(remoteChat.createdAt) {
+            downloadedChat.createdAt = createdDate
+        }
+        if let updatedDate = parseISODate(remoteChat.updatedAt) {
+            downloadedChat.updatedAt = updatedDate
+        }
+
+        if downloadedChat.modelType == nil {
+            downloadedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+        }
+
+        await saveChatToStorage(downloadedChat)
+        await markChatAsSynced(downloadedChat.id, version: downloadedChat.syncVersion)
+    }
+
     /// Sync all chats (upload local changes, download remote changes)
     func syncAllChats() async -> SyncResult {
         guard !isSyncing else {
@@ -716,26 +738,12 @@ class CloudSyncService: ObservableObject {
                     } else {
                         // No inline content - fetch via downloadChat (handles its own decryption)
                         do {
-                            if var downloadedChat = try await cloudStorage.downloadChat(remoteChat.id) {
-                                if let createdDate = parseISODate(remoteChat.createdAt) {
-                                    downloadedChat.createdAt = createdDate
-                                }
-                                if let updatedDate = parseISODate(remoteChat.updatedAt) {
-                                    downloadedChat.updatedAt = updatedDate
-                                }
-
-                                if downloadedChat.modelType == nil {
-                                    downloadedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
-                                }
-
-                                await saveChatToStorage(downloadedChat)
-                                await markChatAsSynced(downloadedChat.id, version: downloadedChat.syncVersion)
-                                result = SyncResult(
-                                    uploaded: result.uploaded,
-                                    downloaded: result.downloaded + 1,
-                                    errors: result.errors
-                                )
-                            }
+                            try await downloadAndSaveRemoteChat(remoteChat)
+                            result = SyncResult(
+                                uploaded: result.uploaded,
+                                downloaded: result.downloaded + 1,
+                                errors: result.errors
+                            )
                         } catch {
                             result = SyncResult(
                                 uploaded: result.uploaded,
@@ -945,26 +953,12 @@ class CloudSyncService: ObservableObject {
                 } else {
                     // No inline content - fetch via downloadChat (handles its own decryption)
                     do {
-                        if var downloadedChat = try await cloudStorage.downloadChat(remoteChat.id) {
-                            if let createdDate = parseISODate(remoteChat.createdAt) {
-                                downloadedChat.createdAt = createdDate
-                            }
-                            if let updatedDate = parseISODate(remoteChat.updatedAt) {
-                                downloadedChat.updatedAt = updatedDate
-                            }
-
-                            if downloadedChat.modelType == nil {
-                                downloadedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
-                            }
-
-                            await saveChatToStorage(downloadedChat)
-                            await markChatAsSynced(downloadedChat.id, version: downloadedChat.syncVersion)
-                            result = SyncResult(
-                                uploaded: result.uploaded,
-                                downloaded: result.downloaded + 1,
-                                errors: result.errors
-                            )
-                        }
+                        try await downloadAndSaveRemoteChat(remoteChat)
+                        result = SyncResult(
+                            uploaded: result.uploaded,
+                            downloaded: result.downloaded + 1,
+                            errors: result.errors
+                        )
                     } catch {
                         result = SyncResult(
                             uploaded: result.uploaded,
