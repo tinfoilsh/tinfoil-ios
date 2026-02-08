@@ -193,7 +193,7 @@ class CloudSyncService: ObservableObject {
         
         
         // Don't sync blank chats or decryption failure placeholders
-        if chat.isBlankChat || chat.messages.isEmpty {
+        if chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed || chat.encryptedData != nil {
             return
         }
 
@@ -223,7 +223,7 @@ class CloudSyncService: ObservableObject {
         // Filter out blank chats, empty chats (decryption failure placeholders), and streaming chats
         var chatsToSync: [Chat] = []
         for chat in unsyncedChats {
-            if !chat.isBlankChat && !chat.messages.isEmpty {
+            if !chat.isBlankChat && !chat.messages.isEmpty && !chat.decryptionFailed && chat.encryptedData == nil {
                 let isStreaming = streamingTracker.isStreaming(chat.id)
                 if !isStreaming {
                     chatsToSync.append(chat)
