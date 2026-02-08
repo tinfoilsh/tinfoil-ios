@@ -8,7 +8,7 @@
 
 import Foundation
 
-struct ChatIndexEntry: Codable, Identifiable {
+struct ChatIndexEntry: Codable, Identifiable, Equatable {
     let id: String
     var title: String
     var titleState: Chat.TitleState
