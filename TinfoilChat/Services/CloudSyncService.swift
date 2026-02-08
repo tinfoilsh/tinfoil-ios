@@ -1108,30 +1108,26 @@ class CloudSyncService: ObservableObject {
     // MARK: - Storage Helpers
     
     private func loadChatFromStorage(_ chatId: String) async -> Chat? {
-        let chats = Chat.loadFromDefaults(userId: await getCurrentUserId())
-        return chats.first { $0.id == chatId }
+        return await Chat.loadChat(chatId: chatId, userId: await getCurrentUserId())
     }
-    
+
     private func getAllChatsFromStorage() async -> [Chat] {
-        return Chat.loadFromDefaults(userId: await getCurrentUserId())
+        let userId = await getCurrentUserId()
+        guard let userId = userId else { return [] }
+        return (try? await EncryptedFileStorage.shared.loadAllChats(userId: userId)) ?? []
     }
-    
+
     private func getUnsyncedChats() async -> [Chat] {
-        let allChats = await getAllChatsFromStorage()
-        // Return chats that are locally modified or never synced
-        return allChats.filter { chat in
-            chat.locallyModified || chat.syncedAt == nil
-        }
+        let userId = await getCurrentUserId()
+        guard let userId = userId else { return [] }
+        let index = (try? await EncryptedFileStorage.shared.loadIndex(userId: userId)) ?? []
+        let unsyncedIds = index.filter { $0.locallyModified || $0.syncedAt == nil }.map(\.id)
+        return await Chat.loadChats(chatIds: unsyncedIds, userId: userId)
     }
-    
+
     private func saveChatToStorage(_ storedChat: StoredChat) async {
         let userId = await getCurrentUserId()
-        
-        var chats = await getAllChatsFromStorage()
 
-        // Remove existing chat if present
-        chats.removeAll { $0.id == storedChat.id }
-        
         // For R2 data without modelType, set it from current config
         var chatToConvert = storedChat
         if chatToConvert.modelType == nil {
@@ -1139,41 +1135,25 @@ class CloudSyncService: ObservableObject {
                 AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
             }
         }
-        
+
         // Convert to Chat - may return nil if models aren't available
-        guard var chatToSave = chatToConvert.toChat() else {
+        guard let chatToSave = chatToConvert.toChat() else {
             #if DEBUG
             print("Warning: Could not convert StoredChat to Chat - no models available. Skipping chat \(chatToConvert.id)")
             #endif
             return
         }
 
-        // Add updated chat
-        chats.append(chatToSave)
-        
-        // Filter out blank chats before saving (matches ChatViewModel.saveChats behavior)
-        // BUT keep encrypted chats that failed to decrypt (they have decryptionFailed flag)
-        let chatsToSave = chats.filter { chat in
-            !chat.messages.isEmpty || chat.decryptionFailed
-        }
-        
-        // Save back to defaults
-        Chat.saveToDefaults(chatsToSave, userId: userId)
+        await Chat.saveChat(chatToSave, userId: userId)
     }
-    
+
     private func markChatAsSynced(_ chatId: String, version: Int) async {
-        var chats = await getAllChatsFromStorage()
-        
-        if let index = chats.firstIndex(where: { $0.id == chatId }) {
-            chats[index].syncVersion = version
-            chats[index].syncedAt = Date()
-            chats[index].locallyModified = false
-            
-            // Filter out blank chats before saving (matches ChatViewModel.saveChats behavior)
-            // BUT keep encrypted chats that failed to decrypt
-            let chatsToSave = chats.filter { !$0.messages.isEmpty || $0.decryptionFailed }
-            Chat.saveToDefaults(chatsToSave, userId: await getCurrentUserId())
-        }
+        let userId = await getCurrentUserId()
+        guard var chat = await Chat.loadChat(chatId: chatId, userId: userId) else { return }
+        chat.syncVersion = version
+        chat.syncedAt = Date()
+        chat.locallyModified = false
+        await Chat.saveChat(chat, userId: userId)
     }
 
     private func queueReencryption(for chat: StoredChat, persistLocal: Bool) {
@@ -1240,13 +1220,7 @@ class CloudSyncService: ObservableObject {
     }
 
     private func deleteChatFromStorage(_ chatId: String) async {
-        var chats = await getAllChatsFromStorage()
-        chats.removeAll { $0.id == chatId }
-        
-        // Filter out blank chats before saving (matches ChatViewModel.saveChats behavior)
-        // BUT keep encrypted chats that failed to decrypt
-        let chatsToSave = chats.filter { !$0.messages.isEmpty || $0.decryptionFailed }
-        Chat.saveToDefaults(chatsToSave, userId: await getCurrentUserId())
+        await Chat.deleteChatFromStorage(chatId: chatId, userId: await getCurrentUserId())
     }
     
     private func getCurrentUserId() async -> String? {
