@@ -388,7 +388,7 @@ struct Message: Identifiable, Codable, Equatable {
         try container.encode(content, forKey: .content)
         try container.encodeIfPresent(thoughts, forKey: .thoughts)
         try container.encode(isThinking, forKey: .isThinking)
-        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(Self.iso8601Formatter.string(from: timestamp), forKey: .timestamp)
         try container.encode(isCollapsed, forKey: .isCollapsed)
         try container.encode(isStreaming, forKey: .isStreaming)
         try container.encodeIfPresent(streamError, forKey: .streamError)
