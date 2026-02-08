@@ -270,6 +270,7 @@ struct UpdateMetadataRequest: Codable {
 struct ProfileData: Codable {
     // Theme settings
     var isDarkMode: Bool?
+    var themeMode: String?
     
     // Chat settings
     var maxPromptMessages: Int?
