@@ -27,8 +27,12 @@ struct StoredChat: Codable {
     
     // For handling encrypted chats that failed to decrypt
     var decryptionFailed: Bool?
+    var dataCorrupted: Bool?
     var encryptedData: String?
     
+    // Project association (used by React, preserved by iOS)
+    var projectId: String?
+
     // For tracking streaming state
     var hasActiveStream: Bool?
     
@@ -44,6 +48,8 @@ struct StoredChat: Codable {
         self.syncVersion = syncVersion
         self.syncedAt = nil
         self.locallyModified = true
+        self.dataCorrupted = chat.dataCorrupted
+        self.projectId = chat.projectId
         self.hasActiveStream = chat.hasActiveStream
     }
     
@@ -74,7 +80,9 @@ struct StoredChat: Codable {
             locallyModified: locallyModified,
             updatedAt: updatedAt,
             decryptionFailed: decryptionFailed ?? false,
-            encryptedData: encryptedData
+            dataCorrupted: dataCorrupted ?? false,
+            encryptedData: encryptedData,
+            projectId: projectId
         )
 
         if let hasActiveStream = hasActiveStream {
@@ -89,7 +97,7 @@ struct StoredChat: Codable {
         case id, title, messages, createdAt, updatedAt
         case language, userId
         case syncVersion, syncedAt, locallyModified
-        case decryptionFailed, encryptedData, hasActiveStream
+        case decryptionFailed, dataCorrupted, encryptedData, projectId, hasActiveStream
     }
 
     func encode(to encoder: Encoder) throws {
@@ -117,7 +125,9 @@ struct StoredChat: Codable {
 
         try container.encode(locallyModified, forKey: .locallyModified)
         try container.encodeIfPresent(decryptionFailed, forKey: .decryptionFailed)
+        try container.encodeIfPresent(dataCorrupted, forKey: .dataCorrupted)
         try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
+        try container.encodeIfPresent(projectId, forKey: .projectId)
         try container.encodeIfPresent(hasActiveStream, forKey: .hasActiveStream)
     }
     
@@ -173,7 +183,9 @@ struct StoredChat: Codable {
         
         locallyModified = try container.decodeIfPresent(Bool.self, forKey: .locallyModified) ?? false
         decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed)
+        dataCorrupted = try container.decodeIfPresent(Bool.self, forKey: .dataCorrupted)
         encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
+        projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
         hasActiveStream = try container.decodeIfPresent(Bool.self, forKey: .hasActiveStream)
     }
 }
@@ -213,6 +225,11 @@ struct ChatListResponse: Codable {
     let hasMore: Bool
 }
 
+/// Response from deleted-since API
+struct DeletedChatsResponse: Codable {
+    let deletedIds: [String]
+}
+
 /// Remote chat metadata from API
 struct RemoteChat: Codable {
     let id: String
@@ -243,6 +260,7 @@ struct UploadConversationRequest: Codable {
     let conversationId: String
     let data: String  // JSON stringified encrypted data
     let metadata: [String: String]
+    let projectId: String?
 }
 
 /// Request for updating metadata
@@ -257,6 +275,7 @@ struct UpdateMetadataRequest: Codable {
 struct ProfileData: Codable {
     // Theme settings
     var isDarkMode: Bool?
+    var themeMode: String?
     
     // Chat settings
     var maxPromptMessages: Int?
@@ -430,17 +449,4 @@ class StreamingTracker {
         streamEndCallbacks[chatId]?.append(callback)
     }
     
-    /// Update chat ID when it changes (e.g., from temporary to permanent ID)
-    func updateChatId(from oldId: String, to newId: String) {
-        if streamingChats.contains(oldId) {
-            streamingChats.remove(oldId)
-            streamingChats.insert(newId)
-        }
-        
-        // Move any callbacks to the new ID
-        if let callbacks = streamEndCallbacks[oldId] {
-            streamEndCallbacks[newId] = callbacks
-            streamEndCallbacks.removeValue(forKey: oldId)
-        }
-    }
 }

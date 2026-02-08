@@ -167,36 +167,8 @@ class CloudMigrationService {
                     continue
                 }
                 
-                // Ensure we use a server-generated conversation ID for cloud storage
-                // If the chat has a temporary (UUID) ID, request a permanent ID from backend
-                var chatForUpload: Chat
-                if chat.hasTemporaryId {
-                    let idResponse = try await CloudStorageService.shared.generateConversationId()
-                    // Preserve original timestamps and content, just swap the ID
-                    chatForUpload = Chat(
-                        id: idResponse.conversationId,
-                        title: chat.title,
-                        messages: chat.messages,
-                        createdAt: chat.createdAt,
-                        modelType: chat.modelType,
-                        language: chat.language,
-                        userId: chat.userId,
-                        syncVersion: 0,
-                        syncedAt: nil,
-                        locallyModified: true,
-                        updatedAt: chat.updatedAt,
-                        decryptionFailed: chat.decryptionFailed,
-                        encryptedData: chat.encryptedData
-                    )
-                } else {
-                    chatForUpload = chat
-                }
-
-                // Preserve streaming state when reconstructing for upload
-                chatForUpload.hasActiveStream = chat.hasActiveStream
-
                 // Create StoredChat format for cloud storage
-                let storedChat = StoredChat(from: chatForUpload)
+                let storedChat = StoredChat(from: chat)
 
                 // Upload to cloud
                 try await CloudStorageService.shared.uploadChat(storedChat)

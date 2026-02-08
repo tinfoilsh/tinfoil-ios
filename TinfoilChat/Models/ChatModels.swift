@@ -38,22 +38,28 @@ struct Chat: Identifiable, Codable {
     
     // For handling encrypted chats that failed to decrypt
     var decryptionFailed: Bool = false
+    var dataCorrupted: Bool = false
     var encryptedData: String?
-    
+
+    // Project association (used by React, preserved by iOS)
+    var projectId: String?
+
     // Computed properties for sync filtering
     var isBlankChat: Bool {
         // Don't treat failed-to-decrypt chats as blank
         return messages.isEmpty && !decryptionFailed
     }
     
-    var hasTemporaryId: Bool {
-        // Temporary IDs are UUID-based (no underscore), permanent IDs have timestamp format (with underscore)
-        // Format: {reverseTimestamp}_{randomSuffix} for permanent IDs
-        return !id.contains("_")
-    }
-    
     var needsGeneratedTitle: Bool {
         return titleState == .placeholder
+    }
+
+    /// Generates a permanent reverse-timestamp ID locally (matching the web app format).
+    /// Format: {reverseTimestamp padded to 13 digits}_{UUID}
+    static func generateReverseId(timestampMs: Int = Int(Date().timeIntervalSince1970 * 1000)) -> String {
+        let reverseTimestamp = Constants.Sync.maxReverseTimestamp - timestampMs
+        let reverseTsStr = String(format: "%0\(Constants.Sync.reverseTimestampDigits)d", reverseTimestamp)
+        return "\(reverseTsStr)_\(UUID().uuidString)"
     }
 
     static func deriveTitleState(for title: String, messages: [Message]) -> TitleState {
@@ -68,8 +74,8 @@ struct Chat: Identifiable, Codable {
     }
 
     init(
-        id: String = UUID().uuidString, 
-        title: String = Chat.placeholderTitle, 
+        id: String = Chat.generateReverseId(),
+        title: String = Chat.placeholderTitle,
         titleState: TitleState? = nil,
         messages: [Message] = [], 
         createdAt: Date = Date(),
@@ -81,7 +87,9 @@ struct Chat: Identifiable, Codable {
         locallyModified: Bool = true,
         updatedAt: Date? = nil,
         decryptionFailed: Bool = false,
-        encryptedData: String? = nil) 
+        dataCorrupted: Bool = false,
+        encryptedData: String? = nil,
+        projectId: String? = nil)
     {
         let resolvedTitleState = titleState ?? Chat.deriveTitleState(for: title, messages: messages)
 
@@ -98,16 +106,17 @@ struct Chat: Identifiable, Codable {
         self.locallyModified = locallyModified
         self.updatedAt = updatedAt ?? createdAt
         self.decryptionFailed = decryptionFailed
+        self.dataCorrupted = dataCorrupted
         self.encryptedData = encryptedData
+        self.projectId = projectId
     }
     
     // MARK: - Factory Methods
-    
+
     /// Creates a new chat with the current model from AppConfig
-    /// Note: For cloud sync, use createWithTimestampId() to get server-generated IDs
     @MainActor
     static func create(
-        id: String = UUID().uuidString,
+        id: String = Chat.generateReverseId(),
         title: String = Chat.placeholderTitle,
         titleState: TitleState? = nil,
         messages: [Message] = [],
@@ -140,40 +149,14 @@ struct Chat: Identifiable, Codable {
         )
     }
     
-    /// Creates a new chat with a server-generated timestamp ID for proper cloud sync
-    @MainActor
-    static func createWithTimestampId(
-        title: String = Chat.placeholderTitle,
-        titleState: TitleState? = nil,
-        messages: [Message] = [],
-        createdAt: Date = Date(),
-        modelType: ModelType? = nil,
-        language: String? = nil,
-        userId: String? = nil
-    ) async throws -> Chat {
-        // Generate timestamp-based ID from server
-        let idResponse = try await CloudStorageService.shared.generateConversationId()
-        
-        return create(
-            id: idResponse.conversationId,
-            title: title,
-            titleState: titleState,
-            messages: messages,
-            createdAt: createdAt,
-            modelType: modelType,
-            language: language,
-            userId: userId
-        )
-    }
-    
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
         case id, title, titleState, messages, hasActiveStream, createdAt, modelType, language, userId
         case syncVersion, syncedAt, locallyModified, updatedAt
-        case decryptionFailed, encryptedData
+        case decryptionFailed, dataCorrupted, encryptedData, projectId
     }
-    
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
@@ -195,9 +178,11 @@ struct Chat: Identifiable, Codable {
         
         // Encryption fields
         decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed) ?? false
+        dataCorrupted = try container.decodeIfPresent(Bool.self, forKey: .dataCorrupted) ?? false
         encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
+        projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
     }
-    
+
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
@@ -218,7 +203,9 @@ struct Chat: Identifiable, Codable {
         
         // Encryption fields
         try container.encode(decryptionFailed, forKey: .decryptionFailed)
+        try container.encode(dataCorrupted, forKey: .dataCorrupted)
         try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
+        try container.encodeIfPresent(projectId, forKey: .projectId)
     }
     
     // MARK: - Haptic Feedback Methods
@@ -312,6 +299,31 @@ struct WebSearchState: Codable, Equatable {
     }
 }
 
+/// URL citation from web search results, matching React's Annotation type
+struct URLCitation: Codable, Equatable {
+    let title: String
+    let url: String
+    let start_index: Int?
+    let end_index: Int?
+}
+
+/// Annotation wrapper, matching React's { type: 'url_citation', url_citation: URLCitation }
+struct Annotation: Codable, Equatable {
+    let type: String
+    let url_citation: URLCitation
+}
+
+/// Document name reference, matching React's { name: string }
+struct DocumentName: Codable, Equatable {
+    let name: String
+}
+
+/// Image data for multimodal support, matching React's { base64: string; mimeType: string }
+struct ImageData: Codable, Equatable {
+    let base64: String
+    let mimeType: String
+}
+
 /// Represents a single message in a chat
 struct Message: Identifiable, Codable, Equatable {
     let id: String
@@ -328,7 +340,16 @@ struct Message: Identifiable, Codable, Equatable {
     var webSearchState: WebSearchState? = nil
     var attachments: [Attachment] = []
     var documentContent: String? = nil
-    var imageBase64: String? = nil
+    var imageData: [ImageData]? = nil
+
+    // Passthrough fields for cross-platform round-trip (used by React, preserved by iOS)
+    var thinkingDuration: Double? = nil
+    var isError: Bool? = nil
+    var multimodalText: String? = nil
+    var documents: [DocumentName]? = nil
+    var webSearchBeforeThinking: Bool? = nil
+    var annotations: [Annotation]? = nil
+    var searchReasoning: String? = nil
 
     static let longMessageAttachmentThreshold = 1200
     var shouldDisplayAsAttachment: Bool {
@@ -347,7 +368,7 @@ struct Message: Identifiable, Codable, Equatable {
         return formatter
     }()
     
-    init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = [], documentContent: String? = nil, imageBase64: String? = nil) {
+    init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = [], documentContent: String? = nil, imageData: [ImageData]? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -360,7 +381,7 @@ struct Message: Identifiable, Codable, Equatable {
         self.webSearchState = webSearchState
         self.attachments = attachments
         self.documentContent = documentContent
-        self.imageBase64 = imageBase64
+        self.imageData = imageData
     }
     
     // MARK: - Codable Implementation
@@ -368,7 +389,10 @@ struct Message: Identifiable, Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, generationTimeSeconds, contentChunks, webSearchState
         case webSearch // Alternative key used by React app
-        case attachments, documentContent, imageBase64
+        case attachments, documentContent, imageData
+        case imageBase64 // Legacy iOS key for backward compatibility
+        case thinkingDuration, isError, multimodalText, documents
+        case webSearchBeforeThinking, annotations, searchReasoning
     }
     
     init(from decoder: Decoder) throws {
@@ -403,7 +427,23 @@ struct Message: Identifiable, Codable, Equatable {
             ?? container.decodeIfPresent(WebSearchState.self, forKey: .webSearch)
         attachments = try container.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
         documentContent = try container.decodeIfPresent(String.self, forKey: .documentContent)
-        imageBase64 = try container.decodeIfPresent(String.self, forKey: .imageBase64)
+        // Try React's imageData array first, fall back to legacy iOS imageBase64 string
+        if let data = try container.decodeIfPresent([ImageData].self, forKey: .imageData) {
+            imageData = data
+        } else if let legacyBase64 = try container.decodeIfPresent(String.self, forKey: .imageBase64) {
+            imageData = [ImageData(base64: legacyBase64, mimeType: Constants.Attachments.defaultImageMimeType)]
+        } else {
+            imageData = nil
+        }
+
+        // Passthrough fields for cross-platform round-trip
+        thinkingDuration = try container.decodeIfPresent(Double.self, forKey: .thinkingDuration)
+        isError = try container.decodeIfPresent(Bool.self, forKey: .isError)
+        multimodalText = try container.decodeIfPresent(String.self, forKey: .multimodalText)
+        documents = try container.decodeIfPresent([DocumentName].self, forKey: .documents)
+        webSearchBeforeThinking = try container.decodeIfPresent(Bool.self, forKey: .webSearchBeforeThinking)
+        annotations = try container.decodeIfPresent([Annotation].self, forKey: .annotations)
+        searchReasoning = try container.decodeIfPresent(String.self, forKey: .searchReasoning)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -413,7 +453,7 @@ struct Message: Identifiable, Codable, Equatable {
         try container.encode(content, forKey: .content)
         try container.encodeIfPresent(thoughts, forKey: .thoughts)
         try container.encode(isThinking, forKey: .isThinking)
-        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(Self.iso8601Formatter.string(from: timestamp), forKey: .timestamp)
         try container.encode(isCollapsed, forKey: .isCollapsed)
         try container.encode(isStreaming, forKey: .isStreaming)
         try container.encodeIfPresent(streamError, forKey: .streamError)
@@ -425,7 +465,16 @@ struct Message: Identifiable, Codable, Equatable {
             try container.encode(attachments, forKey: .attachments)
         }
         try container.encodeIfPresent(documentContent, forKey: .documentContent)
-        try container.encodeIfPresent(imageBase64, forKey: .imageBase64)
+        try container.encodeIfPresent(imageData, forKey: .imageData)
+
+        // Passthrough fields for cross-platform round-trip
+        try container.encodeIfPresent(thinkingDuration, forKey: .thinkingDuration)
+        try container.encodeIfPresent(isError, forKey: .isError)
+        try container.encodeIfPresent(multimodalText, forKey: .multimodalText)
+        try container.encodeIfPresent(documents, forKey: .documents)
+        try container.encodeIfPresent(webSearchBeforeThinking, forKey: .webSearchBeforeThinking)
+        try container.encodeIfPresent(annotations, forKey: .annotations)
+        try container.encodeIfPresent(searchReasoning, forKey: .searchReasoning)
     }
 }
 

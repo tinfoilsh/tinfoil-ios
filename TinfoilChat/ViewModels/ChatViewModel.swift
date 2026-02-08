@@ -391,12 +391,11 @@ class ChatViewModel: ObservableObject {
                     
                     // Also backup current chat if it has changes
                     if let currentChat = await MainActor.run(body: { self.currentChat }),
-                       !currentChat.hasTemporaryId,
                        !currentChat.messages.isEmpty,
                        !currentChat.hasActiveStream {
-                        try await self.cloudSync.backupChat(currentChat.id)
+                        await self.cloudSync.backupChat(currentChat.id)
                     }
-                    
+
                     // Sync profile settings periodically
                     await ProfileManager.shared.syncFromCloud()
                 } catch {
@@ -699,7 +698,7 @@ class ChatViewModel: ObservableObject {
 
         // Merge attachment data into message fields
         var combinedDocumentContent: String? = nil
-        var messageImageBase64: String? = nil
+        var messageImageData: [ImageData] = []
         var messageAttachments: [Attachment] = []
 
         for attachment in pendingAttachments {
@@ -712,7 +711,7 @@ class ChatViewModel: ObservableObject {
                 }
             }
             if let imgBase64 = attachment.imageBase64, !imgBase64.isEmpty {
-                messageImageBase64 = imgBase64
+                messageImageData.append(ImageData(base64: imgBase64, mimeType: Constants.Attachments.defaultImageMimeType))
             }
         }
 
@@ -724,7 +723,7 @@ class ChatViewModel: ObservableObject {
             content: text,
             attachments: messageAttachments,
             documentContent: combinedDocumentContent,
-            imageBase64: messageImageBase64
+            imageData: messageImageData.isEmpty ? nil : messageImageData
         )
         addMessage(userMessage)
 
@@ -1385,108 +1384,14 @@ class ChatViewModel: ObservableObject {
                                     self.updateChat(current)
                                     // Force an immediate cloud backup to propagate the new title
                                     Task {
-                                        try? await self.cloudSync.backupChat(current.id, ensureLatestUpload: true)
+                                        await self.cloudSync.backupChat(current.id, ensureLatestUpload: true)
                                     }
                                     Chat.triggerSuccessFeedback()
                                 }
                             }
                         }
                         
-                        // Convert temporary ID to permanent ID after streaming completes
-                        if chat.hasTemporaryId && self.authManager?.isAuthenticated == true {
-                            Task { @MainActor in
-                                do {
-                                    let newChat = try await Chat.createWithTimestampId(
-                                        modelType: chat.modelType,
-                                        language: chat.language,
-                                        userId: chat.userId
-                                    )
-                                    
-                                    // Get the current state of the chat
-                                    guard let currentChatNow = self.currentChat,
-                                          let index = self.chats.firstIndex(where: { $0.id == chat.id }) else {
-                                        return
-                                    }
-                                    
-                                    // Update streaming tracker with new ID BEFORE we change the chat
-                                    self.streamingTracker.updateChatId(from: chat.id, to: newChat.id)
-                                    
-                                    // Create updated chat with permanent ID but current state
-                                    // IMPORTANT: Keep the original createdAt date from when first message was sent
-                                    var updatedChat = Chat(
-                                        id: newChat.id,
-                                        title: currentChatNow.title,
-                                        messages: currentChatNow.messages,
-                                        createdAt: currentChatNow.createdAt,  // Keep original date
-                                        modelType: currentChatNow.modelType,
-                                        language: currentChatNow.language,
-                                        userId: currentChatNow.userId,
-                                        syncVersion: currentChatNow.syncVersion,
-                                        syncedAt: currentChatNow.syncedAt,
-                                        locallyModified: true,
-                                        updatedAt: Date()
-                                    )
-                                    updatedChat.hasActiveStream = false
-                                    
-                                    // Update in the chats array
-                                    self.chats[index] = updatedChat
-                                    self.currentChat = updatedChat
-                                    
-                                    // Save the updated chat locally first
-                                    self.saveChats()
-                                    
-                                    // End streaming tracking with NEW ID for cloud sync
-                                    self.streamingTracker.endStreaming(updatedChat.id)
-                                    
-                                    // Now backup to cloud with new permanent ID
-                                    try await self.cloudSync.backupChat(updatedChat.id)
-                                    
-                                    // After successful backup, mark as no longer locally modified
-                                    if let index = self.chats.firstIndex(where: { $0.id == updatedChat.id }) {
-                                        self.chats[index].locallyModified = false
-                                        if self.currentChat?.id == updatedChat.id {
-                                            self.currentChat?.locallyModified = false
-                                        }
-                                    }
-                                } catch {
-                                    // Still need to end streaming with old ID if conversion fails
-                                    self.streamingTracker.endStreaming(chat.id)
-                                }
-                            }
-                        } else if !chat.hasTemporaryId && self.authManager?.isAuthenticated == true {
-                            // For chats with permanent IDs, end streaming and backup
-                            self.streamingTracker.endStreaming(chat.id)
-                            
-                            // Save the chat to storage first to ensure we backup the latest version
-                            self.saveChats()
-                            
-                            // Backup now that streaming is complete
-                            Task { @MainActor in
-                                do {
-                                    // Get the latest version of the chat after streaming
-                                    guard let latestChat = self.chats.first(where: { $0.id == chat.id }) else {
-                                        return
-                                    }
-                                    
-                                    try await self.cloudSync.backupChat(latestChat.id)
-                                    
-                                    // After successful backup, mark as no longer locally modified
-                                    // Note: The chat has already been marked as synced in CloudSyncService.markChatAsSynced
-                                    // We just need to update our local state to match
-                                    if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
-                                        // Reload from storage to get the updated sync state
-                                        let updatedChats = Chat.loadFromDefaults(userId: self.currentUserId)
-                                        if let syncedChat = updatedChats.first(where: { $0.id == latestChat.id }) {
-                                            self.chats[index] = syncedChat
-                                            if self.currentChat?.id == latestChat.id {
-                                                self.currentChat = syncedChat
-                                            }
-                                        }
-                                    }
-                                } catch {
-                                }
-                            }
-                        }
+                        self.endStreamingAndBackup(chatId: chat.id)
                     }
                 }
             } catch {
@@ -1527,104 +1432,10 @@ class ChatViewModel: ObservableObject {
                         }
 
                         self.updateChat(chat)  // Final update without throttling
-                        
-                        // Convert temporary ID to permanent ID after streaming completes
-                        if chat.hasTemporaryId && self.authManager?.isAuthenticated == true {
-                            Task { @MainActor in
-                                do {
-                                    let newChat = try await Chat.createWithTimestampId(
-                                        modelType: chat.modelType,
-                                        language: chat.language,
-                                        userId: chat.userId
-                                    )
-                                    
-                                    // Get the current state of the chat
-                                    guard let currentChatNow = self.currentChat,
-                                          let index = self.chats.firstIndex(where: { $0.id == chat.id }) else {
-                                        return
-                                    }
-                                    
-                                    // Update streaming tracker with new ID BEFORE we change the chat
-                                    self.streamingTracker.updateChatId(from: chat.id, to: newChat.id)
-                                    
-                                    // Create updated chat with permanent ID but current state
-                                    // IMPORTANT: Keep the original createdAt date from when first message was sent
-                                    var updatedChat = Chat(
-                                        id: newChat.id,
-                                        title: currentChatNow.title,
-                                        messages: currentChatNow.messages,
-                                        createdAt: currentChatNow.createdAt,  // Keep original date
-                                        modelType: currentChatNow.modelType,
-                                        language: currentChatNow.language,
-                                        userId: currentChatNow.userId,
-                                        syncVersion: currentChatNow.syncVersion,
-                                        syncedAt: currentChatNow.syncedAt,
-                                        locallyModified: true,
-                                        updatedAt: Date()
-                                    )
-                                    updatedChat.hasActiveStream = false
-                                    
-                                    // Update in the chats array
-                                    self.chats[index] = updatedChat
-                                    self.currentChat = updatedChat
-                                    
-                                    // Save the updated chat locally first
-                                    self.saveChats()
-                                    
-                                    // End streaming tracking with NEW ID for cloud sync
-                                    self.streamingTracker.endStreaming(updatedChat.id)
-                                    
-                                    // Now backup to cloud with new permanent ID
-                                    try await self.cloudSync.backupChat(updatedChat.id)
-                                    
-                                    // After successful backup, mark as no longer locally modified
-                                    if let index = self.chats.firstIndex(where: { $0.id == updatedChat.id }) {
-                                        self.chats[index].locallyModified = false
-                                        if self.currentChat?.id == updatedChat.id {
-                                            self.currentChat?.locallyModified = false
-                                        }
-                                    }
-                                } catch {
-                                    // Still need to end streaming with old ID if conversion fails
-                                    self.streamingTracker.endStreaming(chat.id)
-                                }
-                            }
-                        } else if !chat.hasTemporaryId && self.authManager?.isAuthenticated == true {
-                            // For chats with permanent IDs, end streaming and backup
-                            self.streamingTracker.endStreaming(chat.id)
-                            
-                            // Save the chat to storage first to ensure we backup the latest version
-                            self.saveChats()
-                            
-                            // Backup now that streaming is complete
-                            Task { @MainActor in
-                                do {
-                                    // Get the latest version of the chat after streaming
-                                    guard let latestChat = self.chats.first(where: { $0.id == chat.id }) else {
-                                        return
-                                    }
-                                    
-                                    try await self.cloudSync.backupChat(latestChat.id)
-                                    
-                                    // After successful backup, mark as no longer locally modified
-                                    // Note: The chat has already been marked as synced in CloudSyncService.markChatAsSynced
-                                    // We just need to update our local state to match
-                                    if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
-                                        // Reload from storage to get the updated sync state
-                                        let updatedChats = Chat.loadFromDefaults(userId: self.currentUserId)
-                                        if let syncedChat = updatedChats.first(where: { $0.id == latestChat.id }) {
-                                            self.chats[index] = syncedChat
-                                            if self.currentChat?.id == latestChat.id {
-                                                self.currentChat = syncedChat
-                                            }
-                                        }
-                                    }
-                                } catch {
-                                }
-                            }
-                        }
+
+                        self.endStreamingAndBackup(chatId: chat.id)
                     }
-                    
+
                     if var chat = self.currentChat,
                        !chat.messages.isEmpty {
                         let lastIndex = chat.messages.count - 1
@@ -1849,6 +1660,31 @@ class ChatViewModel: ObservableObject {
     
     // MARK: - Private Methods
 
+    private func endStreamingAndBackup(chatId: UUID) {
+        guard authManager?.isAuthenticated == true else { return }
+
+        streamingTracker.endStreaming(chatId)
+        saveChats()
+
+        Task { @MainActor in
+            guard let latestChat = self.chats.first(where: { $0.id == chatId }) else {
+                return
+            }
+
+            await self.cloudSync.backupChat(latestChat.id)
+
+            if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
+                let updatedChats = Chat.loadFromDefaults(userId: self.currentUserId)
+                if let syncedChat = updatedChats.first(where: { $0.id == latestChat.id }) {
+                    self.chats[index] = syncedChat
+                    if self.currentChat?.id == latestChat.id {
+                        self.currentChat = syncedChat
+                    }
+                }
+            }
+        }
+    }
+
     /// Normalizes the chats array to ensure exactly one blank chat at position 0
     /// This is the single source of truth for chat array structure:
     /// 1. Removes ALL blank chats (deduplicates)
@@ -2008,11 +1844,10 @@ class ChatViewModel: ObservableObject {
             let oneMinuteAgo = Date().addingTimeInterval(-Constants.Pagination.cleanupThresholdSeconds)
             let syncedChats = nonEmptyChats.filter { chat in
                 !chat.isBlankChat &&
-                !chat.hasTemporaryId &&
                 chat.createdAt < oneMinuteAgo
             }.sorted { $0.createdAt > $1.createdAt }
 
-            let unsavedChats = nonEmptyChats.filter { $0.isBlankChat || $0.hasTemporaryId }
+            let unsavedChats = nonEmptyChats.filter { $0.isBlankChat }
             let recentChats = nonEmptyChats.filter { $0.createdAt >= oneMinuteAgo }
 
             // Only save first page of synced chats + all unsaved/recent chats
@@ -2045,15 +1880,11 @@ class ChatViewModel: ObservableObject {
             
             // Trigger cloud backup for the current chat if it has messages and permanent ID
             // Don't try to backup chats with temporary IDs or while streaming
-            if let currentChat = currentChat, 
+            if let currentChat = currentChat,
                !currentChat.messages.isEmpty,
-               !currentChat.hasTemporaryId,
                !currentChat.hasActiveStream {
                 Task {
-                    do {
-                        try await cloudSync.backupChat(currentChat.id)
-                    } catch {
-                    }
+                    await cloudSync.backupChat(currentChat.id)
                 }
             }
         }
@@ -2571,14 +2402,6 @@ class ChatViewModel: ObservableObject {
             // Initialize cloud sync service and perform initial sync
             await initializeCloudSync()
 
-            // Migrate any local chats that still have temporary IDs to server IDs
-            let migrationResult = await cloudSync.migrateTemporaryIdChats()
-            if !migrationResult.errors.isEmpty {
-                await MainActor.run {
-                    self.syncErrors.append(contentsOf: migrationResult.errors)
-                }
-            }
-            
             // Sync user profile settings
             await ProfileManager.shared.performFullSync()
             
@@ -2680,22 +2503,21 @@ class ChatViewModel: ObservableObject {
         // Filter synced chats (not blank, not temporary, and older than 1 minute to avoid deleting just-created chats)
         let oneMinuteAgo = Date().addingTimeInterval(-Constants.Pagination.cleanupThresholdSeconds)
         let syncedChats = allChats.filter { chat in
-            !chat.isBlankChat && 
-            !chat.hasTemporaryId &&
+            !chat.isBlankChat &&
             chat.createdAt < oneMinuteAgo  // Only clean up chats older than 1 minute
         }.sorted { $0.createdAt > $1.createdAt }
-        
+
         // Also keep all recent chats (created in last minute) regardless of count
         let recentChats = allChats.filter { chat in
             chat.createdAt >= oneMinuteAgo
         }
-        
+
         // If we have more than first page of old synced chats, keep only the first page
         if syncedChats.count > Constants.Pagination.chatsPerPage {
-            
-            // Keep first page of synced chats + all unsaved chats (blank/temporary) + recent chats
-            let chatsToKeep = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + 
-                             allChats.filter { chat in chat.isBlankChat || chat.hasTemporaryId } +
+
+            // Keep first page of synced chats + all unsaved chats (blank) + recent chats
+            let chatsToKeep = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) +
+                             allChats.filter { chat in chat.isBlankChat } +
                              recentChats
             
             // Remove duplicates based on chat ID
@@ -2819,15 +2641,13 @@ class ChatViewModel: ObservableObject {
         
         // Separate chats into categories
         let twoMinutesAgo = Date().addingTimeInterval(-Constants.Pagination.recentChatThresholdSeconds)
-        let unsavedChats = sortedChats.filter { $0.isBlankChat || $0.hasTemporaryId }
+        let unsavedChats = sortedChats.filter { $0.isBlankChat }
         let recentChats = sortedChats.filter {
             $0.createdAt >= twoMinutesAgo &&
-            !$0.isBlankChat &&
-            !$0.hasTemporaryId
+            !$0.isBlankChat
         }
         let syncedChats = sortedChats.filter {
             !$0.isBlankChat &&
-            !$0.hasTemporaryId &&
             $0.createdAt < twoMinutesAgo
         }
         
@@ -2880,7 +2700,7 @@ class ChatViewModel: ObservableObject {
         }
         
         // Update hasMoreChats conservatively to preserve server-provided pagination
-        let displayedSyncedChats = chats.filter { !$0.isBlankChat && !$0.hasTemporaryId }.count
+        let displayedSyncedChats = chats.filter { !$0.isBlankChat }.count
 
         // Set to true if we clearly have more locally than are displayed
         if syncedChats.count > displayedSyncedChats {
@@ -2917,12 +2737,11 @@ class ChatViewModel: ObservableObject {
                 let recentChats = sortedChats.filter { $0.createdAt >= twoMinutesAgo }
                 
                 // Take the first page worth of chats (10) plus any blank/temporary/recent chats
-                let syncedChats = sortedChats.filter { 
-                    !$0.isBlankChat && 
-                    !$0.hasTemporaryId && 
-                    $0.createdAt < twoMinutesAgo 
+                let syncedChats = sortedChats.filter {
+                    !$0.isBlankChat &&
+                    $0.createdAt < twoMinutesAgo
                 }
-                let unsavedChats = sortedChats.filter { $0.isBlankChat || $0.hasTemporaryId }
+                let unsavedChats = sortedChats.filter { $0.isBlankChat }
                 
                 // Keep first page of synced chats + all unsaved chats + all recent chats
                 let chatsToShow = Array(syncedChats.prefix(Constants.Pagination.chatsPerPage)) + unsavedChats + recentChats

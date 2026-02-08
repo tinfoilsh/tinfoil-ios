@@ -69,15 +69,17 @@ struct ChatQueryBuilder {
                     userContent = "---\nDocument content:\n\(docContent)\n---\n\n\(userContent)"
                 }
 
-                // Use multimodal content parts when model supports it and message has an image
-                if isMultimodal, let imageBase64 = msg.imageBase64, !imageBase64.isEmpty {
+                // Use multimodal content parts when model supports it and message has images
+                if isMultimodal, let images = msg.imageData, !images.isEmpty {
                     var parts: [ChatQuery.ChatCompletionMessageParam.UserMessageParam.Content.ContentPart] = []
                     parts.append(.text(.init(text: userContent)))
-                    let imageUrl = ChatQuery.ChatCompletionMessageParam.ContentPartImageParam.ImageURL(
-                        url: "data:image/jpeg;base64,\(imageBase64)",
-                        detail: .auto
-                    )
-                    parts.append(.image(.init(imageUrl: imageUrl)))
+                    for imgData in images {
+                        let imageUrl = ChatQuery.ChatCompletionMessageParam.ContentPartImageParam.ImageURL(
+                            url: "data:\(imgData.mimeType);base64,\(imgData.base64)",
+                            detail: .auto
+                        )
+                        parts.append(.image(.init(imageUrl: imageUrl)))
+                    }
                     messages.append(.user(.init(content: .contentParts(parts))))
                 } else {
                     messages.append(.user(.init(content: .string(userContent))))

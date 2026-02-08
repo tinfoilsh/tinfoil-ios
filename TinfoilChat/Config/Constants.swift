@@ -62,6 +62,12 @@ enum Constants {
         static let profileSyncIntervalSeconds: TimeInterval = 300.0  // 5 minutes
         static let clientInitTimeoutSeconds: TimeInterval = 60.0
         static let backgroundTaskName = "CompleteStreamingResponse"
+        static let maxReverseTimestamp: Int = 9999999999999
+        static let reverseTimestampDigits: Int = String(maxReverseTimestamp).count
+
+        static let uploadBaseDelaySeconds: TimeInterval = 1.0
+        static let uploadMaxDelaySeconds: TimeInterval = 8.0
+        static let uploadMaxRetries: Int = 3
     }
 
     enum Verification {
@@ -96,6 +102,7 @@ enum Constants {
         static let messageThumbnailColumns: Int = 3
         static let supportedDocumentExtensions: Set<String> = ["pdf", "txt", "md", "csv", "html"]
         static let supportedImageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic"]
+        static let defaultImageMimeType = "image/jpeg"
     }
 }
  
