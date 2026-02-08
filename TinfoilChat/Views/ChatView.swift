@@ -844,6 +844,16 @@ struct VerificationStatusIndicator: View {
             }
             .animation(.easeInOut(duration: 0.35), value: isCollapsed)
         }
+        .onAppear {
+            if viewModel.isVerified && viewModel.verificationError == nil {
+                collapseTask?.cancel()
+                collapseTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: UInt64(Constants.Verification.collapseDelaySeconds * 1_000_000_000))
+                    guard !Task.isCancelled else { return }
+                    isCollapsed = true
+                }
+            }
+        }
         .onChange(of: viewModel.isVerified) { _, isVerified in
             if isVerified && viewModel.verificationError == nil {
                 collapseTask?.cancel()
