@@ -53,6 +53,94 @@ private actor ReencryptionTracker {
     }
 }
 
+/// Coalesces rapid upload requests per chat into single uploads with exponential backoff retry.
+/// Uses a dirty-flag + worker-loop pattern to batch rapid successive writes.
+private actor UploadCoalescer {
+    private struct ChatUploadState {
+        var dirty: Bool = false
+        var workerRunning: Bool = false
+        var failureCount: Int = 0
+        var waiters: [CheckedContinuation<Void, Never>] = []
+    }
+
+    private var states: [String: ChatUploadState] = [:]
+    private let uploadFn: @Sendable (String) async throws -> Void
+
+    init(uploadFn: @escaping @Sendable (String) async throws -> Void) {
+        self.uploadFn = uploadFn
+    }
+
+    func enqueue(_ chatId: String) {
+        var state = states[chatId] ?? ChatUploadState()
+        state.dirty = true
+        states[chatId] = state
+
+        if !state.workerRunning {
+            states[chatId]?.workerRunning = true
+            Task { await runWorker(chatId) }
+        }
+    }
+
+    func waitForUpload(_ chatId: String) async {
+        guard let state = states[chatId], state.workerRunning || state.dirty else {
+            return
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            states[chatId]?.waiters.append(continuation)
+        }
+    }
+
+    private func runWorker(_ chatId: String) async {
+        while states[chatId]?.dirty == true {
+            states[chatId]?.dirty = false
+
+            await uploadWithRetry(chatId)
+        }
+
+        // Notify waiters
+        if let waiters = states[chatId]?.waiters {
+            for waiter in waiters {
+                waiter.resume()
+            }
+        }
+
+        // Clean up state if no failures
+        if states[chatId]?.failureCount == 0 {
+            states.removeValue(forKey: chatId)
+        } else {
+            states[chatId]?.workerRunning = false
+            states[chatId]?.waiters = []
+        }
+    }
+
+    private func uploadWithRetry(_ chatId: String) async {
+        for attempt in 0...Constants.Sync.uploadMaxRetries {
+            do {
+                try await uploadFn(chatId)
+                states[chatId]?.failureCount = 0
+                return
+            } catch {
+                states[chatId]?.failureCount = (states[chatId]?.failureCount ?? 0) + 1
+
+                if attempt == Constants.Sync.uploadMaxRetries {
+                    break
+                }
+
+                let delay = min(
+                    Constants.Sync.uploadBaseDelaySeconds * pow(2.0, Double(attempt)),
+                    Constants.Sync.uploadMaxDelaySeconds
+                )
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+
+                // If dirty was set during backoff, return early to upload fresh data
+                if states[chatId]?.dirty == true {
+                    return
+                }
+            }
+        }
+    }
+}
+
 /// Main service for managing cloud synchronization of chats
 @MainActor
 class CloudSyncService: ObservableObject {
@@ -65,7 +153,11 @@ class CloudSyncService: ObservableObject {
     @Published var syncErrors: [String] = []
     
     // MARK: - Private Properties
-    private var uploadQueue: [String: Task<Void, Error>] = [:]
+    private lazy var uploadCoalescer: UploadCoalescer = {
+        UploadCoalescer { [weak self] chatId in
+            try await self?.doBackupChat(chatId)
+        }
+    }()
     private var streamingCallbacks: Set<String> = []
     private let cloudStorage = CloudStorageService.shared
     private let encryptionService = EncryptionService.shared
@@ -124,39 +216,18 @@ class CloudSyncService: ObservableObject {
     
     // MARK: - Single Chat Backup
     
-    /// Backup a single chat to the cloud with rate limiting
+    /// Backup a single chat to the cloud, coalescing rapid successive calls
     func backupChat(_ chatId: String, ensureLatestUpload: Bool = false) async throws {
         // Don't attempt backup if not authenticated
         guard await cloudStorage.isAuthenticated() else {
             return
         }
-        
-        // Check if there's already an upload in progress for this chat
-        if let existingUpload = uploadQueue[chatId] {
-            // Wait for the in-flight upload to finish before continuing
-            try await existingUpload.value
 
-            // Trigger a fresh upload if the caller needs to ensure the latest data is synced
-            if ensureLatestUpload {
-                try await backupChat(chatId, ensureLatestUpload: false)
-            }
-            return
-        }
+        await uploadCoalescer.enqueue(chatId)
 
-        // Create the upload task
-        let uploadTask = Task<Void, Error> { [weak self] in
-            try await self?.doBackupChat(chatId)
+        if ensureLatestUpload {
+            await uploadCoalescer.waitForUpload(chatId)
         }
-        
-        // Store in queue
-        uploadQueue[chatId] = uploadTask
-        
-        // Clean up the queue when done
-        defer {
-            uploadQueue.removeValue(forKey: chatId)
-        }
-        
-        try await uploadTask.value
     }
     
     private func doBackupChat(_ chatId: String) async throws {
