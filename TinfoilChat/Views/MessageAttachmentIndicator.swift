@@ -276,14 +276,6 @@ private struct ZoomableImagePage: View {
     @State private var lastScale: CGFloat = 1.0
     @State private var decodedImage: UIImage?
 
-    init(attachment: Attachment) {
-        self.attachment = attachment
-        if let base64 = attachment.imageBase64,
-           let data = Data(base64Encoded: base64) {
-            _decodedImage = State(initialValue: UIImage(data: data))
-        }
-    }
-
     var body: some View {
         Group {
             if let uiImage = decodedImage {
@@ -308,6 +300,12 @@ private struct ZoomableImagePage: View {
                         }
                     }
             }
+        }
+        .task {
+            guard decodedImage == nil,
+                  let base64 = attachment.imageBase64,
+                  let data = Data(base64Encoded: base64) else { return }
+            decodedImage = UIImage(data: data)
         }
     }
 }
