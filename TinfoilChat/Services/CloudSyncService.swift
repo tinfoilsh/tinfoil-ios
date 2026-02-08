@@ -165,8 +165,9 @@ class CloudSyncService: ObservableObject {
     private let streamingTracker = StreamingTracker.shared
     private let reencryptionTracker = ReencryptionTracker()
 
-    // UserDefaults key for sync status cache
+    // UserDefaults keys for sync status caches
     private let syncStatusKey = "tinfoil-chat-sync-status"
+    private let allChatsSyncStatusKey = "tinfoil-all-chats-sync-status"
 
     private init() {}
     
@@ -768,6 +769,9 @@ class CloudSyncService: ObservableObject {
             // Refresh cached sync status so subsequent smart-syncs have up-to-date info
             await refreshSyncStatusCache()
 
+            // Detect cross-scope moves (chats moving between projects)
+            await syncCrossScope()
+
         } catch {
             result = SyncResult(
                 uploaded: result.uploaded,
@@ -978,6 +982,9 @@ class CloudSyncService: ObservableObject {
 
             // Refresh cached sync status so subsequent smart-syncs have up-to-date info
             await refreshSyncStatusCache()
+
+            // Detect cross-scope moves (chats moving between projects)
+            await syncCrossScope()
         } catch {
             result = SyncResult(
                 uploaded: result.uploaded,
@@ -1052,6 +1059,7 @@ class CloudSyncService: ObservableObject {
     /// Clear cached sync status (call on logout)
     func clearSyncStatus() {
         UserDefaults.standard.removeObject(forKey: syncStatusKey)
+        UserDefaults.standard.removeObject(forKey: allChatsSyncStatusKey)
     }
 
     // MARK: - Sync Status Cache Helpers
@@ -1074,6 +1082,82 @@ class CloudSyncService: ObservableObject {
         if let remoteStatus = try? await cloudStorage.getChatSyncStatus(),
            let lastUpdated = remoteStatus.lastUpdated {
             saveSyncStatus(count: remoteStatus.count, lastUpdated: lastUpdated)
+        }
+    }
+
+    // MARK: - Cross-Scope Sync
+
+    private func getCachedAllChatsSyncStatus() -> ChatSyncStatus? {
+        guard let data = UserDefaults.standard.data(forKey: allChatsSyncStatusKey) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(ChatSyncStatus.self, from: data)
+    }
+
+    private func saveAllChatsSyncStatus(_ status: ChatSyncStatus) {
+        if let data = try? JSONEncoder().encode(status) {
+            UserDefaults.standard.set(data, forKey: allChatsSyncStatusKey)
+        }
+    }
+
+    /// Detect and apply cross-scope changes (chats moving between projects or becoming unassigned).
+    /// Uses the unscoped all-updated-since endpoint to find chats whose projectId changed.
+    private func syncCrossScope() async {
+        do {
+            let cachedAllStatus = getCachedAllChatsSyncStatus()
+
+            let remoteAllStatus = try await cloudStorage.getAllChatsSyncStatus()
+
+            // If nothing changed globally, skip
+            if let cached = cachedAllStatus,
+               remoteAllStatus.count == cached.count,
+               remoteAllStatus.lastUpdated == cached.lastUpdated {
+                saveAllChatsSyncStatus(remoteAllStatus)
+                return
+            }
+
+            // If we have no cached status, save current and return (first run baseline)
+            guard let cachedLastUpdated = cachedAllStatus?.lastUpdated else {
+                saveAllChatsSyncStatus(remoteAllStatus)
+                return
+            }
+
+            let allUpdated = try await cloudStorage.getAllChatsUpdatedSince(since: cachedLastUpdated)
+
+            let remoteChats = allUpdated.conversations
+            if remoteChats.isEmpty {
+                saveAllChatsSyncStatus(remoteAllStatus)
+                return
+            }
+
+            #if DEBUG
+            print("[CloudSync] Cross-scope sync: processing \(remoteChats.count) changed chats")
+            #endif
+
+            let localChats = await getAllChatsFromStorage()
+            let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
+
+            for remoteChat in remoteChats {
+                let localChat = localChatMap[remoteChat.id]
+                let remoteProjectId = remoteChat.projectId
+                let localProjectId = localChat?.projectId
+
+                if localChat != nil && remoteProjectId != localProjectId {
+                    // Project assignment changed — update local state
+                    let userId = await getCurrentUserId()
+                    if var chat = await Chat.loadChat(chatId: remoteChat.id, userId: userId) {
+                        chat.projectId = remoteProjectId
+                        chat.locallyModified = false
+                        await Chat.saveChat(chat, userId: userId)
+                    }
+                }
+            }
+
+            saveAllChatsSyncStatus(remoteAllStatus)
+        } catch {
+            #if DEBUG
+            print("[CloudSync] Failed to sync cross-scope changes: \(error.localizedDescription)")
+            #endif
         }
     }
 
