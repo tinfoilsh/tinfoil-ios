@@ -2151,12 +2151,13 @@ class ChatViewModel: ObservableObject {
                     // If we have anonymous chats to sync, force re-encryption with proper key
                     if self.hasAnonymousChatsToSync {
                         // Force all local chats to be marked for sync
-                        let userId = self.currentUserId
-                        let allChats = await EncryptedFileStorage.shared.loadAllChats(userId: userId ?? "")
-                        for var chat in allChats {
-                            chat.locallyModified = true
-                            chat.syncVersion = 0
-                            await Chat.saveChat(chat, userId: userId)
+                        if let userId = self.currentUserId {
+                            let allChats = (try? await EncryptedFileStorage.shared.loadAllChats(userId: userId)) ?? []
+                            for var chat in allChats {
+                                chat.locallyModified = true
+                                chat.syncVersion = 0
+                                await Chat.saveChat(chat, userId: userId)
+                            }
                         }
                         self.hasAnonymousChatsToSync = false
                     }
