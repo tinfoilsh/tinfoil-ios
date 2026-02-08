@@ -1391,32 +1391,7 @@ class ChatViewModel: ObservableObject {
                             }
                         }
                         
-                        // End streaming and backup to cloud
-                        if self.authManager?.isAuthenticated == true {
-                            self.streamingTracker.endStreaming(chat.id)
-                            self.saveChats()
-
-                            Task { @MainActor in
-                                do {
-                                    guard let latestChat = self.chats.first(where: { $0.id == chat.id }) else {
-                                        return
-                                    }
-
-                                    try await self.cloudSync.backupChat(latestChat.id)
-
-                                    if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
-                                        let updatedChats = Chat.loadFromDefaults(userId: self.currentUserId)
-                                        if let syncedChat = updatedChats.first(where: { $0.id == latestChat.id }) {
-                                            self.chats[index] = syncedChat
-                                            if self.currentChat?.id == latestChat.id {
-                                                self.currentChat = syncedChat
-                                            }
-                                        }
-                                    }
-                                } catch {
-                                }
-                            }
-                        }
+                        self.endStreamingAndBackup(chatId: chat.id)
                     }
                 }
             } catch {
@@ -1458,34 +1433,9 @@ class ChatViewModel: ObservableObject {
 
                         self.updateChat(chat)  // Final update without throttling
 
-                        // End streaming and backup to cloud
-                        if self.authManager?.isAuthenticated == true {
-                            self.streamingTracker.endStreaming(chat.id)
-                            self.saveChats()
-
-                            Task { @MainActor in
-                                do {
-                                    guard let latestChat = self.chats.first(where: { $0.id == chat.id }) else {
-                                        return
-                                    }
-
-                                    try await self.cloudSync.backupChat(latestChat.id)
-
-                                    if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
-                                        let updatedChats = Chat.loadFromDefaults(userId: self.currentUserId)
-                                        if let syncedChat = updatedChats.first(where: { $0.id == latestChat.id }) {
-                                            self.chats[index] = syncedChat
-                                            if self.currentChat?.id == latestChat.id {
-                                                self.currentChat = syncedChat
-                                            }
-                                        }
-                                    }
-                                } catch {
-                                }
-                            }
-                        }
+                        self.endStreamingAndBackup(chatId: chat.id)
                     }
-                    
+
                     if var chat = self.currentChat,
                        !chat.messages.isEmpty {
                         let lastIndex = chat.messages.count - 1
@@ -1709,6 +1659,34 @@ class ChatViewModel: ObservableObject {
     }
     
     // MARK: - Private Methods
+
+    private func endStreamingAndBackup(chatId: UUID) {
+        guard authManager?.isAuthenticated == true else { return }
+
+        streamingTracker.endStreaming(chatId)
+        saveChats()
+
+        Task { @MainActor in
+            do {
+                guard let latestChat = self.chats.first(where: { $0.id == chatId }) else {
+                    return
+                }
+
+                try await self.cloudSync.backupChat(latestChat.id)
+
+                if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
+                    let updatedChats = Chat.loadFromDefaults(userId: self.currentUserId)
+                    if let syncedChat = updatedChats.first(where: { $0.id == latestChat.id }) {
+                        self.chats[index] = syncedChat
+                        if self.currentChat?.id == latestChat.id {
+                            self.currentChat = syncedChat
+                        }
+                    }
+                }
+            } catch {
+            }
+        }
+    }
 
     /// Normalizes the chats array to ensure exactly one blank chat at position 0
     /// This is the single source of truth for chat array structure:
