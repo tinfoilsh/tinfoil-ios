@@ -63,6 +63,7 @@ enum Constants {
         static let clientInitTimeoutSeconds: TimeInterval = 60.0
         static let backgroundTaskName = "CompleteStreamingResponse"
         static let maxReverseTimestamp: Int = 9999999999999
+        static let reverseTimestampDigits: Int = String(maxReverseTimestamp).count
     }
 
     enum Verification {

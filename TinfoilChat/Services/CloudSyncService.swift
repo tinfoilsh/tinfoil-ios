@@ -613,7 +613,7 @@ class CloudSyncService: ObservableObject {
                         if let underscoreIndex = remoteChat.id.firstIndex(of: "_"),
                            let timestamp = Int(remoteChat.id.prefix(upTo: underscoreIndex)) {
                             // Convert reversed timestamp to actual timestamp
-                            let actualTimestamp = 9999999999999 - timestamp
+                            let actualTimestamp = Constants.Sync.maxReverseTimestamp - timestamp
                             createdDate = Date(timeIntervalSince1970: Double(actualTimestamp) / 1000.0)
                         } else {
                             // Fallback to ISO date parsing if ID format is different
