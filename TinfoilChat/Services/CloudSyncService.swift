@@ -535,57 +535,94 @@ class CloudSyncService: ObservableObject {
                     (!remoteTimestamp.isNaN && remoteTimestamp > (localChat?.syncedAt?.timeIntervalSince1970 ?? 0)) ||
                     (localChat?.decryptionFailed == true)
 
-                if shouldProcess, let content = remoteChat.content {
-                    do {
-                        // Parse and decrypt the content (JSON string format)
-                        guard let contentData = content.data(using: .utf8) else {
-                            throw CloudSyncError.invalidBase64
-                        }
-
-                        let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
-
-                        // Try to decrypt the chat data
+                if shouldProcess {
+                    if let content = remoteChat.content {
                         do {
-                            let decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
-                            var decryptedChat = decryptionResult.value
-
-                            // Double-check: Even if decryption succeeded, validate the content
-                            if decryptedChat.messages.isEmpty {
-                                cleanupInvalidRemoteChat(remoteChat)
-                                continue
+                            // Parse and decrypt the content (JSON string format)
+                            guard let contentData = content.data(using: .utf8) else {
+                                throw CloudSyncError.invalidBase64
                             }
 
-                            // IMPORTANT: Use dates from metadata, not from decrypted data
-                            // This ensures consistency and prevents date corruption
-                            if let createdDate = parseISODate(remoteChat.createdAt) {
-                                decryptedChat.createdAt = createdDate
-                            }
-                            if let updatedDate = parseISODate(remoteChat.updatedAt) {
-                                decryptedChat.updatedAt = updatedDate
-                            }
+                            let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
 
-                            // For R2 data, ensure modelType is set
-                            if decryptedChat.modelType == nil {
-                                decryptedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
-                            }
+                            // Try to decrypt the chat data
+                            do {
+                                let decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
+                                var decryptedChat = decryptionResult.value
 
-                            await saveChatToStorage(decryptedChat)
-                            await markChatAsSynced(decryptedChat.id, version: decryptedChat.syncVersion)
-                            result = SyncResult(
-                                uploaded: result.uploaded,
-                                downloaded: result.downloaded + 1,
-                                errors: result.errors
-                            )
-                            if decryptionResult.usedFallbackKey {
-                                chatsNeedingReencryption.append(decryptedChat)
+                                // Double-check: Even if decryption succeeded, validate the content
+                                if decryptedChat.messages.isEmpty {
+                                    cleanupInvalidRemoteChat(remoteChat)
+                                    continue
+                                }
+
+                                // IMPORTANT: Use dates from metadata, not from decrypted data
+                                // This ensures consistency and prevents date corruption
+                                if let createdDate = parseISODate(remoteChat.createdAt) {
+                                    decryptedChat.createdAt = createdDate
+                                }
+                                if let updatedDate = parseISODate(remoteChat.updatedAt) {
+                                    decryptedChat.updatedAt = updatedDate
+                                }
+
+                                // For R2 data, ensure modelType is set
+                                if decryptedChat.modelType == nil {
+                                    decryptedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+                                }
+
+                                await saveChatToStorage(decryptedChat)
+                                await markChatAsSynced(decryptedChat.id, version: decryptedChat.syncVersion)
+                                result = SyncResult(
+                                    uploaded: result.uploaded,
+                                    downloaded: result.downloaded + 1,
+                                    errors: result.errors
+                                )
+                                if decryptionResult.usedFallbackKey {
+                                    chatsNeedingReencryption.append(decryptedChat)
+                                }
+                            } catch {
+                                // Decryption failed - store as encrypted placeholder for later retry
+                                // Use dates from metadata
+                                let createdDate = parseISODate(remoteChat.createdAt) ?? Date()
+                                let updatedDate = parseISODate(remoteChat.updatedAt) ?? Date()
+
+                                // Create placeholder with encrypted data
+                                var placeholderChat = StoredChat(
+                                    from: Chat.create(
+                                        id: remoteChat.id,
+                                        title: "Encrypted",
+                                        messages: [],
+                                        createdAt: createdDate
+                                    )
+                                )
+                                placeholderChat.decryptionFailed = true
+                                placeholderChat.encryptedData = content
+                                placeholderChat.updatedAt = updatedDate
+
+                                await saveChatToStorage(placeholderChat)
+                                result = SyncResult(
+                                    uploaded: result.uploaded,
+                                    downloaded: result.downloaded + 1,
+                                    errors: result.errors
+                                )
                             }
                         } catch {
-                            // Decryption failed - store as encrypted placeholder for later retry
-                            // Use dates from metadata
-                            let createdDate = parseISODate(remoteChat.createdAt) ?? Date()
+                            // Even if we can't parse the encrypted data, store it for later
+                            // Extract timestamp from the chat ID to use as createdAt
+                            // Format: {reverseTimestamp}_{randomSuffix}
+                            let createdDate: Date
+                            if let underscoreIndex = remoteChat.id.firstIndex(of: "_"),
+                               let timestamp = Int(remoteChat.id.prefix(upTo: underscoreIndex)) {
+                                // Convert reversed timestamp to actual timestamp
+                                let actualTimestamp = Constants.Sync.maxReverseTimestamp - timestamp
+                                createdDate = Date(timeIntervalSince1970: Double(actualTimestamp) / 1000.0)
+                            } else {
+                                // Fallback to ISO date parsing if ID format is different
+                                createdDate = parseISODate(remoteChat.createdAt) ?? Date()
+                            }
+
                             let updatedDate = parseISODate(remoteChat.updatedAt) ?? Date()
 
-                            // Create placeholder with encrypted data
                             var placeholderChat = StoredChat(
                                 from: Chat.create(
                                     id: remoteChat.id,
@@ -605,41 +642,36 @@ class CloudSyncService: ObservableObject {
                                 errors: result.errors
                             )
                         }
-                    } catch {
-                        // Even if we can't parse the encrypted data, store it for later
-                        // Extract timestamp from the chat ID to use as createdAt
-                        // Format: {reverseTimestamp}_{randomSuffix}
-                        let createdDate: Date
-                        if let underscoreIndex = remoteChat.id.firstIndex(of: "_"),
-                           let timestamp = Int(remoteChat.id.prefix(upTo: underscoreIndex)) {
-                            // Convert reversed timestamp to actual timestamp
-                            let actualTimestamp = Constants.Sync.maxReverseTimestamp - timestamp
-                            createdDate = Date(timeIntervalSince1970: Double(actualTimestamp) / 1000.0)
-                        } else {
-                            // Fallback to ISO date parsing if ID format is different
-                            createdDate = parseISODate(remoteChat.createdAt) ?? Date()
-                        }
+                    } else {
+                        // No inline content - fetch via downloadChat (handles its own decryption)
+                        do {
+                            if var downloadedChat = try await cloudStorage.downloadChat(remoteChat.id) {
+                                if let createdDate = parseISODate(remoteChat.createdAt) {
+                                    downloadedChat.createdAt = createdDate
+                                }
+                                if let updatedDate = parseISODate(remoteChat.updatedAt) {
+                                    downloadedChat.updatedAt = updatedDate
+                                }
 
-                        let updatedDate = parseISODate(remoteChat.updatedAt) ?? Date()
+                                if downloadedChat.modelType == nil {
+                                    downloadedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+                                }
 
-                        var placeholderChat = StoredChat(
-                            from: Chat.create(
-                                id: remoteChat.id,
-                                title: "Encrypted",
-                                messages: [],
-                                createdAt: createdDate
+                                await saveChatToStorage(downloadedChat)
+                                await markChatAsSynced(downloadedChat.id, version: downloadedChat.syncVersion)
+                                result = SyncResult(
+                                    uploaded: result.uploaded,
+                                    downloaded: result.downloaded + 1,
+                                    errors: result.errors
+                                )
+                            }
+                        } catch {
+                            result = SyncResult(
+                                uploaded: result.uploaded,
+                                downloaded: result.downloaded,
+                                errors: result.errors + ["Failed to download chat \(remoteChat.id): \(error.localizedDescription)"]
                             )
-                        )
-                        placeholderChat.decryptionFailed = true
-                        placeholderChat.encryptedData = content
-                        placeholderChat.updatedAt = updatedDate
-
-                        await saveChatToStorage(placeholderChat)
-                        result = SyncResult(
-                            uploaded: result.uploaded,
-                            downloaded: result.downloaded + 1,
-                            errors: result.errors
-                        )
+                        }
                     }
                 }
             }
@@ -773,42 +805,51 @@ class CloudSyncService: ObservableObject {
                     }
                 }
 
-                guard let content = remoteChat.content else {
-                    continue
-                }
-
-                do {
-                    guard let contentData = content.data(using: .utf8) else {
-                        throw CloudSyncError.invalidBase64
-                    }
-
-                    let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
-
+                if let content = remoteChat.content {
                     do {
-                        let decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
-                        var decryptedChat = decryptionResult.value
-
-                        if let createdDate = parseISODate(remoteChat.createdAt) {
-                            decryptedChat.createdAt = createdDate
-                        }
-                        if let updatedDate = parseISODate(remoteChat.updatedAt) {
-                            decryptedChat.updatedAt = updatedDate
+                        guard let contentData = content.data(using: .utf8) else {
+                            throw CloudSyncError.invalidBase64
                         }
 
-                        if decryptedChat.modelType == nil {
-                            decryptedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
-                        }
+                        let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
 
-                        await saveChatToStorage(decryptedChat)
-                        await markChatAsSynced(decryptedChat.id, version: decryptedChat.syncVersion)
-                        result = SyncResult(
-                            uploaded: result.uploaded,
-                            downloaded: result.downloaded + 1,
-                            errors: result.errors
-                        )
+                        do {
+                            let decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
+                            var decryptedChat = decryptionResult.value
 
-                        if decryptionResult.usedFallbackKey {
-                            chatsNeedingReencryption.append(decryptedChat)
+                            if let createdDate = parseISODate(remoteChat.createdAt) {
+                                decryptedChat.createdAt = createdDate
+                            }
+                            if let updatedDate = parseISODate(remoteChat.updatedAt) {
+                                decryptedChat.updatedAt = updatedDate
+                            }
+
+                            if decryptedChat.modelType == nil {
+                                decryptedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+                            }
+
+                            await saveChatToStorage(decryptedChat)
+                            await markChatAsSynced(decryptedChat.id, version: decryptedChat.syncVersion)
+                            result = SyncResult(
+                                uploaded: result.uploaded,
+                                downloaded: result.downloaded + 1,
+                                errors: result.errors
+                            )
+
+                            if decryptionResult.usedFallbackKey {
+                                chatsNeedingReencryption.append(decryptedChat)
+                            }
+                        } catch {
+                            let placeholder = await createEncryptedPlaceholder(
+                                remoteChat: remoteChat,
+                                encryptedContent: content
+                            )
+                            await saveChatToStorage(placeholder)
+                            result = SyncResult(
+                                uploaded: result.uploaded,
+                                downloaded: result.downloaded + 1,
+                                errors: result.errors
+                            )
                         }
                     } catch {
                         let placeholder = await createEncryptedPlaceholder(
@@ -822,17 +863,36 @@ class CloudSyncService: ObservableObject {
                             errors: result.errors
                         )
                     }
-                } catch {
-                    let placeholder = await createEncryptedPlaceholder(
-                        remoteChat: remoteChat,
-                        encryptedContent: content
-                    )
-                    await saveChatToStorage(placeholder)
-                    result = SyncResult(
-                        uploaded: result.uploaded,
-                        downloaded: result.downloaded + 1,
-                        errors: result.errors
-                    )
+                } else {
+                    // No inline content - fetch via downloadChat (handles its own decryption)
+                    do {
+                        if var downloadedChat = try await cloudStorage.downloadChat(remoteChat.id) {
+                            if let createdDate = parseISODate(remoteChat.createdAt) {
+                                downloadedChat.createdAt = createdDate
+                            }
+                            if let updatedDate = parseISODate(remoteChat.updatedAt) {
+                                downloadedChat.updatedAt = updatedDate
+                            }
+
+                            if downloadedChat.modelType == nil {
+                                downloadedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+                            }
+
+                            await saveChatToStorage(downloadedChat)
+                            await markChatAsSynced(downloadedChat.id, version: downloadedChat.syncVersion)
+                            result = SyncResult(
+                                uploaded: result.uploaded,
+                                downloaded: result.downloaded + 1,
+                                errors: result.errors
+                            )
+                        }
+                    } catch {
+                        result = SyncResult(
+                            uploaded: result.uploaded,
+                            downloaded: result.downloaded,
+                            errors: result.errors + ["Failed to download chat \(remoteChat.id): \(error.localizedDescription)"]
+                        )
+                    }
                 }
             }
 
