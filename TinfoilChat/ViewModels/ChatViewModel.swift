@@ -1372,6 +1372,8 @@ class ChatViewModel: ObservableObject {
                     if let generated = await self.generateLLMTitle(from: chat.messages) {
                         chat.title = generated
                         chat.titleState = .generated
+                        chat.locallyModified = true
+                        chat.updatedAt = Date()
                         finalizedChat = chat
                         await MainActor.run {
                             Chat.triggerSuccessFeedback()
