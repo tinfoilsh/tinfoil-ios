@@ -727,13 +727,10 @@ class ChatViewModel: ObservableObject {
         )
         addMessage(userMessage)
 
-        // If this is the first message, update creation date (title will be generated after assistant reply)
+        // If this is the first message, mark as modified (title will be generated after assistant reply)
         if var chat = currentChat, chat.messages.count == 1 {
-            // Update creation date to now (when first message is sent)
-            chat.createdAt = Date()
             chat.updatedAt = Date()
-            chat.locallyModified = true  // Ensure it's marked as modified
-            // Keep placeholder title for now; generate via LLM after first assistant response
+            chat.locallyModified = true
             updateChat(chat)
         }
 
