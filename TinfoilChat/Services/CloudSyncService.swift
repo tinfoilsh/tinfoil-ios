@@ -1150,6 +1150,32 @@ class CloudSyncService: ObservableObject {
                         chat.locallyModified = false
                         await Chat.saveChat(chat, userId: userId)
                     }
+                } else if localChat == nil, let content = remoteChat.content {
+                    // New chat we don't have locally — decrypt and save it
+                    do {
+                        guard let contentData = content.data(using: .utf8) else { continue }
+                        let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
+                        let decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
+                        var decryptedChat = decryptionResult.value
+
+                        if let createdDate = parseISODate(remoteChat.createdAt) {
+                            decryptedChat.createdAt = createdDate
+                        }
+                        if let updatedDate = parseISODate(remoteChat.updatedAt) {
+                            decryptedChat.updatedAt = updatedDate
+                        }
+                        if decryptedChat.modelType == nil {
+                            decryptedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+                        }
+                        decryptedChat.projectId = remoteProjectId
+
+                        await saveChatToStorage(decryptedChat)
+                        await markChatAsSynced(decryptedChat.id, version: decryptedChat.syncVersion)
+                    } catch {
+                        #if DEBUG
+                        print("[CloudSync] Cross-scope: failed to ingest chat \(remoteChat.id): \(error.localizedDescription)")
+                        #endif
+                    }
                 }
             }
 
