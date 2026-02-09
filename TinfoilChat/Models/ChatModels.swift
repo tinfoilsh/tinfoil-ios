@@ -18,7 +18,7 @@ struct Chat: Identifiable, Codable {
         case manual
     }
 
-    static let placeholderTitle = "New Chat"
+    static let placeholderTitle = "Untitled"
 
     let id: String
     var title: String

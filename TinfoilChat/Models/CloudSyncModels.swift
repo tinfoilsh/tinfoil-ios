@@ -13,6 +13,7 @@ import Foundation
 struct StoredChat: Codable {
     let id: String
     var title: String
+    var titleState: Chat.TitleState?
     var messages: [Message]
     var createdAt: Date      // Will be encoded as ISO string for API
     var updatedAt: Date      // Will be encoded as ISO string for API
@@ -39,6 +40,7 @@ struct StoredChat: Codable {
     init(from chat: Chat, syncVersion: Int = 0) {
         self.id = chat.id
         self.title = chat.title
+        self.titleState = chat.titleState
         self.messages = chat.messages
         self.createdAt = chat.createdAt
         self.updatedAt = chat.updatedAt
@@ -70,6 +72,7 @@ struct StoredChat: Codable {
         var chat = Chat(
             id: id,
             title: title,
+            titleState: titleState,
             messages: messages,
             createdAt: createdAt,
             modelType: model,
@@ -94,7 +97,7 @@ struct StoredChat: Codable {
     
     // Custom encoding for cross-platform compatibility
     enum CodingKeys: String, CodingKey {
-        case id, title, messages, createdAt, updatedAt
+        case id, title, titleState, messages, createdAt, updatedAt
         case language, userId
         case syncVersion, syncedAt, locallyModified
         case decryptionFailed, dataCorrupted, encryptedData, projectId, hasActiveStream
@@ -105,6 +108,7 @@ struct StoredChat: Codable {
 
         try container.encode(id, forKey: .id)
         try container.encode(title, forKey: .title)
+        try container.encodeIfPresent(titleState, forKey: .titleState)
         try container.encode(messages, forKey: .messages)
 
         // Dates as ISO strings with fractional seconds (matching JavaScript's toISOString())
@@ -136,6 +140,7 @@ struct StoredChat: Codable {
         
         id = try container.decode(String.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
+        titleState = try container.decodeIfPresent(Chat.TitleState.self, forKey: .titleState)
         messages = try container.decode([Message].self, forKey: .messages)
         
         // Dates from ISO strings - configure formatter to handle fractional seconds
