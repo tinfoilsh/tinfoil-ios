@@ -1147,7 +1147,6 @@ class CloudSyncService: ObservableObject {
                     let userId = await getCurrentUserId()
                     if var chat = await Chat.loadChat(chatId: remoteChat.id, userId: userId) {
                         chat.projectId = remoteProjectId
-                        chat.locallyModified = false
                         await Chat.saveChat(chat, userId: userId)
                     }
                 } else if localChat == nil, !deletedChatsTracker.isDeleted(remoteChat.id), let content = remoteChat.content {
@@ -1155,25 +1154,40 @@ class CloudSyncService: ObservableObject {
                     do {
                         guard let contentData = content.data(using: .utf8) else { continue }
                         let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
-                        let decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
-                        var decryptedChat = decryptionResult.value
 
-                        if let createdDate = parseISODate(remoteChat.createdAt) {
-                            decryptedChat.createdAt = createdDate
-                        }
-                        if let updatedDate = parseISODate(remoteChat.updatedAt) {
-                            decryptedChat.updatedAt = updatedDate
-                        }
-                        if decryptedChat.modelType == nil {
-                            decryptedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
-                        }
-                        decryptedChat.projectId = remoteProjectId
+                        do {
+                            let decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
+                            var decryptedChat = decryptionResult.value
 
-                        await saveChatToStorage(decryptedChat)
-                        await markChatAsSynced(decryptedChat.id, version: decryptedChat.syncVersion)
+                            if let createdDate = parseISODate(remoteChat.createdAt) {
+                                decryptedChat.createdAt = createdDate
+                            }
+                            if let updatedDate = parseISODate(remoteChat.updatedAt) {
+                                decryptedChat.updatedAt = updatedDate
+                            }
+                            if decryptedChat.modelType == nil {
+                                decryptedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+                            }
+                            decryptedChat.projectId = remoteProjectId
+
+                            await saveChatToStorage(decryptedChat)
+                            await markChatAsSynced(decryptedChat.id, version: decryptedChat.syncVersion)
+
+                            if decryptionResult.usedFallbackKey {
+                                queueReencryption(for: decryptedChat, persistLocal: false)
+                            }
+                        } catch {
+                            // Decryption failed — save encrypted placeholder for later retry
+                            var placeholder = await createEncryptedPlaceholder(
+                                remoteChat: remoteChat,
+                                encryptedContent: content
+                            )
+                            placeholder.projectId = remoteProjectId
+                            await saveChatToStorage(placeholder)
+                        }
                     } catch {
                         #if DEBUG
-                        print("[CloudSync] Cross-scope: failed to ingest chat \(remoteChat.id): \(error.localizedDescription)")
+                        print("[CloudSync] Cross-scope: failed to parse chat \(remoteChat.id): \(error.localizedDescription)")
                         #endif
                     }
                 }
