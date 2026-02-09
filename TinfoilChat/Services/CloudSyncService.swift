@@ -867,8 +867,6 @@ class CloudSyncService: ObservableObject {
         )
 
         do {
-            let changedChats = try await cloudStorage.getChatsUpdatedSince(since: since, includeContent: true)
-
             _ = try? await encryptionService.initialize()
 
             var chatsNeedingReencryption: [StoredChat] = []
@@ -876,59 +874,82 @@ class CloudSyncService: ObservableObject {
             let localChats = await getAllChatsFromStorage()
             let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
 
-            for remoteChat in changedChats.conversations {
-                if deletedChatsTracker.isDeleted(remoteChat.id) {
-                    continue
-                }
+            // Paginate through all changed chats
+            var hasMore = true
+            var continuationToken: String? = nil
 
-                if !(await shouldProcessRemoteChat(remoteChat)) {
-                    continue
-                }
+            while hasMore {
+                let changedChats = try await cloudStorage.getChatsUpdatedSince(
+                    since: since,
+                    includeContent: true,
+                    continuationToken: continuationToken
+                )
 
-                // Skip if chat is locally modified or has active stream
-                if let localChat = localChatMap[remoteChat.id] {
-                    if localChat.locallyModified || localChat.hasActiveStream {
+                for remoteChat in changedChats.conversations {
+                    if deletedChatsTracker.isDeleted(remoteChat.id) {
                         continue
                     }
 
-                    if streamingTracker.isStreaming(localChat.id) {
+                    if !(await shouldProcessRemoteChat(remoteChat)) {
                         continue
                     }
-                }
 
-                if let content = remoteChat.content {
-                    do {
-                        guard let contentData = content.data(using: .utf8) else {
-                            throw CloudSyncError.invalidBase64
+                    // Skip if chat is locally modified or has active stream
+                    if let localChat = localChatMap[remoteChat.id] {
+                        if localChat.locallyModified || localChat.hasActiveStream {
+                            continue
                         }
 
-                        let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
+                        if streamingTracker.isStreaming(localChat.id) {
+                            continue
+                        }
+                    }
 
+                    if let content = remoteChat.content {
                         do {
-                            let decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
-                            var decryptedChat = decryptionResult.value
-
-                            if let createdDate = parseISODate(remoteChat.createdAt) {
-                                decryptedChat.createdAt = createdDate
-                            }
-                            if let updatedDate = parseISODate(remoteChat.updatedAt) {
-                                decryptedChat.updatedAt = updatedDate
+                            guard let contentData = content.data(using: .utf8) else {
+                                throw CloudSyncError.invalidBase64
                             }
 
-                            if decryptedChat.modelType == nil {
-                                decryptedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
-                            }
+                            let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
 
-                            await saveChatToStorage(decryptedChat)
-                            await markChatAsSynced(decryptedChat.id, version: decryptedChat.syncVersion)
-                            result = SyncResult(
-                                uploaded: result.uploaded,
-                                downloaded: result.downloaded + 1,
-                                errors: result.errors
-                            )
+                            do {
+                                let decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
+                                var decryptedChat = decryptionResult.value
 
-                            if decryptionResult.usedFallbackKey {
-                                chatsNeedingReencryption.append(decryptedChat)
+                                if let createdDate = parseISODate(remoteChat.createdAt) {
+                                    decryptedChat.createdAt = createdDate
+                                }
+                                if let updatedDate = parseISODate(remoteChat.updatedAt) {
+                                    decryptedChat.updatedAt = updatedDate
+                                }
+
+                                if decryptedChat.modelType == nil {
+                                    decryptedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+                                }
+
+                                await saveChatToStorage(decryptedChat)
+                                await markChatAsSynced(decryptedChat.id, version: decryptedChat.syncVersion)
+                                result = SyncResult(
+                                    uploaded: result.uploaded,
+                                    downloaded: result.downloaded + 1,
+                                    errors: result.errors
+                                )
+
+                                if decryptionResult.usedFallbackKey {
+                                    chatsNeedingReencryption.append(decryptedChat)
+                                }
+                            } catch {
+                                let placeholder = await createEncryptedPlaceholder(
+                                    remoteChat: remoteChat,
+                                    encryptedContent: content
+                                )
+                                await saveChatToStorage(placeholder)
+                                result = SyncResult(
+                                    uploaded: result.uploaded,
+                                    downloaded: result.downloaded + 1,
+                                    errors: result.errors
+                                )
                             }
                         } catch {
                             let placeholder = await createEncryptedPlaceholder(
@@ -942,35 +963,27 @@ class CloudSyncService: ObservableObject {
                                 errors: result.errors
                             )
                         }
-                    } catch {
-                        let placeholder = await createEncryptedPlaceholder(
-                            remoteChat: remoteChat,
-                            encryptedContent: content
-                        )
-                        await saveChatToStorage(placeholder)
-                        result = SyncResult(
-                            uploaded: result.uploaded,
-                            downloaded: result.downloaded + 1,
-                            errors: result.errors
-                        )
-                    }
-                } else {
-                    // No inline content - fetch via downloadChat (handles its own decryption)
-                    do {
-                        try await downloadAndSaveRemoteChat(remoteChat)
-                        result = SyncResult(
-                            uploaded: result.uploaded,
-                            downloaded: result.downloaded + 1,
-                            errors: result.errors
-                        )
-                    } catch {
-                        result = SyncResult(
-                            uploaded: result.uploaded,
-                            downloaded: result.downloaded,
-                            errors: result.errors + ["Failed to download chat \(remoteChat.id): \(error.localizedDescription)"]
-                        )
+                    } else {
+                        // No inline content - fetch via downloadChat (handles its own decryption)
+                        do {
+                            try await downloadAndSaveRemoteChat(remoteChat)
+                            result = SyncResult(
+                                uploaded: result.uploaded,
+                                downloaded: result.downloaded + 1,
+                                errors: result.errors
+                            )
+                        } catch {
+                            result = SyncResult(
+                                uploaded: result.uploaded,
+                                downloaded: result.downloaded,
+                                errors: result.errors + ["Failed to download chat \(remoteChat.id): \(error.localizedDescription)"]
+                            )
+                        }
                     }
                 }
+
+                hasMore = changedChats.hasMore
+                continuationToken = changedChats.nextContinuationToken
             }
 
             for chat in chatsNeedingReencryption {
