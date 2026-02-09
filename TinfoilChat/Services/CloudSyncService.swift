@@ -1150,7 +1150,7 @@ class CloudSyncService: ObservableObject {
                         chat.locallyModified = false
                         await Chat.saveChat(chat, userId: userId)
                     }
-                } else if localChat == nil, let content = remoteChat.content {
+                } else if localChat == nil, !deletedChatsTracker.isDeleted(remoteChat.id), let content = remoteChat.content {
                     // New chat we don't have locally — decrypt and save it
                     do {
                         guard let contentData = content.data(using: .utf8) else { continue }
