@@ -1597,9 +1597,6 @@ class ChatViewModel: ObservableObject {
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
 
-        // Add the user message and generate response directly, bypassing sendMessage.
-        // sendMessage updates createdAt when messages.count == 1, which triggers
-        // tableOpacity = 0 in ChatListView and causes messages to disappear.
         isLoading = true
 
         let userMessage = Message(role: .user, content: trimmedContent)
