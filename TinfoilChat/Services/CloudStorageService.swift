@@ -143,6 +143,7 @@ class CloudStorageService: ObservableObject {
         let url = URL(string: "\(apiBaseURL)/api/storage/conversation/\(chatId)")!
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.allHTTPHeaderFields = try await getHeaders()
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -233,6 +234,7 @@ class CloudStorageService: ObservableObject {
 
         var request = URLRequest(url: components.url!)
         request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.allHTTPHeaderFields = try await getHeaders()
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -302,6 +304,7 @@ class CloudStorageService: ObservableObject {
         let url = URL(string: "\(apiBaseURL)/api/chats/sync-status")!
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.allHTTPHeaderFields = try await getHeaders()
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -323,6 +326,7 @@ class CloudStorageService: ObservableObject {
 
         var request = URLRequest(url: components.url!)
         request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.allHTTPHeaderFields = try await getHeaders()
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -340,6 +344,7 @@ class CloudStorageService: ObservableObject {
         let url = URL(string: "\(apiBaseURL)/api/chats/all-sync-status")!
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.allHTTPHeaderFields = try await getHeaders()
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -361,6 +366,7 @@ class CloudStorageService: ObservableObject {
 
         var request = URLRequest(url: components.url!)
         request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.allHTTPHeaderFields = try await getHeaders()
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -392,6 +398,7 @@ class CloudStorageService: ObservableObject {
 
         var request = URLRequest(url: components.url!)
         request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.allHTTPHeaderFields = try await getHeaders()
 
         let (data, response) = try await URLSession.shared.data(for: request)
