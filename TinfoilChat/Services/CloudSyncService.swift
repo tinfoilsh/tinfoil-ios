@@ -982,7 +982,7 @@ class CloudSyncService: ObservableObject {
                     }
                 }
 
-                hasMore = changedChats.hasMore
+                hasMore = changedChats.hasMore && changedChats.nextContinuationToken != nil
                 continuationToken = changedChats.nextContinuationToken
             }
 
