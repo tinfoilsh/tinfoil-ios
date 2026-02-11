@@ -467,6 +467,7 @@ class ObservableMessageWrapper: ObservableObject {
         let contentChanged = self.message.content != message.content ||
                             self.message.thoughts != message.thoughts ||
                             self.message.contentChunks != message.contentChunks ||
+                            self.message.thinkingChunks != message.thinkingChunks ||
                             self.message.isThinking != message.isThinking ||
                             self.message.isCollapsed != message.isCollapsed ||
                             self.message.generationTimeSeconds != message.generationTimeSeconds ||
@@ -501,6 +502,7 @@ class ObservableMessageWrapper: ObservableObject {
         message.content.hashValue ^
         (message.thoughts?.hashValue ?? 0) ^
         (message.contentChunks.hashValue) ^
+        (message.thinkingChunks.hashValue) ^
         isDarkMode.hashValue
     }
 }
