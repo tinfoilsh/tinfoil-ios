@@ -100,6 +100,7 @@ struct MessageView: View {
                         CollapsibleThinkingBox(
                             messageId: message.id,
                             thinkingText: message.thoughts ?? "",
+                            thinkingChunks: message.thinkingChunks,
                             isDarkMode: isDarkMode,
                             isCollapsible: !message.isThinking,
                             isStreaming: message.isThinking && isLoading && isLastMessage,
@@ -906,6 +907,7 @@ struct AdaptiveMarkdownText: View {
 struct CollapsibleThinkingBox: View {
     let messageId: String
     let thinkingText: String
+    let thinkingChunks: [ThinkingChunk]
     let isDarkMode: Bool
     let isCollapsible: Bool
     let isStreaming: Bool
@@ -920,6 +922,7 @@ struct CollapsibleThinkingBox: View {
     init(
         messageId: String,
         thinkingText: String,
+        thinkingChunks: [ThinkingChunk] = [],
         isDarkMode: Bool,
         isCollapsible: Bool,
         isStreaming: Bool,
@@ -929,6 +932,7 @@ struct CollapsibleThinkingBox: View {
     ) {
         self.messageId = messageId
         self.thinkingText = thinkingText
+        self.thinkingChunks = thinkingChunks
         self.isDarkMode = isDarkMode
         self.isCollapsible = isCollapsible
         self.isStreaming = isStreaming
@@ -1013,12 +1017,27 @@ struct CollapsibleThinkingBox: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Divider()
 
-                    Text(thinkingText)
-                        .font(.system(.body))
-                        .foregroundColor(isDarkMode ? .white.opacity(0.9) : Color.black.opacity(0.8))
+                    if !thinkingChunks.isEmpty {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(thinkingChunks) { chunk in
+                                ThinkingChunkView(chunk: chunk, isDarkMode: isDarkMode)
+                                    .equatable()
+                            }
+                        }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .transaction { transaction in
+                            transaction.animation = nil
+                        }
+                    } else {
+                        Text(thinkingText)
+                            .font(.system(.body))
+                            .foregroundColor(isDarkMode ? .white.opacity(0.9) : Color.black.opacity(0.8))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 .opacity(contentVisible ? 1 : 0)
             }
@@ -1064,6 +1083,27 @@ struct CollapsibleThinkingBox: View {
     }
 }
 
+struct ThinkingChunkView: View, Equatable {
+    let chunk: ThinkingChunk
+    let isDarkMode: Bool
+
+    static func == (lhs: ThinkingChunkView, rhs: ThinkingChunkView) -> Bool {
+        if lhs.chunk.isComplete && rhs.chunk.isComplete {
+            return lhs.chunk.id == rhs.chunk.id && lhs.isDarkMode == rhs.isDarkMode
+        }
+        return lhs.chunk.id == rhs.chunk.id &&
+               lhs.chunk.content == rhs.chunk.content &&
+               lhs.isDarkMode == rhs.isDarkMode
+    }
+
+    var body: some View {
+        Text(chunk.content)
+            .font(.system(.body))
+            .foregroundColor(isDarkMode ? .white.opacity(0.9) : Color.black.opacity(0.8))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, 8)
+    }
+}
 
 struct LoadingDotsView: View {    
     let isDarkMode: Bool

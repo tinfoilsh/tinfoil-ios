@@ -1049,6 +1049,7 @@ class ChatViewModel: ObservableObject {
                 var lastHapticTime = Date.distantPast
                 let minHapticInterval: TimeInterval = 0.1
                 let chunker = StreamingMarkdownChunker()
+                let thinkingChunker = ThinkingTextChunker()
                 var hapticChunkCount = 0
                 var hasStartedResponse = false
                 var lastUIUpdateTime = Date.distantPast
@@ -1130,6 +1131,7 @@ class ChatViewModel: ObservableObject {
                         isFirstChunk = false
                         thinkStartTime = Date()
                         thoughtsBuffer = reasoningContent
+                        thinkingChunker.appendToken(reasoningContent)
                         currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                         didMutateState = true
                         // Reset summary service for new thinking session
@@ -1139,6 +1141,7 @@ class ChatViewModel: ObservableObject {
                     } else if isUsingReasoningFormat {
                         if !reasoningContent.isEmpty {
                             thoughtsBuffer += reasoningContent
+                            thinkingChunker.appendToken(reasoningContent)
                             currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                             isInThinkingMode = true
                             didMutateState = true
@@ -1158,6 +1161,7 @@ class ChatViewModel: ObservableObject {
                             }
                             isInThinkingMode = false
                             thinkStartTime = nil
+                            thinkingChunker.finalize()
                             currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                             // Clear thinking summary and cancel any in-flight summary generation
                             Task { @MainActor [weak self] in
@@ -1197,6 +1201,7 @@ class ChatViewModel: ObservableObject {
                                     thinkStartTime = Date()
                                     let afterThink = String(processContent[thinkRange.upperBound...])
                                     thoughtsBuffer = afterThink
+                                    thinkingChunker.appendToken(afterThink)
                                     currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                                     didMutateState = true
                                     // Reset summary service for new thinking session
@@ -1217,6 +1222,8 @@ class ChatViewModel: ObservableObject {
                             if let endRange = content.range(of: "</think>") {
                                 let beforeEnd = String(content[..<endRange.lowerBound])
                                 thoughtsBuffer += beforeEnd
+                                thinkingChunker.appendToken(beforeEnd)
+                                thinkingChunker.finalize()
                                 currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                                 isInThinkingMode = false
                                 // Clear thinking summary and cancel any in-flight summary generation
@@ -1243,6 +1250,7 @@ class ChatViewModel: ObservableObject {
                                 didMutateState = true
                             } else {
                                 thoughtsBuffer += content
+                                thinkingChunker.appendToken(content)
                                 currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                                 isInThinkingMode = true
                                 didMutateState = true
@@ -1271,6 +1279,7 @@ class ChatViewModel: ObservableObject {
                     if didMutateState && now.timeIntervalSince(lastUIUpdateTime) >= uiUpdateInterval {
                         lastUIUpdateTime = now
                         let currentChunks = chunker.getAllChunks()
+                        let currentThinkingChunks = thinkingChunker.getAllChunks()
                         let content = responseContent
                         let thoughts = currentThoughts
                         let thinking = isInThinkingMode
@@ -1294,6 +1303,7 @@ class ChatViewModel: ObservableObject {
 
                             chat.messages[lastIndex].content = processedContent
                             chat.messages[lastIndex].thoughts = thoughts
+                            chat.messages[lastIndex].thinkingChunks = currentThinkingChunks
                             chat.messages[lastIndex].isThinking = thinking
                             chat.messages[lastIndex].generationTimeSeconds = genTime
                             chat.messages[lastIndex].contentChunks = processedChunks
@@ -1352,9 +1362,11 @@ class ChatViewModel: ObservableObject {
                     self.webSearchSummary = ""
                     if !chat.messages.isEmpty, let lastIndex = chat.messages.indices.last {
                         chunker.finalize()
+                        thinkingChunker.finalize()
                         let processedContent = self.processCitationMarkers(responseContent, sources: collectedSources)
                         chat.messages[lastIndex].content = processedContent
                         chat.messages[lastIndex].thoughts = currentThoughts
+                        chat.messages[lastIndex].thinkingChunks = thinkingChunker.getAllChunks()
                         chat.messages[lastIndex].isThinking = false
                         chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
                         // Process citation markers in chunks too since UI renders from chunks

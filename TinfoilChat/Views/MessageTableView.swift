@@ -489,13 +489,18 @@ class ObservableMessageWrapper: ObservableObject {
             cachedHeightKey = nil
         }
 
-        self.message = message
-        self.isDarkMode = isDarkMode
-        self.isLastMessage = isLastMessage
-        self.isLoading = isLoading
-        self.isArchived = isArchived
-        self.showArchiveSeparator = showArchiveSeparator
-        self.messageIndex = messageIndex
+        // Defer @Published property updates to the next run loop tick.
+        // UIHostingConfiguration requires the objectWillChange notification
+        // to arrive on a separate run loop iteration to trigger a re-render.
+        DispatchQueue.main.async {
+            self.message = message
+            self.isDarkMode = isDarkMode
+            self.isLastMessage = isLastMessage
+            self.isLoading = isLoading
+            self.isArchived = isArchived
+            self.showArchiveSeparator = showArchiveSeparator
+            self.messageIndex = messageIndex
+        }
     }
 
     func getCacheKey() -> Int {
