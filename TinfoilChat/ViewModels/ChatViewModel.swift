@@ -1946,6 +1946,10 @@ class ChatViewModel: ObservableObject {
             saveChat(chat)
         }
         
+        // Clear sync caches so stale state doesn't leak into the next session
+        cloudSync.clearSyncStatus()
+        DeletedChatsTracker.shared.clear()
+        
         // Reset to a free model when signing out
         let freeModels = AppConfig.shared.filteredModelTypes(
             isAuthenticated: false,
