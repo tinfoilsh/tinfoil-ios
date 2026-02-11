@@ -2436,8 +2436,10 @@ class ChatViewModel: ObservableObject {
             .filter { filter?($0) ?? true }
             .sorted { $0.createdAt > $1.createdAt }
         let firstPageIds = filtered.prefix(Constants.Pagination.chatsPerPage).map(\.id)
+
         let chats = await Chat.loadChats(chatIds: firstPageIds, userId: userId)
             .sorted { $0.createdAt > $1.createdAt }
+
         return (chats, filtered.count)
     }
 

@@ -486,7 +486,12 @@ class CloudSyncService: ObservableObject {
             let decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
             var decryptedChat = decryptionResult.value
 
-            if let createdDate = parseISODate(remoteChat.createdAt) {
+            // Prefer blob's createdAt (matches React's `decrypted.createdAt ?? remote.createdAt`).
+            // StoredChat decoder falls back to Date() on parse failure — detect that
+            // by checking if the blob date is within the last few seconds.
+            let blobCreatedAt = decryptedChat.createdAt
+            let blobLooksLikeFallback = abs(blobCreatedAt.timeIntervalSinceNow) < Constants.Sync.createdAtFallbackThresholdSeconds
+            if blobLooksLikeFallback, let createdDate = parseISODate(remoteChat.createdAt) {
                 decryptedChat.createdAt = createdDate
             }
             if let updatedDate = parseISODate(remoteChat.updatedAt) {
@@ -532,7 +537,11 @@ class CloudSyncService: ObservableObject {
             return
         }
 
-        if let createdDate = parseISODate(remoteChat.createdAt) {
+        // Prefer blob's createdAt; only fall back to server metadata when
+        // the blob value looks like a decoder fallback (Date()).
+        let blobCreatedAt = downloadedChat.createdAt
+        let blobLooksLikeFallback = abs(blobCreatedAt.timeIntervalSinceNow) < Constants.Sync.createdAtFallbackThresholdSeconds
+        if blobLooksLikeFallback, let createdDate = parseISODate(remoteChat.createdAt) {
             downloadedChat.createdAt = createdDate
         }
         if let updatedDate = parseISODate(remoteChat.updatedAt) {
@@ -1154,6 +1163,7 @@ class CloudSyncService: ObservableObject {
     private func markChatAsSynced(_ chatId: String, version: Int) async {
         let userId = await getCurrentUserId()
         guard var chat = await Chat.loadChat(chatId: chatId, userId: userId) else { return }
+
         chat.syncVersion = version
         chat.syncedAt = Date()
         chat.locallyModified = false
