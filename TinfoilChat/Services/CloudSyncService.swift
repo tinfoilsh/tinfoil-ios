@@ -882,8 +882,9 @@ class CloudSyncService: ObservableObject {
                     }
                 }
 
-                hasMore = changedChats.hasMore && changedChats.nextContinuationToken != nil
-                continuationToken = changedChats.nextContinuationToken
+                let nextToken = changedChats.nextContinuationToken?.isEmpty == false ? changedChats.nextContinuationToken : nil
+                hasMore = changedChats.hasMore && nextToken != nil
+                continuationToken = nextToken
             }
 
             for chat in chatsNeedingReencryption {
@@ -1084,7 +1085,8 @@ class CloudSyncService: ObservableObject {
                     }
                 }
 
-                continuationToken = allUpdated.hasMore ? allUpdated.nextContinuationToken : nil
+                let nextToken = allUpdated.nextContinuationToken?.isEmpty == false ? allUpdated.nextContinuationToken : nil
+                continuationToken = allUpdated.hasMore ? nextToken : nil
             } while continuationToken != nil
 
             #if DEBUG
