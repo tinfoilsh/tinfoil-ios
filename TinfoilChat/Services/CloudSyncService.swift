@@ -1218,7 +1218,7 @@ class CloudSyncService: ObservableObject {
         chatForUpload.updatedAt = Date()
 
         if persistLocal {
-            await saveChatToStorage(StoredChat(from: chatForUpload))
+            await saveChatToStorage(StoredChat(from: chatForUpload, syncVersion: chatForUpload.syncVersion))
         }
 
         do {
