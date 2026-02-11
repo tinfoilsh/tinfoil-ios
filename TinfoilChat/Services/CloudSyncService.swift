@@ -469,7 +469,7 @@ class CloudSyncService: ObservableObject {
     
     /// Decrypt a remote chat's content, apply server metadata dates, and set a default model if needed.
     /// Returns the decrypted `StoredChat` and whether a fallback key was used (indicating reencryption is needed).
-    /// On failure, returns an encrypted placeholder so the chat can be retried later.
+    /// Returns `nil` on failure — callers are responsible for creating an encrypted placeholder.
     struct DecryptedChatResult {
         var chat: StoredChat
         let usedFallbackKey: Bool
