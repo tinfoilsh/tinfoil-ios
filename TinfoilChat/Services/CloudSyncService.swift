@@ -1162,12 +1162,14 @@ class CloudSyncService: ObservableObject {
 
     private func markChatAsSynced(_ chatId: String, version: Int) async {
         let userId = await getCurrentUserId()
-        guard var chat = await Chat.loadChat(chatId: chatId, userId: userId) else { return }
-
-        chat.syncVersion = version
-        chat.syncedAt = Date()
-        chat.locallyModified = false
-        await Chat.saveChat(chat, userId: userId)
+        guard !userId.isEmpty else { return }
+        try? await EncryptedFileStorage.shared.updateSyncMetadata(
+            chatId: chatId,
+            userId: userId,
+            syncVersion: version,
+            syncedAt: Date(),
+            locallyModified: false
+        )
     }
 
     private func queueReencryption(for chat: StoredChat, persistLocal: Bool) {
