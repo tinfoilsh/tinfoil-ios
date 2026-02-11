@@ -357,50 +357,35 @@ enum SyncStatusReason {
 
 // MARK: - Sync State Models
 
-/// Tracks deleted chats to prevent resurrection during sync
+/// Tracks deleted chats to prevent resurrection during sync.
+/// IDs persist for the lifetime of the app session — they are only
+/// removed explicitly via `removeFromDeleted` or `clear`.
 @MainActor
 class DeletedChatsTracker {
     static let shared = DeletedChatsTracker()
     
     private var deletedChats: Set<String> = []
-    private var deletionTimes: [String: Date] = [:]
-    private let expirationTime: TimeInterval = 300 // 5 minutes
     
     private init() {}
     
     /// Mark a chat as deleted
     func markAsDeleted(_ chatId: String) {
         deletedChats.insert(chatId)
-        deletionTimes[chatId] = Date()
-        
-        // Schedule cleanup
-        DispatchQueue.main.asyncAfter(deadline: .now() + expirationTime) { [weak self] in
-            self?.cleanupExpired()
-        }
     }
     
-    /// Check if a chat was recently deleted
+    /// Check if a chat was deleted this session
     func isDeleted(_ chatId: String) -> Bool {
-        cleanupExpired()
         return deletedChats.contains(chatId)
     }
     
     /// Remove from deleted tracking (e.g., after successful cloud deletion)
     func removeFromDeleted(_ chatId: String) {
         deletedChats.remove(chatId)
-        deletionTimes.removeValue(forKey: chatId)
     }
     
-    private func cleanupExpired() {
-        let now = Date()
-        // Create a copy of the dictionary to iterate over to avoid mutation during enumeration
-        let deletionTimesCopy = deletionTimes
-        for (chatId, deletionTime) in deletionTimesCopy {
-            if now.timeIntervalSince(deletionTime) > expirationTime {
-                deletedChats.remove(chatId)
-                deletionTimes.removeValue(forKey: chatId)
-            }
-        }
+    /// Clear all tracked deletions (e.g., on logout)
+    func clear() {
+        deletedChats.removeAll()
     }
 }
 
