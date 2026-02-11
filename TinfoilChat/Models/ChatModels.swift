@@ -358,6 +358,7 @@ struct Message: Identifiable, Codable, Equatable {
     var streamError: String? = nil
     var generationTimeSeconds: Double? = nil
     var contentChunks: [ContentChunk] = []
+    var thinkingChunks: [ThinkingChunk] = []
     var webSearchState: WebSearchState? = nil
     var attachments: [Attachment] = []
     var documentContent: String? = nil
@@ -389,7 +390,7 @@ struct Message: Identifiable, Codable, Equatable {
         return formatter
     }()
     
-    init(id: String = UUID().uuidString.lowercased(), role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = [], documentContent: String? = nil, imageData: [ImageData]? = nil) {
+    init(id: String = UUID().uuidString.lowercased(), role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], thinkingChunks: [ThinkingChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = [], documentContent: String? = nil, imageData: [ImageData]? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -399,6 +400,7 @@ struct Message: Identifiable, Codable, Equatable {
         self.isCollapsed = isCollapsed
         self.generationTimeSeconds = generationTimeSeconds
         self.contentChunks = contentChunks
+        self.thinkingChunks = thinkingChunks
         self.webSearchState = webSearchState
         self.attachments = attachments
         self.documentContent = documentContent
@@ -442,8 +444,9 @@ struct Message: Identifiable, Codable, Equatable {
         isStreaming = try container.decodeIfPresent(Bool.self, forKey: .isStreaming) ?? false
         streamError = try container.decodeIfPresent(String.self, forKey: .streamError)
         generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)
-        // contentChunks is transient UI rendering state — never decoded from storage
+        // contentChunks and thinkingChunks are transient UI rendering state — never decoded from storage
         contentChunks = []
+        thinkingChunks = []
         // Try iOS key first, then React key for cross-platform compatibility
         webSearchState = try container.decodeIfPresent(WebSearchState.self, forKey: .webSearchState)
             ?? container.decodeIfPresent(WebSearchState.self, forKey: .webSearch)
