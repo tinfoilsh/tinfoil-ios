@@ -743,7 +743,7 @@ class ChatViewModel: ObservableObject {
         isProcessingAttachment = true
         attachmentError = nil
 
-        let attachmentId = UUID().uuidString
+        let attachmentId = UUID().uuidString.lowercased()
         var attachment = Attachment(
             id: attachmentId,
             type: .document,
@@ -779,7 +779,7 @@ class ChatViewModel: ObservableObject {
         isProcessingAttachment = true
         attachmentError = nil
 
-        let attachmentId = UUID().uuidString
+        let attachmentId = UUID().uuidString.lowercased()
         var attachment = Attachment(
             id: attachmentId,
             type: .image,
