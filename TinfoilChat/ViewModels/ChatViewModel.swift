@@ -1658,7 +1658,9 @@ class ChatViewModel: ObservableObject {
         }
         saveChat(latestChat)
 
+        let saveTask = pendingSaveTask
         Task { @MainActor in
+            await saveTask?.value
             await self.cloudSync.backupChat(latestChat.id)
 
             if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
@@ -1831,9 +1833,12 @@ class ChatViewModel: ObservableObject {
             await Chat.saveChat(chat, userId: userId)
         }
 
-        // Trigger cloud backup if the chat has messages and no active stream
+        // Trigger cloud backup if the chat has messages and no active stream.
+        // Await pendingSaveTask so the backup reads the latest data from disk.
         if !chat.messages.isEmpty && !chat.hasActiveStream {
+            let saveTask = pendingSaveTask
             Task {
+                await saveTask?.value
                 await cloudSync.backupChat(chat.id)
             }
         }
