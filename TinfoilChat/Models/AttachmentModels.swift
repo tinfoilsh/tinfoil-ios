@@ -30,7 +30,7 @@ struct Attachment: Identifiable, Codable, Equatable {
     var processingState: AttachmentProcessingState
 
     init(
-        id: String = UUID().uuidString,
+        id: String = UUID().uuidString.lowercased(),
         type: AttachmentType,
         fileName: String,
         documentContent: String? = nil,

@@ -60,7 +60,7 @@ struct Chat: Identifiable, Codable {
         let reverseTimestamp = Constants.Sync.maxReverseTimestamp - timestampMs
         let unpadded = String(reverseTimestamp)
         let reverseTsStr = String(repeating: "0", count: max(0, Constants.Sync.reverseTimestampDigits - unpadded.count)) + unpadded
-        return "\(reverseTsStr)_\(UUID().uuidString)"
+        return "\(reverseTsStr)_\(UUID().uuidString.lowercased())"
     }
 
     static func deriveTitleState(for title: String, messages: [Message]) -> TitleState {
@@ -277,7 +277,7 @@ struct WebSearchSource: Codable, Equatable, Identifiable {
     let title: String
     let url: String
 
-    init(id: String = UUID().uuidString, title: String, url: String) {
+    init(id: String = UUID().uuidString.lowercased(), title: String, url: String) {
         self.id = id
         self.title = title
         self.url = url
@@ -286,7 +286,7 @@ struct WebSearchSource: Codable, Equatable, Identifiable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         // Generate UUID if id is missing (React app doesn't include it)
-        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString.lowercased()
         title = try container.decode(String.self, forKey: .title)
         url = try container.decode(String.self, forKey: .url)
     }
@@ -389,7 +389,7 @@ struct Message: Identifiable, Codable, Equatable {
         return formatter
     }()
     
-    init(id: String = UUID().uuidString, role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = [], documentContent: String? = nil, imageData: [ImageData]? = nil) {
+    init(id: String = UUID().uuidString.lowercased(), role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = [], documentContent: String? = nil, imageData: [ImageData]? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -420,7 +420,7 @@ struct Message: Identifiable, Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
         // Make id optional for cross-platform compatibility with React
-        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString.lowercased()
         role = try container.decode(MessageRole.self, forKey: .role)
         content = try container.decode(String.self, forKey: .content)
         thoughts = try container.decodeIfPresent(String.self, forKey: .thoughts)
