@@ -100,7 +100,7 @@ struct StoredChat: Codable {
         case id, title, titleState, messages, createdAt, updatedAt
         case language, userId
         case syncVersion, syncedAt, locallyModified
-        case decryptionFailed, dataCorrupted, encryptedData, projectId, hasActiveStream
+        case decryptionFailed, dataCorrupted, encryptedData, projectId
     }
 
     func encode(to encoder: Encoder) throws {
@@ -132,7 +132,7 @@ struct StoredChat: Codable {
         try container.encodeIfPresent(dataCorrupted, forKey: .dataCorrupted)
         try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
         try container.encodeIfPresent(projectId, forKey: .projectId)
-        try container.encodeIfPresent(hasActiveStream, forKey: .hasActiveStream)
+        // hasActiveStream is transient UI state — never encode it to the sync blob
     }
     
     init(from decoder: Decoder) throws {
@@ -191,7 +191,8 @@ struct StoredChat: Codable {
         dataCorrupted = try container.decodeIfPresent(Bool.self, forKey: .dataCorrupted)
         encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
-        hasActiveStream = try container.decodeIfPresent(Bool.self, forKey: .hasActiveStream)
+        // hasActiveStream is transient UI state — always reset to nil on decode
+        hasActiveStream = nil
     }
 }
 

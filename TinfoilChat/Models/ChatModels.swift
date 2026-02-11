@@ -153,7 +153,7 @@ struct Chat: Identifiable, Codable {
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, title, titleState, messages, hasActiveStream, createdAt, modelType, language, userId
+        case id, title, titleState, messages, createdAt, modelType, language, userId
         case syncVersion, syncedAt, locallyModified, updatedAt
         case decryptionFailed, dataCorrupted, encryptedData, projectId
     }
@@ -165,7 +165,8 @@ struct Chat: Identifiable, Codable {
         title = try container.decode(String.self, forKey: .title)
         messages = try container.decode([Message].self, forKey: .messages)
         titleState = (try? container.decode(TitleState.self, forKey: .titleState)) ?? Chat.deriveTitleState(for: title, messages: messages)
-        hasActiveStream = try container.decodeIfPresent(Bool.self, forKey: .hasActiveStream) ?? false
+        // hasActiveStream is transient UI state — always reset to false on decode
+        hasActiveStream = false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         modelType = try container.decode(ModelType.self, forKey: .modelType)
         language = try container.decodeIfPresent(String.self, forKey: .language)
@@ -190,7 +191,7 @@ struct Chat: Identifiable, Codable {
         try container.encode(title, forKey: .title)
         try container.encode(titleState, forKey: .titleState)
         try container.encode(messages, forKey: .messages)
-        try container.encode(hasActiveStream, forKey: .hasActiveStream)
+        // hasActiveStream is transient UI state — never encode it
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(modelType, forKey: .modelType)
         try container.encodeIfPresent(language, forKey: .language)
@@ -407,7 +408,7 @@ struct Message: Identifiable, Codable, Equatable {
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, generationTimeSeconds, contentChunks, webSearchState
+        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, generationTimeSeconds, webSearchState
         case webSearch // Alternative key used by React app
         case attachments, documentContent, imageData
         case imageBase64 // Legacy iOS key for backward compatibility
@@ -441,7 +442,8 @@ struct Message: Identifiable, Codable, Equatable {
         isStreaming = try container.decodeIfPresent(Bool.self, forKey: .isStreaming) ?? false
         streamError = try container.decodeIfPresent(String.self, forKey: .streamError)
         generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)
-        contentChunks = try container.decodeIfPresent([ContentChunk].self, forKey: .contentChunks) ?? []
+        // contentChunks is transient UI rendering state — never decoded from storage
+        contentChunks = []
         // Try iOS key first, then React key for cross-platform compatibility
         webSearchState = try container.decodeIfPresent(WebSearchState.self, forKey: .webSearchState)
             ?? container.decodeIfPresent(WebSearchState.self, forKey: .webSearch)
@@ -478,7 +480,7 @@ struct Message: Identifiable, Codable, Equatable {
         try container.encode(isStreaming, forKey: .isStreaming)
         try container.encodeIfPresent(streamError, forKey: .streamError)
         try container.encodeIfPresent(generationTimeSeconds, forKey: .generationTimeSeconds)
-        try container.encode(contentChunks, forKey: .contentChunks)
+        // contentChunks is transient UI rendering state — never encode it
         // Encode as "webSearch" for React app compatibility
         try container.encodeIfPresent(webSearchState, forKey: .webSearch)
         if !attachments.isEmpty {
