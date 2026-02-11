@@ -1035,52 +1035,63 @@ class CloudSyncService: ObservableObject {
                 return
             }
 
-            let allUpdated = try await cloudStorage.getAllChatsUpdatedSince(since: cachedLastUpdated)
-
-            let remoteChats = allUpdated.conversations
-            if remoteChats.isEmpty {
-                saveAllChatsSyncStatus(remoteAllStatus)
-                return
-            }
-
-            #if DEBUG
-            print("[CloudSync] Cross-scope sync: processing \(remoteChats.count) changed chats")
-            #endif
-
             let localChats = await getAllChatsFromStorage()
             let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
 
-            for remoteChat in remoteChats {
-                let localChat = localChatMap[remoteChat.id]
-                let remoteProjectId = remoteChat.projectId
-                let localProjectId = localChat?.projectId
+            var continuationToken: String? = nil
+            var totalProcessed = 0
 
-                if localChat != nil && remoteProjectId != localProjectId {
-                    // Project assignment changed — update local state
-                    let userId = await getCurrentUserId()
-                    if var chat = await Chat.loadChat(chatId: remoteChat.id, userId: userId) {
-                        chat.projectId = remoteProjectId
-                        await Chat.saveChat(chat, userId: userId)
-                    }
-                } else if localChat == nil, !deletedChatsTracker.isDeleted(remoteChat.id), let content = remoteChat.content {
-                    // New chat we don't have locally — decrypt and save it
-                    if var decrypted = await decryptRemoteChat(remoteChat, content: content) {
-                        decrypted.chat.projectId = remoteProjectId
-                        await saveChatToStorage(decrypted.chat)
-                        await markChatAsSynced(decrypted.chat.id, version: decrypted.chat.syncVersion)
-                        if decrypted.usedFallbackKey {
-                            queueReencryption(for: decrypted.chat, persistLocal: false)
+            repeat {
+                let allUpdated = try await cloudStorage.getAllChatsUpdatedSince(
+                    since: cachedLastUpdated,
+                    continuationToken: continuationToken
+                )
+
+                let remoteChats = allUpdated.conversations
+                if remoteChats.isEmpty { break }
+
+                totalProcessed += remoteChats.count
+
+                for remoteChat in remoteChats {
+                    let localChat = localChatMap[remoteChat.id]
+                    let remoteProjectId = remoteChat.projectId
+                    let localProjectId = localChat?.projectId
+
+                    if localChat != nil && remoteProjectId != localProjectId {
+                        // Project assignment changed — update local state
+                        let userId = await getCurrentUserId()
+                        if var chat = await Chat.loadChat(chatId: remoteChat.id, userId: userId) {
+                            chat.projectId = remoteProjectId
+                            await Chat.saveChat(chat, userId: userId)
                         }
-                    } else {
-                        var placeholder = await createEncryptedPlaceholder(
-                            remoteChat: remoteChat,
-                            encryptedContent: content
-                        )
-                        placeholder.projectId = remoteProjectId
-                        await saveChatToStorage(placeholder)
+                    } else if localChat == nil, !deletedChatsTracker.isDeleted(remoteChat.id), let content = remoteChat.content {
+                        // New chat we don't have locally — decrypt and save it
+                        if var decrypted = await decryptRemoteChat(remoteChat, content: content) {
+                            decrypted.chat.projectId = remoteProjectId
+                            await saveChatToStorage(decrypted.chat)
+                            await markChatAsSynced(decrypted.chat.id, version: decrypted.chat.syncVersion)
+                            if decrypted.usedFallbackKey {
+                                queueReencryption(for: decrypted.chat, persistLocal: false)
+                            }
+                        } else {
+                            var placeholder = await createEncryptedPlaceholder(
+                                remoteChat: remoteChat,
+                                encryptedContent: content
+                            )
+                            placeholder.projectId = remoteProjectId
+                            await saveChatToStorage(placeholder)
+                        }
                     }
                 }
+
+                continuationToken = allUpdated.hasMore ? allUpdated.nextContinuationToken : nil
+            } while continuationToken != nil
+
+            #if DEBUG
+            if totalProcessed > 0 {
+                print("[CloudSync] Cross-scope sync: processed \(totalProcessed) changed chats")
             }
+            #endif
 
             saveAllChatsSyncStatus(remoteAllStatus)
         } catch {

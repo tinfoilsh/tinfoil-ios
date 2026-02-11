@@ -358,11 +358,17 @@ class CloudStorageService: ObservableObject {
     }
 
     /// Get ALL chats updated since a timestamp (not filtered by project)
-    func getAllChatsUpdatedSince(since: String) async throws -> ChatListResponse {
+    func getAllChatsUpdatedSince(since: String, continuationToken: String? = nil) async throws -> ChatListResponse {
         var components = URLComponents(string: "\(apiBaseURL)/api/chats/all-updated-since")!
-        components.queryItems = [
+        var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "since", value: since)
         ]
+
+        if let continuationToken = continuationToken {
+            queryItems.append(URLQueryItem(name: "continuationToken", value: continuationToken))
+        }
+
+        components.queryItems = queryItems
 
         var request = URLRequest(url: components.url!)
         request.httpMethod = "GET"
