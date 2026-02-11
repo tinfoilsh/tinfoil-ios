@@ -1051,6 +1051,8 @@ class ChatViewModel: ObservableObject {
                 let chunker = StreamingMarkdownChunker()
                 var hapticChunkCount = 0
                 var hasStartedResponse = false
+                var lastUIUpdateTime = Date.distantPast
+                let uiUpdateInterval: TimeInterval = 0.033
 
                 await MainActor.run {
                     if let chat = self.currentChat,
@@ -1264,8 +1266,10 @@ class ChatViewModel: ObservableObject {
                         }
                     }
 
-                    // Update UI on each chunk (fire-and-forget to avoid blocking stream consumption)
-                    if didMutateState {
+                    // Update UI at a throttled rate to avoid overwhelming SwiftUI with diffs
+                    let now = Date()
+                    if didMutateState && now.timeIntervalSince(lastUIUpdateTime) >= uiUpdateInterval {
+                        lastUIUpdateTime = now
                         let currentChunks = chunker.getAllChunks()
                         let content = responseContent
                         let thoughts = currentThoughts
@@ -1775,7 +1779,6 @@ class ChatViewModel: ObservableObject {
             // Update currentChat directly ONLY IF it's the one being updated
             if currentChat?.id == chat.id {
                 currentChat = updatedChat
-                objectWillChange.send()
             }
 
             // During streaming, batch saves to reduce disk I/O

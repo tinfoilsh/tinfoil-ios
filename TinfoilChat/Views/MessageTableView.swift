@@ -488,15 +488,13 @@ class ObservableMessageWrapper: ObservableObject {
             cachedHeightKey = nil
         }
 
-        DispatchQueue.main.async {
-            self.message = message
-            self.isDarkMode = isDarkMode
-            self.isLastMessage = isLastMessage
-            self.isLoading = isLoading
-            self.isArchived = isArchived
-            self.showArchiveSeparator = showArchiveSeparator
-            self.messageIndex = messageIndex
-        }
+        self.message = message
+        self.isDarkMode = isDarkMode
+        self.isLastMessage = isLastMessage
+        self.isLoading = isLoading
+        self.isArchived = isArchived
+        self.showArchiveSeparator = showArchiveSeparator
+        self.messageIndex = messageIndex
     }
 
     func getCacheKey() -> Int {
