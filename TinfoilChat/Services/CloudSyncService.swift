@@ -274,12 +274,12 @@ class CloudSyncService: ObservableObject {
             return
         }
         
-        // Convert to StoredChat and upload
-        let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion + 1)
+        // Upload with current version, increment after success (matches React behavior)
+        let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion)
         try await cloudStorage.uploadChat(storedChat)
         
-        // Mark as synced
-        await markChatAsSynced(chatId, version: storedChat.syncVersion)
+        // Mark as synced with incremented version
+        await markChatAsSynced(chatId, version: chat.syncVersion + 1)
         
     }
     
@@ -312,9 +312,9 @@ class CloudSyncService: ObservableObject {
             }
 
             do {
-                let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion + 1)
+                let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion)
                 try await cloudStorage.uploadChat(storedChat)
-                await markChatAsSynced(chat.id, version: storedChat.syncVersion)
+                await markChatAsSynced(chat.id, version: chat.syncVersion + 1)
                 result = SyncResult(
                     uploaded: result.uploaded + 1,
                     downloaded: result.downloaded,
@@ -1204,10 +1204,9 @@ class CloudSyncService: ObservableObject {
         chatForUpload.locallyModified = true
         chatForUpload.updatedAt = Date()
 
-        let newVersion = chatForUpload.syncVersion + 1
-        chatForUpload.syncVersion = newVersion
+        let currentVersion = chatForUpload.syncVersion
 
-        let storedForUpload = StoredChat(from: chatForUpload, syncVersion: newVersion)
+        let storedForUpload = StoredChat(from: chatForUpload, syncVersion: currentVersion)
 
         if persistLocal {
             await saveChatToStorage(storedForUpload)
@@ -1215,7 +1214,7 @@ class CloudSyncService: ObservableObject {
 
         do {
             try await cloudStorage.uploadChat(storedForUpload)
-            await markChatAsSynced(chatForUpload.id, version: newVersion)
+            await markChatAsSynced(chatForUpload.id, version: currentVersion + 1)
         } catch {
             #if DEBUG
             print("[CloudSync] Failed to re-encrypt chat \(chat.id): \(error)")
@@ -1384,18 +1383,15 @@ class CloudSyncService: ObservableObject {
                 // Re-encrypt the chat with the new key by forcing a sync
                 guard await cloudStorage.isAuthenticated() else { continue }
                 
-                // Increment sync version to force upload
                 var chatToReencrypt = chat
-                chatToReencrypt.syncVersion = chat.syncVersion + 1
                 chatToReencrypt.locallyModified = true
                 
-                // Save locally with new sync version
+                // Save locally then upload (will be encrypted with new key)
                 await saveChatToStorage(StoredChat(from: chatToReencrypt))
                 
-                // Upload to cloud (will be encrypted with new key)
-                let storedChat = StoredChat(from: chatToReencrypt)
+                let storedChat = StoredChat(from: chatToReencrypt, syncVersion: chatToReencrypt.syncVersion)
                 try await cloudStorage.uploadChat(storedChat)
-                await markChatAsSynced(chatToReencrypt.id, version: chatToReencrypt.syncVersion)
+                await markChatAsSynced(chatToReencrypt.id, version: chatToReencrypt.syncVersion + 1)
                 
                 result.uploaded += 1
                 result.reencrypted += 1
