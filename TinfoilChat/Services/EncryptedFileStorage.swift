@@ -181,6 +181,23 @@ actor EncryptedFileStorage {
         }
     }
 
+    /// Atomically update only sync metadata fields on a chat without
+    /// touching messages or other content. This avoids the race where a
+    /// full load-modify-save could overwrite in-progress user edits.
+    func updateSyncMetadata(
+        chatId: String,
+        userId: String,
+        syncVersion: Int,
+        syncedAt: Date,
+        locallyModified: Bool
+    ) async throws {
+        guard var chat = try await loadChat(chatId: chatId, userId: userId) else { return }
+        chat.syncVersion = syncVersion
+        chat.syncedAt = syncedAt
+        chat.locallyModified = locallyModified
+        try await saveChat(chat, userId: userId)
+    }
+
     // MARK: - Bulk Operations
 
     func loadChats(chatIds: [String], userId: String) async throws -> [Chat] {
