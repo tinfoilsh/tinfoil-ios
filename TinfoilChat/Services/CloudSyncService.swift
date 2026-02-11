@@ -1174,8 +1174,7 @@ class CloudSyncService: ObservableObject {
     }
 
     private func markChatAsSynced(_ chatId: String, version: Int) async {
-        let userId = await getCurrentUserId()
-        guard !userId.isEmpty else { return }
+        guard let userId = await getCurrentUserId() else { return }
         try? await EncryptedFileStorage.shared.updateSyncMetadata(
             chatId: chatId,
             userId: userId,
