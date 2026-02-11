@@ -65,6 +65,7 @@ enum Constants {
         static let maxReverseTimestamp: Int = 9999999999999
         static let reverseTimestampDigits: Int = String(maxReverseTimestamp).count
 
+        static let createdAtFallbackThresholdSeconds: TimeInterval = 5.0
         static let uploadBaseDelaySeconds: TimeInterval = 1.0
         static let uploadMaxDelaySeconds: TimeInterval = 8.0
         static let uploadMaxRetries: Int = 3
