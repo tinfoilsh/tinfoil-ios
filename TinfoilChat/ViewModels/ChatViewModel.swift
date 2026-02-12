@@ -2097,6 +2097,8 @@ class ChatViewModel: ObservableObject {
         
         // Clear current chats and create a new empty one with the free model
         chats = []
+        localChats = []
+        activeStorageTab = .cloud
         let newChat = Chat.create(modelType: currentModel)
         currentChat = newChat
         chats = [newChat]
