@@ -1140,7 +1140,7 @@ class CloudSyncService: ObservableObject {
         let userId = await getCurrentUserId()
         guard let userId = userId else { return [] }
         let index = (try? await EncryptedFileStorage.shared.loadIndex(userId: userId)) ?? []
-        let unsyncedIds = index.filter { $0.locallyModified || $0.syncedAt == nil }.map(\.id)
+        let unsyncedIds = index.filter { !$0.isLocalOnly && ($0.locallyModified || $0.syncedAt == nil) }.map(\.id)
         return await Chat.loadChats(chatIds: unsyncedIds, userId: userId)
     }
 
@@ -1337,7 +1337,8 @@ class CloudSyncService: ObservableObject {
                         locallyModified: false,
                         updatedAt: chat.updatedAt,
                         decryptionFailed: false,
-                        encryptedData: nil
+                        encryptedData: nil,
+                        isLocalOnly: chat.isLocalOnly
                     )
                 )
 
