@@ -25,11 +25,9 @@ struct ChatSidebar: View {
     @State private var shouldOpenCloudSync: Bool = false
     @ObservedObject private var settings = SettingsManager.shared
 
-    enum ChatSidebarTab: String {
-        case cloud
-        case local
+    private var activeTab: ChatStorageTab {
+        viewModel.activeStorageTab
     }
-    @State private var activeTab: ChatSidebarTab = .cloud
 
     private var filteredChats: [Chat] {
         if authManager.isAuthenticated && settings.isCloudSyncEnabled {
@@ -325,7 +323,7 @@ struct ChatSidebar: View {
     
     private var cloudLocalTabSwitcher: some View {
         HStack(spacing: 0) {
-            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { activeTab = .cloud } }) {
+            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { viewModel.switchStorageTab(to: .cloud) } }) {
                 HStack(spacing: 4) {
                     Image(systemName: "icloud")
                         .font(.caption)
@@ -346,7 +344,7 @@ struct ChatSidebar: View {
             }
             .buttonStyle(PlainButtonStyle())
 
-            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { activeTab = .local } }) {
+            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { viewModel.switchStorageTab(to: .local) } }) {
                 HStack(spacing: 4) {
                     Image(systemName: "internaldrive")
                         .font(.caption)

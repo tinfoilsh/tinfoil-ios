@@ -376,11 +376,10 @@ struct ChatContainer: View {
 
     /// Label showing whether current chat is local or cloud-synced
     private var chatStorageLabel: some View {
-        let isLocal = viewModel.currentChat?.isLocalOnly ?? true
-        let isCloudSync = settings.isCloudSyncEnabled
+        let isLocal = !settings.isCloudSyncEnabled || viewModel.activeStorageTab == .local
 
         return HStack(spacing: 3) {
-            if !isCloudSync || isLocal {
+            if isLocal {
                 Image(systemName: "internaldrive")
                     .font(.system(size: 9))
                 Text("Local")

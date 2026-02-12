@@ -12,12 +12,18 @@ import TinfoilAI
 import OpenAI
 import AVFoundation
 
+enum ChatStorageTab: String {
+    case cloud
+    case local
+}
+
 @MainActor
 class ChatViewModel: ObservableObject {
     // Published properties for UI updates
     @Published var chats: [Chat] = []
     @Published var localChats: [Chat] = []
     @Published var currentChat: Chat?
+    @Published var activeStorageTab: ChatStorageTab = .cloud
     @Published var isLoading: Bool = false
     @Published var thinkingSummary: String = ""
     @Published var webSearchSummary: String = ""
@@ -541,6 +547,19 @@ class ChatViewModel: ObservableObject {
     
     // MARK: - Public Methods
     
+    /// Switches the active storage tab and selects an appropriate chat
+    func switchStorageTab(to tab: ChatStorageTab) {
+        guard activeStorageTab != tab else { return }
+        activeStorageTab = tab
+
+        let targetList = tab == .local ? localChats : chats
+        if let first = targetList.first {
+            selectChat(first)
+        } else {
+            createNewChat(isLocalOnly: tab == .local)
+        }
+    }
+
     /// Creates a new chat and sets it as the current chat
     func createNewChat(language: String? = nil, modelType: ModelType? = nil, isLocalOnly: Bool? = nil) {
         // Allow creating new chats for all authenticated users
@@ -551,7 +570,14 @@ class ChatViewModel: ObservableObject {
             cancelGeneration()
         }
 
-        let shouldBeLocal = isLocalOnly ?? !SettingsManager.shared.isCloudSyncEnabled
+        let shouldBeLocal: Bool
+        if let explicit = isLocalOnly {
+            shouldBeLocal = explicit
+        } else if !SettingsManager.shared.isCloudSyncEnabled {
+            shouldBeLocal = true
+        } else {
+            shouldBeLocal = activeStorageTab == .local
+        }
 
         // Check if we already have a blank chat in the target list
         if shouldBeLocal {
