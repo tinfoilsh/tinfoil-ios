@@ -675,7 +675,11 @@ class ChatViewModel: ObservableObject {
         // If the deleted chat was the current chat, select another one
         if currentChat?.id == id {
             let activeList = isLocal ? localChats : chats
-            currentChat = activeList.first
+            if let first = activeList.first {
+                currentChat = first
+            } else {
+                createNewChat(isLocalOnly: isLocal)
+            }
         }
 
         // Delete from file storage and cloud
