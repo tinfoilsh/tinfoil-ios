@@ -372,8 +372,8 @@ class ChatViewModel: ObservableObject {
                         
                         // Restore current chat selection if it still exists
                         if let currentChatId = self.currentChat?.id,
-                           let chat = self.chats.first(where: { $0.id == currentChatId }) {
-                            self.currentChat = chat
+                           let location = self.findChatLocation(currentChatId) {
+                            self.currentChat = location.isLocal ? self.localChats[location.index] : self.chats[location.index]
                         }
                         
                     }
@@ -552,11 +552,19 @@ class ChatViewModel: ObservableObject {
         guard activeStorageTab != tab else { return }
         activeStorageTab = tab
 
-        let targetList = tab == .local ? localChats : chats
+        let shouldBeLocal = tab == .local
+
+        // If on a blank chat, switch to the blank chat for the target tab
+        if currentChat?.isBlankChat == true {
+            createNewChat(isLocalOnly: shouldBeLocal)
+            return
+        }
+
+        let targetList = shouldBeLocal ? localChats : chats
         if let first = targetList.first {
             selectChat(first)
         } else {
-            createNewChat(isLocalOnly: tab == .local)
+            createNewChat(isLocalOnly: shouldBeLocal)
         }
     }
 
@@ -1723,24 +1731,32 @@ class ChatViewModel: ObservableObject {
 
         streamingTracker.endStreaming(chatId)
 
-        guard let latestChat = self.chats.first(where: { $0.id == chatId }) else {
+        guard let location = findChatLocation(chatId) else {
             return
         }
+        let latestChat = location.isLocal ? localChats[location.index] : chats[location.index]
         saveChat(latestChat)
 
         let saveTask = pendingSaveTask
+        let isLocal = location.isLocal
         Task { @MainActor in
             await saveTask?.value
             if SettingsManager.shared.isCloudSyncEnabled && !latestChat.isLocalOnly {
                 await self.cloudSync.backupChat(latestChat.id)
             }
 
-            if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
-                if let syncedChat = await Chat.loadChat(chatId: latestChat.id, userId: self.currentUserId) {
-                    self.chats[index] = syncedChat
-                    if self.currentChat?.id == latestChat.id {
-                        self.currentChat = syncedChat
+            if let syncedChat = await Chat.loadChat(chatId: latestChat.id, userId: self.currentUserId) {
+                if isLocal {
+                    if let idx = self.localChats.firstIndex(where: { $0.id == latestChat.id }) {
+                        self.localChats[idx] = syncedChat
                     }
+                } else {
+                    if let idx = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
+                        self.chats[idx] = syncedChat
+                    }
+                }
+                if self.currentChat?.id == latestChat.id {
+                    self.currentChat = syncedChat
                 }
             }
         }
@@ -1794,7 +1810,7 @@ class ChatViewModel: ObservableObject {
 
     /// Normalizes the localChats array: deduplicates and ensures one blank chat at top
     private func normalizeLocalChatsArray() {
-        let wasCurrentChatBlank = currentChat?.isBlankChat == true
+        let wasCurrentChatLocalBlank = currentChat?.isBlankChat == true && currentChat?.isLocalOnly == true
 
         var normalized = localChats.filter { !$0.isBlankChat }
         var seenIds = Set<String>()
@@ -1818,7 +1834,7 @@ class ChatViewModel: ObservableObject {
 
         localChats = normalized
 
-        if wasCurrentChatBlank, let newBlankChat = newBlankChat {
+        if wasCurrentChatLocalBlank, let newBlankChat = newBlankChat {
             currentChat = newBlankChat
         }
     }
@@ -1828,6 +1844,7 @@ class ChatViewModel: ObservableObject {
     private func ensureBlankChatAtTop() {
         if SettingsManager.shared.isCloudSyncEnabled {
             normalizeChatsArray()
+            normalizeLocalChatsArray()
         } else {
             normalizeLocalChatsArray()
         }
@@ -2035,8 +2052,8 @@ class ChatViewModel: ObservableObject {
 
                 // Preserve existing selection when possible so we don't jump to a blank chat
                 if let chatId = previouslySelectedId,
-                   let restoredChat = self.chats.first(where: { $0.id == chatId }) {
-                    self.currentChat = restoredChat
+                   let location = self.findChatLocation(chatId) {
+                    self.currentChat = location.isLocal ? self.localChats[location.index] : self.chats[location.index]
                 } else if self.currentChat == nil {
                     self.currentChat = self.chats.first
                 }
@@ -2278,9 +2295,10 @@ class ChatViewModel: ObservableObject {
     /// Removes all cloud (non-local) chats from the device
     @MainActor
     func deleteNonLocalChats() async {
-        let cloudChatsCopy = chats
-        for chat in cloudChatsCopy {
-            await Chat.deleteChatFromStorage(chatId: chat.id, userId: currentUserId)
+        // Delete all non-local chats from storage using the index (handles paginated chats too)
+        let index = await Chat.loadChatIndex(userId: currentUserId)
+        for entry in index where !entry.isLocalOnly {
+            await Chat.deleteChatFromStorage(chatId: entry.id, userId: currentUserId)
         }
         chats = []
         hasMoreChats = false
