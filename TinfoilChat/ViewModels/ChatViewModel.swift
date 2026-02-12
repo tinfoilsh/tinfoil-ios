@@ -2722,9 +2722,16 @@ class ChatViewModel: ObservableObject {
         // Also sync profile settings
         await ProfileManager.shared.performFullSync()
         
+        // Re-filter localChats to only contain local-only chats
+        // (needed when cloud sync was just enabled and localChats still holds all chats)
+        let freshLocal = await loadAllLocalChats(userId: self.currentUserId)
+            .filter { $0.isLocalOnly }
+
         await MainActor.run {
+            self.localChats = freshLocal
             self.isSyncing = false
             self.lastSyncDate = Date()
+            self.ensureBlankChatAtTop()
             
             if !result.errors.isEmpty {
                 self.syncErrors = result.errors
