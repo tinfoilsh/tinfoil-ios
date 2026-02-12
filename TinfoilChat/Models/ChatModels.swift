@@ -41,6 +41,9 @@ struct Chat: Identifiable, Codable {
     var dataCorrupted: Bool = false
     var encryptedData: String?
 
+    // Local-only flag: when true, chat is never synced to cloud
+    var isLocalOnly: Bool = false
+
     // Project association (used by React, preserved by iOS)
     var projectId: String?
 
@@ -90,6 +93,7 @@ struct Chat: Identifiable, Codable {
         decryptionFailed: Bool = false,
         dataCorrupted: Bool = false,
         encryptedData: String? = nil,
+        isLocalOnly: Bool = false,
         projectId: String? = nil)
     {
         let resolvedTitleState = titleState ?? Chat.deriveTitleState(for: title, messages: messages)
@@ -109,6 +113,7 @@ struct Chat: Identifiable, Codable {
         self.decryptionFailed = decryptionFailed
         self.dataCorrupted = dataCorrupted
         self.encryptedData = encryptedData
+        self.isLocalOnly = isLocalOnly
         self.projectId = projectId
     }
     
@@ -128,7 +133,8 @@ struct Chat: Identifiable, Codable {
         syncVersion: Int = 0,
         syncedAt: Date? = nil,
         locallyModified: Bool = true,
-        updatedAt: Date? = nil
+        updatedAt: Date? = nil,
+        isLocalOnly: Bool = false
     ) -> Chat {
         // Try to use the provided model, fall back to current model, then first available
         guard let model = modelType ?? AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first else {
@@ -146,7 +152,8 @@ struct Chat: Identifiable, Codable {
             syncVersion: syncVersion,
             syncedAt: syncedAt,
             locallyModified: locallyModified,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            isLocalOnly: isLocalOnly
         )
     }
     
@@ -155,7 +162,7 @@ struct Chat: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, title, titleState, messages, createdAt, modelType, language, userId
         case syncVersion, syncedAt, locallyModified, updatedAt
-        case decryptionFailed, dataCorrupted, encryptedData, projectId
+        case decryptionFailed, dataCorrupted, encryptedData, isLocalOnly, projectId
     }
 
     init(from decoder: Decoder) throws {
@@ -182,6 +189,7 @@ struct Chat: Identifiable, Codable {
         decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed) ?? false
         dataCorrupted = try container.decodeIfPresent(Bool.self, forKey: .dataCorrupted) ?? false
         encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
+        isLocalOnly = try container.decodeIfPresent(Bool.self, forKey: .isLocalOnly) ?? false
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
     }
 
@@ -207,6 +215,7 @@ struct Chat: Identifiable, Codable {
         try container.encode(decryptionFailed, forKey: .decryptionFailed)
         try container.encode(dataCorrupted, forKey: .dataCorrupted)
         try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
+        try container.encode(isLocalOnly, forKey: .isLocalOnly)
         try container.encodeIfPresent(projectId, forKey: .projectId)
     }
     

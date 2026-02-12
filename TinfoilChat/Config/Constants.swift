@@ -57,6 +57,10 @@ enum Constants {
         static let maxMessagesLimit = 200
     }
 
+    enum CloudSync {
+        static let enabledKey = "cloudSyncEnabled"
+    }
+
     enum Sync {
         static let chatSyncIntervalSeconds: TimeInterval = 60.0
         static let profileSyncIntervalSeconds: TimeInterval = 300.0  // 5 minutes
