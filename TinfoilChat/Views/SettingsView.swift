@@ -733,6 +733,9 @@ struct SettingsView: View {
                     EncryptionService.shared.clearKey()
                     UserDefaults.standard.removeObject(forKey: "hasLaunchedBefore")
 
+                    // Reset cloud sync setting
+                    settings.isCloudSyncEnabled = false
+
                     // Clear all chats from local storage
                     chatViewModel.clearAllLocalChats()
 
@@ -752,6 +755,7 @@ struct SettingsView: View {
             Button("Delete", role: .destructive) {
                 Task {
                     do {
+                        settings.isCloudSyncEnabled = false
                         try await clerk.user?.delete()
                         await authManager.signOut()
                         dismiss()
