@@ -616,6 +616,11 @@ class CloudSyncService: ObservableObject {
                 // 4. Never overwrite if chat has active stream or is locally modified
                 let remoteTimestamp = parseISODate(remoteChat.updatedAt)?.timeIntervalSince1970 ?? 0
 
+                // Skip local-only chats — their content is never overwritten by remote
+                if let localChat = localChat, localChat.isLocalOnly {
+                    continue
+                }
+
                 // Skip if chat is locally modified or has active stream
                 if let localChat = localChat {
                     if localChat.locallyModified || localChat.hasActiveStream {
@@ -818,6 +823,11 @@ class CloudSyncService: ObservableObject {
                     }
 
                     if !(await shouldProcessRemoteChat(remoteChat)) {
+                        continue
+                    }
+
+                    // Skip local-only chats — their content is never overwritten by remote
+                    if let localChat = localChatMap[remoteChat.id], localChat.isLocalOnly {
                         continue
                     }
 
