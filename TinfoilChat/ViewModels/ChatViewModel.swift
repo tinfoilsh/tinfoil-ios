@@ -310,12 +310,16 @@ class ChatViewModel: ObservableObject {
         // Invalidate existing timer if any
         autoSyncTimer?.invalidate()
 
+        // Do not start auto-sync when cloud sync is disabled
+        if !SettingsManager.shared.isCloudSyncEnabled {
+            return
+        }
+
         // Do not start auto-sync until encryption key is set up
         if !EncryptionService.shared.hasEncryptionKey() {
             return
         }
-        
-        
+
         // Create timer that fires at regular intervals
         autoSyncTimer = Timer.scheduledTimer(withTimeInterval: Constants.Sync.chatSyncIntervalSeconds, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -399,9 +403,9 @@ class ChatViewModel: ObservableObject {
                 self?.retryClientSetup()
             }
             
-            // Resume auto-sync timer if authenticated
+            // Resume auto-sync timer if authenticated and cloud sync is enabled
             Task { @MainActor in
-                if self?.authManager?.isAuthenticated == true {
+                if self?.authManager?.isAuthenticated == true && SettingsManager.shared.isCloudSyncEnabled {
                     // Skip sync if no encryption key is set
                     if !EncryptionService.shared.hasEncryptionKey() {
                         return
@@ -435,7 +439,7 @@ class ChatViewModel: ObservableObject {
                 self?.autoSyncTimer = nil
                 
                 // Do one final sync before going to background
-                if self?.authManager?.isAuthenticated == true {
+                if self?.authManager?.isAuthenticated == true && SettingsManager.shared.isCloudSyncEnabled {
                     if let _ = await self?.cloudSync.syncAllChats() {
                         // Update last sync date
                         self?.lastSyncDate = Date()
@@ -615,11 +619,14 @@ class ChatViewModel: ObservableObject {
             
             // Delete from file storage and cloud
             let userId = currentUserId
+            let chatIsLocalOnly = chats.first(where: { $0.id == id })?.isLocalOnly ?? false
             Task {
                 await Chat.deleteChatFromStorage(chatId: id, userId: userId)
-                do {
-                    try await cloudSync.deleteFromCloud(id)
-                } catch {
+                if SettingsManager.shared.isCloudSyncEnabled && !chatIsLocalOnly {
+                    do {
+                        try await cloudSync.deleteFromCloud(id)
+                    } catch {
+                    }
                 }
             }
         }
@@ -1645,7 +1652,9 @@ class ChatViewModel: ObservableObject {
         let saveTask = pendingSaveTask
         Task { @MainActor in
             await saveTask?.value
-            await self.cloudSync.backupChat(latestChat.id)
+            if SettingsManager.shared.isCloudSyncEnabled && !latestChat.isLocalOnly {
+                await self.cloudSync.backupChat(latestChat.id)
+            }
 
             if let index = self.chats.firstIndex(where: { $0.id == latestChat.id }) {
                 if let syncedChat = await Chat.loadChat(chatId: latestChat.id, userId: self.currentUserId) {
@@ -1816,9 +1825,9 @@ class ChatViewModel: ObservableObject {
             await Chat.saveChat(chat, userId: userId)
         }
 
-        // Trigger cloud backup if the chat has messages and no active stream.
-        // Await pendingSaveTask so the backup reads the latest data from disk.
-        if !chat.messages.isEmpty && !chat.hasActiveStream {
+        // Trigger cloud backup if cloud sync is enabled, the chat is not local-only,
+        // has messages, and no active stream.
+        if SettingsManager.shared.isCloudSyncEnabled && !chat.isLocalOnly && !chat.messages.isEmpty && !chat.hasActiveStream {
             let saveTask = pendingSaveTask
             Task {
                 await saveTask?.value
@@ -2090,11 +2099,23 @@ class ChatViewModel: ObservableObject {
                         self.hasAnonymousChatsToSync = false
                     }
 
-                    // Now proceed with cloud sync regardless of whether key was new or existing
-                    await initializeCloudSync()
-                    
-                    // Sync user profile settings
-                    await ProfileManager.shared.performFullSync()
+                    // Only proceed with cloud sync if cloud sync is enabled
+                    if SettingsManager.shared.isCloudSyncEnabled {
+                        await initializeCloudSync()
+                        
+                        // Sync user profile settings
+                        await ProfileManager.shared.performFullSync()
+                    } else {
+                        // Cloud sync disabled: just load local chats from file storage
+                        let result = await loadFirstPageOfChats(userId: self.currentUserId)
+                        await MainActor.run {
+                            self.chats = result.chats
+                            normalizeChatsArray()
+                            if self.currentChat == nil, let first = self.chats.first {
+                                self.currentChat = first
+                            }
+                        }
+                    }
                     
                     // Update last sync date
                     await MainActor.run {
@@ -2518,6 +2539,11 @@ class ChatViewModel: ObservableObject {
     
     /// Perform a full sync with the cloud
     func performFullSync() async {
+        // Gate sync when cloud sync is disabled
+        if !SettingsManager.shared.isCloudSyncEnabled {
+            return
+        }
+
         // Gate sync until encryption key is set up
         if !EncryptionService.shared.hasEncryptionKey() {
             return
