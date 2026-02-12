@@ -23,7 +23,27 @@ struct ChatSidebar: View {
     @State private var showEncryptedChatAlert: Bool = false
     @State private var selectedEncryptedChat: Chat? = nil
     @State private var shouldOpenCloudSync: Bool = false
-    
+    @ObservedObject private var settings = SettingsManager.shared
+
+    enum ChatSidebarTab: String {
+        case cloud
+        case local
+    }
+    @State private var activeTab: ChatSidebarTab = .cloud
+
+    private var filteredChats: [Chat] {
+        if authManager.isAuthenticated && settings.isCloudSyncEnabled {
+            switch activeTab {
+            case .cloud:
+                return viewModel.chats.filter { !$0.isLocalOnly }
+            case .local:
+                return viewModel.chats.filter { $0.isLocalOnly }
+            }
+        }
+        // When cloud sync is off, all chats are local
+        return viewModel.chats
+    }
+
     // Timer to update relative time strings
     @State private var timeUpdateTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
     @State private var currentTime = Date()
@@ -122,12 +142,20 @@ struct ChatSidebar: View {
                     .fontWeight(.medium)
                     .foregroundColor(.secondary)
 
-                if authManager.isAuthenticated {
-                    Text("Your chats are encrypted and backed up. You can manage your encryption key in Settings.")
+                if !authManager.isAuthenticated {
+                    Text("Log in to save chat history.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else if !settings.isCloudSyncEnabled {
+                    Text("Chats are only stored locally on this device.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else if activeTab == .local {
+                    Text("Local chats are stored only on this device and won't sync across devices.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 } else {
-                    Text("Log in to save chat history.")
+                    Text("Your chats are encrypted and synced to the cloud. The encryption key is only stored on this device and never sent to Tinfoil.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -141,10 +169,17 @@ struct ChatSidebar: View {
                 alignment: .bottom
             )
 
+            // Cloud / Local tab switcher
+            if authManager.isAuthenticated && settings.isCloudSyncEnabled {
+                cloudLocalTabSwitcher
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+            }
+
             // Chat List - shows multiple chats for all authenticated users
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    ForEach(Array(viewModel.chats.enumerated()), id: \.element.id) { index, chat in
+                    ForEach(Array(filteredChats.enumerated()), id: \.element.id) { index, chat in
                         ChatListItem(
                             chat: chat,
                             isSelected: viewModel.currentChat?.id == chat.id,
@@ -288,6 +323,57 @@ struct ChatSidebar: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
     
+    private var cloudLocalTabSwitcher: some View {
+        HStack(spacing: 0) {
+            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { activeTab = .cloud } }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "icloud")
+                        .font(.caption)
+                    Text("Cloud")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(activeTab == .cloud
+                              ? (colorScheme == .dark ? Color(UIColor.systemBackground) : Color.white)
+                              : Color.clear)
+                        .shadow(color: activeTab == .cloud ? Color.black.opacity(0.08) : .clear, radius: 1, y: 1)
+                )
+                .foregroundColor(activeTab == .cloud ? .primary : .secondary)
+            }
+            .buttonStyle(PlainButtonStyle())
+
+            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { activeTab = .local } }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "internaldrive")
+                        .font(.caption)
+                    Text("Local")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(activeTab == .local
+                              ? (colorScheme == .dark ? Color(UIColor.systemBackground) : Color.white)
+                              : Color.clear)
+                        .shadow(color: activeTab == .local ? Color.black.opacity(0.08) : .clear, radius: 1, y: 1)
+                )
+                .foregroundColor(activeTab == .local ? .primary : .secondary)
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(4)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(UIColor.secondarySystemBackground))
+        )
+    }
+
     private func startEditing(_ chat: Chat) {
         editingChatId = chat.id
         editingTitle = chat.title
