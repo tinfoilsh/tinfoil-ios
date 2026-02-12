@@ -1410,10 +1410,14 @@ class ChatViewModel: ObservableObject {
                 }
 
                 // Finalize message content and prepare chat for save
+                // Look up the streaming chat by ID, not self.currentChat, because
+                // the user may have navigated away or toggled sync mid-stream.
                 var finalizedChat: Chat? = await MainActor.run {
                     self.isLoading = false
 
-                    guard var chat = self.currentChat else { return nil }
+                    guard let sid = streamChatId,
+                          let location = self.findChatLocation(sid) else { return nil }
+                    var chat = location.isLocal ? self.localChats[location.index] : self.chats[location.index]
                     chat.hasActiveStream = false
 
                     self.streamUpdateTimer?.invalidate()
@@ -1497,7 +1501,10 @@ class ChatViewModel: ObservableObject {
                     self.webSearchSummary = ""
 
                     // Mark the chat as no longer having an active stream
-                    if var chat = self.currentChat {
+                    // Look up by streamChatId, not self.currentChat, in case user navigated away
+                    if let sid = streamChatId,
+                       let location = self.findChatLocation(sid) {
+                        var chat = location.isLocal ? self.localChats[location.index] : self.chats[location.index]
                         chat.hasActiveStream = false
 
                         // Force any pending stream updates to save immediately
@@ -1515,18 +1522,21 @@ class ChatViewModel: ObservableObject {
                         self.endStreamingAndBackup(chatId: chat.id)
                     }
 
-                    if var chat = self.currentChat,
-                       !chat.messages.isEmpty {
-                        let lastIndex = chat.messages.count - 1
+                    if let sid = streamChatId,
+                       let location = self.findChatLocation(sid) {
+                        var chat = location.isLocal ? self.localChats[location.index] : self.chats[location.index]
+                        if !chat.messages.isEmpty {
+                            let lastIndex = chat.messages.count - 1
 
-                        // Format a more user-friendly error message based on the error type
-                        let userFriendlyError = formatUserFriendlyError(error)
+                            // Format a more user-friendly error message based on the error type
+                            let userFriendlyError = formatUserFriendlyError(error)
 
-                        // Set the stream error - the ErrorMessageView will display it nicely
-                        // Keep any partial content that was received
-                        chat.messages[lastIndex].streamError = userFriendlyError
+                            // Set the stream error - the ErrorMessageView will display it nicely
+                            // Keep any partial content that was received
+                            chat.messages[lastIndex].streamError = userFriendlyError
 
-                        self.updateChat(chat)
+                            self.updateChat(chat)
+                        }
                     }
                 }
             }
