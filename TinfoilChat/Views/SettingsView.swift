@@ -409,6 +409,7 @@ struct SettingsView: View {
                                 }
                             } else {
                                 settings.isCloudSyncEnabled = false
+                                chatViewModel.activeStorageTab = .local
                                 Task {
                                     await chatViewModel.deleteNonLocalChats()
                                 }
