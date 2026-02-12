@@ -257,12 +257,19 @@ class ChatViewModel: ObservableObject {
         // Always create a new chat when the app is loaded initially
         if let auth = authManager, auth.isAuthenticated {
             // Create a temporary blank chat for immediate display
+            let shouldBeLocal = !SettingsManager.shared.isCloudSyncEnabled
             let newChat = Chat.create(
                 modelType: currentModel,
                 language: nil,
-                userId: currentUserId
+                userId: currentUserId,
+                isLocalOnly: shouldBeLocal
             )
-            chats = [newChat]
+            if shouldBeLocal {
+                localChats = [newChat]
+                activeStorageTab = .local
+            } else {
+                chats = [newChat]
+            }
             currentChat = newChat
             
             // Reset pagination state for fresh app start
@@ -724,12 +731,20 @@ class ChatViewModel: ObservableObject {
         return nil
     }
 
-    /// Replaces a chat in whichever array (localChats or chats) it belongs to
+    /// Replaces a chat in whichever array (localChats or chats) it belongs to.
+    /// If the chat isn't in either array, inserts it into the appropriate one.
     private func replaceChat(_ updatedChat: Chat) {
         if let index = localChats.firstIndex(where: { $0.id == updatedChat.id }) {
             localChats[index] = updatedChat
         } else if let index = chats.firstIndex(where: { $0.id == updatedChat.id }) {
             chats[index] = updatedChat
+        } else if !updatedChat.isBlankChat {
+            // Chat not in either array — insert into the appropriate one
+            if updatedChat.isLocalOnly || !SettingsManager.shared.isCloudSyncEnabled {
+                localChats.insert(updatedChat, at: min(1, localChats.count))
+            } else {
+                chats.insert(updatedChat, at: min(1, chats.count))
+            }
         }
     }
 
@@ -2273,8 +2288,10 @@ class ChatViewModel: ObservableObject {
                             self.localChats = allChats
                             self.chats = []
                             self.hasMoreChats = false
+                            self.activeStorageTab = .local
                             normalizeLocalChatsArray()
-                            if self.currentChat == nil, let first = self.localChats.first {
+                            // Always select a local chat — currentChat may be an orphan from init
+                            if let first = self.localChats.first {
                                 self.currentChat = first
                             }
                         }
