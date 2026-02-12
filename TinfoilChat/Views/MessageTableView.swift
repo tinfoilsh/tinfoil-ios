@@ -16,6 +16,7 @@ struct MessageTableView: UIViewRepresentable {
     @Binding var isAtBottom: Bool
     @Binding var userHasScrolled: Bool
     let scrollTrigger: UUID
+    let scrollToUserTrigger: UUID
     @Binding var tableOpacity: Double
     let keyboardHeight: CGFloat
 
@@ -174,6 +175,7 @@ struct MessageTableView: UIViewRepresentable {
 
             DispatchQueue.main.async {
                 UIView.performWithoutAnimation {
+                    context.coordinator.isUserMessageScrollMode = false
                     let currentOffset = tableView.contentOffset.y
                     context.coordinator.updateContentInset()
                     tableView.layoutIfNeeded()
@@ -182,9 +184,33 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
+        if context.coordinator.lastScrollToUserTrigger != scrollToUserTrigger {
+            context.coordinator.lastScrollToUserTrigger = scrollToUserTrigger
+            context.coordinator.shouldScrollToUserMessageAfterLayout = true
+            context.coordinator.shouldScrollToBottomAfterLayout = false
+            context.coordinator.isUserMessageScrollMode = true
+
+            DispatchQueue.main.async {
+                context.coordinator.scrollToUserMessage(animated: false)
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    if context.coordinator.shouldScrollToUserMessageAfterLayout {
+                        context.coordinator.scrollToUserMessage(animated: false)
+                        context.coordinator.shouldScrollToUserMessageAfterLayout = false
+
+                        withAnimation(.easeIn(duration: 0.2)) {
+                            self.tableOpacity = 1.0
+                        }
+                    }
+                }
+            }
+        }
+
         if context.coordinator.lastScrollTrigger != scrollTrigger {
             context.coordinator.lastScrollTrigger = scrollTrigger
             context.coordinator.shouldScrollToBottomAfterLayout = true
+            context.coordinator.shouldScrollToUserMessageAfterLayout = false
+            context.coordinator.isUserMessageScrollMode = false
 
             DispatchQueue.main.async {
                 context.coordinator.scrollToBottom(animated: false)
@@ -215,6 +241,7 @@ struct MessageTableView: UIViewRepresentable {
         var parent: MessageTableView
         weak var tableView: UITableView?
         var lastScrollTrigger: UUID?
+        var lastScrollToUserTrigger: UUID?
         var lastMessageCount: Int = 0
         var lastIsLoading: Bool = false
         var cellReuseIdentifierSuffix: String = ""
@@ -225,6 +252,10 @@ struct MessageTableView: UIViewRepresentable {
         private var isDragging = false
         var messageWrappers: [String: ObservableMessageWrapper] = [:]
         var shouldScrollToBottomAfterLayout = false
+        var shouldScrollToUserMessageAfterLayout = false
+        /// Stays true while streaming after user sent a message, adjusting the
+        /// bottom inset so the user message can be scrolled to the top of the screen.
+        var isUserMessageScrollMode = false
         var heightCache: [IndexPath: CGFloat] = [:]
         var shownMessageIds: Set<String> = []
 
@@ -336,6 +367,20 @@ struct MessageTableView: UIViewRepresentable {
                     }
                 }
             }
+
+            if shouldScrollToUserMessageAfterLayout {
+                let numberOfRows = tableView.numberOfRows(inSection: 0)
+                if indexPath.row == numberOfRows - 1 {
+                    DispatchQueue.main.async {
+                        self.scrollToUserMessage(animated: false)
+                        self.shouldScrollToUserMessageAfterLayout = false
+
+                        withAnimation(.easeIn(duration: 0.2)) {
+                            self.parent.tableOpacity = 1.0
+                        }
+                    }
+                }
+            }
         }
 
         func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
@@ -357,8 +402,16 @@ struct MessageTableView: UIViewRepresentable {
                 let screenHeight = UIScreen.main.bounds.height
                 let bufferHeight = screenHeight * wrapper.bufferMultiplier
                 let unusedBuffer = bufferHeight - wrapper.actualContentHeight
+                let streamingInset = -max(0, unusedBuffer)
 
-                targetInset = -max(0, unusedBuffer)
+                if isUserMessageScrollMode {
+                    let userMessageInset = insetForUserMessageAtTop(tableView)
+                    targetInset = max(streamingInset, userMessageInset)
+                } else {
+                    targetInset = streamingInset
+                }
+            } else if parent.isLoading && isUserMessageScrollMode {
+                targetInset = insetForUserMessageAtTop(tableView)
             } else {
                 targetInset = 0
             }
@@ -371,11 +424,22 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
+        /// Returns the minimum bottom inset that allows the user message row
+        /// (second-to-last) to be scrolled to the top of the visible area.
+        private func insetForUserMessageAtTop(_ tableView: UITableView) -> CGFloat {
+            let numberOfRows = tableView.numberOfRows(inSection: 0)
+            guard numberOfRows >= 2 else { return 0 }
+            let userMessageIndexPath = IndexPath(row: numberOfRows - 2, section: 0)
+            let userMessageY = tableView.rectForRow(at: userMessageIndexPath).origin.y
+            return userMessageY + tableView.bounds.height - tableView.contentSize.height
+        }
+
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
             isDragging = true
             parent.userHasScrolled = true
             parent.viewModel.isScrollInteractionActive = true
             shouldScrollToBottomAfterLayout = false
+            shouldScrollToUserMessageAfterLayout = false
 
             UIView.animate(withDuration: 0.3) {
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -408,6 +472,23 @@ struct MessageTableView: UIViewRepresentable {
 
             let lastIndexPath = IndexPath(row: numberOfRows - 1, section: 0)
             tableView.scrollToRow(at: lastIndexPath, at: .bottom, animated: animated)
+        }
+
+        /// Scrolls so the user's message sits at the top of the visible area,
+        /// with the assistant response streaming in below it.
+        func scrollToUserMessage(animated: Bool) {
+            guard let tableView = tableView else { return }
+
+            let numberOfRows = tableView.numberOfRows(inSection: 0)
+            guard numberOfRows >= 2 else {
+                scrollToBottom(animated: animated)
+                return
+            }
+
+            updateContentInset()
+
+            let userMessageIndexPath = IndexPath(row: numberOfRows - 2, section: 0)
+            tableView.scrollToRow(at: userMessageIndexPath, at: .top, animated: animated)
         }
 
         func checkIfAtBottom() {

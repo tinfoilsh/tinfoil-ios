@@ -20,6 +20,7 @@ struct ChatListView: View {
     @State private var isKeyboardVisible = false
     @State private var keyboardHeight: CGFloat = 0
     @State private var scrollTrigger = UUID()
+    @State private var scrollToUserTrigger = UUID()
     @State private var tableOpacity = 1.0
 
     private var messages: [Message] {
@@ -40,6 +41,7 @@ struct ChatListView: View {
             isAtBottom: $isAtBottom,
             userHasScrolled: $userHasScrolled,
             scrollTrigger: scrollTrigger,
+            scrollToUserTrigger: scrollToUserTrigger,
             tableOpacity: $tableOpacity,
             keyboardHeight: keyboardHeight
         )
@@ -110,7 +112,11 @@ struct ChatListView: View {
                 if hasUserMessage || wasInitialLoad {
                     userHasScrolled = false
                     viewModel.isScrollInteractionActive = false
-                    scrollTrigger = UUID()
+                    if hasUserMessage && viewModel.isLoading {
+                        scrollToUserTrigger = UUID()
+                    } else {
+                        scrollTrigger = UUID()
+                    }
                 }
             }
         }
