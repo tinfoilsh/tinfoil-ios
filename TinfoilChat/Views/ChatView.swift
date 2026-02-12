@@ -31,6 +31,7 @@ struct ChatContainer: View {
     @State private var lastBackgroundTime: Date?
     @State private var shouldCreateNewChatAfterSubscription = false
     @State private var showPremiumModal = false
+    @State private var isVerificationBadgeExpanded = false
     
     // Sidebar constants
     private let sidebarWidth: CGFloat = 300
@@ -213,14 +214,15 @@ struct ChatContainer: View {
 
                     if authManager.isAuthenticated {
                         chatStorageLabel
-                            .opacity(isSidebarOpen ? 0 : 1)
+                            .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
                     }
                 }
                 .animation(.easeInOut(duration: 0.2), value: isSidebarOpen)
+                .animation(.easeInOut(duration: 0.35), value: isVerificationBadgeExpanded)
             }
             if authManager.isAuthenticated {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    VerificationStatusIndicator(viewModel: viewModel)
+                    VerificationStatusIndicator(viewModel: viewModel, isBadgeExpanded: $isVerificationBadgeExpanded)
                 }
             }
             // Only show new chat button when chat has messages (not a new/blank chat)
@@ -817,6 +819,7 @@ extension View {
 /// Verification status indicator for the navigation bar
 struct VerificationStatusIndicator: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
+    @Binding var isBadgeExpanded: Bool
     @State private var isCollapsed = false
     @State private var collapseTask: Task<Void, Never>?
 
@@ -873,26 +876,31 @@ struct VerificationStatusIndicator: View {
         }
         .onAppear {
             if viewModel.isVerified && viewModel.verificationError == nil {
+                isBadgeExpanded = true
                 collapseTask?.cancel()
                 collapseTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: UInt64(Constants.Verification.collapseDelaySeconds * 1_000_000_000))
                     guard !Task.isCancelled else { return }
                     isCollapsed = true
+                    isBadgeExpanded = false
                 }
             }
         }
         .onChange(of: viewModel.isVerified) { _, isVerified in
             if isVerified && viewModel.verificationError == nil {
+                isBadgeExpanded = true
                 collapseTask?.cancel()
                 collapseTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: UInt64(Constants.Verification.collapseDelaySeconds * 1_000_000_000))
                     guard !Task.isCancelled else { return }
                     isCollapsed = true
+                    isBadgeExpanded = false
                 }
             }
         }
         .onChange(of: viewModel.isVerifying) { _, isVerifying in
             if isVerifying {
+                isBadgeExpanded = true
                 collapseTask?.cancel()
                 collapseTask = nil
                 isCollapsed = false
