@@ -23,12 +23,18 @@ struct ChatIndexEntry: Codable, Identifiable, Equatable {
     var syncVersion: Int
     var syncedAt: Date?
     var locallyModified: Bool
+    var isLocalOnly: Bool
     var userId: String?
     var language: String?
 
     /// Whether this entry represents a chat worth showing in the sidebar
     var isDisplayable: Bool {
         projectId == nil && (messageCount > 0 || decryptionFailed || titleState != .placeholder)
+    }
+
+    /// Whether this entry is a cloud-synced (non-local) displayable chat
+    var isCloudDisplayable: Bool {
+        isDisplayable && !isLocalOnly
     }
 
     init(from chat: Chat) {
@@ -46,6 +52,7 @@ struct ChatIndexEntry: Codable, Identifiable, Equatable {
         self.syncVersion = chat.syncVersion
         self.syncedAt = chat.syncedAt
         self.locallyModified = chat.locallyModified
+        self.isLocalOnly = chat.isLocalOnly
         self.userId = chat.userId
         self.language = chat.language
     }
