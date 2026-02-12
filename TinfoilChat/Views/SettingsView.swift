@@ -757,6 +757,10 @@ struct SettingsView: View {
                 Task {
                     do {
                         settings.isCloudSyncEnabled = false
+                        EncryptionService.shared.clearKey()
+                        chatViewModel.clearAllLocalChats()
+                        settings.clearPersonalization()
+                        ProfileManager.shared.clearProfile()
                         try await clerk.user?.delete()
                         await authManager.signOut()
                         dismiss()
