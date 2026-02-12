@@ -1208,6 +1208,15 @@ class CloudSyncService: ObservableObject {
     private func performReencryption(for chat: StoredChat, persistLocal: Bool) async {
         guard await cloudStorage.isAuthenticated() else { return }
 
+        // Skip local-only chats — check the on-disk index since StoredChat doesn't carry isLocalOnly
+        let userId = await getCurrentUserId()
+        if let userId = userId,
+           let index = try? await EncryptedFileStorage.shared.loadIndex(userId: userId),
+           let entry = index.first(where: { $0.id == chat.id }),
+           entry.isLocalOnly {
+            return
+        }
+
         // Ensure encryption service is initialized with the current default key
         _ = try? await encryptionService.initialize()
 
