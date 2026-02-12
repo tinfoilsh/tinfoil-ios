@@ -87,6 +87,13 @@ class SettingsManager: ObservableObject {
         }
     }
 
+    // Cloud sync toggle
+    @Published var isCloudSyncEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isCloudSyncEnabled, forKey: Constants.CloudSync.enabledKey)
+        }
+    }
+
     // Available personality traits
     let availableTraits = [
         "witty", "encouraging", "formal", "casual", "analytical", "creative",
@@ -125,6 +132,17 @@ class SettingsManager: ObservableObject {
 
         // Initialize web search setting
         self.webSearchEnabled = UserDefaults.standard.object(forKey: "webSearchEnabled") as? Bool ?? false
+
+        // Initialize cloud sync setting
+        // If no explicit value has been stored, auto-enable for existing users who already have an encryption key
+        if let storedValue = UserDefaults.standard.object(forKey: Constants.CloudSync.enabledKey) as? Bool {
+            self.isCloudSyncEnabled = storedValue
+        } else if EncryptionService.shared.hasEncryptionKey() {
+            self.isCloudSyncEnabled = true
+            UserDefaults.standard.set(true, forKey: Constants.CloudSync.enabledKey)
+        } else {
+            self.isCloudSyncEnabled = false
+        }
 
         // Ensure defaults are saved if they weren't present
         if UserDefaults.standard.object(forKey: "hapticFeedbackEnabled") == nil {
@@ -219,6 +237,7 @@ struct SettingsView: View {
     @State private var showLanguagePicker = false
     @State private var showSignOutConfirmation = false
     @State private var showPremiumModal = false
+    @State private var showCloudSyncOnboarding = false
     
     var shouldOpenCloudSync: Bool = false
     
@@ -375,13 +394,40 @@ struct SettingsView: View {
             }
 
             if authManager.isAuthenticated {
-                NavigationLink {
-                    CloudSyncSettingsView(
-                        viewModel: chatViewModel,
-                        authManager: authManager
-                    )
-                } label: {
-                    Text("Cloud Sync")
+                HStack {
+                    Toggle("Cloud Sync", isOn: Binding(
+                        get: { settings.isCloudSyncEnabled },
+                        set: { newValue in
+                            if newValue {
+                                if EncryptionService.shared.hasEncryptionKey() {
+                                    settings.isCloudSyncEnabled = true
+                                    Task {
+                                        await chatViewModel.performFullSync()
+                                    }
+                                } else {
+                                    showCloudSyncOnboarding = true
+                                }
+                            } else {
+                                settings.isCloudSyncEnabled = false
+                                Task {
+                                    await chatViewModel.deleteNonLocalChats()
+                                }
+                            }
+                        }
+                    ))
+                    .tint(Color.accentPrimary)
+
+                    if settings.isCloudSyncEnabled {
+                        NavigationLink {
+                            CloudSyncSettingsView(
+                                viewModel: chatViewModel,
+                                authManager: authManager
+                            )
+                        } label: {
+                            EmptyView()
+                        }
+                        .frame(width: 20)
+                    }
                 }
             }
         } header: {
@@ -745,6 +791,25 @@ struct SettingsView: View {
                         await authManager.fetchSubscriptionStatus()
                     }
                 }
+        }
+        .sheet(isPresented: $showCloudSyncOnboarding) {
+            CloudSyncOnboardingView(
+                onSetupComplete: { key in
+                    Task {
+                        do {
+                            try await chatViewModel.setEncryptionKey(key)
+                            chatViewModel.handleSignIn()
+                        } catch {
+                            #if DEBUG
+                            print("Failed to set encryption key from onboarding: \(error)")
+                            #endif
+                        }
+                    }
+                },
+                onDismissWithoutSetup: {
+                    settings.isCloudSyncEnabled = false
+                }
+            )
         }
     }
     
