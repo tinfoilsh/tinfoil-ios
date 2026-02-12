@@ -16,6 +16,7 @@ import AVFoundation
 class ChatViewModel: ObservableObject {
     // Published properties for UI updates
     @Published var chats: [Chat] = []
+    @Published var localChats: [Chat] = []
     @Published var currentChat: Chat?
     @Published var isLoading: Bool = false
     @Published var thinkingSummary: String = ""
@@ -541,7 +542,7 @@ class ChatViewModel: ObservableObject {
     // MARK: - Public Methods
     
     /// Creates a new chat and sets it as the current chat
-    func createNewChat(language: String? = nil, modelType: ModelType? = nil) {
+    func createNewChat(language: String? = nil, modelType: ModelType? = nil, isLocalOnly: Bool? = nil) {
         // Allow creating new chats for all authenticated users
         guard hasChatAccess else { return }
         
@@ -549,30 +550,39 @@ class ChatViewModel: ObservableObject {
         if isLoading {
             cancelGeneration()
         }
-        
-        // Check if we already have a blank chat at the top
-        if let firstChat = chats.first, firstChat.isBlankChat {
-            // Just select the existing blank chat
-            selectChat(firstChat)
-            shouldFocusInput = true
-            return
+
+        let shouldBeLocal = isLocalOnly ?? !SettingsManager.shared.isCloudSyncEnabled
+
+        // Check if we already have a blank chat in the target list
+        if shouldBeLocal {
+            if let existing = localChats.first(where: { $0.isBlankChat }) {
+                selectChat(existing)
+                shouldFocusInput = true
+                return
+            }
+        } else {
+            if let existing = chats.first(where: { $0.isBlankChat }) {
+                selectChat(existing)
+                shouldFocusInput = true
+                return
+            }
         }
         
         // Create new chat with temporary ID (instant, no network call)
-        // The chat will automatically be blank (no messages) and have a temporary ID (UUID)
         let newChat = Chat.create(
             modelType: modelType ?? currentModel,
             language: language,
             userId: currentUserId,
-            isLocalOnly: !SettingsManager.shared.isCloudSyncEnabled
+            isLocalOnly: shouldBeLocal
         )
-        
-        chats.insert(newChat, at: 0)
+
+        if shouldBeLocal {
+            localChats.insert(newChat, at: 0)
+        } else {
+            chats.insert(newChat, at: 0)
+        }
         selectChat(newChat)
         shouldFocusInput = true
-        
-        // Preserve pagination state - adding a blank chat doesn't affect whether more chats are available
-        // The hasMoreChats flag should remain unchanged
     }
     
     /// Selects a chat as the current chat
@@ -582,13 +592,20 @@ class ChatViewModel: ObservableObject {
             cancelGeneration()
         }
 
-        // Find the most up-to-date version of the chat in the chats array
+        // Find the most up-to-date version of the chat in both arrays
         let chatToSelect: Chat
-        if let index = chats.firstIndex(where: { $0.id == chat.id }) {
-            chatToSelect = chats[index]
+        if chat.isLocalOnly {
+            if let index = localChats.firstIndex(where: { $0.id == chat.id }) {
+                chatToSelect = localChats[index]
+            } else {
+                chatToSelect = chat
+                localChats.append(chatToSelect)
+            }
         } else {
-            chatToSelect = chat
-            if !chats.contains(where: { $0.id == chat.id }) {
+            if let index = chats.firstIndex(where: { $0.id == chat.id }) {
+                chatToSelect = chats[index]
+            } else {
+                chatToSelect = chat
                 chats.append(chatToSelect)
             }
         }
@@ -605,55 +622,97 @@ class ChatViewModel: ObservableObject {
     func deleteChat(_ id: String) {
         // Allow deleting chats for all authenticated users
         guard hasChatAccess else { return }
-        
-        if let index = chats.firstIndex(where: { $0.id == id }) {
-            let deletedChat = chats.remove(at: index)
-            
-            // Mark as deleted for cloud sync
-            DeletedChatsTracker.shared.markAsDeleted(id)
-            
-            // If the deleted chat was the current chat, select another one
-            if currentChat?.id == deletedChat.id {
-                currentChat = chats.first
-            }
-            
-            // Delete from file storage and cloud
-            let userId = currentUserId
-            let chatIsLocalOnly = chats.first(where: { $0.id == id })?.isLocalOnly ?? false
-            Task {
-                await Chat.deleteChatFromStorage(chatId: id, userId: userId)
-                if SettingsManager.shared.isCloudSyncEnabled && !chatIsLocalOnly {
-                    do {
-                        try await cloudSync.deleteFromCloud(id)
-                    } catch {
-                    }
+
+        let isLocal: Bool
+
+        if let index = localChats.firstIndex(where: { $0.id == id }) {
+            localChats.remove(at: index)
+            isLocal = true
+        } else if let index = chats.firstIndex(where: { $0.id == id }) {
+            chats.remove(at: index)
+            isLocal = false
+        } else {
+            return
+        }
+
+        // Mark as deleted for cloud sync
+        DeletedChatsTracker.shared.markAsDeleted(id)
+
+        // If the deleted chat was the current chat, select another one
+        if currentChat?.id == id {
+            let activeList = isLocal ? localChats : chats
+            currentChat = activeList.first
+        }
+
+        // Delete from file storage and cloud
+        let userId = currentUserId
+        Task {
+            await Chat.deleteChatFromStorage(chatId: id, userId: userId)
+            if !isLocal && SettingsManager.shared.isCloudSyncEnabled {
+                do {
+                    try await cloudSync.deleteFromCloud(id)
+                } catch {
                 }
             }
         }
     }
     
+    /// Finds a chat by ID in localChats or chats and returns (inout reference via index, array identity)
+    private func findChatLocation(_ id: String) -> (isLocal: Bool, index: Int)? {
+        if let index = localChats.firstIndex(where: { $0.id == id }) {
+            return (isLocal: true, index: index)
+        }
+        if let index = chats.firstIndex(where: { $0.id == id }) {
+            return (isLocal: false, index: index)
+        }
+        return nil
+    }
+
+    /// Updates a chat in whichever array it belongs to
+    @discardableResult
+    private func updateChatInPlace(_ id: String, update: (inout Chat) -> Void) -> Chat? {
+        if let index = localChats.firstIndex(where: { $0.id == id }) {
+            update(&localChats[index])
+            let updated = localChats[index]
+            if currentChat?.id == id { currentChat = updated }
+            return updated
+        }
+        if let index = chats.firstIndex(where: { $0.id == id }) {
+            update(&chats[index])
+            let updated = chats[index]
+            if currentChat?.id == id { currentChat = updated }
+            return updated
+        }
+        return nil
+    }
+
+    /// Replaces a chat in whichever array (localChats or chats) it belongs to
+    private func replaceChat(_ updatedChat: Chat) {
+        if let index = localChats.firstIndex(where: { $0.id == updatedChat.id }) {
+            localChats[index] = updatedChat
+        } else if let index = chats.firstIndex(where: { $0.id == updatedChat.id }) {
+            chats[index] = updatedChat
+        }
+    }
+
     /// Updates a chat's title
     func updateChatTitle(_ id: String, newTitle: String) {
         // Allow updating chat titles for all authenticated users
         guard hasChatAccess else { return }
-        
-        if let index = chats.firstIndex(where: { $0.id == id }) {
-            var updatedChat = chats[index]
+
+        if let updated = updateChatInPlace(id, update: { chat in
             let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
-                updatedChat.title = Chat.placeholderTitle
-                updatedChat.titleState = .placeholder
+                chat.title = Chat.placeholderTitle
+                chat.titleState = .placeholder
             } else {
-                updatedChat.title = trimmed
-                updatedChat.titleState = .manual
+                chat.title = trimmed
+                chat.titleState = .manual
             }
-            updatedChat.locallyModified = true
-            updatedChat.updatedAt = Date()
-            chats[index] = updatedChat
-            if currentChat?.id == id {
-                currentChat = updatedChat
-            }
-            saveChat(updatedChat)
+            chat.locallyModified = true
+            chat.updatedAt = Date()
+        }) {
+            saveChat(updated)
         }
     }
 
@@ -1544,11 +1603,9 @@ class ChatViewModel: ObservableObject {
         updatedChat.locallyModified = true
         updatedChat.updatedAt = Date()
 
-        // Update both currentChat and chats array directly
+        // Update both currentChat and the appropriate array
         currentChat = updatedChat
-        if let index = chats.firstIndex(where: { $0.id == chat.id }) {
-            chats[index] = updatedChat
-        }
+        replaceChat(updatedChat)
 
         // Save and generate response (without adding user message again)
         saveChat(updatedChat)
@@ -1577,11 +1634,9 @@ class ChatViewModel: ObservableObject {
         updatedChat.locallyModified = true
         updatedChat.updatedAt = Date()
 
-        // Update both currentChat and chats array directly
+        // Update both currentChat and the appropriate array
         currentChat = updatedChat
-        if let index = chats.firstIndex(where: { $0.id == chat.id }) {
-            chats[index] = updatedChat
-        }
+        replaceChat(updatedChat)
 
         saveChat(updatedChat)
 
@@ -1614,9 +1669,7 @@ class ChatViewModel: ObservableObject {
         updatedChat.updatedAt = Date()
 
         currentChat = updatedChat
-        if let index = chats.firstIndex(where: { $0.id == chat.id }) {
-            chats[index] = updatedChat
-        }
+        replaceChat(updatedChat)
 
         isScrollInteractionActive = false
         scrollToBottomTrigger = UUID()
@@ -1713,10 +1766,45 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Normalizes the localChats array: deduplicates and ensures one blank chat at top
+    private func normalizeLocalChatsArray() {
+        let wasCurrentChatBlank = currentChat?.isBlankChat == true
+
+        var normalized = localChats.filter { !$0.isBlankChat }
+        var seenIds = Set<String>()
+        normalized = normalized.filter { chat in
+            if seenIds.contains(chat.id) { return false }
+            seenIds.insert(chat.id)
+            return true
+        }
+
+        var newBlankChat: Chat?
+        if hasChatAccess {
+            let blankChat = Chat.create(
+                modelType: currentModel,
+                language: nil,
+                userId: currentUserId,
+                isLocalOnly: true
+            )
+            normalized.insert(blankChat, at: 0)
+            newBlankChat = blankChat
+        }
+
+        localChats = normalized
+
+        if wasCurrentChatBlank, let newBlankChat = newBlankChat {
+            currentChat = newBlankChat
+        }
+    }
+
     /// Ensures there's always a blank chat at the top of the list
     /// This now simply calls normalizeChatsArray() for consistency
     private func ensureBlankChatAtTop() {
-        normalizeChatsArray()
+        if SettingsManager.shared.isCloudSyncEnabled {
+            normalizeChatsArray()
+        } else {
+            normalizeLocalChatsArray()
+        }
     }
 
     /// Persist the collapse state for a message's thinking box
@@ -1763,8 +1851,9 @@ class ChatViewModel: ObservableObject {
             updatedChat.updatedAt = Date()
         }
         
-        if let index = chats.firstIndex(where: { $0.id == chat.id }) {
-            chats[index] = updatedChat
+        replaceChat(updatedChat)
+        let chatFound = localChats.contains(where: { $0.id == chat.id }) || chats.contains(where: { $0.id == chat.id })
+        if chatFound {
             // Update currentChat directly ONLY IF it's the one being updated
             if currentChat?.id == chat.id {
                 currentChat = updatedChat
@@ -1795,7 +1884,11 @@ class ChatViewModel: ObservableObject {
             }
         } else {
             // Chat not found in array - this shouldn't happen but handle it
-            chats.insert(updatedChat, at: 0)
+            if updatedChat.isLocalOnly {
+                localChats.insert(updatedChat, at: 0)
+            } else {
+                chats.insert(updatedChat, at: 0)
+            }
 
             // Update currentChat if it's the one being updated
             if currentChat?.id == chat.id {
@@ -1971,6 +2064,7 @@ class ChatViewModel: ObservableObject {
     func clearAllLocalChats() {
         // Clear all chats from memory
         chats.removeAll()
+        localChats.removeAll()
         currentChat = nil
         
         // Clear from file storage
@@ -2023,7 +2117,7 @@ class ChatViewModel: ObservableObject {
             loadPersistedPaginationState()
             
             // Check if we have any anonymous chats to migrate
-            let anonymousChats = chats.filter { chat in
+            let anonymousChats = (chats + localChats).filter { chat in
                 chat.userId == nil && !chat.messages.isEmpty
             }
             
@@ -2036,10 +2130,7 @@ class ChatViewModel: ObservableObject {
                     chat.userId = userId
                     chat.locallyModified = true
                     chat.syncVersion = 0  // Reset sync version to force upload
-                    // Update in our chats array
-                    if let index = chats.firstIndex(where: { $0.id == chat.id }) {
-                        chats[index] = chat
-                    }
+                    replaceChat(chat)
                     saveChat(chat)
                 }
                 
@@ -2099,6 +2190,13 @@ class ChatViewModel: ObservableObject {
                         self.hasAnonymousChatsToSync = false
                     }
 
+                    // Always load all local chats (they're on device, no pagination needed)
+                    let allLocal = await loadAllLocalChats(userId: self.currentUserId)
+                        .filter { $0.isLocalOnly }
+                    await MainActor.run {
+                        self.localChats = allLocal
+                    }
+
                     // Only proceed with cloud sync if cloud sync is enabled
                     if SettingsManager.shared.isCloudSyncEnabled {
                         await initializeCloudSync()
@@ -2106,12 +2204,14 @@ class ChatViewModel: ObservableObject {
                         // Sync user profile settings
                         await ProfileManager.shared.performFullSync()
                     } else {
-                        // Cloud sync disabled: just load local chats from file storage
-                        let result = await loadFirstPageOfChats(userId: self.currentUserId)
+                        // Cloud sync disabled: load all local chats (no pagination needed)
+                        let allChats = await loadAllLocalChats(userId: self.currentUserId)
                         await MainActor.run {
-                            self.chats = result.chats
-                            normalizeChatsArray()
-                            if self.currentChat == nil, let first = self.chats.first {
+                            self.localChats = allChats
+                            self.chats = []
+                            self.hasMoreChats = false
+                            normalizeLocalChatsArray()
+                            if self.currentChat == nil, let first = self.localChats.first {
                                 self.currentChat = first
                             }
                         }
@@ -2124,10 +2224,10 @@ class ChatViewModel: ObservableObject {
                     
                     // After sync completes, ensure we have proper chat setup
                     await MainActor.run {
-                        if self.chats.isEmpty {
+                        let activeList = SettingsManager.shared.isCloudSyncEnabled ? self.chats : self.localChats
+                        if activeList.isEmpty {
                             self.createNewChat()
                         } else {
-                            // Ensure there's a blank chat at the top
                             self.ensureBlankChatAtTop()
                         }
                         self.isSignInInProgress = false
@@ -2149,23 +2249,24 @@ class ChatViewModel: ObservableObject {
     
     // MARK: - Cloud Sync Methods
 
-    /// Removes all non-local (cloud-synced) chats from the device
+    /// Removes all cloud (non-local) chats from the device
     @MainActor
     func deleteNonLocalChats() async {
-        let cloudChats = chats.filter { !$0.isLocalOnly }
-        for chat in cloudChats {
+        let cloudChatsCopy = chats
+        for chat in cloudChatsCopy {
             await Chat.deleteChatFromStorage(chatId: chat.id, userId: currentUserId)
         }
-        chats.removeAll { !$0.isLocalOnly }
-        // If the current chat was a cloud chat, switch to the first remaining or create a new local one
+        chats = []
+        hasMoreChats = false
+        paginationToken = nil
+        // If the current chat was a cloud chat, switch to a local one
         if let current = currentChat, !current.isLocalOnly {
-            if let first = chats.first {
+            if let first = localChats.first {
                 currentChat = first
             } else {
                 createNewChat()
             }
         }
-        objectWillChange.send()
     }
 
     /// Initialize cloud sync when user signs in
@@ -2180,7 +2281,7 @@ class ChatViewModel: ObservableObject {
             // Perform sync
             let _ = await cloudSync.syncAllChats()
             
-            // Load and display synced chats from file index
+            // Load and display synced chats from file index (cloud chats, paginated)
             let result = await loadFirstPageOfChats(
                 userId: currentUserId,
                 filter: \.isDisplayable
@@ -2329,6 +2430,13 @@ class ChatViewModel: ObservableObject {
     /// Loads the first page of chats from file storage, sorted newest-first.
     /// Returns the loaded chats and the total number of matching index entries
     /// (useful for determining whether more pages exist).
+    /// Loads ALL chats from local file storage (no pagination). Used when cloud sync is disabled.
+    private func loadAllLocalChats(userId: String?) async -> [Chat] {
+        guard let userId = userId else { return [] }
+        return await Chat.loadAllChats(userId: userId)
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
     private func loadFirstPageOfChats(
         userId: String?,
         excluding excludedIds: Set<String> = [],

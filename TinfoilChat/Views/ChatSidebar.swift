@@ -35,13 +35,13 @@ struct ChatSidebar: View {
         if authManager.isAuthenticated && settings.isCloudSyncEnabled {
             switch activeTab {
             case .cloud:
-                return viewModel.chats.filter { !$0.isLocalOnly }
+                return viewModel.chats
             case .local:
-                return viewModel.chats.filter { $0.isLocalOnly }
+                return viewModel.localChats
             }
         }
         // When cloud sync is off, all chats are local
-        return viewModel.chats
+        return viewModel.localChats
     }
 
     // Timer to update relative time strings
@@ -88,8 +88,8 @@ struct ChatSidebar: View {
             Button("Delete", role: .destructive) {
                 if let id = deletingChatId {
                     viewModel.deleteChat(id)
-                    if viewModel.chats.isEmpty {
-                        viewModel.createNewChat()
+                    if filteredChats.isEmpty {
+                        viewModel.createNewChat(isLocalOnly: activeTab == .local || !settings.isCloudSyncEnabled)
                     }
                 }
                 deletingChatId = nil
@@ -210,8 +210,8 @@ struct ChatSidebar: View {
                         )
                     }
                     
-                    // Load More button or loading indicator
-                    if viewModel.hasMoreChats {
+                    // Load More button or loading indicator (cloud tab only — local chats are never paginated)
+                    if viewModel.hasMoreChats && activeTab != .local {
                         if viewModel.isLoadingMore {
                             HStack {
                                 ProgressView()
