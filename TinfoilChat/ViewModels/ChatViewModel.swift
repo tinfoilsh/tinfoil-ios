@@ -2079,6 +2079,10 @@ class ChatViewModel: ObservableObject {
     
     /// Handle sign-out by clearing current chats but preserving them in storage
     func handleSignOut() {
+        // Allow a new sign-in flow after sign-out
+        isSignInInProgress = false
+        hasPerformedInitialSync = false
+
         // Stop auto-sync timer when signing out
         autoSyncTimer?.invalidate()
         autoSyncTimer = nil
