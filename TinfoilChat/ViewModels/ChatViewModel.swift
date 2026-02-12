@@ -56,15 +56,12 @@ class ChatViewModel: ObservableObject {
     private var encryptionKey: String?  // Keep private for security
     @Published var isFirstTimeUser: Bool = false
     @Published var showEncryptionSetup: Bool = false
-    @Published var showMigrationPrompt: Bool = false
-    @Published var userAgreedToMigrateLegacy: Bool = false
     @Published var shouldShowKeyImport: Bool = false
     private let cloudSync = CloudSyncService.shared
     private let streamingTracker = StreamingTracker.shared
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
     private var hasPerformedInitialSync: Bool = false  // Track if initial sync has been done
     private var hasAnonymousChatsToSync: Bool = false  // Track if we have anonymous chats to sync
-    private var isMigrationDecisionPending: Bool = false
     
     // Pagination properties
     @Published var isLoadingMore: Bool = false
@@ -280,15 +277,6 @@ class ChatViewModel: ObservableObject {
         // Setup network status observer for automatic retry on reconnection
         setupNetworkStatusObserver()
 
-        // If app opens and user is already signed in, check legacy data immediately
-        if authManager?.isAuthenticated == true {
-            if CloudMigrationService.shared.isMigrationNeeded(userId: currentUserId) {
-                // Gate all sync until the user decides
-                self.isMigrationDecisionPending = true
-                self.showMigrationPrompt = true
-            }
-        }
-
         // Initial sync will be triggered when authManager is set (see authManager didSet)
 
         // Setup Tinfoil client immediately
@@ -322,11 +310,6 @@ class ChatViewModel: ObservableObject {
         // Invalidate existing timer if any
         autoSyncTimer?.invalidate()
 
-        // Do not start auto-sync until user decides how to handle legacy data
-        if isMigrationDecisionPending {
-            return
-        }
-
         // Do not start auto-sync until encryption key is set up
         if !EncryptionService.shared.hasEncryptionKey() {
             return
@@ -338,11 +321,6 @@ class ChatViewModel: ObservableObject {
             Task { @MainActor in
                 guard let self = self else { return }
                 
-                // Gate auto-sync if migration decision is pending
-                if self.isMigrationDecisionPending {
-                    return
-                }
-
                 // Gate auto-sync if no encryption key is set
                 if !EncryptionService.shared.hasEncryptionKey() {
                     return
@@ -424,11 +402,6 @@ class ChatViewModel: ObservableObject {
             // Resume auto-sync timer if authenticated
             Task { @MainActor in
                 if self?.authManager?.isAuthenticated == true {
-                    // Skip any sync activity while migration decision is pending
-                    if self?.isMigrationDecisionPending == true {
-                        return
-                    }
-
                     // Skip sync if no encryption key is set
                     if !EncryptionService.shared.hasEncryptionKey() {
                         return
@@ -463,10 +436,6 @@ class ChatViewModel: ObservableObject {
                 
                 // Do one final sync before going to background
                 if self?.authManager?.isAuthenticated == true {
-                    // Do not perform background sync if migration decision is pending
-                    if self?.isMigrationDecisionPending == true {
-                        return
-                    }
                     if let _ = await self?.cloudSync.syncAllChats() {
                         // Update last sync date
                         self?.lastSyncDate = Date()
@@ -581,9 +550,7 @@ class ChatViewModel: ObservableObject {
         if let firstChat = chats.first, firstChat.isBlankChat {
             // Just select the existing blank chat
             selectChat(firstChat)
-            if !isMigrationDecisionPending && EncryptionService.shared.hasEncryptionKey() {
-                shouldFocusInput = true
-            }
+            shouldFocusInput = true
             return
         }
         
@@ -592,14 +559,13 @@ class ChatViewModel: ObservableObject {
         let newChat = Chat.create(
             modelType: modelType ?? currentModel,
             language: language,
-            userId: currentUserId
+            userId: currentUserId,
+            isLocalOnly: !SettingsManager.shared.isCloudSyncEnabled
         )
         
         chats.insert(newChat, at: 0)
         selectChat(newChat)
-        if !isMigrationDecisionPending && EncryptionService.shared.hasEncryptionKey() {
-            shouldFocusInput = true
-        }
+        shouldFocusInput = true
         
         // Preserve pagination state - adding a blank chat doesn't affect whether more chats are available
         // The hasMoreChats flag should remain unchanged
@@ -2047,47 +2013,6 @@ class ChatViewModel: ObservableObject {
             // Restore pagination state immediately for better UX on cold start
             loadPersistedPaginationState()
             
-            // If legacy local chats are detected, handle migration path
-            if CloudMigrationService.shared.isMigrationNeeded(userId: userId) {
-                let decisionMade = CloudMigrationService.shared.hasUserMadeDecision(userId: userId)
-                let choseSync = CloudMigrationService.shared.didUserChooseSync(userId: userId) || self.userAgreedToMigrateLegacy
-
-                if decisionMade {
-                    if choseSync {
-                        // User chose sync previously: run migration automatically if we have a key;
-                        // otherwise let ContentView present the key prompt
-                        if EncryptionService.shared.hasEncryptionKey() {
-                            Task {
-                                do {
-                                    let _ = try await CloudMigrationService.shared.migrateToCloud(userId: userId)
-                                } catch {
-                                    // Ignore and continue; errors will surface in sync
-                                }
-                                await MainActor.run { self.userAgreedToMigrateLegacy = false }
-                                await self.startEncryptedSyncFlow()
-                            }
-                        } else {
-                            Task { @MainActor in
-                                self.isMigrationDecisionPending = false
-                                self.showMigrationPrompt = false
-                                self.isSignInInProgress = false
-                            }
-                        }
-                        return
-                    } else {
-                        // Decision was delete; ensure cleanup and continue
-                        CloudMigrationService.shared.deleteLegacyLocalChats(userId: userId)
-                        // fallthrough to continue normal flow
-                    }
-                } else {
-                    // No decision yet; present sheet and gate sync immediately (avoid race with auto-sync)
-                    self.isMigrationDecisionPending = true
-                    self.showMigrationPrompt = true
-                    self.isSignInInProgress = false
-                    return
-                }
-            }
-            
             // Check if we have any anonymous chats to migrate
             let anonymousChats = chats.filter { chat in
                 chat.userId == nil && !chat.messages.isEmpty
@@ -2202,25 +2127,31 @@ class ChatViewModel: ObservableObject {
     }
     
     // MARK: - Cloud Sync Methods
-    
+
+    /// Removes all non-local (cloud-synced) chats from the device
+    @MainActor
+    func deleteNonLocalChats() async {
+        let cloudChats = chats.filter { !$0.isLocalOnly }
+        for chat in cloudChats {
+            await Chat.deleteChatFromStorage(chatId: chat.id, userId: currentUserId)
+        }
+        chats.removeAll { !$0.isLocalOnly }
+        // If the current chat was a cloud chat, switch to the first remaining or create a new local one
+        if let current = currentChat, !current.isLocalOnly {
+            if let first = chats.first {
+                currentChat = first
+            } else {
+                createNewChat()
+            }
+        }
+        objectWillChange.send()
+    }
+
     /// Initialize cloud sync when user signs in
     private func initializeCloudSync() async {
         do {
             // Mark that initial sync has been done to avoid duplicate
             hasPerformedInitialSync = true
-            
-            // Check if we need to migrate old chats to cloud first
-            if let userId = currentUserId, CloudMigrationService.shared.isMigrationNeeded(userId: userId) {
-                do {
-                    let migrationResult = try await CloudMigrationService.shared.migrateToCloud(userId: userId)
-                    
-                    if !migrationResult.isSuccess && !migrationResult.errors.isEmpty {
-                        // Migration had errors but continue with normal flow
-                    }
-                } catch {
-                    // Continue with normal flow even if migration fails
-                }
-            }
             
             // Initialize cloud sync service
             try await cloudSync.initialize()
@@ -2260,79 +2191,6 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Legacy Migration Decision Actions
-    
-    /// User chose to delete legacy local chats instead of migrating
-    func confirmDeleteLegacyChats() {
-        let userId = currentUserId
-        CloudMigrationService.shared.setUserDecision("delete", userId: userId)
-        CloudMigrationService.shared.deleteLegacyLocalChats(userId: userId)
-        Task { @MainActor in
-            self.showMigrationPrompt = false
-            self.isMigrationDecisionPending = false
-            self.userAgreedToMigrateLegacy = false
-            // Always bring up Import Encryption Key view after decision
-            self.shouldShowKeyImport = true
-        }
-        // Continue with normal sign-in flow now that migration is resolved
-        Task {
-            await self.startEncryptedSyncFlow()
-        }
-    }
-    
-    /// User chose to migrate legacy local chats to cloud
-    func confirmMigrateLegacyChats() async {
-        // Record decision immediately
-        CloudMigrationService.shared.setUserDecision("sync", userId: currentUserId)
-
-        // If no encryption key yet, record intent and ask the user to set it up first
-        if !EncryptionService.shared.hasEncryptionKey() {
-            await MainActor.run {
-                self.userAgreedToMigrateLegacy = true
-                self.showMigrationPrompt = false
-                self.isMigrationDecisionPending = false
-                // Always bring up Import Encryption Key view after decision
-                self.shouldShowKeyImport = true
-            }
-            // The UI will prompt for key; after key is set, handleSignIn() will auto-run and migrate
-            return
-        }
-
-        // Dismiss the sheet immediately for better UX and show syncing state
-        await MainActor.run {
-            self.showMigrationPrompt = false
-            self.isMigrationDecisionPending = false
-            self.isSyncing = true
-            // Always bring up Import Encryption Key view after decision
-            self.shouldShowKeyImport = true
-        }
-
-        do {
-            // Initialize encryption with existing key and cloud sync
-            let key = try await EncryptionService.shared.initialize()
-            await MainActor.run { self.encryptionKey = key }
-            try await CloudSyncService.shared.initialize()
-            // Perform migration
-            let result = try await CloudMigrationService.shared.migrateToCloud(userId: currentUserId)
-            #if DEBUG
-            print("Migration completed: migrated=\(result.migratedCount), failed=\(result.failedCount)")
-            if !result.errors.isEmpty { print("Migration errors: \(result.errors)") }
-            #endif
-        } catch {
-            // Proceed regardless; errors will be surfaced in sync if needed
-            #if DEBUG
-            print("Migration failed to run: \(error)")
-            #endif
-        }
-
-        await MainActor.run {
-            self.isSyncing = false
-        }
-
-        // Continue with normal sign-in flow
-        await startEncryptedSyncFlow()
-    }
-    
     /// Continues the sign-in flow (encryption, cloud sync, profile sync) after migration decision
     private func startEncryptedSyncFlow() async {
         // Avoid double starts
@@ -2660,11 +2518,6 @@ class ChatViewModel: ObservableObject {
     
     /// Perform a full sync with the cloud
     func performFullSync() async {
-        // Gate manual sync until migration choice is made
-        if isMigrationDecisionPending {
-            return
-        }
-
         // Gate sync until encryption key is set up
         if !EncryptionService.shared.hasEncryptionKey() {
             return
