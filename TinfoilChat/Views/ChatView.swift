@@ -204,12 +204,19 @@ struct ChatContainer: View {
                 }
             }
             ToolbarItem(placement: .principal) {
-                Image(colorScheme == .dark ? "logo-white" : "logo-dark")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 22)
-                    .opacity(isSidebarOpen ? 1 : 0)
-                    .animation(.easeInOut(duration: 0.2), value: isSidebarOpen)
+                ZStack {
+                    Image(colorScheme == .dark ? "logo-white" : "logo-dark")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 22)
+                        .opacity(isSidebarOpen ? 1 : 0)
+
+                    if authManager.isAuthenticated {
+                        chatStorageLabel
+                            .opacity(isSidebarOpen ? 0 : 1)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: isSidebarOpen)
             }
             if authManager.isAuthenticated {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -365,6 +372,27 @@ struct ChatContainer: View {
     /// Shows the settings view
     private func showSettingsView() {
         showSettings = true
+    }
+
+    /// Label showing whether current chat is local or cloud-synced
+    private var chatStorageLabel: some View {
+        let isLocal = viewModel.currentChat?.isLocalOnly ?? true
+        let isCloudSync = settings.isCloudSyncEnabled
+
+        return HStack(spacing: 3) {
+            if !isCloudSync || isLocal {
+                Image(systemName: "internaldrive")
+                    .font(.system(size: 9))
+                Text("Local")
+                    .font(.system(size: 10, weight: .medium))
+            } else {
+                Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90.icloud")
+                    .font(.system(size: 9))
+                Text("Cloud")
+                    .font(.system(size: 10, weight: .medium))
+            }
+        }
+        .foregroundColor(.secondary)
     }
     
     /// Shows the memory view
