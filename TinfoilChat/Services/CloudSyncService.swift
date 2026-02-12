@@ -264,8 +264,8 @@ class CloudSyncService: ObservableObject {
         }
         
         
-        // Don't sync blank chats or decryption failure placeholders
-        if chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed || chat.encryptedData != nil {
+        // Don't sync local-only, blank, empty, or decryption failure chats
+        if chat.isLocalOnly || chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed || chat.encryptedData != nil {
             return
         }
 
@@ -287,10 +287,10 @@ class CloudSyncService: ObservableObject {
         let unsyncedChats = await getUnsyncedChats()
         
         
-        // Filter out blank chats, empty chats (decryption failure placeholders), and streaming chats
+        // Filter out local-only, blank, empty, decryption failure, and streaming chats
         var chatsToSync: [Chat] = []
         for chat in unsyncedChats {
-            if !chat.isBlankChat && !chat.messages.isEmpty && !chat.decryptionFailed && chat.encryptedData == nil {
+            if !chat.isLocalOnly && !chat.isBlankChat && !chat.messages.isEmpty && !chat.decryptionFailed && chat.encryptedData == nil {
                 let isStreaming = streamingTracker.isStreaming(chat.id)
                 if !isStreaming {
                     chatsToSync.append(chat)
@@ -1384,8 +1384,8 @@ class CloudSyncService: ObservableObject {
         }
         
         for chat in allChats {
-            // Skip blank chats and chats with no messages (decryption failure placeholders)
-            if chat.isBlankChat || chat.messages.isEmpty { continue }
+            // Skip local-only, blank, and empty chats
+            if chat.isLocalOnly || chat.isBlankChat || chat.messages.isEmpty { continue }
 
             do {
                 // Re-encrypt the chat with the new key by forcing a sync
