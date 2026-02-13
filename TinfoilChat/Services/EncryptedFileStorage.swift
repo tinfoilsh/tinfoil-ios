@@ -62,7 +62,7 @@ actor EncryptedFileStorage {
             .appendingPathComponent(sanitizePathComponent(userId), isDirectory: true)
 
         if let sub = subdirectory {
-            chatsDir = chatsDir.appendingPathComponent(sub, isDirectory: true)
+            chatsDir = chatsDir.appendingPathComponent(sanitizePathComponent(sub), isDirectory: true)
         }
 
         if !fileManager.fileExists(atPath: chatsDir.path) {
