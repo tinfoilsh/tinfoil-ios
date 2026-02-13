@@ -1801,73 +1801,44 @@ class ChatViewModel: ObservableObject {
     ///
     /// Note: This does NOT sort. Caller should sort chats before calling this if needed.
     private func normalizeChatsArray() {
-        // Track if currentChat was pointing to a blank chat
-        let wasCurrentChatBlank = currentChat?.isBlankChat == true
-
-        // Step 1: Remove ALL blank chats to deduplicate
-        var normalizedChats = chats.filter { !$0.isBlankChat }
-
-        // Step 2: Deduplicate by ID (keep first occurrence, preserve order)
-        var seenIds = Set<String>()
-        normalizedChats = normalizedChats.filter { chat in
-            if seenIds.contains(chat.id) {
-                return false
-            }
-            seenIds.insert(chat.id)
-            return true
-        }
-
-        // Step 3: Add exactly ONE blank chat at position 0 if user has chat access
-        var newBlankChat: Chat?
-        if hasChatAccess {
-            let blankChat = Chat.create(
-                modelType: currentModel,
-                language: nil,
-                userId: currentUserId
-            )
-            normalizedChats.insert(blankChat, at: 0)
-            newBlankChat = blankChat
-        }
-
-        // Update the chats array
-        chats = normalizedChats
-
-        // Step 4: If currentChat was pointing to a blank chat, update it to the new blank chat
-        // This maintains the invariant that currentChat is always in the chats array
-        if wasCurrentChatBlank, let newBlankChat = newBlankChat {
-            currentChat = newBlankChat
-        }
+        chats = normalizeAndDedup(chats, isLocal: false)
     }
 
     /// Normalizes the localChats array: deduplicates and ensures one blank chat at top
     private func normalizeLocalChatsArray() {
-        let wasCurrentChatLocalBlank = currentChat?.isBlankChat == true && currentChat?.isLocalOnly == true
+        localChats = normalizeAndDedup(localChats, isLocal: true)
+    }
 
-        var normalized = localChats.filter { !$0.isBlankChat }
+    /// Shared normalization: removes duplicates, ensures one blank chat at top,
+    /// and updates currentChat if it was pointing to a stale blank.
+    private func normalizeAndDedup(_ source: [Chat], isLocal: Bool) -> [Chat] {
+        let wasCurrentChatBlank = currentChat?.isBlankChat == true
+            && currentChat?.isLocalOnly == isLocal
+
+        // Remove all blank chats, then deduplicate by ID (keep first occurrence)
         var seenIds = Set<String>()
-        normalized = normalized.filter { chat in
+        var result = source.filter { !$0.isBlankChat }.filter { chat in
             if seenIds.contains(chat.id) { return false }
             seenIds.insert(chat.id)
             return true
         }
 
-        var newBlankChat: Chat?
+        // Add exactly one blank chat at position 0 if user has chat access
         if hasChatAccess {
             let blankChat = Chat.create(
                 modelType: currentModel,
                 language: nil,
                 userId: currentUserId,
-                isLocalOnly: true
+                isLocalOnly: isLocal
             )
-            normalized.insert(blankChat, at: 0)
-            newBlankChat = blankChat
+            result.insert(blankChat, at: 0)
+
+            if wasCurrentChatBlank {
+                currentChat = blankChat
+            }
         }
 
-        localChats = normalized
-
-        if wasCurrentChatLocalBlank, let newBlankChat = newBlankChat {
-            currentChat = newBlankChat
-        }
+        return result
     }
 
     /// Ensures there's always a blank chat at the top of the list
