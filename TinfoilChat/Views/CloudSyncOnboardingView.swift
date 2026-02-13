@@ -570,6 +570,8 @@ struct CloudSyncOnboardingView: View {
                     try? FileManager.default.removeItem(at: tempURL)
                 }
                 topVC.present(activityVC, animated: true)
+            } else {
+                try? FileManager.default.removeItem(at: tempURL)
             }
         } catch {
             #if DEBUG
