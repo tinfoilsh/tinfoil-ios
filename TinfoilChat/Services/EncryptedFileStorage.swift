@@ -32,7 +32,7 @@ actor EncryptedFileStorage {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    init(encryptor: any ChatEncryptor, subdirectory: String?) {
+    private init(encryptor: any ChatEncryptor, subdirectory: String?) {
         self.encryptor = encryptor
         self.subdirectory = subdirectory
     }
