@@ -212,7 +212,7 @@ struct ChatContainer: View {
                         .frame(height: 22)
                         .opacity(isSidebarOpen ? 1 : 0)
 
-                    if authManager.isAuthenticated {
+                    if authManager.isAuthenticated && settings.isCloudSyncEnabled {
                         chatStorageLabel
                             .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
                     }
@@ -376,24 +376,33 @@ struct ChatContainer: View {
         showSettings = true
     }
 
-    /// Label showing whether current chat is local or cloud-synced
+    /// Label showing whether current chat is local or cloud-synced.
+    /// Only rendered when cloud sync is enabled (see call site).
     private var chatStorageLabel: some View {
-        let isLocal = !settings.isCloudSyncEnabled || viewModel.activeStorageTab == .local
+        let isLocal = viewModel.activeStorageTab == .local
 
-        return HStack(spacing: 3) {
-            if isLocal {
-                Image(systemName: "internaldrive")
-                    .font(.system(size: 9))
-                Text("Local")
-                    .font(.system(size: 10, weight: .medium))
-            } else {
-                Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90.icloud")
-                    .font(.system(size: 9))
-                Text("Cloud")
-                    .font(.system(size: 10, weight: .medium))
+        return Button {
+            let target: ChatStorageTab = isLocal ? .cloud : .local
+            withAnimation(.easeInOut(duration: 0.2)) {
+                viewModel.switchStorageTab(to: target)
             }
+        } label: {
+            HStack(spacing: 3) {
+                if isLocal {
+                    Image(systemName: "internaldrive")
+                        .font(.system(size: 9))
+                    Text("Local")
+                        .font(.system(size: 10, weight: .medium))
+                } else {
+                    Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90.icloud")
+                        .font(.system(size: 9))
+                    Text("Cloud")
+                        .font(.system(size: 10, weight: .medium))
+                }
+            }
+            .foregroundColor(.secondary)
         }
-        .foregroundColor(.secondary)
+        .buttonStyle(.plain)
     }
     
     /// Shows the memory view
