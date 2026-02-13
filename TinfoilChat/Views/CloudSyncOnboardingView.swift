@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import AVFoundation
 
 enum CloudSyncOnboardingStep {
     case intro
@@ -63,6 +64,7 @@ struct CloudSyncOnboardingView: View {
     @State private var isCopied: Bool = false
     @State private var keyError: String? = nil
     @State private var showFilePicker: Bool = false
+    @State private var showQRScanner: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -99,6 +101,13 @@ struct CloudSyncOnboardingView: View {
             allowsMultipleSelection: false
         ) { result in
             handleFileImport(result)
+        }
+        .sheet(isPresented: $showQRScanner) {
+            QRCodeScannerView(isPresented: $showQRScanner) { scannedKey in
+                showQRScanner = false
+                inputKey = scannedKey
+                keyError = nil
+            }
         }
     }
 
@@ -408,6 +417,38 @@ struct CloudSyncOnboardingView: View {
                         .padding(.horizontal)
                 }
 
+                // OR divider
+                HStack {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.3))
+                        .frame(height: 1)
+                    Text("OR")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.3))
+                        .frame(height: 1)
+                }
+                .padding(.horizontal)
+
+                // Scan QR Code button
+                Button(action: {
+                    requestCameraPermission { granted in
+                        if granted {
+                            showQRScanner = true
+                        }
+                    }
+                }) {
+                    HStack {
+                        Image(systemName: "qrcode.viewfinder")
+                            .font(.title3)
+                        Text("Scan QR Code")
+                            .fontWeight(.medium)
+                    }
+                    .onboardingPrimaryButton()
+                }
+                .padding(.horizontal)
+
                 // Back / Restore Key buttons
                 HStack(spacing: 12) {
                     Button(action: {
@@ -617,6 +658,43 @@ struct CloudSyncOnboardingView: View {
             }
         case .failure:
             keyError = "Failed to import file"
+        }
+    }
+
+    private func requestCameraPermission(completion: @escaping (Bool) -> Void) {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            completion(true)
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    completion(granted)
+                }
+            }
+        case .denied, .restricted:
+            let alert = UIAlertController(
+                title: "Camera Access Required",
+                message: "Please enable camera access in Settings to scan QR codes.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "Settings", style: .default) { _ in
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            })
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let rootViewController = windowScene.windows.first?.rootViewController {
+                var topVC = rootViewController
+                while let presented = topVC.presentedViewController {
+                    topVC = presented
+                }
+                topVC.present(alert, animated: true)
+            }
+            completion(false)
+        @unknown default:
+            completion(false)
         }
     }
 
