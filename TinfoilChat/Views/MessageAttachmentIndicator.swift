@@ -6,22 +6,11 @@
 
 import SwiftUI
 
-private struct ImageViewerConfig: Identifiable {
-    let id = UUID()
-    let initialIndex: Int
-}
-
 struct MessageAttachmentIndicator: View {
     let attachments: [Attachment]
     let isDarkMode: Bool
+    let allConversationImages: [Attachment]
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
-    @State private var imageViewerConfig: ImageViewerConfig?
-
-    private var allConversationImages: [Attachment] {
-        (viewModel.currentChat?.messages ?? [])
-            .flatMap { $0.attachments }
-            .filter { $0.type == .image && $0.imageBase64 != nil }
-    }
 
     private var imageAttachments: [Attachment] {
         attachments.filter { $0.type == .image }
@@ -42,13 +31,6 @@ struct MessageAttachmentIndicator: View {
             }
         }
         .padding(.bottom, 4)
-        .fullScreenCover(item: $imageViewerConfig) { config in
-            ImageViewerOverlay(
-                images: allConversationImages,
-                initialIndex: config.initialIndex,
-                onDismiss: { imageViewerConfig = nil }
-            )
-        }
     }
 
     @ViewBuilder
@@ -62,11 +44,10 @@ struct MessageAttachmentIndicator: View {
                     ForEach(row) { attachment in
                         ImageThumbnail(attachment: attachment, size: size)
                             .onTapGesture {
-                                if attachment.imageBase64 != nil {
-                                    let images = allConversationImages
-                                    if let index = images.firstIndex(where: { $0.id == attachment.id }) {
-                                        imageViewerConfig = ImageViewerConfig(initialIndex: index)
-                                    }
+                                if let index = allConversationImages.firstIndex(where: { $0.id == attachment.id }) {
+                                    viewModel.imageViewerImages = allConversationImages
+                                    viewModel.imageViewerIndex = index
+                                    viewModel.showImageViewer = true
                                 }
                             }
                     }
@@ -146,7 +127,7 @@ private struct ImageThumbnail: View {
     }
 }
 
-private struct ImageViewerOverlay: View {
+struct ImageViewerOverlay: View {
     let images: [Attachment]
     let initialIndex: Int
     let onDismiss: () -> Void
@@ -270,42 +251,48 @@ private extension Array {
     }
 }
 
-private struct ZoomableImagePage: View {
+struct ZoomableImagePage: View {
     let attachment: Attachment
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
-    @State private var decodedImage: UIImage?
+
+    private var uiImage: UIImage? {
+        let base64 = attachment.imageBase64 ?? attachment.thumbnailBase64
+        guard let base64, let data = Data(base64Encoded: base64) else { return nil }
+        return UIImage(data: data)
+    }
 
     var body: some View {
-        Group {
-            if let uiImage = decodedImage {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .scaleEffect(scale)
-                    .gesture(
-                        MagnifyGesture()
-                            .onChanged { value in
-                                scale = lastScale * value.magnification
-                            }
-                            .onEnded { _ in
-                                lastScale = max(1.0, scale)
-                                scale = lastScale
-                            }
-                    )
-                    .onTapGesture(count: 2) {
-                        withAnimation {
-                            scale = 1.0
-                            lastScale = 1.0
+        if let uiImage {
+            Image(uiImage: uiImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .scaleEffect(scale)
+                .gesture(
+                    MagnifyGesture()
+                        .onChanged { value in
+                            scale = lastScale * value.magnification
                         }
+                        .onEnded { _ in
+                            lastScale = max(1.0, scale)
+                            scale = lastScale
+                        }
+                )
+                .onTapGesture(count: 2) {
+                    withAnimation {
+                        scale = 1.0
+                        lastScale = 1.0
                     }
+                }
+        } else {
+            VStack(spacing: 12) {
+                Image(systemName: "photo")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.white.opacity(0.5))
+                Text("Unable to load image")
+                    .foregroundStyle(.white.opacity(0.5))
+                    .font(.caption)
             }
-        }
-        .task {
-            guard decodedImage == nil,
-                  let base64 = attachment.imageBase64,
-                  let data = Data(base64Encoded: base64) else { return }
-            decodedImage = UIImage(data: data)
         }
     }
 }
