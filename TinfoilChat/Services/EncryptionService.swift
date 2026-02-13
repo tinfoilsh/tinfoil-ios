@@ -153,28 +153,6 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         return SymmetricKey(data: keyData)
     }
 
-    private func prepareSealedBox(from encryptedData: EncryptedData) throws -> AES.GCM.SealedBox {
-        guard !encryptedData.iv.isEmpty, !encryptedData.data.isEmpty else {
-            throw EncryptionError.invalidEncryptedData
-        }
-
-        guard let ivData = Data(base64Encoded: encryptedData.iv),
-              let combinedData = Data(base64Encoded: encryptedData.data) else {
-            throw EncryptionError.invalidBase64
-        }
-
-        let tagSize = 16 // GCM tag is always 128 bits
-        guard combinedData.count > tagSize else {
-            throw EncryptionError.invalidEncryptedData
-        }
-
-        let nonce = try AES.GCM.Nonce(data: ivData)
-        let ciphertext = combinedData.prefix(combinedData.count - tagSize)
-        let tag = combinedData.suffix(tagSize)
-
-        return try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
-    }
-
     private func updateKeyHistory(withNewKey newKey: String, previousKey: String?) throws {
         var history = loadKeyHistory()
 
@@ -366,17 +344,7 @@ extension EncryptionService: ChatEncryptor {
             throw EncryptionError.keyNotInitialized
         }
 
-        let nonce = AES.GCM.Nonce()
-        let sealedBox = try AES.GCM.seal(data, using: encryptionKey, nonce: nonce)
-
-        var combined = Data()
-        combined.append(sealedBox.ciphertext)
-        combined.append(sealedBox.tag)
-
-        return EncryptedData(
-            iv: Data(nonce).base64EncodedString(),
-            data: combined.base64EncodedString()
-        )
+        return try AESGCMHelper.seal(data, using: encryptionKey)
     }
 
     func decryptData(_ encrypted: EncryptedData) async throws -> Data {
@@ -391,7 +359,7 @@ extension EncryptionService: ChatEncryptor {
             throw EncryptionError.keyNotInitialized
         }
 
-        let sealedBox = try prepareSealedBox(from: encrypted)
+        let sealedBox = try AESGCMHelper.parseSealedBox(from: encrypted)
 
         do {
             let data = try AES.GCM.open(sealedBox, using: defaultKey)

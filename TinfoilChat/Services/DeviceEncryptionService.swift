@@ -33,38 +33,12 @@ actor DeviceEncryptionService: ChatEncryptor {
 
     func encryptData(_ data: Data) async throws -> EncryptedData {
         let key = try getOrCreateKey()
-        let nonce = AES.GCM.Nonce()
-        let sealedBox = try AES.GCM.seal(data, using: key, nonce: nonce)
-
-        var combined = Data()
-        combined.append(sealedBox.ciphertext)
-        combined.append(sealedBox.tag)
-
-        return EncryptedData(
-            iv: Data(nonce).base64EncodedString(),
-            data: combined.base64EncodedString()
-        )
+        return try AESGCMHelper.seal(data, using: key)
     }
 
     func decryptData(_ encrypted: EncryptedData) async throws -> Data {
         let key = try getOrCreateKey()
-
-        guard let ivData = Data(base64Encoded: encrypted.iv),
-              let combinedData = Data(base64Encoded: encrypted.data) else {
-            throw EncryptionError.invalidBase64
-        }
-
-        let tagSize = 16
-        guard combinedData.count > tagSize else {
-            throw EncryptionError.invalidEncryptedData
-        }
-
-        let nonce = try AES.GCM.Nonce(data: ivData)
-        let ciphertext = combinedData.prefix(combinedData.count - tagSize)
-        let tag = combinedData.suffix(tagSize)
-        let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
-
-        return try AES.GCM.open(sealedBox, using: key)
+        return try AESGCMHelper.open(encrypted, using: key)
     }
 
     // MARK: - Key Management
