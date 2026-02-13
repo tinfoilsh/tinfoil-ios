@@ -117,7 +117,6 @@ actor EncryptedFileStorage {
     // MARK: - Chat Operations
 
     func saveChat(_ chat: Chat, userId: String) async throws {
-        var entries = (try? await loadIndex(userId: userId)) ?? []
         let chatToSave = chat
 
         let isCorrupted = chatToSave.decryptionFailed || chatToSave.dataCorrupted
@@ -148,7 +147,10 @@ actor EncryptedFileStorage {
             }
         }
 
-        // Update index: upsert and save
+        // Load the index after the file write to minimize the reentrancy window
+        // between this read and the subsequent save (the await on encryptData above
+        // is a suspension point where other actor methods could interleave).
+        var entries = (try? await loadIndex(userId: userId)) ?? []
         let newEntry = ChatIndexEntry(from: chatToSave)
         if let idx = entries.firstIndex(where: { $0.id == chatToSave.id }) {
             entries[idx] = newEntry
