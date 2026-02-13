@@ -229,6 +229,13 @@ struct ChatListResponse: Codable {
     let conversations: [RemoteChat]
     let nextContinuationToken: String?
     let hasMore: Bool
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.conversations = (try? container.decode([RemoteChat].self, forKey: .conversations)) ?? []
+        self.nextContinuationToken = try container.decodeIfPresent(String.self, forKey: .nextContinuationToken)
+        self.hasMore = (try? container.decode(Bool.self, forKey: .hasMore)) ?? false
+    }
 }
 
 /// Response from deleted-since API
