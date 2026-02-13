@@ -543,7 +543,7 @@ struct SettingsView: View {
                     let isRevenueCat = checkIfRevenueCat()
                     let url = isRevenueCat
                         ? URL(string: "https://apps.apple.com/account/subscriptions")!
-                        : URL(string: "https://www.tinfoil.sh/dashboard")!
+                        : URL(string: "https://dash.tinfoil.sh")!
                     UIApplication.shared.open(url)
                 }) {
                     HStack {
