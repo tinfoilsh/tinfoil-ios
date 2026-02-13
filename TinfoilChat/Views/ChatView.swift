@@ -91,6 +91,13 @@ struct ChatContainer: View {
                     .environmentObject(viewModel)
             }
         }
+        .fullScreenCover(isPresented: $viewModel.showImageViewer) {
+            ImageViewerOverlay(
+                images: viewModel.imageViewerImages,
+                initialIndex: viewModel.imageViewerIndex,
+                onDismiss: { viewModel.showImageViewer = false }
+            )
+        }
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()
                 .environment(Clerk.shared)

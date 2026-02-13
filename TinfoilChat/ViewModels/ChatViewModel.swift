@@ -38,6 +38,9 @@ class ChatViewModel: ObservableObject {
     @Published var scrollToUserMessageTrigger: UUID = UUID()
     @Published var isClientInitializing: Bool = false
     @Published var isWebSearchEnabled: Bool = false
+    @Published var imageViewerImages: [Attachment] = []
+    @Published var imageViewerIndex: Int = 0
+    @Published var showImageViewer: Bool = false
 
     // Verification properties - consolidated to reduce update frequency
     struct VerificationInfo {
