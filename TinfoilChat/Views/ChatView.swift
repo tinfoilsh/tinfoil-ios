@@ -382,6 +382,7 @@ struct ChatContainer: View {
         let isLocal = viewModel.activeStorageTab == .local
 
         return Button {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             let target: ChatStorageTab = isLocal ? .cloud : .local
             withAnimation(.easeInOut(duration: 0.2)) {
                 viewModel.switchStorageTab(to: target)
