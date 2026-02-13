@@ -19,6 +19,14 @@ actor DeviceEncryptionService: ChatEncryptor {
 
     private var cachedKey: SymmetricKey?
 
+    private var baseKeychainQuery: [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount
+        ]
+    }
+
     private init() {}
 
     // MARK: - ChatEncryptor
@@ -64,13 +72,7 @@ actor DeviceEncryptionService: ChatEncryptor {
     /// Removes the device key from the keychain (used during destructive cleanup).
     func clearKey() {
         cachedKey = nil
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: keychainAccount
-        ]
-        SecItemDelete(query as CFDictionary)
+        SecItemDelete(baseKeychainQuery as CFDictionary)
     }
 
     // MARK: - Private
@@ -90,13 +92,9 @@ actor DeviceEncryptionService: ChatEncryptor {
     }
 
     private func loadKeyFromKeychain() -> SymmetricKey? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: keychainAccount,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
+        var query = baseKeychainQuery
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -110,13 +108,9 @@ actor DeviceEncryptionService: ChatEncryptor {
     private func saveKeyToKeychain(_ key: SymmetricKey) throws {
         let keyData = key.withUnsafeBytes { Data($0) }
 
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: keychainAccount,
-            kSecValueData as String: keyData,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        ]
+        var query = baseKeychainQuery
+        query[kSecValueData as String] = keyData
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
 
         let status = SecItemAdd(query as CFDictionary, nil)
         if status != errSecSuccess {
