@@ -369,17 +369,6 @@ struct Annotation: Codable, Equatable {
     let url_citation: URLCitation
 }
 
-/// Document name reference, matching React's { name: string }
-struct DocumentName: Codable, Equatable {
-    let name: String
-}
-
-/// Image data for multimodal support, matching React's { base64: string; mimeType: string }
-struct ImageData: Codable, Equatable {
-    let base64: String
-    let mimeType: String
-}
-
 /// Represents a single message in a chat
 struct Message: Identifiable, Codable, Equatable {
     let id: String
@@ -396,14 +385,10 @@ struct Message: Identifiable, Codable, Equatable {
     var thinkingChunks: [ThinkingChunk] = []
     var webSearchState: WebSearchState? = nil
     var attachments: [Attachment] = []
-    var documentContent: String? = nil
-    var imageData: [ImageData]? = nil
 
     // Passthrough fields for cross-platform round-trip (used by React, preserved by iOS)
     var thinkingDuration: Double? = nil
     var isError: Bool? = nil
-    var multimodalText: String? = nil
-    var documents: [DocumentName]? = nil
     var webSearchBeforeThinking: Bool? = nil
     var annotations: [Annotation]? = nil
     var searchReasoning: String? = nil
@@ -425,7 +410,7 @@ struct Message: Identifiable, Codable, Equatable {
         return formatter
     }()
     
-    init(id: String = UUID().uuidString.lowercased(), role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], thinkingChunks: [ThinkingChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = [], documentContent: String? = nil, imageData: [ImageData]? = nil) {
+    init(id: String = UUID().uuidString.lowercased(), role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], thinkingChunks: [ThinkingChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = []) {
         self.id = id
         self.role = role
         self.content = content
@@ -438,8 +423,6 @@ struct Message: Identifiable, Codable, Equatable {
         self.thinkingChunks = thinkingChunks
         self.webSearchState = webSearchState
         self.attachments = attachments
-        self.documentContent = documentContent
-        self.imageData = imageData
     }
     
     // MARK: - Codable Implementation
@@ -447,10 +430,11 @@ struct Message: Identifiable, Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, generationTimeSeconds, webSearchState
         case webSearch // Alternative key used by React app
-        case attachments, documentContent, imageData
-        case imageBase64 // Legacy iOS key for backward compatibility
-        case thinkingDuration, isError, multimodalText, documents
+        case attachments
+        case thinkingDuration, isError
         case webSearchBeforeThinking, annotations, searchReasoning
+        // Legacy keys for decoding React messages that use the old format
+        case documentContent, imageData, imageBase64, multimodalText, documents
     }
     
     init(from decoder: Decoder) throws {
@@ -485,22 +469,18 @@ struct Message: Identifiable, Codable, Equatable {
         // Try iOS key first, then React key for cross-platform compatibility
         webSearchState = try container.decodeIfPresent(WebSearchState.self, forKey: .webSearchState)
             ?? container.decodeIfPresent(WebSearchState.self, forKey: .webSearch)
-        attachments = try container.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
-        documentContent = try container.decodeIfPresent(String.self, forKey: .documentContent)
-        // Try React's imageData array first, fall back to legacy iOS imageBase64 string
-        if let data = try container.decodeIfPresent([ImageData].self, forKey: .imageData) {
-            imageData = data
-        } else if let legacyBase64 = try container.decodeIfPresent(String.self, forKey: .imageBase64) {
-            imageData = [ImageData(base64: legacyBase64, mimeType: Constants.Attachments.defaultImageMimeType)]
+        let decodedAttachments = try container.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
+
+        if !decodedAttachments.isEmpty {
+            attachments = decodedAttachments
         } else {
-            imageData = nil
+            // Reconstruct attachments from legacy React format (documents + imageData + documentContent + multimodalText)
+            attachments = Self.reconstructAttachments(from: container)
         }
 
         // Passthrough fields for cross-platform round-trip
         thinkingDuration = try container.decodeIfPresent(Double.self, forKey: .thinkingDuration)
         isError = try container.decodeIfPresent(Bool.self, forKey: .isError)
-        multimodalText = try container.decodeIfPresent(String.self, forKey: .multimodalText)
-        documents = try container.decodeIfPresent([DocumentName].self, forKey: .documents)
         webSearchBeforeThinking = try container.decodeIfPresent(Bool.self, forKey: .webSearchBeforeThinking)
         annotations = try container.decodeIfPresent([Annotation].self, forKey: .annotations)
         searchReasoning = try container.decodeIfPresent(String.self, forKey: .searchReasoning)
@@ -524,17 +504,104 @@ struct Message: Identifiable, Codable, Equatable {
         if !attachments.isEmpty {
             try container.encode(attachments, forKey: .attachments)
         }
-        try container.encodeIfPresent(documentContent, forKey: .documentContent)
-        try container.encodeIfPresent(imageData, forKey: .imageData)
+        // imageData, documents, documentContent, multimodalText are no longer encoded —
+        // all attachment data lives in the attachments array
 
         // Passthrough fields for cross-platform round-trip
         try container.encodeIfPresent(thinkingDuration, forKey: .thinkingDuration)
         try container.encodeIfPresent(isError, forKey: .isError)
-        try container.encodeIfPresent(multimodalText, forKey: .multimodalText)
-        try container.encodeIfPresent(documents, forKey: .documents)
         try container.encodeIfPresent(webSearchBeforeThinking, forKey: .webSearchBeforeThinking)
         try container.encodeIfPresent(annotations, forKey: .annotations)
         try container.encodeIfPresent(searchReasoning, forKey: .searchReasoning)
+    }
+
+    // MARK: - Legacy Format Reconstruction
+
+    /// Reconstructs attachments from React's legacy format (documents + imageData + documentContent + multimodalText).
+    /// React stored these as parallel arrays: documents[i].name paired with imageData[i] for images.
+    private static func reconstructAttachments(from container: KeyedDecodingContainer<CodingKeys>) -> [Attachment] {
+        // Decode legacy fields
+        struct LegacyImageData: Codable {
+            let base64: String
+            let mimeType: String
+        }
+        struct LegacyDocumentName: Codable {
+            let name: String
+        }
+
+        let legacyDocuments = (try? container.decodeIfPresent([LegacyDocumentName].self, forKey: .documents)) ?? nil
+        let legacyImageData = (try? container.decodeIfPresent([LegacyImageData].self, forKey: .imageData)) ?? nil
+        let legacyImageBase64 = (try? container.decodeIfPresent(String.self, forKey: .imageBase64)) ?? nil
+        let legacyDocumentContent = (try? container.decodeIfPresent(String.self, forKey: .documentContent)) ?? nil
+        let legacyMultimodalText = (try? container.decodeIfPresent(String.self, forKey: .multimodalText)) ?? nil
+
+        guard legacyDocuments != nil || legacyImageData != nil || legacyImageBase64 != nil else {
+            return []
+        }
+
+        var result: [Attachment] = []
+
+        if let docs = legacyDocuments {
+            // React format: documents[] and imageData[] are parallel arrays.
+            // If imageData[i] exists, documents[i] is an image; otherwise it's a document.
+            for (i, doc) in docs.enumerated() {
+                if let imgArray = legacyImageData, i < imgArray.count {
+                    let img = imgArray[i]
+                    let description = extractImageDescription(named: doc.name, from: legacyMultimodalText)
+                    result.append(Attachment(
+                        type: .image,
+                        fileName: doc.name,
+                        mimeType: img.mimeType,
+                        base64: img.base64,
+                        description: description ?? doc.name
+                    ))
+                } else {
+                    let textContent = extractDocumentContent(named: doc.name, from: legacyDocumentContent)
+                    result.append(Attachment(
+                        type: .document,
+                        fileName: doc.name,
+                        textContent: textContent
+                    ))
+                }
+            }
+        } else if let legacyBase64 = legacyImageBase64 {
+            // Very old iOS format: single imageBase64 string, no documents array
+            result.append(Attachment(
+                type: .image,
+                fileName: "Image",
+                mimeType: Constants.Attachments.defaultImageMimeType,
+                base64: legacyBase64,
+                description: "Image"
+            ))
+        }
+
+        return result
+    }
+
+    /// Extracts a single image description from the combined multimodalText string.
+    /// React format: "Image: {name}\nDescription:\n{description}\n\nImage: {name2}\n..."
+    private static func extractImageDescription(named name: String, from multimodalText: String?) -> String? {
+        guard let text = multimodalText else { return nil }
+        let marker = "Image: \(name)\nDescription:\n"
+        guard let range = text.range(of: marker) else { return nil }
+        let rest = text[range.upperBound...]
+        if let nextImage = rest.range(of: "\n\nImage: ") {
+            return String(rest[..<nextImage.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return String(rest).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Extracts a single document's text content from the combined documentContent string.
+    /// React format: "Document title: {name}\nDocument contents:\n{content}\n\nDocument title: {name2}\n..."
+    private static func extractDocumentContent(named name: String, from documentContent: String?) -> String? {
+        guard let content = documentContent else { return nil }
+        let marker = "Document title: \(name)\nDocument contents:\n"
+        guard let range = content.range(of: marker) else { return nil }
+        let rest = content[range.upperBound...]
+        if let nextDoc = rest.range(of: "\nDocument title: ") {
+            return String(rest[..<nextDoc.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return String(rest).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
