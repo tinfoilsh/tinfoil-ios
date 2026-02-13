@@ -801,6 +801,7 @@ struct SettingsView: View {
                     Task {
                         do {
                             try await chatViewModel.setEncryptionKey(key)
+                            settings.isCloudSyncEnabled = true
                             chatViewModel.handleSignIn()
                         } catch {
                             #if DEBUG
