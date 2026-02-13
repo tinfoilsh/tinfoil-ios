@@ -97,15 +97,14 @@ private actor UploadCoalescer {
             await uploadWithRetry(chatId)
         }
 
-        // Notify waiters
-        if let waiters = states[chatId]?.waiters {
-            for waiter in waiters {
-                waiter.resume()
-            }
+        // Notify waiters and clean up in a single access
+        let waiters = states[chatId]?.waiters ?? []
+        for waiter in waiters {
+            waiter.resume()
         }
 
-        // Clean up state if no failures
-        if states[chatId]?.failureCount == 0 {
+        let failureCount = states[chatId]?.failureCount ?? 0
+        if failureCount == 0 {
             states.removeValue(forKey: chatId)
         } else {
             states[chatId]?.workerRunning = false
@@ -120,7 +119,8 @@ private actor UploadCoalescer {
                 states[chatId]?.failureCount = 0
                 return
             } catch {
-                states[chatId]?.failureCount = (states[chatId]?.failureCount ?? 0) + 1
+                let currentCount = states[chatId]?.failureCount ?? 0
+                states[chatId]?.failureCount = currentCount + 1
 
                 if attempt == Constants.Sync.uploadMaxRetries {
                     break
@@ -133,7 +133,8 @@ private actor UploadCoalescer {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
 
                 // If dirty was set during backoff, return early to upload fresh data
-                if states[chatId]?.dirty == true {
+                let isDirty = states[chatId]?.dirty ?? false
+                if isDirty {
                     return
                 }
             }
