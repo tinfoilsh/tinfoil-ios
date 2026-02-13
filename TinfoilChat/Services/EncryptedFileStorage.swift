@@ -199,8 +199,17 @@ actor EncryptedFileStorage {
 
     func deleteAllChats(userId: String) throws {
         let dir = try chatsDirectory(userId: userId)
-        if fileManager.fileExists(atPath: dir.path) {
-            try fileManager.removeItem(at: dir)
+        guard fileManager.fileExists(atPath: dir.path) else { return }
+
+        let contents = try fileManager.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        )
+
+        for item in contents {
+            let resourceValues = try item.resourceValues(forKeys: [.isDirectoryKey])
+            if resourceValues.isDirectory == true { continue }
+            try fileManager.removeItem(at: item)
         }
     }
 
