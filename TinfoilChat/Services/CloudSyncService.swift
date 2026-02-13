@@ -1092,7 +1092,7 @@ class CloudSyncService: ObservableObject {
             saveAllChatsSyncStatus(remoteAllStatus)
         } catch {
             #if DEBUG
-            print("[CloudSync] Failed to sync cross-scope changes: \(error.localizedDescription)")
+            print("[CloudSync] Failed to sync cross-scope changes: \(error)")
             #endif
         }
     }
