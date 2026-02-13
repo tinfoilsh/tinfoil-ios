@@ -64,23 +64,49 @@ struct ChatQueryBuilder {
                     hasAddedSystemInstructions = true
                 }
 
+                // Derive document content and image data from attachments
+                let documentAttachments = msg.attachments.filter { $0.type == .document }
+                let imageAttachments = msg.attachments.filter { $0.type == .image }
+
                 // Prepend document content as context when present
-                if let docContent = msg.documentContent, !docContent.isEmpty {
-                    userContent = "---\nDocument content:\n\(docContent)\n---\n\n\(userContent)"
+                if !documentAttachments.isEmpty {
+                    let docContent = documentAttachments
+                        .compactMap { attachment -> String? in
+                            guard let text = attachment.textContent, !text.isEmpty else { return nil }
+                            return "Document title: \(attachment.fileName)\nDocument contents:\n\(text)"
+                        }
+                        .joined(separator: "\n\n")
+                    if !docContent.isEmpty {
+                        userContent = "---\nDocument content:\n\(docContent)\n---\n\n\(userContent)"
+                    }
                 }
 
                 // Use multimodal content parts when model supports it and message has images
-                if isMultimodal, let images = msg.imageData, !images.isEmpty {
+                if isMultimodal, !imageAttachments.isEmpty {
                     var parts: [ChatQuery.ChatCompletionMessageParam.UserMessageParam.Content.ContentPart] = []
                     parts.append(.text(.init(text: userContent)))
-                    for imgData in images {
+                    for attachment in imageAttachments {
+                        guard let base64 = attachment.base64,
+                              let mimeType = attachment.mimeType else { continue }
                         let imageUrl = ChatQuery.ChatCompletionMessageParam.ContentPartImageParam.ImageURL(
-                            url: "data:\(imgData.mimeType);base64,\(imgData.base64)",
+                            url: "data:\(mimeType);base64,\(base64)",
                             detail: .auto
                         )
                         parts.append(.image(.init(imageUrl: imageUrl)))
                     }
                     messages.append(.user(.init(content: .contentParts(parts))))
+                } else if !imageAttachments.isEmpty {
+                    // Non-multimodal model: append image descriptions as text fallback
+                    let descriptions = imageAttachments
+                        .compactMap { $0.description }
+                        .filter { !$0.isEmpty }
+                    if !descriptions.isEmpty {
+                        let descText = descriptions
+                            .map { "[\($0)]" }
+                            .joined(separator: "\n")
+                        userContent = userContent + "\n\n" + descText
+                    }
+                    messages.append(.user(.init(content: .string(userContent))))
                 } else {
                     messages.append(.user(.init(content: .string(userContent))))
                 }

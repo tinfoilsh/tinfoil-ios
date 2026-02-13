@@ -792,34 +792,14 @@ class ChatViewModel: ObservableObject {
         // Update UI state
         isLoading = true
 
-        // Merge attachment data into message fields
-        var combinedDocumentContent: String? = nil
-        var messageImageData: [ImageData] = []
-        var messageAttachments: [Attachment] = []
-
-        for attachment in pendingAttachments {
-            messageAttachments.append(attachment)
-            if let docContent = attachment.textContent, !docContent.isEmpty {
-                if let existing = combinedDocumentContent {
-                    combinedDocumentContent = existing + "\n\n---\n\n" + docContent
-                } else {
-                    combinedDocumentContent = docContent
-                }
-            }
-            if let imgBase64 = attachment.base64, !imgBase64.isEmpty {
-                messageImageData.append(ImageData(base64: imgBase64, mimeType: Constants.Attachments.defaultImageMimeType))
-            }
-        }
-
+        let messageAttachments = pendingAttachments
         clearPendingAttachments()
 
-        // Create and add user message
+        // Create and add user message — attachments carry all data
         let userMessage = Message(
             role: .user,
             content: text,
-            attachments: messageAttachments,
-            documentContent: combinedDocumentContent,
-            imageData: messageImageData.isEmpty ? nil : messageImageData
+            attachments: messageAttachments
         )
         addMessage(userMessage)
 
