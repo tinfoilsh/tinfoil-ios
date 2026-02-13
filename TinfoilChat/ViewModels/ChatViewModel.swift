@@ -2024,7 +2024,7 @@ class ChatViewModel: ObservableObject {
         // If user upgraded to premium, load saved chats if any
         if isAuthenticated && hasActiveSubscription && chats.count <= 1 {
             Task {
-                let result = await loadFirstPageOfChats(userId: currentUserId, filter: { !$0.isLocalOnly })
+                let result = await loadFirstPageOfChats(userId: currentUserId, filter: \.isCloudDisplayable)
                 guard !result.chats.isEmpty else { return }
                 let previouslySelectedId = self.currentChat?.id
                 self.chats = result.chats
@@ -2203,7 +2203,7 @@ class ChatViewModel: ObservableObject {
                     // Retry decryption for any previously failed chats now that key is loaded
                     let decryptedCount = await cloudSync.retryDecryptionWithNewKey(onProgress: nil)
                     if decryptedCount > 0 {
-                        let result = await loadFirstPageOfChats(userId: self.currentUserId, filter: { !$0.isLocalOnly })
+                        let result = await loadFirstPageOfChats(userId: self.currentUserId, filter: \.isCloudDisplayable)
                         await MainActor.run {
                             self.chats = result.chats
                             // Refresh currentChat to show decrypted content
@@ -2571,7 +2571,7 @@ class ChatViewModel: ObservableObject {
         let locallyModifiedIds = Set(locallyModifiedChats.map { $0.id })
 
         // Load first page of cloud chats from files, excluding locally modified ones
-        let result = await loadFirstPageOfChats(userId: userId, excluding: locallyModifiedIds, filter: { !$0.isLocalOnly })
+        let result = await loadFirstPageOfChats(userId: userId, excluding: locallyModifiedIds, filter: \.isCloudDisplayable)
 
         // Combine: locally modified chats + synced chats from files
         let sortedChats = (locallyModifiedChats + result.chats).sorted { $0.createdAt > $1.createdAt }
@@ -2752,7 +2752,7 @@ class ChatViewModel: ObservableObject {
                 
                 // Reload chats immediately after decryption to show decrypted chats
                 if decryptedCount > 0 {
-                    let result = await loadFirstPageOfChats(userId: self.currentUserId, filter: { !$0.isLocalOnly })
+                    let result = await loadFirstPageOfChats(userId: self.currentUserId, filter: \.isCloudDisplayable)
                     await MainActor.run {
                         self.chats = result.chats
                         normalizeChatsArray()
@@ -2816,7 +2816,7 @@ class ChatViewModel: ObservableObject {
         }
         
         // Reload cloud chats after decryption
-        let result = await loadFirstPageOfChats(userId: currentUserId, filter: { !$0.isLocalOnly })
+        let result = await loadFirstPageOfChats(userId: currentUserId, filter: \.isCloudDisplayable)
         await MainActor.run {
             self.chats = result.chats
             normalizeChatsArray()
