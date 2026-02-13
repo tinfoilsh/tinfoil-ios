@@ -2223,7 +2223,20 @@ class ChatViewModel: ObservableObject {
             // IMPORTANT: Do NOT auto-generate a key here; allow UI to prompt the user
             Task {
                 do {
-                    // If no key exists yet, let ContentView present the prompt and stop here
+                    // Always load local chats first — they use the device key,
+                    // not the cloud encryption key, so they're available regardless
+                    // of cloud sync setup state.
+                    let allLocal = await loadAllLocalChats(userId: self.currentUserId)
+                    await MainActor.run {
+                        self.localChats = allLocal
+                        self.activeStorageTab = .local
+                        normalizeLocalChatsArray()
+                        if self.currentChat == nil, let first = self.localChats.first {
+                            self.currentChat = first
+                        }
+                    }
+
+                    // If no cloud key exists yet, let ContentView present the prompt and stop here
                     if !EncryptionService.shared.hasEncryptionKey() {
                         await MainActor.run {
                             self.isFirstTimeUser = true
@@ -2265,11 +2278,7 @@ class ChatViewModel: ObservableObject {
                         self.hasAnonymousChatsToSync = false
                     }
 
-                    // Always load all local chats (they're on device, no pagination needed)
-                    let allLocal = await loadAllLocalChats(userId: self.currentUserId)
-                    await MainActor.run {
-                        self.localChats = allLocal
-                    }
+                    // Local chats were already loaded above the early return.
 
                     // Only proceed with cloud sync if cloud sync is enabled
                     if SettingsManager.shared.isCloudSyncEnabled {
@@ -2278,18 +2287,10 @@ class ChatViewModel: ObservableObject {
                         // Sync user profile settings
                         await ProfileManager.shared.performFullSync()
                     } else {
-                        // Cloud sync disabled: load all local chats (no pagination needed)
-                        let allChats = await loadAllLocalChats(userId: self.currentUserId)
                         await MainActor.run {
-                            self.localChats = allChats
                             self.chats = []
                             self.hasMoreChats = false
                             self.activeStorageTab = .local
-                            normalizeLocalChatsArray()
-                            // Always select a local chat — currentChat may be an orphan from init
-                            if let first = self.localChats.first {
-                                self.currentChat = first
-                            }
                         }
                     }
                     
