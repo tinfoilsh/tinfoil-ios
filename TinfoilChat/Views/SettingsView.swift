@@ -289,6 +289,17 @@ struct SettingsView: View {
         }
     }
     
+    /// Shared destructive cleanup used by both "Delete Everything" and "Delete Account".
+    private func performFullDataCleanup() async {
+        EncryptionService.shared.clearKey()
+        await DeviceEncryptionService.shared.clearKey()
+        UserDefaults.standard.removeObject(forKey: "hasLaunchedBefore")
+        settings.isCloudSyncEnabled = false
+        chatViewModel.clearAllLocalChats()
+        settings.clearPersonalization()
+        ProfileManager.shared.clearProfile()
+    }
+
     private var accountSection: some View {
         Section {
             if authManager.isAuthenticated {
@@ -730,21 +741,7 @@ struct SettingsView: View {
             }
             Button("Delete Everything", role: .destructive) {
                 Task {
-                    // Clear encryption keys and all local data
-                    EncryptionService.shared.clearKey()
-                    await DeviceEncryptionService.shared.clearKey()
-                    UserDefaults.standard.removeObject(forKey: "hasLaunchedBefore")
-
-                    // Reset cloud sync setting
-                    settings.isCloudSyncEnabled = false
-
-                    // Clear all chats from local storage
-                    chatViewModel.clearAllLocalChats()
-
-                    // Clear personalization settings
-                    settings.clearPersonalization()
-                    ProfileManager.shared.clearProfile()
-
+                    await performFullDataCleanup()
                     await authManager.signOut()
                     dismiss()
                 }
@@ -757,12 +754,7 @@ struct SettingsView: View {
             Button("Delete", role: .destructive) {
                 Task {
                     do {
-                        settings.isCloudSyncEnabled = false
-                        EncryptionService.shared.clearKey()
-                        await DeviceEncryptionService.shared.clearKey()
-                        chatViewModel.clearAllLocalChats()
-                        settings.clearPersonalization()
-                        ProfileManager.shared.clearProfile()
+                        await performFullDataCleanup()
                         try await clerk.user?.delete()
                         await authManager.signOut()
                         dismiss()
