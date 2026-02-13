@@ -392,7 +392,14 @@ struct SettingsView: View {
         Section {
             Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
                 .tint(Color.accentPrimary)
+        } header: {
+            Text("Preferences")
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
 
+    private var chatSettingsSection: some View {
+        Section {
             NavigationLink(destination: LanguagePickerView(
                 selectedLanguage: $settings.selectedLanguage,
                 languages: languages
@@ -443,14 +450,7 @@ struct SettingsView: View {
                     }
                 }
             }
-        } header: {
-            Text("Preferences")
-        }
-        .listRowBackground(Color.cardSurface(for: colorScheme))
-    }
 
-    private var chatSettingsSection: some View {
-        Section {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Messages in Context")
