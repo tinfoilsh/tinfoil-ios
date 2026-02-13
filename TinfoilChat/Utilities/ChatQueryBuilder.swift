@@ -98,13 +98,13 @@ struct ChatQueryBuilder {
                 } else if !imageAttachments.isEmpty {
                     // Non-multimodal model: append image descriptions as text fallback
                     let descriptions = imageAttachments
-                        .compactMap { $0.description }
-                        .filter { !$0.isEmpty }
+                        .compactMap { attachment -> String? in
+                            guard let desc = attachment.description, !desc.isEmpty else { return nil }
+                            return "Image: \(attachment.fileName)\nDescription:\n\(desc)"
+                        }
                     if !descriptions.isEmpty {
-                        let descText = descriptions
-                            .map { "[\($0)]" }
-                            .joined(separator: "\n")
-                        userContent = userContent + "\n\n" + descText
+                        let descText = descriptions.joined(separator: "\n\n")
+                        userContent = userContent + "\n\n[Treat these descriptions as if they are the raw images.]\n" + descText
                     }
                     messages.append(.user(.init(content: .string(userContent))))
                 } else {
