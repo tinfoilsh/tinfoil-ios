@@ -1,6 +1,8 @@
 import SwiftUI
 import UIKit
 import PhotosUI
+import RevenueCat
+import RevenueCatUI
 
 /// Input area for typing messages, including attachments and send button
 struct MessageInputView: View {
@@ -433,12 +435,17 @@ struct AddToSheetView: View {
     let onPhotos: () -> Void
     let onFiles: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var showPremiumModal = false
 
     private var availableModels: [ModelType] {
         AppConfig.shared.filteredModelTypes(
             isAuthenticated: authManager.isAuthenticated,
             hasActiveSubscription: authManager.hasActiveSubscription
         )
+    }
+
+    private func canUseModel(_ model: ModelType) -> Bool {
+        model.isFree || (authManager.isAuthenticated && authManager.hasActiveSubscription)
     }
 
     var body: some View {
@@ -481,13 +488,17 @@ struct AddToSheetView: View {
                                     model: model,
                                     isSelected: viewModel.currentModel.id == model.id,
                                     isDarkMode: isDarkMode,
-                                    isEnabled: model.isFree || (authManager.isAuthenticated && authManager.hasActiveSubscription),
+                                    isEnabled: canUseModel(model),
                                     showPricingLabel: !(authManager.isAuthenticated && authManager.hasActiveSubscription),
                                     style: .regular
                                 ) {
-                                    let canUse = model.isFree || (authManager.isAuthenticated && authManager.hasActiveSubscription)
-                                    if canUse {
+                                    if canUseModel(model) {
                                         viewModel.changeModel(to: model)
+                                    } else {
+                                        if authManager.isAuthenticated, let clerkUserId = authManager.localUserData?["id"] as? String {
+                                            Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
+                                        }
+                                        showPremiumModal = true
                                     }
                                 }
                                 .id(model.id)
@@ -517,6 +528,17 @@ struct AddToSheetView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+            }
+            .sheet(isPresented: $showPremiumModal) {
+                PaywallView(displayCloseButton: true)
+                    .onPurchaseCompleted { _ in
+                        showPremiumModal = false
+                    }
+                    .onDisappear {
+                        Task {
+                            await authManager.fetchSubscriptionStatus()
+                        }
+                    }
             }
         }
     }
