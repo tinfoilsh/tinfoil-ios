@@ -296,7 +296,7 @@ struct SettingsView: View {
         await DeviceEncryptionService.shared.clearKey()
         UserDefaults.standard.removeObject(forKey: "hasLaunchedBefore")
         settings.isCloudSyncEnabled = false
-        chatViewModel.clearAllLocalChats()
+        await chatViewModel.clearAllChatsFromDevice()
         settings.clearPersonalization()
         ProfileManager.shared.clearProfile()
     }
