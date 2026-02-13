@@ -862,11 +862,21 @@ struct VerificationStatusIndicator: View {
                     .font(.system(size: 14))
 
                 if !statusText.isEmpty {
-                    Text(statusText)
+                    // Use the longest possible text as a hidden sizing
+                    // reference so the badge width stays stable when the
+                    // label changes from "Verifying..." to "Privacy verified".
+                    Text("Privacy verified")
                         .font(.caption)
-                        .foregroundStyle(iconColor)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
+                        .hidden()
+                        .overlay(alignment: .leading) {
+                            Text(statusText)
+                                .font(.caption)
+                                .foregroundStyle(iconColor)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
                         .opacity(isCollapsed ? 0 : 1)
                         .frame(width: isCollapsed ? 0 : nil, alignment: .leading)
                         .clipped()
