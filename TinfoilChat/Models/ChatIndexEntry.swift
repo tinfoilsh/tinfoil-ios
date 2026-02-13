@@ -23,7 +23,7 @@ struct ChatIndexEntry: Codable, Identifiable, Equatable {
     var syncVersion: Int
     var syncedAt: Date?
     var locallyModified: Bool
-    var isLocalOnly: Bool
+    var isLocalOnly: Bool = false
     var userId: String?
     var language: String?
 
