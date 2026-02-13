@@ -65,19 +65,9 @@ private struct AttachmentChip: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if attachment.type == .image, let base64 = attachment.thumbnailBase64,
-               let data = Data(base64Encoded: base64),
-               let uiImage = UIImage(data: data) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 28, height: 28)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-            } else {
-                Image(systemName: iconName)
-                    .font(.system(size: 14))
-                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
-            }
+            Image(systemName: iconName)
+                .font(.system(size: 14))
+                .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
 
             Text(attachment.fileName)
                 .font(.system(size: 12))
