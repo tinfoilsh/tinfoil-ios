@@ -108,11 +108,19 @@ actor DeviceEncryptionService: ChatEncryptor {
     private func saveKeyToKeychain(_ key: SymmetricKey) throws {
         let keyData = key.withUnsafeBytes { Data($0) }
 
-        var query = baseKeychainQuery
-        query[kSecValueData as String] = keyData
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        let attributes: [String: Any] = [
+            kSecValueData as String: keyData,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
 
-        let status = SecItemAdd(query as CFDictionary, nil)
+        var status = SecItemUpdate(baseKeychainQuery as CFDictionary, attributes as CFDictionary)
+
+        if status == errSecItemNotFound {
+            var addQuery = baseKeychainQuery
+            addQuery.merge(attributes) { _, new in new }
+            status = SecItemAdd(addQuery as CFDictionary, nil)
+        }
+
         if status != errSecSuccess {
             throw EncryptionError.keychainSaveFailed(status: status)
         }
