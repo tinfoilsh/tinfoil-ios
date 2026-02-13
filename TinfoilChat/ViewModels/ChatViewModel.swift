@@ -1430,10 +1430,11 @@ class ChatViewModel: ObservableObject {
                 // Look up the streaming chat by ID, not self.currentChat, because
                 // the user may have navigated away or toggled sync mid-stream.
                 var finalizedChat: Chat? = await MainActor.run {
-                    self.isLoading = false
-
                     guard let sid = streamChatId,
-                          let location = self.findChatLocation(sid) else { return nil }
+                          let location = self.findChatLocation(sid) else {
+                        self.isLoading = false
+                        return nil
+                    }
                     var chat = self.chat(at: location)
                     chat.hasActiveStream = false
 
@@ -1470,6 +1471,16 @@ class ChatViewModel: ObservableObject {
                         }
                     }
 
+                    // Apply finalized content to currentChat BEFORE setting isLoading
+                    // to false. The isLoadingChanged path in MessageTableView.updateUIView
+                    // reads messages.last (from currentChat) to populate the wrapper. If
+                    // isLoading is cleared first, the wrapper captures stale throttled
+                    // content. Title generation (async) then delays the real updateChat,
+                    // and no subsequent updateUIView branch refreshes the wrapper — causing
+                    // the first assistant response to appear truncated.
+                    self.updateChat(chat)
+                    self.isLoading = false
+
                     return chat
                 }
 
@@ -1487,7 +1498,7 @@ class ChatViewModel: ObservableObject {
                     }
                 }
 
-                // Single save + cloud sync with the resolved title
+                // Save with the resolved title and trigger cloud backup
                 await MainActor.run {
                     if let chat = finalizedChat {
                         self.updateChat(chat)
