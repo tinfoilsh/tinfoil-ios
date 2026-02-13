@@ -904,6 +904,8 @@ struct VerificationStatusIndicator: View {
                 collapseTask?.cancel()
                 collapseTask = nil
                 isCollapsed = false
+            } else if !viewModel.isVerified {
+                isBadgeExpanded = false
             }
         }
     }
