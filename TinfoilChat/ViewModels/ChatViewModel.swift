@@ -35,6 +35,7 @@ class ChatViewModel: ObservableObject {
     @Published var isScrollInteractionActive: Bool = false
     @Published var isAtBottom: Bool = true
     @Published var scrollToBottomTrigger: UUID = UUID()
+    @Published var scrollToUserMessageTrigger: UUID = UUID()
     @Published var isClientInitializing: Bool = false
     @Published var isWebSearchEnabled: Bool = false
 
@@ -1685,6 +1686,8 @@ class ChatViewModel: ObservableObject {
 
         // Save and generate response (without adding user message again)
         saveChat(updatedChat)
+        isScrollInteractionActive = false
+        scrollToUserMessageTrigger = UUID()
         generateResponse()
     }
 
@@ -1748,7 +1751,7 @@ class ChatViewModel: ObservableObject {
         replaceChat(updatedChat)
 
         isScrollInteractionActive = false
-        scrollToBottomTrigger = UUID()
+        scrollToUserMessageTrigger = UUID()
 
         saveChat(updatedChat)
         generateResponse()
