@@ -59,6 +59,7 @@ enum Constants {
 
     enum CloudSync {
         static let enabledKey = "cloudSyncEnabled"
+        static let clipboardExpirationSeconds: TimeInterval = 300
     }
 
     enum Sync {
