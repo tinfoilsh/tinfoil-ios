@@ -29,8 +29,14 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     private let keychainService = "sh.tinfoil.chat"
     private let keychainHistoryKey = "key_history"
     private let encryptionKeySetupFlagKey = "encryptionKeyWasSetUp"
-    private var encryptionKey: SymmetricKey?
+    private var _encryptionKey: SymmetricKey?
     private let keychainLock = NSLock()
+
+    /// Thread-safe access to the in-memory encryption key.
+    private var encryptionKey: SymmetricKey? {
+        get { keychainLock.withLock { _encryptionKey } }
+        set { keychainLock.withLock { _encryptionKey = newValue } }
+    }
 
     private init() {}
 
