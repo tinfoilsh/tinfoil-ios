@@ -140,6 +140,11 @@ struct ChatListView: View {
             viewModel.isScrollInteractionActive = false
             scrollTrigger = UUID()
         }
+        .onChange(of: viewModel.scrollToUserMessageTrigger) { _, _ in
+            userHasScrolled = false
+            viewModel.isScrollInteractionActive = false
+            scrollToUserTrigger = UUID()
+        }
     }
 
     private func setupKeyboardObservers() {
