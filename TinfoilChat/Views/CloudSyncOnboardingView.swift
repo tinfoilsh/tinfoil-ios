@@ -15,6 +15,39 @@ enum CloudSyncOnboardingStep {
     case restoreKey
 }
 
+// MARK: - Onboarding Button Styles
+
+private struct OnboardingButtonModifier: ViewModifier {
+    let foreground: Color
+    let background: Color
+
+    func body(content: Content) -> some View {
+        content
+            .font(.subheadline)
+            .fontWeight(.medium)
+            .foregroundColor(foreground)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(background)
+            )
+    }
+}
+
+private extension View {
+    func onboardingPrimaryButton(fill: Color = .accentPrimary) -> some View {
+        modifier(OnboardingButtonModifier(foreground: .white, background: fill))
+    }
+
+    func onboardingSecondaryButton() -> some View {
+        modifier(OnboardingButtonModifier(
+            foreground: .primary,
+            background: Color(UIColor.secondarySystemBackground)
+        ))
+    }
+}
+
 struct CloudSyncOnboardingView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -143,28 +176,12 @@ struct CloudSyncOnboardingView: View {
                 HStack(spacing: 12) {
                     Button(action: { handleMaybeLater() }) {
                         Text("Maybe later")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundColor(.primary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(UIColor.secondarySystemBackground))
-                            )
+                            .onboardingSecondaryButton()
                     }
 
                     Button(action: { handleContinue() }) {
                         Text("Continue")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color.accentPrimary)
-                            )
+                            .onboardingPrimaryButton()
                     }
                 }
                 .padding(.horizontal)
@@ -207,15 +224,7 @@ struct CloudSyncOnboardingView: View {
                     withAnimation { currentStep = .restoreKey }
                 }) {
                     Text("Restore Encryption Key")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.primary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color(UIColor.secondarySystemBackground))
-                        )
+                        .onboardingSecondaryButton()
                 }
                 .padding(.horizontal)
 
@@ -225,15 +234,7 @@ struct CloudSyncOnboardingView: View {
                         withAnimation { currentStep = .intro }
                     }) {
                         Text("Back")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundColor(.primary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(UIColor.secondarySystemBackground))
-                            )
+                            .onboardingSecondaryButton()
                     }
 
                     Button(action: { handleGenerateKey() }) {
@@ -245,15 +246,7 @@ struct CloudSyncOnboardingView: View {
                                 Text("Generate Key")
                             }
                         }
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.accentPrimary)
-                        )
+                        .onboardingPrimaryButton()
                     }
                     .disabled(isProcessing)
                 }
@@ -335,15 +328,7 @@ struct CloudSyncOnboardingView: View {
                 // Done button
                 Button(action: { handleComplete() }) {
                     Text("Done")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.accentPrimary)
-                        )
+                        .onboardingPrimaryButton()
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
@@ -419,15 +404,7 @@ struct CloudSyncOnboardingView: View {
                         withAnimation { currentStep = .generateOrRestore }
                     }) {
                         Text("Back")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundColor(.primary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(UIColor.secondarySystemBackground))
-                            )
+                            .onboardingSecondaryButton()
                     }
 
                     Button(action: { handleRestoreKey() }) {
@@ -439,16 +416,10 @@ struct CloudSyncOnboardingView: View {
                                 Text("Restore Key")
                             }
                         }
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(inputKey.trimmingCharacters(in: .whitespaces).isEmpty || isProcessing
-                                      ? Color.gray.opacity(0.5)
-                                      : Color.blue)
+                        .onboardingPrimaryButton(
+                            fill: inputKey.trimmingCharacters(in: .whitespaces).isEmpty || isProcessing
+                                ? Color.gray.opacity(0.5)
+                                : Color.blue
                         )
                     }
                     .disabled(inputKey.trimmingCharacters(in: .whitespaces).isEmpty || isProcessing)
