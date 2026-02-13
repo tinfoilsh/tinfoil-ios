@@ -197,7 +197,17 @@ struct CloudSyncOnboardingView: View {
     private var generateOrRestoreStepView: some View {
         ScrollView {
             VStack(spacing: 20) {
-                Spacer().frame(height: 30)
+                Spacer().frame(height: 20)
+
+                // Key icon
+                ZStack {
+                    Circle()
+                        .fill(Color.secondary.opacity(0.15))
+                        .frame(width: 64, height: 64)
+                    Image(systemName: "key.fill")
+                        .font(.system(size: 28))
+                        .foregroundColor(.secondary)
+                }
 
                 // Step label
                 Text("Step 2")
