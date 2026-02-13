@@ -238,6 +238,7 @@ struct SettingsView: View {
     @State private var showSignOutConfirmation = false
     @State private var showPremiumModal = false
     @State private var showCloudSyncOnboarding = false
+    @State private var accountDeletionError: String? = nil
     
     var shouldOpenCloudSync: Bool = false
     
@@ -754,16 +755,25 @@ struct SettingsView: View {
             Button("Delete", role: .destructive) {
                 Task {
                     do {
-                        await performFullDataCleanup()
                         try await clerk.user?.delete()
+                        await performFullDataCleanup()
                         await authManager.signOut()
                         dismiss()
                     } catch {
+                        accountDeletionError = error.localizedDescription
                     }
                 }
             }
         } message: {
             Text("Are you sure you want to delete your account? This action cannot be undone.")
+        }
+        .alert("Account Deletion Failed", isPresented: Binding(
+            get: { accountDeletionError != nil },
+            set: { if !$0 { accountDeletionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(accountDeletionError ?? "")
         }
         .sheet(isPresented: $showProfileEditor) {
             ProfileEditorView(
