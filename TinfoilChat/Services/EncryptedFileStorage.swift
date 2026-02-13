@@ -117,31 +117,29 @@ actor EncryptedFileStorage {
     // MARK: - Chat Operations
 
     func saveChat(_ chat: Chat, userId: String) async throws {
-        let chatToSave = chat
+        let isCorrupted = chat.decryptionFailed || chat.dataCorrupted
 
-        let isCorrupted = chatToSave.decryptionFailed || chatToSave.dataCorrupted
-
-        let data = try encoder.encode(chatToSave)
+        let data = try encoder.encode(chat)
 
         if isCorrupted {
             // Write as plain JSON — the encryptedData field already contains
             // the original encrypted payload for future decryption retry
-            let filePath = try chatFilePath(chatId: chatToSave.id, userId: userId, isCorrupted: true)
+            let filePath = try chatFilePath(chatId: chat.id, userId: userId, isCorrupted: true)
             try data.write(to: filePath, options: [.atomic, .completeFileProtection])
 
             // Remove any stale .enc file for this chat
-            let encPath = try chatFilePath(chatId: chatToSave.id, userId: userId, isCorrupted: false)
+            let encPath = try chatFilePath(chatId: chat.id, userId: userId, isCorrupted: false)
             if fileManager.fileExists(atPath: encPath.path) {
                 try? fileManager.removeItem(at: encPath)
             }
         } else {
             let encrypted = try await encryptor.encryptData(data)
             let encryptedData = try encoder.encode(encrypted)
-            let filePath = try chatFilePath(chatId: chatToSave.id, userId: userId, isCorrupted: false)
+            let filePath = try chatFilePath(chatId: chat.id, userId: userId, isCorrupted: false)
             try encryptedData.write(to: filePath, options: [.atomic, .completeFileProtection])
 
             // Remove any stale .raw file for this chat
-            let rawPath = try chatFilePath(chatId: chatToSave.id, userId: userId, isCorrupted: true)
+            let rawPath = try chatFilePath(chatId: chat.id, userId: userId, isCorrupted: true)
             if fileManager.fileExists(atPath: rawPath.path) {
                 try? fileManager.removeItem(at: rawPath)
             }
@@ -151,8 +149,8 @@ actor EncryptedFileStorage {
         // between this read and the subsequent save (the await on encryptData above
         // is a suspension point where other actor methods could interleave).
         var entries = (try? await loadIndex(userId: userId)) ?? []
-        let newEntry = ChatIndexEntry(from: chatToSave)
-        if let idx = entries.firstIndex(where: { $0.id == chatToSave.id }) {
+        let newEntry = ChatIndexEntry(from: chat)
+        if let idx = entries.firstIndex(where: { $0.id == chat.id }) {
             entries[idx] = newEntry
         } else {
             entries.append(newEntry)
