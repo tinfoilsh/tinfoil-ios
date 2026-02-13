@@ -1926,54 +1926,31 @@ class ChatViewModel: ObservableObject {
         }
         
         replaceChat(updatedChat)
-        let chatFound = localChats.contains(where: { $0.id == chat.id }) || chats.contains(where: { $0.id == chat.id })
-        if chatFound {
-            // Update currentChat directly ONLY IF it's the one being updated
-            if currentChat?.id == chat.id {
-                currentChat = updatedChat
-            }
 
-            // During streaming, batch saves to reduce disk I/O
-            if throttleForStreaming {
-                // Store pending update
-                pendingStreamUpdate = updatedChat
+        // Update currentChat directly ONLY IF it's the one being updated
+        if currentChat?.id == chat.id {
+            currentChat = updatedChat
+        }
 
-                // Cancel existing timer and create new one
-                streamUpdateTimer?.invalidate()
-                streamUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
-                    Task { @MainActor in
-                        if let pending = self?.pendingStreamUpdate {
-                            self?.pendingStreamUpdate = nil
-                            if self?.hasChatAccess == true {
-                                self?.saveChat(pending)
-                            }
+        // During streaming, batch saves to reduce disk I/O
+        if throttleForStreaming {
+            // Store pending update
+            pendingStreamUpdate = updatedChat
+
+            // Cancel existing timer and create new one
+            streamUpdateTimer?.invalidate()
+            streamUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+                Task { @MainActor in
+                    if let pending = self?.pendingStreamUpdate {
+                        self?.pendingStreamUpdate = nil
+                        if self?.hasChatAccess == true {
+                            self?.saveChat(pending)
                         }
                     }
                 }
-            } else {
-                // Save immediately for non-streaming updates
-                if hasChatAccess {
-                    saveChat(updatedChat)
-                }
             }
         } else {
-            // Chat not found in array - this shouldn't happen but handle it
-            if updatedChat.isLocalOnly {
-                localChats.insert(updatedChat, at: 0)
-            } else {
-                chats.insert(updatedChat, at: 0)
-            }
-
-            // Update currentChat if it's the one being updated
-            if currentChat?.id == chat.id {
-                currentChat = updatedChat
-            }
-
-            // IMPORTANT: Preserve pagination state when inserting new chats
-            // Adding a new chat doesn't affect whether more chats are available to load
-            // The hasMoreChats flag should remain unchanged
-
-            // Save chats for all authenticated users
+            // Save immediately for non-streaming updates
             if hasChatAccess {
                 saveChat(updatedChat)
             }
