@@ -32,7 +32,9 @@ final class ImageProcessingService {
     struct ProcessedImage {
         let base64: String
         let thumbnailBase64: String
-        let fileSize: Int64
+        let compressedSize: Int64
+        let width: Int
+        let height: Int
     }
 
     func processImage(data: Data) async throws -> ProcessedImage {
@@ -62,7 +64,9 @@ final class ImageProcessingService {
             return ProcessedImage(
                 base64: base64,
                 thumbnailBase64: thumbnailBase64,
-                fileSize: Int64(data.count)
+                compressedSize: Int64(jpegData.count),
+                width: Int(scaled.size.width),
+                height: Int(scaled.size.height)
             )
         }.value
     }

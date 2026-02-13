@@ -45,7 +45,7 @@ struct MessageAttachmentIndicator: View {
                             .onTapGesture {
                                 let allImages = (viewModel.currentChat?.messages ?? [])
                                     .flatMap { $0.attachments }
-                                    .filter { $0.type == .image && $0.imageBase64 != nil }
+                                    .filter { $0.type == .image && $0.base64 != nil }
                                 if let index = allImages.firstIndex(where: { $0.id == attachment.id }) {
                                     viewModel.imageViewerImages = allImages
                                     viewModel.imageViewerIndex = index
@@ -294,7 +294,7 @@ struct ZoomableImagePage: View {
             }
         }
         .onAppear {
-            let base64 = attachment.imageBase64 ?? attachment.thumbnailBase64
+            let base64 = attachment.base64 ?? attachment.thumbnailBase64
             guard let base64, let data = Data(base64Encoded: base64) else { return }
             decodedImage = UIImage(data: data)
         }

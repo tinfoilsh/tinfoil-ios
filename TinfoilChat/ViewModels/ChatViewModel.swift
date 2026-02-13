@@ -799,14 +799,14 @@ class ChatViewModel: ObservableObject {
 
         for attachment in pendingAttachments {
             messageAttachments.append(attachment)
-            if let docContent = attachment.documentContent, !docContent.isEmpty {
+            if let docContent = attachment.textContent, !docContent.isEmpty {
                 if let existing = combinedDocumentContent {
                     combinedDocumentContent = existing + "\n\n---\n\n" + docContent
                 } else {
                     combinedDocumentContent = docContent
                 }
             }
-            if let imgBase64 = attachment.imageBase64, !imgBase64.isEmpty {
+            if let imgBase64 = attachment.base64, !imgBase64.isEmpty {
                 messageImageData.append(ImageData(base64: imgBase64, mimeType: Constants.Attachments.defaultImageMimeType))
             }
         }
@@ -853,7 +853,7 @@ class ChatViewModel: ObservableObject {
                 let text = try await DocumentProcessingService.shared.extractText(from: url)
                 let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
 
-                attachment.documentContent = text
+                attachment.textContent = text
                 attachment.fileSize = fileSize
                 attachment.processingState = .completed
 
@@ -889,10 +889,15 @@ class ChatViewModel: ObservableObject {
             do {
                 let processed = try await ImageProcessingService.shared.processImage(data: data)
 
-                attachment.imageBase64 = processed.base64
+                attachment.mimeType = Constants.Attachments.defaultImageMimeType
+                attachment.base64 = processed.base64
                 attachment.thumbnailBase64 = processed.thumbnailBase64
-                attachment.fileSize = processed.fileSize
+                attachment.fileSize = processed.compressedSize
                 attachment.processingState = .completed
+
+                // Build metadata description for cross-platform compatibility
+                let sizeKB = processed.compressedSize / 1024
+                attachment.description = "\(fileName) — \(processed.width)×\(processed.height) JPEG, \(sizeKB) KB"
 
                 if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
                     pendingAttachments[index] = attachment
