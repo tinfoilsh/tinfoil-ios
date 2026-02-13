@@ -19,13 +19,15 @@ enum AttachmentProcessingState: String, Codable, Equatable {
     case failed
 }
 
-struct Attachment: Identifiable, Codable, Equatable {
+struct Attachment: Identifiable, Equatable {
     let id: String
     let type: AttachmentType
     let fileName: String
-    var documentContent: String?
-    var imageBase64: String?
+    var mimeType: String?
+    var base64: String?
     var thumbnailBase64: String?
+    var textContent: String?
+    var description: String?
     var fileSize: Int64
     var processingState: AttachmentProcessingState
 
@@ -33,19 +35,63 @@ struct Attachment: Identifiable, Codable, Equatable {
         id: String = UUID().uuidString.lowercased(),
         type: AttachmentType,
         fileName: String,
-        documentContent: String? = nil,
-        imageBase64: String? = nil,
+        mimeType: String? = nil,
+        base64: String? = nil,
         thumbnailBase64: String? = nil,
+        textContent: String? = nil,
+        description: String? = nil,
         fileSize: Int64 = 0,
         processingState: AttachmentProcessingState = .pending
     ) {
         self.id = id
         self.type = type
         self.fileName = fileName
-        self.documentContent = documentContent
-        self.imageBase64 = imageBase64
+        self.mimeType = mimeType
+        self.base64 = base64
         self.thumbnailBase64 = thumbnailBase64
+        self.textContent = textContent
+        self.description = description
         self.fileSize = fileSize
         self.processingState = processingState
+    }
+}
+
+// MARK: - Codable (exclude transient UI state from serialization)
+
+extension Attachment: Codable {
+    enum CodingKeys: String, CodingKey {
+        case id, type, fileName, mimeType, base64, thumbnailBase64
+        case textContent, description, fileSize
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString.lowercased()
+        type = try container.decode(AttachmentType.self, forKey: .type)
+        fileName = try container.decode(String.self, forKey: .fileName)
+        mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType)
+        base64 = try container.decodeIfPresent(String.self, forKey: .base64)
+        thumbnailBase64 = try container.decodeIfPresent(String.self, forKey: .thumbnailBase64)
+        textContent = try container.decodeIfPresent(String.self, forKey: .textContent)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        fileSize = try container.decodeIfPresent(Int64.self, forKey: .fileSize) ?? 0
+        // processingState is transient UI state — always reset to completed on decode
+        processingState = .completed
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(fileName, forKey: .fileName)
+        try container.encodeIfPresent(mimeType, forKey: .mimeType)
+        try container.encodeIfPresent(base64, forKey: .base64)
+        try container.encodeIfPresent(thumbnailBase64, forKey: .thumbnailBase64)
+        try container.encodeIfPresent(textContent, forKey: .textContent)
+        try container.encodeIfPresent(description, forKey: .description)
+        if fileSize > 0 {
+            try container.encode(fileSize, forKey: .fileSize)
+        }
+        // processingState is transient UI state — never encode
     }
 }
