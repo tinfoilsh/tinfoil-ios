@@ -375,7 +375,7 @@ class ChatViewModel: ObservableObject {
                         // Restore current chat selection if it still exists
                         if let currentChatId = self.currentChat?.id,
                            let location = self.findChatLocation(currentChatId) {
-                            self.currentChat = location.isLocal ? self.localChats[location.index] : self.chats[location.index]
+                            self.currentChat = self.chat(at: location)
                         }
                         
                     }
@@ -708,6 +708,11 @@ class ChatViewModel: ObservableObject {
             return (isLocal: false, index: index)
         }
         return nil
+    }
+
+    /// Returns the chat for a given location tuple.
+    private func chat(at location: (isLocal: Bool, index: Int)) -> Chat {
+        location.isLocal ? localChats[location.index] : chats[location.index]
     }
 
     /// Updates a chat in whichever array it belongs to
@@ -1429,7 +1434,7 @@ class ChatViewModel: ObservableObject {
 
                     guard let sid = streamChatId,
                           let location = self.findChatLocation(sid) else { return nil }
-                    var chat = location.isLocal ? self.localChats[location.index] : self.chats[location.index]
+                    var chat = self.chat(at: location)
                     chat.hasActiveStream = false
 
                     self.streamUpdateTimer?.invalidate()
@@ -1516,7 +1521,7 @@ class ChatViewModel: ObservableObject {
                     // Look up by streamChatId, not self.currentChat, in case user navigated away
                     if let sid = streamChatId,
                        let location = self.findChatLocation(sid) {
-                        var chat = location.isLocal ? self.localChats[location.index] : self.chats[location.index]
+                        var chat = self.chat(at: location)
                         chat.hasActiveStream = false
 
                         // Force any pending stream updates to save immediately
@@ -1536,7 +1541,7 @@ class ChatViewModel: ObservableObject {
 
                     if let sid = streamChatId,
                        let location = self.findChatLocation(sid) {
-                        var chat = location.isLocal ? self.localChats[location.index] : self.chats[location.index]
+                        var chat = self.chat(at: location)
                         if !chat.messages.isEmpty {
                             let lastIndex = chat.messages.count - 1
 
@@ -1760,7 +1765,7 @@ class ChatViewModel: ObservableObject {
         guard let location = findChatLocation(chatId) else {
             return
         }
-        let latestChat = location.isLocal ? localChats[location.index] : chats[location.index]
+        let latestChat = chat(at: location)
         saveChat(latestChat)
 
         let saveTask = pendingSaveTask
@@ -2079,9 +2084,9 @@ class ChatViewModel: ObservableObject {
                 // Preserve existing selection when possible so we don't jump to a blank chat
                 if let chatId = previouslySelectedId,
                    let location = self.findChatLocation(chatId) {
-                    self.currentChat = location.isLocal ? self.localChats[location.index] : self.chats[location.index]
-                } else if self.currentChat == nil {
-                    self.currentChat = self.chats.first
+                            self.currentChat = self.chat(at: location)
+                        } else if self.currentChat == nil {
+                            self.currentChat = self.chats.first
                 }
 
                 self.ensureBlankChatAtTop()
