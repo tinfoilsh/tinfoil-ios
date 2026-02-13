@@ -23,6 +23,7 @@ struct ChatSidebar: View {
     @State private var showEncryptedChatAlert: Bool = false
     @State private var selectedEncryptedChat: Chat? = nil
     @State private var shouldOpenCloudSync: Bool = false
+    @State private var isTabSwitching: Bool = false
     @ObservedObject private var settings = SettingsManager.shared
 
     private var activeTab: ChatStorageTab {
@@ -175,6 +176,12 @@ struct ChatSidebar: View {
             }
 
             // Chat List - shows multiple chats for all authenticated users
+            if isTabSwitching {
+                Spacer()
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle())
+                Spacer()
+            } else {
             ScrollView {
                 LazyVStack(spacing: 12) {
                     ForEach(Array(filteredChats.enumerated()), id: \.element.id) { index, chat in
@@ -273,6 +280,7 @@ struct ChatSidebar: View {
                 await viewModel.performFullSync()
             }
             .frame(maxHeight: .infinity)
+            } // end tab switching else
 
             Divider()
                 .background(Color.gray.opacity(0.3))
@@ -323,7 +331,7 @@ struct ChatSidebar: View {
     
     private var cloudLocalTabSwitcher: some View {
         HStack(spacing: 0) {
-            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { viewModel.switchStorageTab(to: .cloud) } }) {
+            Button(action: { switchTab(to: .cloud) }) {
                 HStack(spacing: 4) {
                     Image(systemName: "icloud")
                         .font(.caption)
@@ -344,7 +352,7 @@ struct ChatSidebar: View {
             }
             .buttonStyle(PlainButtonStyle())
 
-            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { viewModel.switchStorageTab(to: .local) } }) {
+            Button(action: { switchTab(to: .local) }) {
                 HStack(spacing: 4) {
                     Image(systemName: "internaldrive")
                         .font(.caption)
@@ -370,6 +378,18 @@ struct ChatSidebar: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(UIColor.secondarySystemBackground))
         )
+    }
+
+    private func switchTab(to tab: ChatStorageTab) {
+        guard activeTab != tab else { return }
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        isTabSwitching = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            viewModel.switchStorageTab(to: tab)
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isTabSwitching = false
+            }
+        }
     }
 
     private func startEditing(_ chat: Chat) {

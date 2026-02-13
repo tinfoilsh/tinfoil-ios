@@ -559,7 +559,7 @@ class ChatViewModel: ObservableObject {
 
         // If on a blank chat, switch to the blank chat for the target tab
         if currentChat?.isBlankChat == true {
-            createNewChat(isLocalOnly: shouldBeLocal)
+            createNewChat(isLocalOnly: shouldBeLocal, focusInput: false)
             return
         }
 
@@ -567,12 +567,12 @@ class ChatViewModel: ObservableObject {
         if let first = targetList.first {
             selectChat(first)
         } else {
-            createNewChat(isLocalOnly: shouldBeLocal)
+            createNewChat(isLocalOnly: shouldBeLocal, focusInput: false)
         }
     }
 
     /// Creates a new chat and sets it as the current chat
-    func createNewChat(language: String? = nil, modelType: ModelType? = nil, isLocalOnly: Bool? = nil) {
+    func createNewChat(language: String? = nil, modelType: ModelType? = nil, isLocalOnly: Bool? = nil, focusInput: Bool = true) {
         // Allow creating new chats for all authenticated users
         guard hasChatAccess else { return }
         
@@ -594,13 +594,13 @@ class ChatViewModel: ObservableObject {
         if shouldBeLocal {
             if let existing = localChats.first(where: { $0.isBlankChat }) {
                 selectChat(existing)
-                shouldFocusInput = true
+                shouldFocusInput = focusInput
                 return
             }
         } else {
             if let existing = chats.first(where: { $0.isBlankChat }) {
                 selectChat(existing)
-                shouldFocusInput = true
+                shouldFocusInput = focusInput
                 return
             }
         }
@@ -619,7 +619,7 @@ class ChatViewModel: ObservableObject {
             chats.insert(newChat, at: 0)
         }
         selectChat(newChat)
-        shouldFocusInput = true
+        shouldFocusInput = focusInput
     }
     
     /// Selects a chat as the current chat
