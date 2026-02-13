@@ -49,10 +49,7 @@ struct MessageView: View {
             if message.role == .user && !message.attachments.isEmpty {
                 MessageAttachmentIndicator(
                     attachments: message.attachments,
-                    isDarkMode: isDarkMode,
-                    allConversationImages: (viewModel.currentChat?.messages ?? [])
-                        .flatMap { $0.attachments }
-                        .filter { $0.type == .image && $0.imageBase64 != nil }
+                    isDarkMode: isDarkMode
                 )
             }
 

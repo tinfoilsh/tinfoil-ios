@@ -9,7 +9,6 @@ import SwiftUI
 struct MessageAttachmentIndicator: View {
     let attachments: [Attachment]
     let isDarkMode: Bool
-    let allConversationImages: [Attachment]
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
 
     private var imageAttachments: [Attachment] {
@@ -44,8 +43,11 @@ struct MessageAttachmentIndicator: View {
                     ForEach(row) { attachment in
                         ImageThumbnail(attachment: attachment, size: size)
                             .onTapGesture {
-                                if let index = allConversationImages.firstIndex(where: { $0.id == attachment.id }) {
-                                    viewModel.imageViewerImages = allConversationImages
+                                let allImages = (viewModel.currentChat?.messages ?? [])
+                                    .flatMap { $0.attachments }
+                                    .filter { $0.type == .image && $0.imageBase64 != nil }
+                                if let index = allImages.firstIndex(where: { $0.id == attachment.id }) {
+                                    viewModel.imageViewerImages = allImages
                                     viewModel.imageViewerIndex = index
                                     viewModel.showImageViewer = true
                                 }
@@ -255,44 +257,46 @@ struct ZoomableImagePage: View {
     let attachment: Attachment
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
-
-    private var uiImage: UIImage? {
-        let base64 = attachment.imageBase64 ?? attachment.thumbnailBase64
-        guard let base64, let data = Data(base64Encoded: base64) else { return nil }
-        return UIImage(data: data)
-    }
+    @State private var decodedImage: UIImage?
 
     var body: some View {
-        if let uiImage {
-            Image(uiImage: uiImage)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .scaleEffect(scale)
-                .gesture(
-                    MagnifyGesture()
-                        .onChanged { value in
-                            scale = lastScale * value.magnification
+        Group {
+            if let decodedImage {
+                Image(uiImage: decodedImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .scaleEffect(scale)
+                    .gesture(
+                        MagnifyGesture()
+                            .onChanged { value in
+                                scale = lastScale * value.magnification
+                            }
+                            .onEnded { _ in
+                                lastScale = max(1.0, scale)
+                                scale = lastScale
+                            }
+                    )
+                    .onTapGesture(count: 2) {
+                        withAnimation {
+                            scale = 1.0
+                            lastScale = 1.0
                         }
-                        .onEnded { _ in
-                            lastScale = max(1.0, scale)
-                            scale = lastScale
-                        }
-                )
-                .onTapGesture(count: 2) {
-                    withAnimation {
-                        scale = 1.0
-                        lastScale = 1.0
                     }
+            } else {
+                VStack(spacing: 12) {
+                    Image(systemName: "photo")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.white.opacity(0.5))
+                    Text("Unable to load image")
+                        .foregroundStyle(.white.opacity(0.5))
+                        .font(.caption)
                 }
-        } else {
-            VStack(spacing: 12) {
-                Image(systemName: "photo")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.white.opacity(0.5))
-                Text("Unable to load image")
-                    .foregroundStyle(.white.opacity(0.5))
-                    .font(.caption)
             }
+        }
+        .onAppear {
+            let base64 = attachment.imageBase64 ?? attachment.thumbnailBase64
+            guard let base64, let data = Data(base64Encoded: base64) else { return }
+            decodedImage = UIImage(data: data)
         }
     }
 }
