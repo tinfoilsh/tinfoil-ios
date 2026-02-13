@@ -566,6 +566,9 @@ struct CloudSyncOnboardingView: View {
                 }
                 activityVC.popoverPresentationController?.sourceView = topVC.view
                 activityVC.popoverPresentationController?.sourceRect = CGRect(x: topVC.view.bounds.midX, y: topVC.view.bounds.midY, width: 0, height: 0)
+                activityVC.completionWithItemsHandler = { _, _, _, _ in
+                    try? FileManager.default.removeItem(at: tempURL)
+                }
                 topVC.present(activityVC, animated: true)
             }
         } catch {
