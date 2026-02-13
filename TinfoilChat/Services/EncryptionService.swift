@@ -118,66 +118,16 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     
     /// Encrypt data
     func encrypt<T: Encodable>(_ data: T) async throws -> EncryptedData {
-        guard let encryptionKey = encryptionKey else {
-            throw EncryptionError.keyNotInitialized
-        }
-        
-        // Convert data to JSON
-        let encoder = JSONEncoder()
         // Don't set date encoding - let StoredChat handle its own format
-        // encoder.dateEncodingStrategy = .iso8601
-        let jsonData = try encoder.encode(data)
-        
-        // Generate random nonce (IV)
-        let nonce = AES.GCM.Nonce()
-        
-        // Encrypt
-        let sealedBox = try AES.GCM.seal(jsonData, using: encryptionKey, nonce: nonce)
-        
-        // Extract ciphertext and tag
-        let ciphertext = sealedBox.ciphertext
-        let tag = sealedBox.tag
-        
-        // Combine ciphertext and tag
-        var combinedData = Data()
-        combinedData.append(ciphertext)
-        combinedData.append(tag)
-        
-        // Convert to base64
-        let ivBase64 = Data(nonce).base64EncodedString()
-        let dataBase64 = combinedData.base64EncodedString()
-        
-        return EncryptedData(iv: ivBase64, data: dataBase64)
+        let jsonData = try JSONEncoder().encode(data)
+        return try await encryptData(jsonData)
     }
     
     /// Decrypt data
     func decrypt<T: Decodable>(_ encryptedData: EncryptedData, as type: T.Type) async throws -> DecryptionResult<T> {
-        guard let defaultKey = encryptionKey else {
-            throw EncryptionError.keyNotInitialized
-        }
-
-        let sealedBox = try prepareSealedBox(from: encryptedData)
-        let decoder = JSONDecoder()
-
-        do {
-            let decryptedData = try AES.GCM.open(sealedBox, using: defaultKey)
-            let value = try decoder.decode(type, from: decryptedData)
-            return DecryptionResult(value: value, usedFallbackKey: false)
-        } catch {
-            var lastError = error
-            let history = loadKeyHistory()
-            for legacyKey in history {
-                do {
-                    let legacySymmetricKey = try symmetricKey(from: legacyKey)
-                    let decryptedData = try AES.GCM.open(sealedBox, using: legacySymmetricKey)
-                    let value = try decoder.decode(type, from: decryptedData)
-                    return DecryptionResult(value: value, usedFallbackKey: true)
-                } catch {
-                    lastError = error
-                }
-            }
-            throw lastError
-        }
+        let (data, usedFallback) = try await decryptDataWithFallbackInfo(encryptedData)
+        let value = try JSONDecoder().decode(type, from: data)
+        return DecryptionResult(value: value, usedFallbackKey: usedFallback)
     }
     
     // MARK: - Helper Methods
@@ -430,6 +380,13 @@ extension EncryptionService: ChatEncryptor {
     }
 
     func decryptData(_ encrypted: EncryptedData) async throws -> Data {
+        let (data, _) = try await decryptDataWithFallbackInfo(encrypted)
+        return data
+    }
+
+    /// Shared decryption that tries the primary key, then falls back to key history.
+    /// Returns the decrypted data and whether a fallback key was used.
+    private func decryptDataWithFallbackInfo(_ encrypted: EncryptedData) async throws -> (Data, Bool) {
         guard let defaultKey = encryptionKey else {
             throw EncryptionError.keyNotInitialized
         }
@@ -437,14 +394,16 @@ extension EncryptionService: ChatEncryptor {
         let sealedBox = try prepareSealedBox(from: encrypted)
 
         do {
-            return try AES.GCM.open(sealedBox, using: defaultKey)
+            let data = try AES.GCM.open(sealedBox, using: defaultKey)
+            return (data, false)
         } catch {
             var lastError = error
             let history = loadKeyHistory()
             for legacyKey in history {
                 do {
                     let legacySymmetricKey = try symmetricKey(from: legacyKey)
-                    return try AES.GCM.open(sealedBox, using: legacySymmetricKey)
+                    let data = try AES.GCM.open(sealedBox, using: legacySymmetricKey)
+                    return (data, true)
                 } catch {
                     lastError = error
                 }
