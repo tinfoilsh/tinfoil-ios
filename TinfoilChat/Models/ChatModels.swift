@@ -228,10 +228,12 @@ struct Chat: Identifiable, Codable {
 
     // MARK: - Per-Chat File Storage Methods
 
+    /// Routes to `.local` or `.cloud` storage based on `chat.isLocalOnly`.
     static func saveChat(_ chat: Chat, userId: String?) async {
         guard let userId = userId else { return }
+        let storage: EncryptedFileStorage = chat.isLocalOnly ? .local : .cloud
         do {
-            try await EncryptedFileStorage.shared.saveChat(chat, userId: userId)
+            try await storage.saveChat(chat, userId: userId)
         } catch {
             #if DEBUG
             print("Failed to save chat to file storage: \(error)")
@@ -239,34 +241,58 @@ struct Chat: Identifiable, Codable {
         }
     }
 
+    /// Loads the cloud index only (backward compatible for pagination/sync callers).
     static func loadChatIndex(userId: String?) async -> [ChatIndexEntry] {
         guard let userId = userId else { return [] }
-        return (try? await EncryptedFileStorage.shared.loadIndex(userId: userId)) ?? []
+        return (try? await EncryptedFileStorage.cloud.loadIndex(userId: userId)) ?? []
     }
 
+    /// Loads the local-only index.
+    static func loadLocalChatIndex(userId: String?) async -> [ChatIndexEntry] {
+        guard let userId = userId else { return [] }
+        return (try? await EncryptedFileStorage.local.loadIndex(userId: userId)) ?? []
+    }
+
+    /// Tries local storage first, then cloud.
     static func loadChat(chatId: String, userId: String?) async -> Chat? {
         guard let userId = userId else { return nil }
-        return try? await EncryptedFileStorage.shared.loadChat(chatId: chatId, userId: userId)
+        if let chat = try? await EncryptedFileStorage.local.loadChat(chatId: chatId, userId: userId) {
+            return chat
+        }
+        return try? await EncryptedFileStorage.cloud.loadChat(chatId: chatId, userId: userId)
     }
 
     static func loadChats(chatIds: [String], userId: String?) async -> [Chat] {
         guard let userId = userId else { return [] }
-        return (try? await EncryptedFileStorage.shared.loadChats(chatIds: chatIds, userId: userId)) ?? []
+        var results: [Chat] = []
+        for chatId in chatIds {
+            if let chat = await loadChat(chatId: chatId, userId: userId) {
+                results.append(chat)
+            }
+        }
+        return results
     }
 
+    /// Loads chats from both stores and merges.
     static func loadAllChats(userId: String?) async -> [Chat] {
         guard let userId = userId else { return [] }
-        return (try? await EncryptedFileStorage.shared.loadAllChats(userId: userId)) ?? []
+        let localChats = (try? await EncryptedFileStorage.local.loadAllChats(userId: userId)) ?? []
+        let cloudChats = (try? await EncryptedFileStorage.cloud.loadAllChats(userId: userId)) ?? []
+        return localChats + cloudChats
     }
 
+    /// Tries both stores to ensure the chat is removed wherever it lives.
     static func deleteChatFromStorage(chatId: String, userId: String?) async {
         guard let userId = userId else { return }
-        try? await EncryptedFileStorage.shared.deleteChat(chatId: chatId, userId: userId)
+        try? await EncryptedFileStorage.local.deleteChat(chatId: chatId, userId: userId)
+        try? await EncryptedFileStorage.cloud.deleteChat(chatId: chatId, userId: userId)
     }
 
+    /// Deletes from both stores.
     static func deleteAllChatsFromStorage(userId: String?) async {
         guard let userId = userId else { return }
-        try? await EncryptedFileStorage.shared.deleteAllChats(userId: userId)
+        try? await EncryptedFileStorage.local.deleteAllChats(userId: userId)
+        try? await EncryptedFileStorage.cloud.deleteAllChats(userId: userId)
     }
 
     // MARK: - Title Generation handled via LLM (see ChatViewModel.generateLLMTitle)

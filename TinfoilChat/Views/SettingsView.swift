@@ -730,8 +730,9 @@ struct SettingsView: View {
             }
             Button("Delete Everything", role: .destructive) {
                 Task {
-                    // Clear encryption key and all local data
+                    // Clear encryption keys and all local data
                     EncryptionService.shared.clearKey()
+                    await DeviceEncryptionService.shared.clearKey()
                     UserDefaults.standard.removeObject(forKey: "hasLaunchedBefore")
 
                     // Reset cloud sync setting
@@ -758,6 +759,7 @@ struct SettingsView: View {
                     do {
                         settings.isCloudSyncEnabled = false
                         EncryptionService.shared.clearKey()
+                        await DeviceEncryptionService.shared.clearKey()
                         chatViewModel.clearAllLocalChats()
                         settings.clearPersonalization()
                         ProfileManager.shared.clearProfile()
