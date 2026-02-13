@@ -98,6 +98,16 @@ enum Constants {
         static let numberOfChannels: Int = 1  // Mono
     }
 
+    enum Share {
+        static let shareBaseURL = "https://chat.tinfoil.sh"
+        static let shareAPIPath = "/api/shares"
+        static let encryptionAlgorithm = "AES-GCM"
+        static let encryptionKeyBits = 256
+        static let ivByteLength = 12
+        static let formatVersion = 1
+        static let copyFeedbackDurationSeconds: TimeInterval = 2.0
+    }
+
     enum Attachments {
         static let maxImageDimension: CGFloat = 768
         static let imageCompressionQuality: CGFloat = 0.85
