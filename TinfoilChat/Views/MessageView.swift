@@ -36,6 +36,7 @@ struct MessageView: View {
     @State private var editedContent = ""
     @State private var showSelectableText = false
     @State private var showSourcesSheet = false
+    @State private var showUserMessageActions = false
 
     var body: some View {
         HStack {
@@ -231,7 +232,7 @@ struct MessageView: View {
                 if message.role == .assistant &&
                    (!message.content.isEmpty || message.thoughts != nil) &&
                    !(isLoading && isLastMessage) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 16) {
                         // Sources button - only show if we have web search sources
                         if let webSearchState = message.webSearchState,
                            !webSearchState.sources.isEmpty {
@@ -242,19 +243,17 @@ struct MessageView: View {
                                 showSourcesSheet = true
                             }
                         }
-                        
+
                         Button {
                             Task { @MainActor in
                                 showRawContentModal = true
                             }
                         } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "doc.on.doc")
-                                    .font(.system(size: 12))
-                                Text("Copy")
-                                    .font(.system(size: 12))
-                            }
-                            .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 16))
+                                .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                                .frame(width: 32, height: 32)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(PlainButtonStyle())
 
@@ -263,20 +262,18 @@ struct MessageView: View {
                             Button {
                                 viewModel.regenerateMessage(at: messageIndex - 1)
                             } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: 12))
-                                    Text("Regenerate")
-                                        .font(.system(size: 12))
-                                }
-                                .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
 
                         Spacer()
                     }
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 8)
 
                     // AI disclaimer - only on the last assistant message
                     if isLastMessage {
@@ -302,51 +299,34 @@ struct MessageView: View {
                 .cornerRadius(16)
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
                 .onLongPressGesture {
-                    if message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil) {
+                    if message.role == .user && !message.content.isEmpty {
+                        showUserMessageActions = true
+                    } else if message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil) {
                         Task { @MainActor in
                             showRawContentModal = true
                         }
-                    } else if message.role == .user && !message.content.isEmpty {
-                        showSelectableText = true
                     }
+                }
+                .confirmationDialog("", isPresented: $showUserMessageActions, titleVisibility: .hidden) {
+                    Button("Resend", role: nil) {
+                        viewModel.regenerateMessage(at: messageIndex)
+                    }
+                    .disabled(viewModel.isLoading)
+
+                    Button("Copy", role: nil) {
+                        UIPasteboard.general.string = message.content
+                    }
+
+                    Button("Edit", role: nil) {
+                        editedContent = message.content
+                        isEditMode = true
+                    }
+
+                    Button("Cancel", role: .cancel) {}
                 }
                 .onChange(of: message.id) { _, _ in
                     isEditMode = false
                     editedContent = ""
-                }
-
-                // Add action buttons for user messages (only when not in edit mode)
-                if message.role == .user && !message.content.isEmpty && !isEditMode {
-                    HStack(spacing: 8) {
-                        Spacer()
-
-                        Button {
-                            UIPasteboard.general.string = message.content
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "doc.on.doc")
-                                    .font(.system(size: 12))
-                                Text("Copy")
-                                    .font(.system(size: 12))
-                            }
-                            .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
-                        }
-                        .buttonStyle(PlainButtonStyle())
-
-                        Button {
-                            editedContent = message.content
-                            isEditMode = true
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "square.and.pencil")
-                                    .font(.system(size: 12))
-                                Text("Edit")
-                                    .font(.system(size: 12))
-                            }
-                            .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
                 }
 
             }
