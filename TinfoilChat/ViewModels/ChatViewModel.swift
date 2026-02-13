@@ -671,8 +671,10 @@ class ChatViewModel: ObservableObject {
             return
         }
 
-        // Mark as deleted for cloud sync
-        DeletedChatsTracker.shared.markAsDeleted(id)
+        // Mark as deleted for cloud sync (local-only chats are never uploaded)
+        if !isLocal {
+            DeletedChatsTracker.shared.markAsDeleted(id)
+        }
 
         // If the deleted chat was the current chat, select another one
         if currentChat?.id == id {
@@ -2265,7 +2267,6 @@ class ChatViewModel: ObservableObject {
 
                     // Always load all local chats (they're on device, no pagination needed)
                     let allLocal = await loadAllLocalChats(userId: self.currentUserId)
-                        .filter { $0.isLocalOnly }
                     await MainActor.run {
                         self.localChats = allLocal
                     }
@@ -2327,10 +2328,9 @@ class ChatViewModel: ObservableObject {
     /// Removes all cloud (non-local) chats from the device
     @MainActor
     func deleteNonLocalChats() async {
-        // Delete all non-local chats from storage using the index (handles paginated chats too)
-        let index = await Chat.loadChatIndex(userId: currentUserId)
-        for entry in index where !entry.isLocalOnly {
-            await Chat.deleteChatFromStorage(chatId: entry.id, userId: currentUserId)
+        // Delete all cloud chats from storage (the cloud store only has cloud chats)
+        if let userId = currentUserId {
+            try? await EncryptedFileStorage.cloud.deleteAllChats(userId: userId)
         }
         chats = []
         hasMoreChats = false
@@ -2506,10 +2506,10 @@ class ChatViewModel: ObservableObject {
     /// Loads the first page of chats from file storage, sorted newest-first.
     /// Returns the loaded chats and the total number of matching index entries
     /// (useful for determining whether more pages exist).
-    /// Loads ALL chats from local file storage (no pagination). Used when cloud sync is disabled.
+    /// Loads ALL chats from the local-only store (no pagination). Used when cloud sync is disabled.
     private func loadAllLocalChats(userId: String?) async -> [Chat] {
         guard let userId = userId else { return [] }
-        return await Chat.loadAllChats(userId: userId)
+        return ((try? await EncryptedFileStorage.local.loadAllChats(userId: userId)) ?? [])
             .sorted { $0.createdAt > $1.createdAt }
     }
 
@@ -2752,10 +2752,8 @@ class ChatViewModel: ObservableObject {
         // Also sync profile settings
         await ProfileManager.shared.performFullSync()
         
-        // Re-filter localChats to only contain local-only chats
-        // (needed when cloud sync was just enabled and localChats still holds all chats)
+        // Re-load localChats from the local-only store
         let freshLocal = await loadAllLocalChats(userId: self.currentUserId)
-            .filter { $0.isLocalOnly }
 
         await MainActor.run {
             self.localChats = freshLocal

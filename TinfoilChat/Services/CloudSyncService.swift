@@ -264,8 +264,8 @@ class CloudSyncService: ObservableObject {
         }
         
         
-        // Don't sync local-only, blank, empty, or decryption failure chats
-        if chat.isLocalOnly || chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed || chat.encryptedData != nil {
+        // Don't sync blank, empty, or decryption failure chats
+        if chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed || chat.encryptedData != nil {
             return
         }
 
@@ -287,10 +287,10 @@ class CloudSyncService: ObservableObject {
         let unsyncedChats = await getUnsyncedChats()
         
         
-        // Filter out local-only, blank, empty, decryption failure, and streaming chats
+        // Filter out blank, empty, decryption failure, and streaming chats
         var chatsToSync: [Chat] = []
         for chat in unsyncedChats {
-            if !chat.isLocalOnly && !chat.isBlankChat && !chat.messages.isEmpty && !chat.decryptionFailed && chat.encryptedData == nil {
+            if !chat.isBlankChat && !chat.messages.isEmpty && !chat.decryptionFailed && chat.encryptedData == nil {
                 let isStreaming = streamingTracker.isStreaming(chat.id)
                 if !isStreaming {
                     chatsToSync.append(chat)
@@ -616,11 +616,6 @@ class CloudSyncService: ObservableObject {
                 // 4. Never overwrite if chat has active stream or is locally modified
                 let remoteTimestamp = parseISODate(remoteChat.updatedAt)?.timeIntervalSince1970 ?? 0
 
-                // Skip local-only chats — their content is never overwritten by remote
-                if let localChat = localChat, localChat.isLocalOnly {
-                    continue
-                }
-
                 // Skip if chat is locally modified or has active stream
                 if let localChat = localChat {
                     if localChat.locallyModified || localChat.hasActiveStream {
@@ -823,11 +818,6 @@ class CloudSyncService: ObservableObject {
                     }
 
                     if !(await shouldProcessRemoteChat(remoteChat)) {
-                        continue
-                    }
-
-                    // Skip local-only chats — their content is never overwritten by remote
-                    if let localChat = localChatMap[remoteChat.id], localChat.isLocalOnly {
                         continue
                     }
 
@@ -1143,14 +1133,14 @@ class CloudSyncService: ObservableObject {
     private func getAllChatsFromStorage() async -> [Chat] {
         let userId = await getCurrentUserId()
         guard let userId = userId else { return [] }
-        return (try? await EncryptedFileStorage.shared.loadAllChats(userId: userId)) ?? []
+        return (try? await EncryptedFileStorage.cloud.loadAllChats(userId: userId)) ?? []
     }
 
     private func getUnsyncedChats() async -> [Chat] {
         let userId = await getCurrentUserId()
         guard let userId = userId else { return [] }
-        let index = (try? await EncryptedFileStorage.shared.loadIndex(userId: userId)) ?? []
-        let unsyncedIds = index.filter { !$0.isLocalOnly && ($0.locallyModified || $0.syncedAt == nil) }.map(\.id)
+        let index = (try? await EncryptedFileStorage.cloud.loadIndex(userId: userId)) ?? []
+        let unsyncedIds = index.filter { $0.locallyModified || $0.syncedAt == nil }.map(\.id)
         return await Chat.loadChats(chatIds: unsyncedIds, userId: userId)
     }
 
@@ -1186,7 +1176,7 @@ class CloudSyncService: ObservableObject {
 
     private func markChatAsSynced(_ chatId: String, version: Int) async {
         guard let userId = await getCurrentUserId() else { return }
-        try? await EncryptedFileStorage.shared.updateSyncMetadata(
+        try? await EncryptedFileStorage.cloud.updateSyncMetadata(
             chatId: chatId,
             userId: userId,
             syncVersion: version,
@@ -1207,15 +1197,6 @@ class CloudSyncService: ObservableObject {
 
     private func performReencryption(for chat: StoredChat, persistLocal: Bool) async {
         guard await cloudStorage.isAuthenticated() else { return }
-
-        // Skip local-only chats — check the on-disk index since StoredChat doesn't carry isLocalOnly
-        let userId = await getCurrentUserId()
-        if let userId = userId,
-           let index = try? await EncryptedFileStorage.shared.loadIndex(userId: userId),
-           let entry = index.first(where: { $0.id == chat.id }),
-           entry.isLocalOnly {
-            return
-        }
 
         // Ensure encryption service is initialized with the current default key
         _ = try? await encryptionService.initialize()
@@ -1404,8 +1385,8 @@ class CloudSyncService: ObservableObject {
         }
         
         for chat in allChats {
-            // Skip local-only, blank, and empty chats
-            if chat.isLocalOnly || chat.isBlankChat || chat.messages.isEmpty { continue }
+            // Skip blank and empty chats
+            if chat.isBlankChat || chat.messages.isEmpty { continue }
 
             do {
                 // Re-encrypt the chat with the new key by forcing a sync

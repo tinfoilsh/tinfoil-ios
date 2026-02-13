@@ -6,18 +6,36 @@
 //  Replaces the single keychain blob with per-chat encrypted files
 //  and a lightweight index for metadata queries.
 //
+//  Two static instances:
+//    .local  — device key, stores under {userId}/local/
+//    .cloud  — cloud key, stores under {userId}/ (backward compatible)
+//    .shared — alias for .cloud (backward compat for callers)
+//
 
 import Foundation
 
 actor EncryptedFileStorage {
-    static let shared = EncryptedFileStorage()
+    static let local = EncryptedFileStorage(
+        encryptor: DeviceEncryptionService.shared,
+        subdirectory: "local"
+    )
+    static let cloud = EncryptedFileStorage(
+        encryptor: EncryptionService.shared,
+        subdirectory: nil
+    )
+    /// Backward-compatible alias for cloud storage.
+    static let shared = cloud
 
     private let fileManager = FileManager.default
-    private let encryptionService = EncryptionService.shared
+    private let encryptor: any ChatEncryptor
+    private let subdirectory: String?
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    private init() {}
+    init(encryptor: any ChatEncryptor, subdirectory: String?) {
+        self.encryptor = encryptor
+        self.subdirectory = subdirectory
+    }
 
     // MARK: - Directory / Path Helpers
 
@@ -38,10 +56,14 @@ actor EncryptedFileStorage {
             create: true
         )
 
-        let chatsDir = appSupport
+        var chatsDir = appSupport
             .appendingPathComponent("tinfoil", isDirectory: true)
             .appendingPathComponent("chats", isDirectory: true)
             .appendingPathComponent(sanitizePathComponent(userId), isDirectory: true)
+
+        if let sub = subdirectory {
+            chatsDir = chatsDir.appendingPathComponent(sub, isDirectory: true)
+        }
 
         if !fileManager.fileExists(atPath: chatsDir.path) {
             try fileManager.createDirectory(
@@ -75,12 +97,10 @@ actor EncryptedFileStorage {
         }
 
         do {
-            let data = try Data(contentsOf: indexPath)
-            let decryptionResult = try await encryptionService.decrypt(
-                decoder.decode(EncryptedData.self, from: data),
-                as: [ChatIndexEntry].self
-            )
-            return decryptionResult.value
+            let fileData = try Data(contentsOf: indexPath)
+            let encrypted = try decoder.decode(EncryptedData.self, from: fileData)
+            let decryptedData = try await encryptor.decryptData(encrypted)
+            return try decoder.decode([ChatIndexEntry].self, from: decryptedData)
         } catch {
             return try await rebuildIndex(userId: userId)
         }
@@ -88,20 +108,17 @@ actor EncryptedFileStorage {
 
     func saveIndex(_ entries: [ChatIndexEntry], userId: String) async throws {
         let indexPath = try indexFilePath(userId: userId)
-        let encrypted = try await encryptionService.encrypt(entries)
-        let data = try encoder.encode(encrypted)
-        try data.write(to: indexPath, options: [.atomic, .completeFileProtection])
+        let jsonData = try encoder.encode(entries)
+        let encrypted = try await encryptor.encryptData(jsonData)
+        let fileData = try encoder.encode(encrypted)
+        try fileData.write(to: indexPath, options: [.atomic, .completeFileProtection])
     }
 
     // MARK: - Chat Operations
 
     func saveChat(_ chat: Chat, userId: String) async throws {
-        // Enforce isLocalOnly stickiness: once a chat is marked local, it stays local
         var entries = (try? await loadIndex(userId: userId)) ?? []
-        var chatToSave = chat
-        if let existingEntry = entries.first(where: { $0.id == chat.id }), existingEntry.isLocalOnly {
-            chatToSave.isLocalOnly = true
-        }
+        let chatToSave = chat
 
         let isCorrupted = chatToSave.decryptionFailed || chatToSave.dataCorrupted
 
@@ -119,7 +136,7 @@ actor EncryptedFileStorage {
                 try? fileManager.removeItem(at: encPath)
             }
         } else {
-            let encrypted = try await encryptionService.encrypt(data)
+            let encrypted = try await encryptor.encryptData(data)
             let encryptedData = try encoder.encode(encrypted)
             let filePath = try chatFilePath(chatId: chatToSave.id, userId: userId, isCorrupted: false)
             try encryptedData.write(to: filePath, options: [.atomic, .completeFileProtection])
@@ -257,8 +274,8 @@ actor EncryptedFileStorage {
             return try decoder.decode(Chat.self, from: data)
         } else {
             let encrypted = try decoder.decode(EncryptedData.self, from: data)
-            let decryptionResult = try await encryptionService.decrypt(encrypted, as: Data.self)
-            return try decoder.decode(Chat.self, from: decryptionResult.value)
+            let decryptedData = try await encryptor.decryptData(encrypted)
+            return try decoder.decode(Chat.self, from: decryptedData)
         }
     }
 }

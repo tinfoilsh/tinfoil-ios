@@ -22,7 +22,7 @@ struct DecryptionResult<T> {
 }
 
 /// Service for handling end-to-end encryption of chat data
-class EncryptionService: ObservableObject {
+class EncryptionService: ObservableObject, @unchecked Sendable {
     static let shared = EncryptionService()
 
     private let keychainKey = "sh.tinfoil.encryptionKey"
@@ -399,6 +399,52 @@ class EncryptionService: ObservableObject {
         ]
         
         SecItemDelete(query as CFDictionary)
+    }
+}
+
+// MARK: - ChatEncryptor Conformance
+
+extension EncryptionService: ChatEncryptor {
+    func encryptData(_ data: Data) async throws -> EncryptedData {
+        guard let encryptionKey = encryptionKey else {
+            throw EncryptionError.keyNotInitialized
+        }
+
+        let nonce = AES.GCM.Nonce()
+        let sealedBox = try AES.GCM.seal(data, using: encryptionKey, nonce: nonce)
+
+        var combined = Data()
+        combined.append(sealedBox.ciphertext)
+        combined.append(sealedBox.tag)
+
+        return EncryptedData(
+            iv: Data(nonce).base64EncodedString(),
+            data: combined.base64EncodedString()
+        )
+    }
+
+    func decryptData(_ encrypted: EncryptedData) async throws -> Data {
+        guard let defaultKey = encryptionKey else {
+            throw EncryptionError.keyNotInitialized
+        }
+
+        let sealedBox = try prepareSealedBox(from: encrypted)
+
+        do {
+            return try AES.GCM.open(sealedBox, using: defaultKey)
+        } catch {
+            var lastError = error
+            let history = loadKeyHistory()
+            for legacyKey in history {
+                do {
+                    let legacySymmetricKey = try symmetricKey(from: legacyKey)
+                    return try AES.GCM.open(sealedBox, using: legacySymmetricKey)
+                } catch {
+                    lastError = error
+                }
+            }
+            throw lastError
+        }
     }
 }
 
