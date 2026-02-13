@@ -37,6 +37,7 @@ struct MessageView: View {
     @State private var showSelectableText = false
     @State private var showSourcesSheet = false
     @State private var showUserMessageActions = false
+    @State private var showShareSheet = false
 
     var body: some View {
         HStack {
@@ -271,6 +272,20 @@ struct MessageView: View {
                             .buttonStyle(PlainButtonStyle())
                         }
 
+                        // Share button - only on the last assistant message
+                        if isLastMessage && !viewModel.isLoading {
+                            Button {
+                                showShareSheet = true
+                            } label: {
+                                Image(systemName: "square.and.arrow.up")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+
                         Spacer()
                     }
                     .padding(.vertical, 8)
@@ -350,6 +365,17 @@ struct MessageView: View {
             if let sources = message.webSearchState?.sources {
                 SourcesSheetView(sources: sources, isDarkMode: isDarkMode)
                     .presentationDetents([.medium, .large])
+            }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let currentChat = viewModel.currentChat {
+                ShareChatView(
+                    messages: currentChat.messages,
+                    chatTitle: currentChat.title,
+                    chatCreatedAt: currentChat.createdAt,
+                    chatId: currentChat.id
+                )
+                .presentationDetents([.medium, .large])
             }
         }
         .environment(\.openURL, OpenURLAction { url in
