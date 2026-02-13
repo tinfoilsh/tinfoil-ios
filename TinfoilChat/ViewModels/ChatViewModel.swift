@@ -152,6 +152,20 @@ class ChatViewModel: ObservableObject {
             // When auth becomes available and authenticated, restore persisted pagination state immediately
             if authManager?.isAuthenticated == true {
                 loadPersistedPaginationState()
+
+                // Move the initial blank chat to the correct array based on cloud sync state.
+                // init() always takes the unauthenticated branch (authManager is nil at init time),
+                // so the blank chat ends up in `chats`. When cloud sync is off, the sidebar shows
+                // `localChats` which is empty. Fix this by moving the chat now.
+                if !SettingsManager.shared.isCloudSyncEnabled,
+                   let chat = currentChat, chat.isBlankChat, !chat.isLocalOnly {
+                    chats.removeAll { $0.id == chat.id }
+                    var localChat = chat
+                    localChat.isLocalOnly = true
+                    localChats = [localChat]
+                    currentChat = localChat
+                    activeStorageTab = .local
+                }
             }
         }
     }
@@ -254,32 +268,13 @@ class ChatViewModel: ObservableObject {
         // Store auth manager reference (will trigger initial sync via didSet if authenticated)
         self.authManager = authManager
         
-        // Always create a new chat when the app is loaded initially
-        if let auth = authManager, auth.isAuthenticated {
-            // Create a temporary blank chat for immediate display
-            let shouldBeLocal = !SettingsManager.shared.isCloudSyncEnabled
-            let newChat = Chat.create(
-                modelType: currentModel,
-                language: nil,
-                userId: currentUserId,
-                isLocalOnly: shouldBeLocal
-            )
-            if shouldBeLocal {
-                localChats = [newChat]
-                activeStorageTab = .local
-            } else {
-                chats = [newChat]
-            }
-            currentChat = newChat
-            
-            // Reset pagination state for fresh app start
-            // Don't wipe persisted values here; let restoration happen via loadPersistedPaginationState()
-        } else {
-            // For non-authenticated users, just create a single chat without saving
-            let newChat = Chat.create(modelType: currentModel)
-            currentChat = newChat
-            chats = [newChat]
-        }
+        // Always create a new chat when the app is loaded initially.
+        // authManager is nil at init time (set later via onAppear), so this always takes
+        // the unauthenticated branch. The didSet on authManager moves the chat to the
+        // correct array once auth state is known.
+        let newChat = Chat.create(modelType: currentModel)
+        currentChat = newChat
+        chats = [newChat]
         
         // Load any previously persisted pagination state (per-user)
         // Delay enabling persistence until after load to avoid overwriting saved values
