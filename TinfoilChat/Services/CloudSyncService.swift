@@ -1052,11 +1052,12 @@ class CloudSyncService: ObservableObject {
                     let localProjectId = localChat?.projectId
 
                     if localChat != nil && remoteProjectId != localProjectId {
-                        // Project assignment changed — update local state
+                        // Project assignment changed — update local cloud state
                         let userId = await getCurrentUserId()
-                        if var chat = await Chat.loadChat(chatId: remoteChat.id, userId: userId) {
+                        if let userId = userId,
+                           var chat = try? await EncryptedFileStorage.cloud.loadChat(chatId: remoteChat.id, userId: userId) {
                             chat.projectId = remoteProjectId
-                            await Chat.saveChat(chat, userId: userId)
+                            try? await EncryptedFileStorage.cloud.saveChat(chat, userId: userId)
                         }
                     } else if localChat == nil, !deletedChatsTracker.isDeleted(remoteChat.id), let content = remoteChat.content {
                         // New chat we don't have locally — decrypt and save it
@@ -1127,7 +1128,8 @@ class CloudSyncService: ObservableObject {
     // MARK: - Storage Helpers
     
     private func loadChatFromStorage(_ chatId: String) async -> Chat? {
-        return await Chat.loadChat(chatId: chatId, userId: await getCurrentUserId())
+        guard let userId = await getCurrentUserId() else { return nil }
+        return try? await EncryptedFileStorage.cloud.loadChat(chatId: chatId, userId: userId)
     }
 
     private func getAllChatsFromStorage() async -> [Chat] {
@@ -1141,7 +1143,7 @@ class CloudSyncService: ObservableObject {
         guard let userId = userId else { return [] }
         let index = (try? await EncryptedFileStorage.cloud.loadIndex(userId: userId)) ?? []
         let unsyncedIds = index.filter { $0.locallyModified || $0.syncedAt == nil }.map(\.id)
-        return await Chat.loadChats(chatIds: unsyncedIds, userId: userId)
+        return (try? await EncryptedFileStorage.cloud.loadChats(chatIds: unsyncedIds, userId: userId)) ?? []
     }
 
     private func saveChatToStorage(_ storedChat: StoredChat) async {
@@ -1243,7 +1245,8 @@ class CloudSyncService: ObservableObject {
     }
 
     private func deleteChatFromStorage(_ chatId: String) async {
-        await Chat.deleteChatFromStorage(chatId: chatId, userId: await getCurrentUserId())
+        guard let userId = await getCurrentUserId() else { return }
+        try? await EncryptedFileStorage.cloud.deleteChat(chatId: chatId, userId: userId)
     }
     
     private func getCurrentUserId() async -> String? {

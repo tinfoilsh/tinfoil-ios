@@ -2141,17 +2141,15 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Clear all local chats and reset to fresh state
-    func clearAllLocalChats() {
+    func clearAllChatsFromDevice() async {
         // Clear all chats from memory
         chats.removeAll()
         localChats.removeAll()
         currentChat = nil
         
-        // Clear from file storage
+        // Clear from file storage (both local and cloud stores)
         let userId = currentUserId
-        Task {
-            await Chat.deleteAllChatsFromStorage(userId: userId)
-        }
+        await Chat.deleteAllChatsFromStorage(userId: userId)
         
         // Reset sync state
         lastSyncDate = nil
@@ -2271,13 +2269,13 @@ class ChatViewModel: ObservableObject {
 
                     // If we have anonymous chats to sync, force re-encryption with proper key
                     if self.hasAnonymousChatsToSync {
-                        // Force all local chats to be marked for sync
+                        // Force all cloud chats to be marked for sync
                         if let userId = self.currentUserId {
-                            let allChats = await Chat.loadAllChats(userId: userId)
-                            for var chat in allChats {
+                            let cloudChats = (try? await EncryptedFileStorage.cloud.loadAllChats(userId: userId)) ?? []
+                            for var chat in cloudChats {
                                 chat.locallyModified = true
                                 chat.syncVersion = 0
-                                await Chat.saveChat(chat, userId: userId)
+                                try? await EncryptedFileStorage.cloud.saveChat(chat, userId: userId)
                             }
                         }
                         self.hasAnonymousChatsToSync = false
