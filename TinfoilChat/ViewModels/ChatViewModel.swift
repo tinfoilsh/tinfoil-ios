@@ -265,6 +265,10 @@ class ChatViewModel: ObservableObject {
         }
         self.currentModel = model
         self.isWebSearchEnabled = SettingsManager.shared.webSearchEnabled
+        if let savedTab = UserDefaults.standard.string(forKey: Constants.CloudSync.activeTabKey),
+           let tab = ChatStorageTab(rawValue: savedTab) {
+            self.activeStorageTab = tab
+        }
 
         // Load persisted last sync date (will be loaded per-user when auth is set)
         // Initial load happens in the authManager didSet
@@ -557,6 +561,7 @@ class ChatViewModel: ObservableObject {
     func switchStorageTab(to tab: ChatStorageTab) {
         guard activeStorageTab != tab else { return }
         activeStorageTab = tab
+        UserDefaults.standard.set(tab.rawValue, forKey: Constants.CloudSync.activeTabKey)
 
         let shouldBeLocal = tab == .local
 
@@ -2251,7 +2256,15 @@ class ChatViewModel: ObservableObject {
                     // Only proceed with cloud sync if cloud sync is enabled
                     if SettingsManager.shared.isCloudSyncEnabled {
                         await initializeCloudSync()
-                        
+
+                        // Restore persisted tab preference now that cloud chats are loaded
+                        if let savedTab = UserDefaults.standard.string(forKey: Constants.CloudSync.activeTabKey),
+                           let tab = ChatStorageTab(rawValue: savedTab) {
+                            await MainActor.run {
+                                self.activeStorageTab = tab
+                            }
+                        }
+
                         // Sync user profile settings
                         await ProfileManager.shared.performFullSync()
                     } else {

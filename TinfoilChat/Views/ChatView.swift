@@ -911,6 +911,9 @@ struct VerificationStatusIndicator: View {
                     isCollapsed = true
                     isBadgeExpanded = false
                 }
+            } else if viewModel.isVerifying {
+                isBadgeExpanded = true
+                isCollapsed = false
             }
         }
         .onChange(of: viewModel.isVerified) { _, isVerified in
