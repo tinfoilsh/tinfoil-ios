@@ -44,10 +44,11 @@ struct ShareChatView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.tertiary)
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 18, weight: .medium))
                     }
                 }
             }
@@ -143,13 +144,13 @@ struct ShareChatView: View {
                 }
             }
             .font(.system(size: 15, weight: .semibold))
-            .foregroundColor(isDark ? .black : .white)
+            .foregroundColor(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
-            .background(isDark ? Color.white.opacity(isShareEnabled ? 0.9 : 0.3) : Color.black.opacity(isShareEnabled ? 0.85 : 0.25))
+            .background(Color.tinfoilAccentDark.opacity(isShareEnabled && shareUrl == nil ? 1.0 : 0.35))
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-        .disabled(!isShareEnabled || isUploading || chatId == nil)
+        .disabled(!isShareEnabled || isUploading || chatId == nil || shareUrl != nil)
     }
 
     private func selectPrivate() {
@@ -178,13 +179,14 @@ struct ShareChatView: View {
             HStack(spacing: 8) {
                 Text(url)
                     .font(.system(size: 13, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(isDark ? .white.opacity(0.6) : .black.opacity(0.6))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .padding(.horizontal, 12)
+                    .frame(height: 44)
+                    .background(isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
 
                 Button(action: copyShareUrl) {
                     HStack(spacing: 4) {
@@ -193,10 +195,10 @@ struct ShareChatView: View {
                     }
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white)
+                    .frame(height: 44)
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
                     .background(Color.tinfoilAccentDark)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
             }
         }

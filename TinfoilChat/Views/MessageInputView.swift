@@ -147,6 +147,7 @@ struct MessageInputView: View {
                 )
                 .environmentObject(authManager)
                 .presentationDetents([.height(340)])
+                .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
             }
     }
 
@@ -474,9 +475,8 @@ struct AddToSheetView: View {
 
                 // Model selector
                 Text("Select a Model")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.horizontal, 20)
                     .padding(.bottom, -12)
 
@@ -516,6 +516,8 @@ struct AddToSheetView: View {
                 }
             }
             .padding(.top, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background((isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground)).ignoresSafeArea())
             .navigationTitle("Add to Chat")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -523,9 +525,8 @@ struct AddToSheetView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.secondary)
+                        Image(systemName: "xmark")
+                            .font(.system(size: 18, weight: .medium))
                     }
                 }
             }
