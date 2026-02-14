@@ -231,9 +231,16 @@ struct ShareChatView: View {
         isUploading = true
         errorMessage = nil
 
-        Task {
+        // Capture view data on main thread before offloading
+        let capturedMessages = messages
+        let title = chatTitle
+        let createdAt = chatCreatedAt
+
+        Task.detached {
             do {
-                let shareableData = buildShareableData()
+                let shareableData = ShareChatView.buildShareableData(
+                    messages: capturedMessages, chatTitle: title, chatCreatedAt: createdAt
+                )
                 let key = ShareEncryptionService.generateShareKey()
                 let encrypted = try ShareEncryptionService.encryptForShare(shareableData, key: key)
                 let keyBase64url = ShareEncryptionService.exportKeyToBase64url(key)
@@ -264,7 +271,7 @@ struct ShareChatView: View {
         }
     }
 
-    private func buildShareableData() -> ShareableChatData {
+    private static func buildShareableData(messages: [Message], chatTitle: String?, chatCreatedAt: Date?) -> ShareableChatData {
         let shareableMessages = messages.map { msg in
             let docContent: String? = {
                 let docs = msg.attachments.filter { $0.type == .document && $0.textContent != nil }
