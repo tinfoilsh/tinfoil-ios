@@ -534,6 +534,15 @@ class CloudSyncService: ObservableObject {
             return
         }
 
+        // If decryption failed, don't overwrite a valid local copy.
+        if downloadedChat.decryptionFailed {
+            if let localChat = await loadChatFromStorage(remoteChat.id),
+               !localChat.messages.isEmpty,
+               !localChat.decryptionFailed {
+                return
+            }
+        }
+
         // Prefer blob's createdAt; only fall back to server metadata when
         // the blob value looks like a decoder fallback (Date()).
         let blobCreatedAt = downloadedChat.createdAt
@@ -656,16 +665,24 @@ class CloudSyncService: ObservableObject {
                                 chatsNeedingReencryption.append(decrypted.chat)
                             }
                         } else {
-                            let placeholder = createEncryptedPlaceholder(
-                                remoteChat: remoteChat,
-                                encryptedContent: content
-                            )
-                            await saveChatToStorage(placeholder)
-                            result = SyncResult(
-                                uploaded: result.uploaded,
-                                downloaded: result.downloaded + 1,
-                                errors: result.errors
-                            )
+                            // Only save a placeholder if there is no valid local copy.
+                            // When a good local version exists (non-empty messages, not
+                            // already failed), preserve it to avoid replacing decrypted
+                            // content with an empty encrypted placeholder (e.g. after
+                            // the remote was re-encrypted with a key we don't have yet).
+                            let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
+                            if !hasValidLocal {
+                                let placeholder = createEncryptedPlaceholder(
+                                    remoteChat: remoteChat,
+                                    encryptedContent: content
+                                )
+                                await saveChatToStorage(placeholder)
+                                result = SyncResult(
+                                    uploaded: result.uploaded,
+                                    downloaded: result.downloaded + 1,
+                                    errors: result.errors
+                                )
+                            }
                         }
                     } else {
                         // No inline content - fetch via downloadChat (handles its own decryption)
@@ -849,16 +866,21 @@ class CloudSyncService: ObservableObject {
                                 chatsNeedingReencryption.append(decrypted.chat)
                             }
                         } else {
-                            let placeholder = createEncryptedPlaceholder(
-                                remoteChat: remoteChat,
-                                encryptedContent: content
-                            )
-                            await saveChatToStorage(placeholder)
-                            result = SyncResult(
-                                uploaded: result.uploaded,
-                                downloaded: result.downloaded + 1,
-                                errors: result.errors
-                            )
+                            // Only save a placeholder when no valid local copy exists.
+                            let localChat = localChatMap[remoteChat.id]
+                            let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
+                            if !hasValidLocal {
+                                let placeholder = createEncryptedPlaceholder(
+                                    remoteChat: remoteChat,
+                                    encryptedContent: content
+                                )
+                                await saveChatToStorage(placeholder)
+                                result = SyncResult(
+                                    uploaded: result.uploaded,
+                                    downloaded: result.downloaded + 1,
+                                    errors: result.errors
+                                )
+                            }
                         }
                     } else {
                         // No inline content - fetch via downloadChat (handles its own decryption)
