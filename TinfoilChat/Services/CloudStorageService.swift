@@ -293,7 +293,8 @@ class CloudStorageService: ObservableObject {
                 guard att.type == .image,
                       att.base64 == nil,
                       let keyB64 = att.encryptionKey,
-                      let keyData = Data(base64Encoded: keyB64) else { continue }
+                      let keyData = Data(base64Encoded: keyB64),
+                      keyData.count == BinaryCodec.aes256KeySize else { continue }
                 work.append((msgIdx, attIdx, att.id, keyData))
             }
         }
