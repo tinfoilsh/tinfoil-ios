@@ -205,24 +205,20 @@ class CloudStorageService: ObservableObject {
         let formatVersion = Int(httpResponse.value(forHTTPHeaderField: "X-Format-Version") ?? "0") ?? 0
 
         do {
+            let result: DecryptionResult<StoredChat>
             if formatVersion == 1 {
-                let result = try EncryptionService.shared.decryptV1(data, as: StoredChat.self)
-                var chat = result.value
-                chat.formatVersion = 1
-                if result.usedFallbackKey {
-                    scheduleReencryption(for: chat)
-                }
-                return chat
+                result = try EncryptionService.shared.decryptV1(data, as: StoredChat.self)
             } else {
                 let encrypted = try JSONDecoder().decode(EncryptedData.self, from: data)
-                let result = try await EncryptionService.shared.decrypt(encrypted, as: StoredChat.self)
-                var chat = result.value
-                chat.formatVersion = 0
-                if result.usedFallbackKey {
-                    scheduleReencryption(for: chat)
-                }
-                return chat
+                result = try await EncryptionService.shared.decrypt(encrypted, as: StoredChat.self)
             }
+
+            var chat = result.value
+            chat.formatVersion = formatVersion
+            if result.usedFallbackKey {
+                scheduleReencryption(for: chat)
+            }
+            return chat
         } catch {
             // If decryption fails, create a placeholder with encrypted data for recovery
             let timestamp = chatId.split(separator: "_").first.map(String.init) ?? ""
