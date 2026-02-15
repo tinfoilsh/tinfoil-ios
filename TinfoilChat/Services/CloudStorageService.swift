@@ -224,23 +224,18 @@ class CloudStorageService: ObservableObject {
             let parsedTimestamp = Int(timestamp) ?? 0
             let createdAtMs = parsedTimestamp > 0 ? Double(Constants.Sync.maxReverseTimestamp - parsedTimestamp) : Date().timeIntervalSince1970 * 1000
 
-            var placeholder = StoredChat(
-                from: await Chat.create(
-                    id: chatId,
-                    title: "Encrypted",
-                    messages: [],
-                    createdAt: Date(timeIntervalSince1970: Double(createdAtMs) / 1000.0)
-                )
-            )
-            placeholder.decryptionFailed = true
-            placeholder.formatVersion = formatVersion
             // Store encrypted data for recovery: v1 binary gets base64-encoded into the string field
-            if formatVersion == 1 {
-                placeholder.encryptedData = data.base64EncodedString()
-            } else {
-                placeholder.encryptedData = String(data: data, encoding: .utf8)
-            }
-            return placeholder
+            let encryptedString: String? = formatVersion == 1
+                ? data.base64EncodedString()
+                : String(data: data, encoding: .utf8)
+
+            return StoredChat.encryptedPlaceholder(
+                id: chatId,
+                createdAt: Date(timeIntervalSince1970: createdAtMs / 1000.0),
+                updatedAt: Date(),
+                formatVersion: formatVersion,
+                encryptedData: encryptedString
+            )
         }
     }
 
