@@ -15,15 +15,12 @@ import Gzip
 
 enum BinaryCodecError: LocalizedError {
     case encodingFailed
-    case decompressFailed
     case invalidCombinedLength
 
     var errorDescription: String? {
         switch self {
         case .encodingFailed:
             return "Failed to encode data as JSON"
-        case .decompressFailed:
-            return "Failed to decompress gzip data"
         case .invalidCombinedLength:
             return "Encrypted data too short to contain nonce and tag"
         }
