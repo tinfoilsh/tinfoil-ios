@@ -62,14 +62,14 @@ class CloudStorageService: ObservableObject {
 
     // MARK: - API Headers
 
-    private func getHeaders() async throws -> [String: String] {
+    private func getHeaders(contentType: String = "application/json") async throws -> [String: String] {
         guard let token = await (getToken ?? defaultTokenGetter)() else {
             throw CloudStorageError.authenticationRequired
         }
 
         return [
             "Authorization": "Bearer \(token)",
-            "Content-Type": "application/json"
+            "Content-Type": contentType
         ]
     }
 
@@ -97,42 +97,83 @@ class CloudStorageService: ObservableObject {
 
     // MARK: - Upload Operations
 
-    /// Upload a chat to cloud storage
+    /// Upload a chat to cloud storage using v1 binary format.
+    /// 1. Encrypt and upload image attachments separately
+    /// 2. Strip base64 image data from messages
+    /// 3. Compress, encrypt, and upload the chat as a binary blob
     func uploadChat(_ chat: StoredChat) async throws {
-        // Encrypt the chat data first
-        let encrypted = try await EncryptionService.shared.encrypt(chat)
+        var chatToUpload = chat
 
-        // Create metadata
-        let metadata: [String: String] = [
-            "db-version": "1",
-            "message-count": String(chat.messages.count),
-            "chat-created-at": ISO8601DateFormatter().string(from: chat.createdAt),
-            "chat-updated-at": ISO8601DateFormatter().string(from: chat.updatedAt)
-        ]
+        // Upload image attachments and record encryption keys on each attachment
+        try await encryptAndUploadAttachments(&chatToUpload)
 
-        // Create upload request
-        let url = URL(string: "\(apiBaseURL)/api/storage/conversation")!
+        // Strip full-size base64 from image attachments (thumbnails stay inline)
+        stripBase64FromMessages(&chatToUpload.messages)
+
+        // Compress + encrypt the chat as v1 binary
+        let binaryData = try EncryptionService.shared.encryptV1(chatToUpload)
+
+        // Upload to the binary conversation endpoint
+        let url = URL(string: "\(apiBaseURL)/api/storage/conversation/\(chat.id)/data")!
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
-        request.allHTTPHeaderFields = try await getHeaders()
-
-        // Send encrypted data as JSON string
-        let encryptedJSON = try JSONEncoder().encode(encrypted)
-        let encryptedString = String(data: encryptedJSON, encoding: .utf8)!
-
-        let body = UploadConversationRequest(
-            conversationId: chat.id,
-            data: encryptedString,
-            metadata: metadata,
-            projectId: chat.projectId
-        )
-        request.httpBody = try JSONEncoder().encode(body)
+        request.allHTTPHeaderFields = try await getHeaders(contentType: "application/octet-stream")
+        request.setValue(String(chat.messages.count), forHTTPHeaderField: "X-Message-Count")
+        if let projectId = chat.projectId {
+            request.setValue(projectId, forHTTPHeaderField: "X-Project-Id")
+        }
+        request.httpBody = binaryData
 
         let (_, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200 else {
             throw CloudStorageError.uploadFailed
+        }
+    }
+
+    /// Encrypt and upload each image attachment, storing encryption key material on the attachment.
+    private func encryptAndUploadAttachments(_ chat: inout StoredChat) async throws {
+        for msgIdx in chat.messages.indices {
+            for attIdx in chat.messages[msgIdx].attachments.indices {
+                let attachment = chat.messages[msgIdx].attachments[attIdx]
+                guard attachment.type == .image, let base64 = attachment.base64,
+                      let imageData = Data(base64Encoded: base64) else { continue }
+
+                let result = try BinaryCodec.encryptAttachment(imageData)
+                try await uploadAttachment(attachmentId: attachment.id, chatId: chat.id, data: result.encryptedData)
+
+                chat.messages[msgIdx].attachments[attIdx].encryptionKey = result.key.base64EncodedString()
+                chat.messages[msgIdx].attachments[attIdx].encryptionIV = result.nonce.base64EncodedString()
+            }
+        }
+    }
+
+    /// Upload a single encrypted attachment blob.
+    private func uploadAttachment(attachmentId: String, chatId: String, data: Data) async throws {
+        let url = URL(string: "\(apiBaseURL)/api/storage/attachment/\(attachmentId)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.allHTTPHeaderFields = try await getHeaders(contentType: "application/octet-stream")
+        request.setValue(chatId, forHTTPHeaderField: "X-Chat-Id")
+        request.httpBody = data
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw CloudStorageError.uploadFailed
+        }
+    }
+
+    /// Remove full-size base64 from image attachments. Thumbnails remain inline.
+    private func stripBase64FromMessages(_ messages: inout [Message]) {
+        for msgIdx in messages.indices {
+            for attIdx in messages[msgIdx].attachments.indices {
+                if messages[msgIdx].attachments[attIdx].type == .image {
+                    messages[msgIdx].attachments[attIdx].base64 = nil
+                }
+            }
         }
     }
 
