@@ -661,6 +661,22 @@ class ChatViewModel: ObservableObject {
         if currentModel != chatToSelect.modelType {
             changeModel(to: chatToSelect.modelType, shouldUpdateChat: false)
         }
+
+        // Lazy-load full-res images for v1 synced chats
+        let hasUnfetchedImages = chatToSelect.messages.contains { msg in
+            msg.attachments.contains { $0.type == .image && $0.base64 == nil && $0.encryptionKey != nil }
+        }
+        if hasUnfetchedImages {
+            let chatId = chatToSelect.id
+            Task {
+                let updatedMessages = await CloudStorageService.shared.loadImages(in: chatToSelect.messages)
+                guard self.currentChat?.id == chatId else { return }
+                self.currentChat?.messages = updatedMessages
+                if let idx = self.chats.firstIndex(where: { $0.id == chatId }) {
+                    self.chats[idx].messages = updatedMessages
+                }
+            }
+        }
     }
     
     /// Deletes a chat by ID
