@@ -299,6 +299,7 @@ struct ChatContainer: View {
             messageText: $messageText
         )
         .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
+        .ignoresSafeArea(edges: .top)
     }
     
     /// The sliding sidebar and dimming overlay
