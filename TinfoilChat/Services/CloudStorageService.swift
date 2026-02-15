@@ -179,7 +179,8 @@ class CloudStorageService: ObservableObject {
 
     // MARK: - Download Operations
 
-    /// Download a chat from cloud storage
+    /// Download a chat from cloud storage.
+    /// Routes v0 (legacy JSON) and v1 (binary) based on the X-Format-Version response header.
     func downloadChat(_ chatId: String) async throws -> StoredChat? {
         let url = URL(string: "\(apiBaseURL)/api/storage/conversation/\(chatId)")!
         var request = URLRequest(url: url)
@@ -201,25 +202,34 @@ class CloudStorageService: ObservableObject {
             throw CloudStorageError.downloadFailed
         }
 
-        let encrypted = try JSONDecoder().decode(EncryptedData.self, from: data)
+        let formatVersion = Int(httpResponse.value(forHTTPHeaderField: "X-Format-Version") ?? "0") ?? 0
 
-        // Try to decrypt the chat data
         do {
-            let decryptionResult = try await EncryptionService.shared.decrypt(encrypted, as: StoredChat.self)
-            let chat = decryptionResult.value
-
-            if decryptionResult.usedFallbackKey {
-                scheduleReencryption(for: chat)
+            if formatVersion == 1 {
+                let result = try EncryptionService.shared.decryptV1(data, as: StoredChat.self)
+                var chat = result.value
+                chat.formatVersion = 1
+                if result.usedFallbackKey {
+                    scheduleReencryption(for: chat)
+                }
+                return chat
+            } else {
+                let encrypted = try JSONDecoder().decode(EncryptedData.self, from: data)
+                let result = try await EncryptionService.shared.decrypt(encrypted, as: StoredChat.self)
+                var chat = result.value
+                chat.formatVersion = 0
+                if result.usedFallbackKey {
+                    scheduleReencryption(for: chat)
+                }
+                return chat
             }
-
-            return chat
         } catch {
-            // If decryption fails, create a placeholder with encrypted data
+            // If decryption fails, create a placeholder with encrypted data for recovery
             let timestamp = chatId.split(separator: "_").first.map(String.init) ?? ""
             let parsedTimestamp = Int(timestamp) ?? 0
-            let createdAtMs = parsedTimestamp > 0 ? Double(9999999999999 - parsedTimestamp) : Date().timeIntervalSince1970 * 1000
+            let createdAtMs = parsedTimestamp > 0 ? Double(Constants.Sync.maxReverseTimestamp - parsedTimestamp) : Date().timeIntervalSince1970 * 1000
 
-            return StoredChat(
+            var placeholder = StoredChat(
                 from: await Chat.create(
                     id: chatId,
                     title: "Encrypted",
@@ -227,6 +237,15 @@ class CloudStorageService: ObservableObject {
                     createdAt: Date(timeIntervalSince1970: Double(createdAtMs) / 1000.0)
                 )
             )
+            placeholder.decryptionFailed = true
+            placeholder.formatVersion = formatVersion
+            // Store encrypted data for recovery: v1 binary gets base64-encoded into the string field
+            if formatVersion == 1 {
+                placeholder.encryptedData = data.base64EncodedString()
+            } else {
+                placeholder.encryptedData = String(data: data, encoding: .utf8)
+            }
+            return placeholder
         }
     }
 
