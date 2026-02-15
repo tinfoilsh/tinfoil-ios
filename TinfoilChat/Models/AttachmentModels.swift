@@ -29,6 +29,9 @@ struct Attachment: Identifiable, Equatable {
     var textContent: String?
     var description: String?
     var fileSize: Int64
+    // v1 format: per-attachment encryption key material (base64-encoded)
+    var encryptionKey: String?
+    var encryptionIV: String?
     var processingState: AttachmentProcessingState
 
     init(
@@ -41,6 +44,8 @@ struct Attachment: Identifiable, Equatable {
         textContent: String? = nil,
         description: String? = nil,
         fileSize: Int64 = 0,
+        encryptionKey: String? = nil,
+        encryptionIV: String? = nil,
         processingState: AttachmentProcessingState = .pending
     ) {
         self.id = id
@@ -52,6 +57,8 @@ struct Attachment: Identifiable, Equatable {
         self.textContent = textContent
         self.description = description
         self.fileSize = fileSize
+        self.encryptionKey = encryptionKey
+        self.encryptionIV = encryptionIV
         self.processingState = processingState
     }
 }
@@ -62,6 +69,7 @@ extension Attachment: Codable {
     enum CodingKeys: String, CodingKey {
         case id, type, fileName, mimeType, base64, thumbnailBase64
         case textContent, description, fileSize
+        case encryptionKey, encryptionIV
     }
 
     init(from decoder: Decoder) throws {
@@ -75,6 +83,8 @@ extension Attachment: Codable {
         textContent = try container.decodeIfPresent(String.self, forKey: .textContent)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         fileSize = try container.decodeIfPresent(Int64.self, forKey: .fileSize) ?? 0
+        encryptionKey = try container.decodeIfPresent(String.self, forKey: .encryptionKey)
+        encryptionIV = try container.decodeIfPresent(String.self, forKey: .encryptionIV)
         // processingState is transient UI state — always reset to completed on decode
         processingState = .completed
     }
@@ -92,6 +102,8 @@ extension Attachment: Codable {
         if fileSize > 0 {
             try container.encode(fileSize, forKey: .fileSize)
         }
+        try container.encodeIfPresent(encryptionKey, forKey: .encryptionKey)
+        try container.encodeIfPresent(encryptionIV, forKey: .encryptionIV)
         // processingState is transient UI state — never encode
     }
 }

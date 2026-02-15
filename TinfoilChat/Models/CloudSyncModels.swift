@@ -31,6 +31,9 @@ struct StoredChat: Codable {
     var dataCorrupted: Bool?
     var encryptedData: String?
     
+    // Format version: 0=legacy JSON, 1=gzip+binary
+    var formatVersion: Int?
+    
     // Project association (used by React, preserved by iOS)
     var projectId: String?
 
@@ -51,6 +54,7 @@ struct StoredChat: Codable {
         self.syncedAt = nil
         self.locallyModified = true
         self.dataCorrupted = chat.dataCorrupted
+        self.formatVersion = chat.formatVersion
         self.projectId = chat.projectId
         self.hasActiveStream = chat.hasActiveStream
     }
@@ -85,6 +89,7 @@ struct StoredChat: Codable {
             decryptionFailed: decryptionFailed ?? false,
             dataCorrupted: dataCorrupted ?? false,
             encryptedData: encryptedData,
+            formatVersion: formatVersion,
             projectId: projectId
         )
 
@@ -100,7 +105,7 @@ struct StoredChat: Codable {
         case id, title, titleState, messages, createdAt, updatedAt
         case language, userId
         case syncVersion, syncedAt, locallyModified
-        case decryptionFailed, dataCorrupted, encryptedData, projectId
+        case decryptionFailed, dataCorrupted, encryptedData, formatVersion, projectId
     }
 
     func encode(to encoder: Encoder) throws {
@@ -131,6 +136,7 @@ struct StoredChat: Codable {
         try container.encodeIfPresent(decryptionFailed, forKey: .decryptionFailed)
         try container.encodeIfPresent(dataCorrupted, forKey: .dataCorrupted)
         try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
+        try container.encodeIfPresent(formatVersion, forKey: .formatVersion)
         try container.encodeIfPresent(projectId, forKey: .projectId)
         // hasActiveStream is transient UI state — never encode it to the sync blob
     }
@@ -190,6 +196,7 @@ struct StoredChat: Codable {
         decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed)
         dataCorrupted = try container.decodeIfPresent(Bool.self, forKey: .dataCorrupted)
         encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
+        formatVersion = try container.decodeIfPresent(Int.self, forKey: .formatVersion)
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
         // hasActiveStream is transient UI state — always reset to nil on decode
         hasActiveStream = nil
@@ -254,6 +261,7 @@ struct RemoteChat: Codable {
     let syncVersion: Int?  // Optional - for version tracking
     let size: Int?  // Optional - file size
     let content: String?  // Encrypted chat content (optional in list)
+    let formatVersion: Int?  // 0=legacy JSON, 1=gzip+binary
     let projectId: String?  // Project association (returned by all-updated-since)
 }
 
