@@ -535,7 +535,7 @@ class CloudSyncService: ObservableObject {
         }
 
         // If decryption failed, don't overwrite a valid local copy.
-        if downloadedChat.decryptionFailed {
+        if downloadedChat.decryptionFailed == true {
             if let localChat = await loadChatFromStorage(remoteChat.id),
                !localChat.messages.isEmpty,
                !localChat.decryptionFailed {
