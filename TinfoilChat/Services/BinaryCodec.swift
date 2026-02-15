@@ -16,6 +16,7 @@ import Gzip
 enum BinaryCodecError: LocalizedError {
     case sealedBoxCombinedFailed
     case invalidCombinedLength
+    case invalidKeySize(expected: Int, actual: Int)
 
     var errorDescription: String? {
         switch self {
@@ -23,6 +24,8 @@ enum BinaryCodecError: LocalizedError {
             return "AES-GCM sealed box failed to produce combined representation"
         case .invalidCombinedLength:
             return "Encrypted data too short to contain nonce and tag"
+        case .invalidKeySize(let expected, let actual):
+            return "Attachment key must be \(expected) bytes, got \(actual)"
         }
     }
 }
@@ -33,6 +36,8 @@ enum BinaryCodec {
 
     private static let nonceSize = 12
     private static let tagSize = 16
+    /// AES-256 key length in bytes. Must match React's `encryptAttachment` (binary-codec.ts).
+    static let aes256KeySize = 32
 
     /// JSON-encode → gzip → AES-GCM encrypt.
     /// Returns the combined wire format: nonce(12) || ciphertext || tag(16).
@@ -79,7 +84,8 @@ extension BinaryCodec {
     }
 
     /// Encrypt attachment data with a fresh random AES-256-GCM key.
-    /// Returns the encrypted blob + the key material needed to decrypt it.
+    /// Returns the encrypted blob + 32 raw key bytes. The caller base64-encodes the key
+    /// and stores it in `Attachment.encryptionKey` (standard base64, cross-platform).
     static func encryptAttachment(_ plaintext: Data) throws -> AttachmentEncryptionResult {
         let key = SymmetricKey(size: .bits256)
         let sealed = try AES.GCM.seal(plaintext, using: key)
@@ -87,12 +93,18 @@ extension BinaryCodec {
             throw BinaryCodecError.sealedBoxCombinedFailed
         }
         let keyData = key.withUnsafeBytes { Data($0) }
+        assert(keyData.count == aes256KeySize, "SymmetricKey(.bits256) produced unexpected byte count")
         return AttachmentEncryptionResult(encryptedData: combined, key: keyData)
     }
 
     /// Decrypt attachment data using the key material from encryptAttachment.
-    /// `key` is the raw 256-bit key bytes, `encryptedData` is the combined wire format.
+    /// `key` must be exactly 32 raw bytes (AES-256). `encryptedData` is the combined wire format.
+    /// The key is stored as standard base64 in `Attachment.encryptionKey` — both iOS and React
+    /// use the same encoding (iOS `Data.base64EncodedString()`, React `btoa`).
     static func decryptAttachment(_ encryptedData: Data, key: Data) throws -> Data {
+        guard key.count == aes256KeySize else {
+            throw BinaryCodecError.invalidKeySize(expected: aes256KeySize, actual: key.count)
+        }
         let minLength = nonceSize + tagSize
         guard encryptedData.count > minLength else {
             throw BinaryCodecError.invalidCombinedLength

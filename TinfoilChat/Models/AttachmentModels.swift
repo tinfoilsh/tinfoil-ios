@@ -29,7 +29,9 @@ struct Attachment: Identifiable, Equatable {
     var textContent: String?
     var description: String?
     var fileSize: Int64
-    // v1 format: per-attachment encryption key (base64-encoded, nonce is in the wire format)
+    // v1 format: per-attachment AES-256 key as standard base64 (32 raw bytes → 44 chars).
+    // Cross-platform contract: iOS uses Data.base64EncodedString(), React uses btoa().
+    // The encrypted blob (nonce || ciphertext || tag) is stored separately at /api/storage/attachment/:id.
     var encryptionKey: String?
     var processingState: AttachmentProcessingState
 
