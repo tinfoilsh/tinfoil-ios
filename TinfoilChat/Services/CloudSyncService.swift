@@ -1318,15 +1318,23 @@ class CloudSyncService: ObservableObject {
             guard let encryptedData = chat.encryptedData else { continue }
 
             do {
-                // Parse the stored encrypted data
-                guard let contentData = encryptedData.data(using: .utf8) else {
-                    throw CloudSyncError.invalidBase64
+                let decryptionResult: DecryptionResult<StoredChat>
+
+                if chat.formatVersion == 1 {
+                    // v1: encryptedData is base64-encoded binary
+                    guard let binaryData = Data(base64Encoded: encryptedData) else {
+                        throw CloudSyncError.invalidBase64
+                    }
+                    decryptionResult = try encryptionService.decryptV1(binaryData, as: StoredChat.self)
+                } else {
+                    // v0: encryptedData is a JSON-encoded EncryptedData envelope
+                    guard let contentData = encryptedData.data(using: .utf8) else {
+                        throw CloudSyncError.invalidBase64
+                    }
+                    let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
+                    decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
                 }
 
-                let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
-
-                // Decrypt the chat data
-                let decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
                 let decryptedData = decryptionResult.value
 
                 // Get a model type for decrypted chat (use existing or get default)
@@ -1340,7 +1348,7 @@ class CloudSyncService: ObservableObject {
                     modelForChat = defaultModel
                 }
 
-                // Use decrypted content but preserve metadata dates
+                // Use decrypted content but preserve metadata dates and format version
                 let updatedChat = StoredChat(
                     from: Chat(
                         id: chat.id,
@@ -1356,6 +1364,7 @@ class CloudSyncService: ObservableObject {
                         updatedAt: chat.updatedAt,
                         decryptionFailed: false,
                         encryptedData: nil,
+                        formatVersion: chat.formatVersion,
                         isLocalOnly: chat.isLocalOnly
                     )
                 )
