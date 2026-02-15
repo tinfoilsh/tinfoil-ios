@@ -55,7 +55,7 @@ final class ImageProcessingService {
 
             let base64 = jpegData.base64EncodedString()
 
-            let thumbnail = self.scaleImage(image, maxDimension: Constants.Attachments.previewThumbnailSize)
+            let thumbnail = self.scaleImage(image, maxDimension: Constants.Attachments.thumbnailMaxDimension)
             guard let thumbnailData = thumbnail.jpegData(compressionQuality: 0.6) else {
                 throw ProcessingError.encodingFailed
             }

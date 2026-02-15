@@ -99,7 +99,7 @@ private struct ImageThumbnail: View {
     let size: CGFloat
 
     var body: some View {
-        if let base64 = attachment.thumbnailBase64 ?? attachment.base64,
+        if let base64 = attachment.base64 ?? attachment.thumbnailBase64,
            let data = Data(base64Encoded: base64),
            let uiImage = UIImage(data: data) {
             Image(uiImage: uiImage)

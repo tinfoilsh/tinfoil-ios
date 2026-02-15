@@ -114,6 +114,7 @@ enum Constants {
         static let maxFileSizeBytes: Int64 = 20 * 1024 * 1024      // 20 MB
         static let maxImageSizeBytes: Int64 = 10 * 1024 * 1024     // 10 MB
         static let previewThumbnailSize: CGFloat = 60
+        static let thumbnailMaxDimension: CGFloat = 300
         static let previewMaxWidth: CGFloat = 200
         static let messageThumbnailSize: CGFloat = 80
         static let messageThumbnailColumns: Int = 3
