@@ -177,16 +177,20 @@ class AuthManager: ObservableObject {
 
         // Clerk loaded successfully - now we can trust clerk.user state
         let wasAuthenticated = isAuthenticated
-        isAuthenticated = clerk.user != nil
 
-        if isAuthenticated, let user = clerk.user {
+        if let user = clerk.user {
+            isAuthenticated = true
             updateUserData(from: user)
             await RevenueCatManager.shared.loginUser(user.id)
         } else {
             if wasAuthenticated {
-                // User was authenticated but Clerk confirms they're no longer signed in
+                // User was authenticated but Clerk confirms they're no longer signed in.
+                // clearAuthState calls handleSignOut first (while auth is still true)
+                // so that local chats can be saved to disk before clearing.
                 clearAuthState()
                 await RevenueCatManager.shared.logoutUser()
+            } else {
+                isAuthenticated = false
             }
             hasActiveSubscription = false
         }
@@ -195,19 +199,20 @@ class AuthManager: ObservableObject {
     }
     
     private func clearAuthState() {
+        // Handle chat state BEFORE clearing auth so the view model can still
+        // save the current chat (hasChatAccess depends on isAuthenticated).
+        chatViewModel?.handleSignOut()
+
         localUserData = nil
         isAuthenticated = false
         hasActiveSubscription = false
         hasTriggeredSignIn = false  // Reset the flag on sign out
-        
+
         // Clear saved auth state
         UserDefaults.standard.removeObject(forKey: authStateKey)
         UserDefaults.standard.removeObject(forKey: userDataKey)
         UserDefaults.standard.removeObject(forKey: subscriptionKey)
-        
-        // Handle chat state for sign out
-        chatViewModel?.handleSignOut()
-        
+
     }
     
     func signOut() async {
