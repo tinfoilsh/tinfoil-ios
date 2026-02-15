@@ -356,6 +356,7 @@ struct MessageView: View {
         .sheet(isPresented: $showRawContentModal) {
             RawContentModalView(message: message)
                 .presentationDetents([.medium, .large])
+                .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
         }
         .sheet(isPresented: $showSelectableText) {
             UserMessageSelectView(content: message.content)
@@ -649,71 +650,72 @@ private struct RawContentModalView: View {
         return responseContent
     }
 
+    private var sheetBackground: Color {
+        isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground)
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 SelectableTextView(text: fullRawContent)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 20)
 
                 Divider()
 
-                VStack(spacing: 12) {
-                    Button(action: copyAll) {
-                        HStack {
-                            Image(systemName: showCopyAllFeedback ? "checkmark" : "doc.on.doc")
-                            Text(showCopyAllFeedback ? "Copied All!" : "Copy All")
-                            Spacer()
-                        }
-                        .foregroundColor(isDarkMode ? .white : .black)
-                        .padding()
-                        .background(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
-                        .cornerRadius(8)
-                    }
-                    .buttonStyle(PlainButtonStyle())
+                VStack(spacing: 10) {
+                    copyButton(
+                        action: copyAll,
+                        icon: showCopyAllFeedback ? "checkmark" : "doc.on.doc",
+                        label: showCopyAllFeedback ? "Copied All!" : "Copy All"
+                    )
 
                     if hasThoughts && !responseContent.isEmpty {
-                        Button(action: copyResponse) {
-                            HStack {
-                                Image(systemName: showCopyResponseFeedback ? "checkmark" : "text.quote")
-                                Text(showCopyResponseFeedback ? "Copied Response!" : "Copy Response")
-                                Spacer()
-                            }
-                            .foregroundColor(isDarkMode ? .white : .black)
-                            .padding()
-                            .background(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
-                            .cornerRadius(8)
-                        }
-                        .buttonStyle(PlainButtonStyle())
+                        copyButton(
+                            action: copyResponse,
+                            icon: showCopyResponseFeedback ? "checkmark" : "text.quote",
+                            label: showCopyResponseFeedback ? "Copied Response!" : "Copy Response"
+                        )
                     }
 
                     if hasThoughts {
-                        Button(action: copyThoughts) {
-                            HStack {
-                                Image(systemName: showCopyThoughtsFeedback ? "checkmark" : "brain")
-                                Text(showCopyThoughtsFeedback ? "Copied Thoughts!" : "Copy Thoughts")
-                                Spacer()
-                            }
-                            .foregroundColor(isDarkMode ? .white : .black)
-                            .padding()
-                            .background(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
-                            .cornerRadius(8)
-                        }
-                        .buttonStyle(PlainButtonStyle())
+                        copyButton(
+                            action: copyThoughts,
+                            icon: showCopyThoughtsFeedback ? "checkmark" : "brain",
+                            label: showCopyThoughtsFeedback ? "Copied Thoughts!" : "Copy Thoughts"
+                        )
                     }
                 }
-                .padding()
-                .background(isDarkMode ? Color.backgroundPrimary : Color(UIColor.systemBackground))
+                .padding(20)
             }
-            .background(isDarkMode ? Color.backgroundPrimary : Color(UIColor.systemBackground))
+            .background(sheetBackground)
             .navigationTitle("Raw Content")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") {
+                    Button {
                         dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 18, weight: .medium))
                     }
                 }
             }
+        }
+    }
+
+    private func copyButton(action: @escaping () -> Void, icon: String, label: String) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                Text(label)
+            }
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.tinfoilAccentDark)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
 
