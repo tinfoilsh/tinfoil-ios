@@ -256,11 +256,13 @@ struct StoredChat: Codable {
 struct SyncResult {
     let uploaded: Int
     let downloaded: Int
+    let deleted: Int
     let errors: [String]
     
-    init(uploaded: Int = 0, downloaded: Int = 0, errors: [String] = []) {
+    init(uploaded: Int = 0, downloaded: Int = 0, deleted: Int = 0, errors: [String] = []) {
         self.uploaded = uploaded
         self.downloaded = downloaded
+        self.deleted = deleted
         self.errors = errors
     }
 }
