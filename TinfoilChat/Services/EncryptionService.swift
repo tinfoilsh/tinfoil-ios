@@ -129,7 +129,42 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         let value = try JSONDecoder().decode(type, from: data)
         return DecryptionResult(value: value, usedFallbackKey: usedFallback)
     }
-    
+
+    // MARK: - V1 Binary Encryption/Decryption
+
+    /// Encrypt data using v1 format: JSON → gzip → AES-GCM → raw binary.
+    func encryptV1<T: Encodable>(_ data: T) throws -> Data {
+        guard let key = encryptionKey else {
+            throw EncryptionError.keyNotInitialized
+        }
+        return try BinaryCodec.compressAndEncrypt(data, using: key)
+    }
+
+    /// Decrypt v1 binary data, trying the primary key then falling back to key history.
+    func decryptV1<T: Decodable>(_ binary: Data, as type: T.Type) throws -> DecryptionResult<T> {
+        guard let defaultKey = encryptionKey else {
+            throw EncryptionError.keyNotInitialized
+        }
+
+        do {
+            let value = try BinaryCodec.decryptAndDecompress(binary, using: defaultKey, as: type)
+            return DecryptionResult(value: value, usedFallbackKey: false)
+        } catch {
+            var lastError = error
+            let history = loadKeyHistory()
+            for legacyKey in history {
+                do {
+                    let legacySymmetricKey = try symmetricKey(from: legacyKey)
+                    let value = try BinaryCodec.decryptAndDecompress(binary, using: legacySymmetricKey, as: type)
+                    return DecryptionResult(value: value, usedFallbackKey: true)
+                } catch {
+                    lastError = error
+                }
+            }
+            throw lastError
+        }
+    }
+
     // MARK: - Helper Methods
 
     private func normalizeKeyInput(_ keyString: String) throws -> (String, Data) {
