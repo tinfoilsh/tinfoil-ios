@@ -94,6 +94,10 @@ extension BinaryCodec {
     /// Decrypt attachment data using the key material from encryptAttachment.
     /// `key` is the raw 256-bit key bytes, `encryptedData` is the combined wire format.
     static func decryptAttachment(_ encryptedData: Data, key: Data) throws -> Data {
+        let minLength = 12 + 16 // nonce + tag
+        guard encryptedData.count > minLength else {
+            throw BinaryCodecError.invalidCombinedLength
+        }
         let symmetricKey = SymmetricKey(data: key)
         let sealedBox = try AES.GCM.SealedBox(combined: encryptedData)
         return try AES.GCM.open(sealedBox, using: symmetricKey)
