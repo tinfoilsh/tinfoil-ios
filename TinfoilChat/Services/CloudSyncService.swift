@@ -387,7 +387,7 @@ class CloudSyncService: ObservableObject {
                         chatsNeedingReencryption.append(decrypted.chat)
                     }
                 } else {
-                    let placeholder = await createEncryptedPlaceholder(
+                    let placeholder = createEncryptedPlaceholder(
                         remoteChat: remoteChat,
                         encryptedContent: content
                     )
@@ -517,25 +517,14 @@ class CloudSyncService: ObservableObject {
     private func createEncryptedPlaceholder(
         remoteChat: RemoteChat,
         encryptedContent: String
-    ) async -> StoredChat {
-        let createdDate = parseISODate(remoteChat.createdAt) ?? Date()
-        let updatedDate = parseISODate(remoteChat.updatedAt) ?? Date()
-        let formatVersion = remoteChat.formatVersion ?? 0
-        
-        var placeholderChat = StoredChat(
-            from: Chat.create(
-                id: remoteChat.id,
-                title: "Encrypted",
-                messages: [],
-                createdAt: createdDate
-            )
+    ) -> StoredChat {
+        StoredChat.encryptedPlaceholder(
+            id: remoteChat.id,
+            createdAt: parseISODate(remoteChat.createdAt) ?? Date(),
+            updatedAt: parseISODate(remoteChat.updatedAt) ?? Date(),
+            formatVersion: remoteChat.formatVersion ?? 0,
+            encryptedData: encryptedContent
         )
-        placeholderChat.decryptionFailed = true
-        placeholderChat.encryptedData = encryptedContent
-        placeholderChat.formatVersion = formatVersion
-        placeholderChat.updatedAt = updatedDate
-        
-        return placeholderChat
     }
     
     /// Download a remote chat by ID, apply metadata dates, and save locally.
@@ -667,7 +656,7 @@ class CloudSyncService: ObservableObject {
                                 chatsNeedingReencryption.append(decrypted.chat)
                             }
                         } else {
-                            let placeholder = await createEncryptedPlaceholder(
+                            let placeholder = createEncryptedPlaceholder(
                                 remoteChat: remoteChat,
                                 encryptedContent: content
                             )
@@ -860,7 +849,7 @@ class CloudSyncService: ObservableObject {
                                 chatsNeedingReencryption.append(decrypted.chat)
                             }
                         } else {
-                            let placeholder = await createEncryptedPlaceholder(
+                            let placeholder = createEncryptedPlaceholder(
                                 remoteChat: remoteChat,
                                 encryptedContent: content
                             )
@@ -1084,7 +1073,7 @@ class CloudSyncService: ObservableObject {
                                 queueReencryption(for: decrypted.chat, persistLocal: false)
                             }
                         } else {
-                            var placeholder = await createEncryptedPlaceholder(
+                            var placeholder = createEncryptedPlaceholder(
                                 remoteChat: remoteChat,
                                 encryptedContent: content
                             )

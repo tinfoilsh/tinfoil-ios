@@ -40,6 +40,55 @@ struct StoredChat: Codable {
     // For tracking streaming state
     var hasActiveStream: Bool?
     
+    /// Creates a placeholder for a chat that failed to decrypt.
+    /// Does NOT require @MainActor — avoids a main-thread hop during background sync.
+    /// The modelType is left nil and resolved lazily in toChat() when the user opens it.
+    static func encryptedPlaceholder(
+        id: String,
+        createdAt: Date,
+        updatedAt: Date,
+        formatVersion: Int,
+        encryptedData: String?
+    ) -> StoredChat {
+        var chat = StoredChat(
+            id: id,
+            title: "Encrypted",
+            messages: [],
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            syncVersion: 0,
+            locallyModified: false
+        )
+        chat.decryptionFailed = true
+        chat.formatVersion = formatVersion
+        chat.encryptedData = encryptedData
+        return chat
+    }
+
+    /// Memberwise initializer for internal construction (not from a Chat).
+    private init(
+        id: String,
+        title: String,
+        messages: [Message],
+        createdAt: Date,
+        updatedAt: Date,
+        syncVersion: Int,
+        locallyModified: Bool
+    ) {
+        self.id = id
+        self.title = title
+        self.titleState = nil
+        self.messages = messages
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.modelType = nil
+        self.language = nil
+        self.userId = nil
+        self.syncVersion = syncVersion
+        self.syncedAt = nil
+        self.locallyModified = locallyModified
+    }
+
     init(from chat: Chat, syncVersion: Int = 0) {
         self.id = chat.id
         self.title = chat.title
