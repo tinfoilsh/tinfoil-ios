@@ -694,7 +694,9 @@ class ChatViewModel: ObservableObject {
         }
 
         if currentChat?.id == chatId {
-            mergeIntoMessages(&currentChat!.messages)
+            var updated = currentChat!
+            mergeIntoMessages(&updated.messages)
+            currentChat = updated
         }
         if let idx = chats.firstIndex(where: { $0.id == chatId }) {
             mergeIntoMessages(&chats[idx].messages)
