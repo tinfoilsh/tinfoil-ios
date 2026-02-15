@@ -25,10 +25,22 @@ struct ShareableChatData: Codable {
         let thoughts: String?
         let thinkingDuration: Double?
         let isError: Bool?
+        let attachments: [ShareableAttachment]?
     }
 
     struct ShareableDocument: Codable {
         let name: String
+    }
+
+    struct ShareableAttachment: Codable {
+        let id: String
+        let type: String
+        let fileName: String
+        let mimeType: String?
+        let thumbnailBase64: String?
+        let encryptionKey: String?
+        let textContent: String?
+        let description: String?
     }
 }
 
