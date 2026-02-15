@@ -31,6 +31,9 @@ enum BinaryCodecError: LocalizedError {
 
 enum BinaryCodec {
 
+    private static let nonceSize = 12
+    private static let tagSize = 16
+
     /// JSON-encode → gzip → AES-GCM encrypt.
     /// Returns the combined wire format: nonce(12) || ciphertext || tag(16).
     static func compressAndEncrypt<T: Encodable>(_ value: T, using key: SymmetricKey) throws -> Data {
@@ -52,7 +55,7 @@ enum BinaryCodec {
 
     /// AES-GCM decrypt → gunzip, returning raw decompressed bytes.
     static func decryptRaw(_ data: Data, using key: SymmetricKey) throws -> Data {
-        let minLength = 12 + 16 // nonce + tag
+        let minLength = nonceSize + tagSize
         guard data.count > minLength else {
             throw BinaryCodecError.invalidCombinedLength
         }
@@ -90,7 +93,7 @@ extension BinaryCodec {
     /// Decrypt attachment data using the key material from encryptAttachment.
     /// `key` is the raw 256-bit key bytes, `encryptedData` is the combined wire format.
     static func decryptAttachment(_ encryptedData: Data, key: Data) throws -> Data {
-        let minLength = 12 + 16 // nonce + tag
+        let minLength = nonceSize + tagSize
         guard encryptedData.count > minLength else {
             throw BinaryCodecError.invalidCombinedLength
         }
