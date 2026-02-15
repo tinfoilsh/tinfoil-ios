@@ -669,16 +669,38 @@ class ChatViewModel: ObservableObject {
         if hasUnfetchedImages {
             let chatId = chatToSelect.id
             Task {
-                let updatedMessages = await CloudStorageService.shared.loadImages(in: chatToSelect.messages)
-                guard self.currentChat?.id == chatId else { return }
-                self.currentChat?.messages = updatedMessages
-                if let idx = self.chats.firstIndex(where: { $0.id == chatId }) {
-                    self.chats[idx].messages = updatedMessages
-                }
+                let loadedImages = await CloudStorageService.shared.loadImages(in: chatToSelect.messages)
+                guard !loadedImages.isEmpty, self.currentChat?.id == chatId else { return }
+                // Merge loaded base64 data into the current messages by attachment ID,
+                // rather than replacing the whole array with a stale snapshot.
+                self.applyLoadedImages(loadedImages, toChatId: chatId)
             }
         }
     }
     
+    /// Merge fetched image base64 data into the current messages of a chat by attachment ID.
+    /// This avoids replacing the entire messages array, preventing a stale snapshot from
+    /// overwriting messages that may have been updated by sync while images were loading.
+    private func applyLoadedImages(_ images: [String: String], toChatId chatId: String) {
+        func mergeIntoMessages(_ messages: inout [Message]) {
+            for msgIdx in messages.indices {
+                for attIdx in messages[msgIdx].attachments.indices {
+                    let attId = messages[msgIdx].attachments[attIdx].id
+                    if let b64 = images[attId] {
+                        messages[msgIdx].attachments[attIdx].base64 = b64
+                    }
+                }
+            }
+        }
+
+        if currentChat?.id == chatId {
+            mergeIntoMessages(&currentChat!.messages)
+        }
+        if let idx = chats.firstIndex(where: { $0.id == chatId }) {
+            mergeIntoMessages(&chats[idx].messages)
+        }
+    }
+
     /// Deletes a chat by ID
     func deleteChat(_ id: String) {
         // Allow deleting chats for all authenticated users

@@ -277,47 +277,48 @@ class CloudStorageService: ObservableObject {
         return data
     }
 
-    /// Fetch, decrypt, and populate base64 for all v1 image attachments in a message array.
-    /// Fetches all attachments in parallel. Returns updated messages.
-    func loadImages(in messages: [Message]) async -> [Message] {
-        // Collect work items: (messageIndex, attachmentIndex, attachmentId, keyData)
-        var work: [(Int, Int, String, Data)] = []
-        for msgIdx in messages.indices {
-            for attIdx in messages[msgIdx].attachments.indices {
-                let att = messages[msgIdx].attachments[attIdx]
+    /// Fetch and decrypt all v1 image attachments in a message array in parallel.
+    /// Returns a dictionary mapping attachment IDs to their decoded base64 strings
+    /// so callers can merge results into the current (possibly updated) messages
+    /// without overwriting the entire array with a stale snapshot.
+    func loadImages(in messages: [Message]) async -> [String: String] {
+        // Collect work items: (attachmentId, keyData)
+        var work: [(String, Data)] = []
+        for msg in messages {
+            for att in msg.attachments {
                 guard att.type == .image,
                       att.base64 == nil,
                       let keyB64 = att.encryptionKey,
                       let keyData = Data(base64Encoded: keyB64),
                       keyData.count == BinaryCodec.aes256KeySize else { continue }
-                work.append((msgIdx, attIdx, att.id, keyData))
+                work.append((att.id, keyData))
             }
         }
 
-        guard !work.isEmpty else { return messages }
+        guard !work.isEmpty else { return [:] }
 
-        var updated = messages
+        var results: [String: String] = [:]
 
-        await withTaskGroup(of: (Int, Int, String?).self) { group in
-            for (msgIdx, attIdx, attId, keyData) in work {
+        await withTaskGroup(of: (String, String?).self) { group in
+            for (attId, keyData) in work {
                 group.addTask {
                     do {
                         let encrypted = try await self.fetchAttachment(attachmentId: attId)
                         let decrypted = try BinaryCodec.decryptAttachment(encrypted, key: keyData)
-                        return (msgIdx, attIdx, decrypted.base64EncodedString())
+                        return (attId, decrypted.base64EncodedString())
                     } catch {
-                        return (msgIdx, attIdx, nil)
+                        return (attId, nil)
                     }
                 }
             }
-            for await (msgIdx, attIdx, base64) in group {
+            for await (attId, base64) in group {
                 if let b64 = base64 {
-                    updated[msgIdx].attachments[attIdx].base64 = b64
+                    results[attId] = b64
                 }
             }
         }
 
-        return updated
+        return results
     }
 
     // MARK: - List Operations
