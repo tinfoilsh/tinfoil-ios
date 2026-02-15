@@ -62,14 +62,14 @@ class CloudStorageService: ObservableObject {
 
     // MARK: - API Headers
 
-    private func getHeaders() async throws -> [String: String] {
+    private func getHeaders(contentType: String = "application/json") async throws -> [String: String] {
         guard let token = await (getToken ?? defaultTokenGetter)() else {
             throw CloudStorageError.authenticationRequired
         }
 
         return [
             "Authorization": "Bearer \(token)",
-            "Content-Type": "application/json"
+            "Content-Type": contentType
         ]
     }
 
@@ -97,36 +97,32 @@ class CloudStorageService: ObservableObject {
 
     // MARK: - Upload Operations
 
-    /// Upload a chat to cloud storage
+    /// Upload a chat to cloud storage using v1 binary format.
+    /// 1. Encrypt and upload image attachments separately
+    /// 2. Strip base64 image data from messages
+    /// 3. Compress, encrypt, and upload the chat as a binary blob
     func uploadChat(_ chat: StoredChat) async throws {
-        // Encrypt the chat data first
-        let encrypted = try await EncryptionService.shared.encrypt(chat)
+        var chatToUpload = chat
 
-        // Create metadata
-        let metadata: [String: String] = [
-            "db-version": "1",
-            "message-count": String(chat.messages.count),
-            "chat-created-at": ISO8601DateFormatter().string(from: chat.createdAt),
-            "chat-updated-at": ISO8601DateFormatter().string(from: chat.updatedAt)
-        ]
+        // Upload image attachments and record encryption keys on each attachment
+        try await encryptAndUploadAttachments(&chatToUpload)
 
-        // Create upload request
-        let url = URL(string: "\(apiBaseURL)/api/storage/conversation")!
+        // Strip full-size base64 from image attachments (thumbnails stay inline)
+        stripBase64FromMessages(&chatToUpload.messages)
+
+        // Compress + encrypt the chat as v1 binary
+        let binaryData = try EncryptionService.shared.encryptV1(chatToUpload)
+
+        // Upload to the binary conversation endpoint
+        let url = URL(string: "\(apiBaseURL)/api/storage/conversation/\(chat.id)/data")!
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
-        request.allHTTPHeaderFields = try await getHeaders()
-
-        // Send encrypted data as JSON string
-        let encryptedJSON = try JSONEncoder().encode(encrypted)
-        let encryptedString = String(data: encryptedJSON, encoding: .utf8)!
-
-        let body = UploadConversationRequest(
-            conversationId: chat.id,
-            data: encryptedString,
-            metadata: metadata,
-            projectId: chat.projectId
-        )
-        request.httpBody = try JSONEncoder().encode(body)
+        request.allHTTPHeaderFields = try await getHeaders(contentType: "application/octet-stream")
+        request.setValue(String(chat.messages.count), forHTTPHeaderField: "X-Message-Count")
+        if let projectId = chat.projectId {
+            request.setValue(projectId, forHTTPHeaderField: "X-Project-Id")
+        }
+        request.httpBody = binaryData
 
         let (_, response) = try await URLSession.shared.data(for: request)
 
@@ -136,9 +132,54 @@ class CloudStorageService: ObservableObject {
         }
     }
 
+    /// Encrypt and upload each image attachment, storing encryption key material on the attachment.
+    private func encryptAndUploadAttachments(_ chat: inout StoredChat) async throws {
+        for msgIdx in chat.messages.indices {
+            for attIdx in chat.messages[msgIdx].attachments.indices {
+                let attachment = chat.messages[msgIdx].attachments[attIdx]
+                guard attachment.type == .image, let base64 = attachment.base64,
+                      let imageData = Data(base64Encoded: base64) else { continue }
+
+                let result = try BinaryCodec.encryptAttachment(imageData)
+                try await uploadAttachment(attachmentId: attachment.id, chatId: chat.id, data: result.encryptedData)
+
+                chat.messages[msgIdx].attachments[attIdx].encryptionKey = result.key.base64EncodedString()
+            }
+        }
+    }
+
+    /// Upload a single encrypted attachment blob.
+    private func uploadAttachment(attachmentId: String, chatId: String, data: Data) async throws {
+        let url = URL(string: "\(apiBaseURL)/api/storage/attachment/\(attachmentId)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.allHTTPHeaderFields = try await getHeaders(contentType: "application/octet-stream")
+        request.setValue(chatId, forHTTPHeaderField: "X-Chat-Id")
+        request.httpBody = data
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw CloudStorageError.uploadFailed
+        }
+    }
+
+    /// Remove full-size base64 from image attachments. Thumbnails remain inline.
+    private func stripBase64FromMessages(_ messages: inout [Message]) {
+        for msgIdx in messages.indices {
+            for attIdx in messages[msgIdx].attachments.indices {
+                if messages[msgIdx].attachments[attIdx].type == .image {
+                    messages[msgIdx].attachments[attIdx].base64 = nil
+                }
+            }
+        }
+    }
+
     // MARK: - Download Operations
 
-    /// Download a chat from cloud storage
+    /// Download a chat from cloud storage.
+    /// Routes v0 (legacy JSON) and v1 (binary) based on the X-Format-Version response header.
     func downloadChat(_ chatId: String) async throws -> StoredChat? {
         let url = URL(string: "\(apiBaseURL)/api/storage/conversation/\(chatId)")!
         var request = URLRequest(url: url)
@@ -160,31 +201,40 @@ class CloudStorageService: ObservableObject {
             throw CloudStorageError.downloadFailed
         }
 
-        let encrypted = try JSONDecoder().decode(EncryptedData.self, from: data)
+        let formatVersion = Int(httpResponse.value(forHTTPHeaderField: "X-Format-Version") ?? "0") ?? 0
 
-        // Try to decrypt the chat data
         do {
-            let decryptionResult = try await EncryptionService.shared.decrypt(encrypted, as: StoredChat.self)
-            let chat = decryptionResult.value
-
-            if decryptionResult.usedFallbackKey {
-                scheduleReencryption(for: chat)
+            let result: DecryptionResult<StoredChat>
+            if formatVersion == 1 {
+                result = try EncryptionService.shared.decryptV1(data, as: StoredChat.self)
+            } else {
+                let encrypted = try JSONDecoder().decode(EncryptedData.self, from: data)
+                result = try await EncryptionService.shared.decrypt(encrypted, as: StoredChat.self)
             }
 
+            var chat = result.value
+            chat.formatVersion = formatVersion
+            if result.usedFallbackKey {
+                scheduleReencryption(for: chat)
+            }
             return chat
         } catch {
-            // If decryption fails, create a placeholder with encrypted data
+            // If decryption fails, create a placeholder with encrypted data for recovery
             let timestamp = chatId.split(separator: "_").first.map(String.init) ?? ""
             let parsedTimestamp = Int(timestamp) ?? 0
-            let createdAtMs = parsedTimestamp > 0 ? Double(9999999999999 - parsedTimestamp) : Date().timeIntervalSince1970 * 1000
+            let createdAtMs = parsedTimestamp > 0 ? Double(Constants.Sync.maxReverseTimestamp - parsedTimestamp) : Date().timeIntervalSince1970 * 1000
 
-            return StoredChat(
-                from: await Chat.create(
-                    id: chatId,
-                    title: "Encrypted",
-                    messages: [],
-                    createdAt: Date(timeIntervalSince1970: Double(createdAtMs) / 1000.0)
-                )
+            // Store encrypted data for recovery: v1 binary gets base64-encoded into the string field
+            let encryptedString: String? = formatVersion == 1
+                ? data.base64EncodedString()
+                : String(data: data, encoding: .utf8)
+
+            return StoredChat.encryptedPlaceholder(
+                id: chatId,
+                createdAt: Date(timeIntervalSince1970: createdAtMs / 1000.0),
+                updatedAt: Date(),
+                formatVersion: formatVersion,
+                encryptedData: encryptedString
             )
         }
     }
@@ -207,6 +257,68 @@ class CloudStorageService: ObservableObject {
 #endif
             }
         }
+    }
+
+    // MARK: - Attachment Operations
+
+    /// Fetch a single encrypted attachment blob from the public endpoint (no auth needed).
+    func fetchAttachment(attachmentId: String) async throws -> Data {
+        let url = URL(string: "\(apiBaseURL)/api/storage/attachment/\(attachmentId)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw CloudStorageError.downloadFailed
+        }
+
+        return data
+    }
+
+    /// Fetch and decrypt all v1 image attachments in a message array in parallel.
+    /// Returns a dictionary mapping attachment IDs to their decoded base64 strings
+    /// so callers can merge results into the current (possibly updated) messages
+    /// without overwriting the entire array with a stale snapshot.
+    func loadImages(in messages: [Message]) async -> [String: String] {
+        // Collect work items: (attachmentId, keyData)
+        var work: [(String, Data)] = []
+        for msg in messages {
+            for att in msg.attachments {
+                guard att.type == .image,
+                      att.base64 == nil,
+                      let keyB64 = att.encryptionKey,
+                      let keyData = Data(base64Encoded: keyB64),
+                      keyData.count == BinaryCodec.aes256KeySize else { continue }
+                work.append((att.id, keyData))
+            }
+        }
+
+        guard !work.isEmpty else { return [:] }
+
+        var results: [String: String] = [:]
+
+        await withTaskGroup(of: (String, String?).self) { group in
+            for (attId, keyData) in work {
+                group.addTask {
+                    do {
+                        let encrypted = try await self.fetchAttachment(attachmentId: attId)
+                        let decrypted = try BinaryCodec.decryptAttachment(encrypted, key: keyData)
+                        return (attId, decrypted.base64EncodedString())
+                    } catch {
+                        return (attId, nil)
+                    }
+                }
+            }
+            for await (attId, base64) in group {
+                if let b64 = base64 {
+                    results[attId] = b64
+                }
+            }
+        }
+
+        return results
     }
 
     // MARK: - List Operations

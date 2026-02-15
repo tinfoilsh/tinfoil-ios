@@ -31,12 +31,64 @@ struct StoredChat: Codable {
     var dataCorrupted: Bool?
     var encryptedData: String?
     
+    // Format version: 0=legacy JSON, 1=gzip+binary
+    var formatVersion: Int?
+    
     // Project association (used by React, preserved by iOS)
     var projectId: String?
 
     // For tracking streaming state
     var hasActiveStream: Bool?
     
+    /// Creates a placeholder for a chat that failed to decrypt.
+    /// Does NOT require @MainActor — avoids a main-thread hop during background sync.
+    /// The modelType is left nil and resolved lazily in toChat() when the user opens it.
+    static func encryptedPlaceholder(
+        id: String,
+        createdAt: Date,
+        updatedAt: Date,
+        formatVersion: Int,
+        encryptedData: String?
+    ) -> StoredChat {
+        var chat = StoredChat(
+            id: id,
+            title: "Encrypted",
+            messages: [],
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            syncVersion: 0,
+            locallyModified: false
+        )
+        chat.decryptionFailed = true
+        chat.formatVersion = formatVersion
+        chat.encryptedData = encryptedData
+        return chat
+    }
+
+    /// Memberwise initializer for internal construction (not from a Chat).
+    private init(
+        id: String,
+        title: String,
+        messages: [Message],
+        createdAt: Date,
+        updatedAt: Date,
+        syncVersion: Int,
+        locallyModified: Bool
+    ) {
+        self.id = id
+        self.title = title
+        self.titleState = nil
+        self.messages = messages
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.modelType = nil
+        self.language = nil
+        self.userId = nil
+        self.syncVersion = syncVersion
+        self.syncedAt = nil
+        self.locallyModified = locallyModified
+    }
+
     init(from chat: Chat, syncVersion: Int = 0) {
         self.id = chat.id
         self.title = chat.title
@@ -51,6 +103,7 @@ struct StoredChat: Codable {
         self.syncedAt = nil
         self.locallyModified = true
         self.dataCorrupted = chat.dataCorrupted
+        self.formatVersion = chat.formatVersion
         self.projectId = chat.projectId
         self.hasActiveStream = chat.hasActiveStream
     }
@@ -85,6 +138,7 @@ struct StoredChat: Codable {
             decryptionFailed: decryptionFailed ?? false,
             dataCorrupted: dataCorrupted ?? false,
             encryptedData: encryptedData,
+            formatVersion: formatVersion,
             projectId: projectId
         )
 
@@ -100,7 +154,7 @@ struct StoredChat: Codable {
         case id, title, titleState, messages, createdAt, updatedAt
         case language, userId
         case syncVersion, syncedAt, locallyModified
-        case decryptionFailed, dataCorrupted, encryptedData, projectId
+        case decryptionFailed, dataCorrupted, encryptedData, formatVersion, projectId
     }
 
     func encode(to encoder: Encoder) throws {
@@ -131,6 +185,7 @@ struct StoredChat: Codable {
         try container.encodeIfPresent(decryptionFailed, forKey: .decryptionFailed)
         try container.encodeIfPresent(dataCorrupted, forKey: .dataCorrupted)
         try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
+        try container.encodeIfPresent(formatVersion, forKey: .formatVersion)
         try container.encodeIfPresent(projectId, forKey: .projectId)
         // hasActiveStream is transient UI state — never encode it to the sync blob
     }
@@ -190,6 +245,7 @@ struct StoredChat: Codable {
         decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed)
         dataCorrupted = try container.decodeIfPresent(Bool.self, forKey: .dataCorrupted)
         encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
+        formatVersion = try container.decodeIfPresent(Int.self, forKey: .formatVersion)
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
         // hasActiveStream is transient UI state — always reset to nil on decode
         hasActiveStream = nil
@@ -254,6 +310,7 @@ struct RemoteChat: Codable {
     let syncVersion: Int?  // Optional - for version tracking
     let size: Int?  // Optional - file size
     let content: String?  // Encrypted chat content (optional in list)
+    let formatVersion: Int?  // 0=legacy JSON, 1=gzip+binary
     let projectId: String?  // Project association (returned by all-updated-since)
 }
 

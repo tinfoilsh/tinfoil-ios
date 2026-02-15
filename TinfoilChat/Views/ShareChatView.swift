@@ -242,10 +242,10 @@ struct ShareChatView: View {
                     messages: capturedMessages, chatTitle: title, chatCreatedAt: createdAt
                 )
                 let key = ShareEncryptionService.generateShareKey()
-                let encrypted = try ShareEncryptionService.encryptForShare(shareableData, key: key)
+                let encryptedBinary = try ShareEncryptionService.encryptForShare(shareableData, key: key)
                 let keyBase64url = ShareEncryptionService.exportKeyToBase64url(key)
 
-                try await ShareAPIService.uploadSharedChat(chatId: chatId, encryptedData: encrypted)
+                try await ShareAPIService.uploadSharedChat(chatId: chatId, encryptedData: encryptedBinary)
 
                 let url = "\(Constants.Share.shareBaseURL)/share/\(chatId)#\(keyBase64url)"
 
@@ -284,6 +284,21 @@ struct ShareChatView: View {
                 ? nil
                 : msg.attachments.map { ShareableChatData.ShareableDocument(name: $0.fileName) }
 
+            let shareableAttachments: [ShareableChatData.ShareableAttachment]? = msg.attachments.isEmpty
+                ? nil
+                : msg.attachments.map { att in
+                    ShareableChatData.ShareableAttachment(
+                        id: att.id,
+                        type: att.type == .image ? "image" : "document",
+                        fileName: att.fileName,
+                        mimeType: att.mimeType,
+                        thumbnailBase64: att.thumbnailBase64,
+                        encryptionKey: att.encryptionKey,
+                        textContent: att.textContent,
+                        description: att.description
+                    )
+                }
+
             return ShareableChatData.ShareableMessage(
                 role: msg.role.rawValue,
                 content: msg.content,
@@ -292,7 +307,8 @@ struct ShareChatView: View {
                 timestamp: msg.timestamp.timeIntervalSince1970 * 1000,
                 thoughts: msg.thoughts,
                 thinkingDuration: msg.thinkingDuration ?? msg.generationTimeSeconds,
-                isError: msg.isError
+                isError: msg.isError,
+                attachments: shareableAttachments
             )
         }
 

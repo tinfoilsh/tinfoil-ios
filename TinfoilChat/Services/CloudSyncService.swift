@@ -387,7 +387,7 @@ class CloudSyncService: ObservableObject {
                         chatsNeedingReencryption.append(decrypted.chat)
                     }
                 } else {
-                    let placeholder = await createEncryptedPlaceholder(
+                    let placeholder = createEncryptedPlaceholder(
                         remoteChat: remoteChat,
                         encryptedContent: content
                     )
@@ -473,12 +473,24 @@ class CloudSyncService: ObservableObject {
         _ remoteChat: RemoteChat,
         content: String
     ) async -> DecryptedChatResult? {
-        guard let contentData = content.data(using: .utf8) else { return nil }
+        let formatVersion = remoteChat.formatVersion ?? 0
 
         do {
-            let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
-            let decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
+            let decryptionResult: DecryptionResult<StoredChat>
+
+            if formatVersion == 1 {
+                // v1: content is base64-encoded binary
+                guard let binaryData = Data(base64Encoded: content) else { return nil }
+                decryptionResult = try encryptionService.decryptV1(binaryData, as: StoredChat.self)
+            } else {
+                // v0: content is a JSON-encoded EncryptedData envelope
+                guard let contentData = content.data(using: .utf8) else { return nil }
+                let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
+                decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
+            }
+
             var decryptedChat = decryptionResult.value
+            decryptedChat.formatVersion = formatVersion
 
             // Prefer blob's createdAt (matches React's `decrypted.createdAt ?? remote.createdAt`).
             // StoredChat decoder falls back to Date() on parse failure — detect that
@@ -505,23 +517,14 @@ class CloudSyncService: ObservableObject {
     private func createEncryptedPlaceholder(
         remoteChat: RemoteChat,
         encryptedContent: String
-    ) async -> StoredChat {
-        let createdDate = parseISODate(remoteChat.createdAt) ?? Date()
-        let updatedDate = parseISODate(remoteChat.updatedAt) ?? Date()
-        
-        var placeholderChat = StoredChat(
-            from: Chat.create(
-                id: remoteChat.id,
-                title: "Encrypted",
-                messages: [],
-                createdAt: createdDate
-            )
+    ) -> StoredChat {
+        StoredChat.encryptedPlaceholder(
+            id: remoteChat.id,
+            createdAt: parseISODate(remoteChat.createdAt) ?? Date(),
+            updatedAt: parseISODate(remoteChat.updatedAt) ?? Date(),
+            formatVersion: remoteChat.formatVersion ?? 0,
+            encryptedData: encryptedContent
         )
-        placeholderChat.decryptionFailed = true
-        placeholderChat.encryptedData = encryptedContent
-        placeholderChat.updatedAt = updatedDate
-        
-        return placeholderChat
     }
     
     /// Download a remote chat by ID, apply metadata dates, and save locally.
@@ -653,7 +656,7 @@ class CloudSyncService: ObservableObject {
                                 chatsNeedingReencryption.append(decrypted.chat)
                             }
                         } else {
-                            let placeholder = await createEncryptedPlaceholder(
+                            let placeholder = createEncryptedPlaceholder(
                                 remoteChat: remoteChat,
                                 encryptedContent: content
                             )
@@ -846,7 +849,7 @@ class CloudSyncService: ObservableObject {
                                 chatsNeedingReencryption.append(decrypted.chat)
                             }
                         } else {
-                            let placeholder = await createEncryptedPlaceholder(
+                            let placeholder = createEncryptedPlaceholder(
                                 remoteChat: remoteChat,
                                 encryptedContent: content
                             )
@@ -1070,7 +1073,7 @@ class CloudSyncService: ObservableObject {
                                 queueReencryption(for: decrypted.chat, persistLocal: false)
                             }
                         } else {
-                            var placeholder = await createEncryptedPlaceholder(
+                            var placeholder = createEncryptedPlaceholder(
                                 remoteChat: remoteChat,
                                 encryptedContent: content
                             )
@@ -1304,15 +1307,23 @@ class CloudSyncService: ObservableObject {
             guard let encryptedData = chat.encryptedData else { continue }
 
             do {
-                // Parse the stored encrypted data
-                guard let contentData = encryptedData.data(using: .utf8) else {
-                    throw CloudSyncError.invalidBase64
+                let decryptionResult: DecryptionResult<StoredChat>
+
+                if chat.formatVersion == 1 {
+                    // v1: encryptedData is base64-encoded binary
+                    guard let binaryData = Data(base64Encoded: encryptedData) else {
+                        throw CloudSyncError.invalidBase64
+                    }
+                    decryptionResult = try encryptionService.decryptV1(binaryData, as: StoredChat.self)
+                } else {
+                    // v0: encryptedData is a JSON-encoded EncryptedData envelope
+                    guard let contentData = encryptedData.data(using: .utf8) else {
+                        throw CloudSyncError.invalidBase64
+                    }
+                    let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
+                    decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
                 }
 
-                let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
-
-                // Decrypt the chat data
-                let decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
                 let decryptedData = decryptionResult.value
 
                 // Get a model type for decrypted chat (use existing or get default)
@@ -1326,7 +1337,7 @@ class CloudSyncService: ObservableObject {
                     modelForChat = defaultModel
                 }
 
-                // Use decrypted content but preserve metadata dates
+                // Use decrypted content but preserve metadata dates and format version
                 let updatedChat = StoredChat(
                     from: Chat(
                         id: chat.id,
@@ -1342,6 +1353,7 @@ class CloudSyncService: ObservableObject {
                         updatedAt: chat.updatedAt,
                         decryptionFailed: false,
                         encryptedData: nil,
+                        formatVersion: chat.formatVersion,
                         isLocalOnly: chat.isLocalOnly
                     )
                 )
