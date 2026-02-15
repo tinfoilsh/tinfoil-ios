@@ -370,7 +370,7 @@ struct MessageInputView: View {
                 .padding(.vertical, 8)
                 .background(Color.secondary.opacity(0.15))
                 .clipShape(Capsule())
-                .foregroundColor(.primary)
+                .foregroundColor(.blue)
             } else {
                 Image(systemName: "globe")
                     .font(.system(size: 20))
