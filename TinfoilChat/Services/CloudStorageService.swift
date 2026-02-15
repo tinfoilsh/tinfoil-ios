@@ -269,6 +269,49 @@ class CloudStorageService: ObservableObject {
         }
     }
 
+    // MARK: - Attachment Operations
+
+    /// Fetch a single encrypted attachment blob from the public endpoint (no auth needed).
+    func fetchAttachment(attachmentId: String) async throws -> Data {
+        let url = URL(string: "\(apiBaseURL)/api/storage/attachment/\(attachmentId)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw CloudStorageError.downloadFailed
+        }
+
+        return data
+    }
+
+    /// Fetch, decrypt, and populate base64 for all v1 image attachments in a chat.
+    /// Each attachment is fetched from the public endpoint and decrypted with its per-attachment key.
+    func loadChatImages(chat: inout StoredChat) async {
+        for msgIdx in chat.messages.indices {
+            for attIdx in chat.messages[msgIdx].attachments.indices {
+                let attachment = chat.messages[msgIdx].attachments[attIdx]
+                guard attachment.type == .image,
+                      attachment.base64 == nil,
+                      let keyB64 = attachment.encryptionKey,
+                      let keyData = Data(base64Encoded: keyB64) else { continue }
+
+                do {
+                    let encryptedData = try await fetchAttachment(attachmentId: attachment.id)
+                    let decrypted = try BinaryCodec.decryptAttachment(encryptedData, key: keyData)
+                    chat.messages[msgIdx].attachments[attIdx].base64 = decrypted.base64EncodedString()
+                } catch {
+                    #if DEBUG
+                    print("[CloudStorageService] Failed to load attachment \(attachment.id): \(error)")
+                    #endif
+                }
+            }
+        }
+    }
+
     // MARK: - List Operations
 
     /// List chats from cloud storage with optional pagination
