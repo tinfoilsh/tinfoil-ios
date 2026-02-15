@@ -14,13 +14,13 @@ import CryptoKit
 import Gzip
 
 enum BinaryCodecError: LocalizedError {
-    case encodingFailed
+    case sealedBoxCombinedFailed
     case invalidCombinedLength
 
     var errorDescription: String? {
         switch self {
-        case .encodingFailed:
-            return "Failed to encode data as JSON"
+        case .sealedBoxCombinedFailed:
+            return "AES-GCM sealed box failed to produce combined representation"
         case .invalidCombinedLength:
             return "Encrypted data too short to contain nonce and tag"
         }
@@ -38,7 +38,7 @@ enum BinaryCodec {
         let compressed = try json.gzipped()
         let sealed = try AES.GCM.seal(compressed, using: key)
         guard let combined = sealed.combined else {
-            throw BinaryCodecError.encodingFailed
+            throw BinaryCodecError.sealedBoxCombinedFailed
         }
         return combined
     }
@@ -84,7 +84,7 @@ extension BinaryCodec {
         let nonce = AES.GCM.Nonce()
         let sealed = try AES.GCM.seal(plaintext, using: key, nonce: nonce)
         guard let combined = sealed.combined else {
-            throw BinaryCodecError.encodingFailed
+            throw BinaryCodecError.sealedBoxCombinedFailed
         }
         let keyData = key.withUnsafeBytes { Data($0) }
         let nonceData = Data(nonce)
