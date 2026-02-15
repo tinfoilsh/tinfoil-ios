@@ -372,8 +372,8 @@ class ChatViewModel: ObservableObject {
                     // Update last sync date after successful sync
                     self.lastSyncDate = Date()
                     
-                    // If we downloaded new chats, reload the chat list
-                    if syncResult.downloaded > 0 {
+                    // If chats were downloaded or deleted remotely, reload the chat list
+                    if syncResult.downloaded > 0 || syncResult.deleted > 0 {
                         // Use intelligent update that preserves pagination
                         await self.updateChatsAfterSync()
                         
@@ -436,7 +436,7 @@ class ChatViewModel: ObservableObject {
                         self?.lastSyncDate = Date()
 
                         // Update chats if needed
-                        if syncResult.downloaded > 0 {
+                        if syncResult.downloaded > 0 || syncResult.deleted > 0 {
                             await self?.updateChatsAfterSync()
                         }
                     }
@@ -2746,7 +2746,7 @@ class ChatViewModel: ObservableObject {
         let result = await cloudSync.syncAllChats()
         
         // Update chats if there were changes (await this before marking sync complete)
-        if result.downloaded > 0 || result.uploaded > 0 {
+        if result.downloaded > 0 || result.uploaded > 0 || result.deleted > 0 {
             await self.updateChatsAfterSync()
         }
         

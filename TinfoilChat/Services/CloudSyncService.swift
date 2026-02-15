@@ -709,10 +709,18 @@ class CloudSyncService: ObservableObject {
             }
 
             // Delete local chats that were deleted on another device
+            var deletedCount = 0
             if let cachedStatus = getCachedSyncStatus(),
                let lastUpdated = cachedStatus.lastUpdated {
-                await deleteRemotelyDeletedChats(since: lastUpdated)
+                deletedCount = await deleteRemotelyDeletedChats(since: lastUpdated)
             }
+
+            result = SyncResult(
+                uploaded: result.uploaded,
+                downloaded: result.downloaded,
+                deleted: result.deleted + deletedCount,
+                errors: result.errors
+            )
 
             // Refresh cached sync status so subsequent smart-syncs have up-to-date info
             await refreshSyncStatusCache()
@@ -724,6 +732,7 @@ class CloudSyncService: ObservableObject {
             result = SyncResult(
                 uploaded: result.uploaded,
                 downloaded: result.downloaded,
+                deleted: result.deleted,
                 errors: result.errors + ["Sync failed: \(error.localizedDescription)"]
             )
         }
@@ -911,7 +920,13 @@ class CloudSyncService: ObservableObject {
             }
 
             // Delete local chats that were deleted on another device
-            await deleteRemotelyDeletedChats(since: since)
+            let deletedCount = await deleteRemotelyDeletedChats(since: since)
+            result = SyncResult(
+                uploaded: result.uploaded,
+                downloaded: result.downloaded,
+                deleted: result.deleted + deletedCount,
+                errors: result.errors
+            )
 
             // Refresh cached sync status so subsequent smart-syncs have up-to-date info
             await refreshSyncStatusCache()
@@ -922,6 +937,7 @@ class CloudSyncService: ObservableObject {
             result = SyncResult(
                 uploaded: result.uploaded,
                 downloaded: result.downloaded,
+                deleted: result.deleted,
                 errors: result.errors + ["Delta sync failed: \(error.localizedDescription)"]
             )
         }
@@ -1259,14 +1275,18 @@ class CloudSyncService: ObservableObject {
     }
 
     /// Delete local chats that were deleted on another device since `since` timestamp.
-    private func deleteRemotelyDeletedChats(since: String) async {
+    /// Returns the number of chats deleted locally.
+    @discardableResult
+    private func deleteRemotelyDeletedChats(since: String) async -> Int {
         do {
             let deleted = try await cloudStorage.getDeletedChatsSince(since: since)
             for id in deleted.deletedIds {
                 await deleteChatFromStorage(id)
             }
+            return deleted.deletedIds.count
         } catch {
             // Non-fatal: continue even if deletion check fails
+            return 0
         }
     }
 
