@@ -142,21 +142,31 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
 
     /// Decrypt v1 binary data, trying the primary key then falling back to key history.
     func decryptV1<T: Decodable>(_ binary: Data, as type: T.Type) throws -> DecryptionResult<T> {
+        let (value, usedFallback) = try decryptWithKeyFallback { key in
+            try BinaryCodec.decryptAndDecompress(binary, using: key, as: type)
+        }
+        return DecryptionResult(value: value, usedFallbackKey: usedFallback)
+    }
+
+    // MARK: - Helper Methods
+
+    /// Try the primary key first, then iterate through key history on failure.
+    /// Returns the result and whether a fallback key was used.
+    private func decryptWithKeyFallback<T>(
+        _ operation: (SymmetricKey) throws -> T
+    ) throws -> (T, Bool) {
         guard let defaultKey = encryptionKey else {
             throw EncryptionError.keyNotInitialized
         }
 
         do {
-            let value = try BinaryCodec.decryptAndDecompress(binary, using: defaultKey, as: type)
-            return DecryptionResult(value: value, usedFallbackKey: false)
+            return (try operation(defaultKey), false)
         } catch {
             var lastError = error
-            let history = loadKeyHistory()
-            for legacyKey in history {
+            for legacyKey in loadKeyHistory() {
                 do {
-                    let legacySymmetricKey = try symmetricKey(from: legacyKey)
-                    let value = try BinaryCodec.decryptAndDecompress(binary, using: legacySymmetricKey, as: type)
-                    return DecryptionResult(value: value, usedFallbackKey: true)
+                    let key = try symmetricKey(from: legacyKey)
+                    return (try operation(key), true)
                 } catch {
                     lastError = error
                 }
@@ -164,8 +174,6 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
             throw lastError
         }
     }
-
-    // MARK: - Helper Methods
 
     private func normalizeKeyInput(_ keyString: String) throws -> (String, Data) {
         guard keyString.hasPrefix("key_") else {
@@ -390,28 +398,9 @@ extension EncryptionService: ChatEncryptor {
     /// Shared decryption that tries the primary key, then falls back to key history.
     /// Returns the decrypted data and whether a fallback key was used.
     private func decryptDataWithFallbackInfo(_ encrypted: EncryptedData) async throws -> (Data, Bool) {
-        guard let defaultKey = encryptionKey else {
-            throw EncryptionError.keyNotInitialized
-        }
-
         let sealedBox = try AESGCMHelper.parseSealedBox(from: encrypted)
-
-        do {
-            let data = try AES.GCM.open(sealedBox, using: defaultKey)
-            return (data, false)
-        } catch {
-            var lastError = error
-            let history = loadKeyHistory()
-            for legacyKey in history {
-                do {
-                    let legacySymmetricKey = try symmetricKey(from: legacyKey)
-                    let data = try AES.GCM.open(sealedBox, using: legacySymmetricKey)
-                    return (data, true)
-                } catch {
-                    lastError = error
-                }
-            }
-            throw lastError
+        return try decryptWithKeyFallback { key in
+            try AES.GCM.open(sealedBox, using: key)
         }
     }
 }
