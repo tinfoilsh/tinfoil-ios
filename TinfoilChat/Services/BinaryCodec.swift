@@ -73,22 +73,18 @@ extension BinaryCodec {
         let encryptedData: Data
         /// Raw 256-bit key bytes (32 bytes)
         let key: Data
-        /// Raw nonce bytes (12 bytes)
-        let nonce: Data
     }
 
     /// Encrypt attachment data with a fresh random AES-256-GCM key.
     /// Returns the encrypted blob + the key material needed to decrypt it.
     static func encryptAttachment(_ plaintext: Data) throws -> AttachmentEncryptionResult {
         let key = SymmetricKey(size: .bits256)
-        let nonce = AES.GCM.Nonce()
-        let sealed = try AES.GCM.seal(plaintext, using: key, nonce: nonce)
+        let sealed = try AES.GCM.seal(plaintext, using: key)
         guard let combined = sealed.combined else {
             throw BinaryCodecError.sealedBoxCombinedFailed
         }
         let keyData = key.withUnsafeBytes { Data($0) }
-        let nonceData = Data(nonce)
-        return AttachmentEncryptionResult(encryptedData: combined, key: keyData, nonce: nonceData)
+        return AttachmentEncryptionResult(encryptedData: combined, key: keyData)
     }
 
     /// Decrypt attachment data using the key material from encryptAttachment.
