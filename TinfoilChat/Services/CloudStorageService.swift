@@ -271,7 +271,6 @@ class CloudStorageService: ObservableObject {
         let url = URL(string: "\(apiBaseURL)/api/storage/attachment/\(attachmentId)")!
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.cachePolicy = .reloadIgnoringLocalCacheData
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -283,28 +282,46 @@ class CloudStorageService: ObservableObject {
         return data
     }
 
-    /// Fetch, decrypt, and populate base64 for all v1 image attachments in a chat.
-    /// Each attachment is fetched from the public endpoint and decrypted with its per-attachment key.
-    func loadChatImages(chat: inout StoredChat) async {
-        for msgIdx in chat.messages.indices {
-            for attIdx in chat.messages[msgIdx].attachments.indices {
-                let attachment = chat.messages[msgIdx].attachments[attIdx]
-                guard attachment.type == .image,
-                      attachment.base64 == nil,
-                      let keyB64 = attachment.encryptionKey,
+    /// Fetch, decrypt, and populate base64 for all v1 image attachments in a message array.
+    /// Fetches all attachments in parallel. Returns updated messages.
+    func loadImages(in messages: [Message]) async -> [Message] {
+        // Collect work items: (messageIndex, attachmentIndex, attachmentId, keyData)
+        var work: [(Int, Int, String, Data)] = []
+        for msgIdx in messages.indices {
+            for attIdx in messages[msgIdx].attachments.indices {
+                let att = messages[msgIdx].attachments[attIdx]
+                guard att.type == .image,
+                      att.base64 == nil,
+                      let keyB64 = att.encryptionKey,
                       let keyData = Data(base64Encoded: keyB64) else { continue }
+                work.append((msgIdx, attIdx, att.id, keyData))
+            }
+        }
 
-                do {
-                    let encryptedData = try await fetchAttachment(attachmentId: attachment.id)
-                    let decrypted = try BinaryCodec.decryptAttachment(encryptedData, key: keyData)
-                    chat.messages[msgIdx].attachments[attIdx].base64 = decrypted.base64EncodedString()
-                } catch {
-                    #if DEBUG
-                    print("[CloudStorageService] Failed to load attachment \(attachment.id): \(error)")
-                    #endif
+        guard !work.isEmpty else { return messages }
+
+        var updated = messages
+
+        await withTaskGroup(of: (Int, Int, String?).self) { group in
+            for (msgIdx, attIdx, attId, keyData) in work {
+                group.addTask {
+                    do {
+                        let encrypted = try await self.fetchAttachment(attachmentId: attId)
+                        let decrypted = try BinaryCodec.decryptAttachment(encrypted, key: keyData)
+                        return (msgIdx, attIdx, decrypted.base64EncodedString())
+                    } catch {
+                        return (msgIdx, attIdx, nil)
+                    }
+                }
+            }
+            for await (msgIdx, attIdx, base64) in group {
+                if let b64 = base64 {
+                    updated[msgIdx].attachments[attIdx].base64 = b64
                 }
             }
         }
+
+        return updated
     }
 
     // MARK: - List Operations
