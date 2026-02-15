@@ -144,7 +144,6 @@ class CloudStorageService: ObservableObject {
                 try await uploadAttachment(attachmentId: attachment.id, chatId: chat.id, data: result.encryptedData)
 
                 chat.messages[msgIdx].attachments[attIdx].encryptionKey = result.key.base64EncodedString()
-                chat.messages[msgIdx].attachments[attIdx].encryptionIV = result.nonce.base64EncodedString()
             }
         }
     }
