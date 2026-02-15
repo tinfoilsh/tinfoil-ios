@@ -2098,16 +2098,23 @@ class ChatViewModel: ObservableObject {
         // Stop auto-sync timer when signing out
         autoSyncTimer?.invalidate()
         autoSyncTimer = nil
-        
-        // Save current chat before clearing (it's already associated with the user ID)
-        if hasChatAccess, let chat = currentChat {
-            saveChat(chat)
+
+        // Save all local chats with content to disk before clearing in-memory state.
+        // This is called while isAuthenticated is still true (see clearAuthState ordering)
+        // so that hasChatAccess/currentUserId are available for the save.
+        if hasChatAccess {
+            for chat in localChats where !chat.messages.isEmpty {
+                saveChat(chat)
+            }
+            if let chat = currentChat, !chat.messages.isEmpty {
+                saveChat(chat)
+            }
         }
-        
+
         // Clear sync caches so stale state doesn't leak into the next session
         cloudSync.clearSyncStatus()
         DeletedChatsTracker.shared.clear()
-        
+
         // Reset to a free model when signing out
         let freeModels = AppConfig.shared.filteredModelTypes(
             isAuthenticated: false,
@@ -2117,22 +2124,24 @@ class ChatViewModel: ObservableObject {
             currentModel = defaultFreeModel
             AppConfig.shared.currentModel = defaultFreeModel
         }
-        
+
         // Reset pagination state when signing out
         paginationToken = nil
         hasMoreChats = false
         isPaginationActive = false
         hasLoadedInitialPage = false
         hasAttemptedLoadMore = false
-        
-        // Clear current chats and create a new empty one with the free model
+
+        // Clear cloud chats and create a new empty one with the free model.
+        // Local chats are only cleared from memory — files on disk are preserved
+        // and will be reloaded on next sign-in via handleSignIn/loadAllLocalChats.
         chats = []
         localChats = []
         activeStorageTab = .cloud
         let newChat = Chat.create(modelType: currentModel)
         currentChat = newChat
         chats = [newChat]
-        
+
     }
     
     /// Clear all local chats and reset to fresh state
