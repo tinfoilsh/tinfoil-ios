@@ -242,10 +242,10 @@ struct ShareChatView: View {
                     messages: capturedMessages, chatTitle: title, chatCreatedAt: createdAt
                 )
                 let key = ShareEncryptionService.generateShareKey()
-                let encrypted = try ShareEncryptionService.encryptForShare(shareableData, key: key)
+                let encryptedBinary = try ShareEncryptionService.encryptForShare(shareableData, key: key)
                 let keyBase64url = ShareEncryptionService.exportKeyToBase64url(key)
 
-                try await ShareAPIService.uploadSharedChat(chatId: chatId, encryptedData: encrypted)
+                try await ShareAPIService.uploadSharedChat(chatId: chatId, encryptedData: encryptedBinary)
 
                 let url = "\(Constants.Share.shareBaseURL)/share/\(chatId)#\(keyBase64url)"
 

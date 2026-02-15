@@ -12,10 +12,10 @@ import Clerk
 /// Service for share API operations
 enum ShareAPIService {
 
-    /// Upload encrypted shared chat data to the server.
+    /// Upload encrypted shared chat data to the server as v1 binary.
     /// Endpoint: PUT {baseURL}/api/shares/{chatId}
     /// Requires authentication via Clerk Bearer token.
-    static func uploadSharedChat(chatId: String, encryptedData: EncryptedShareData) async throws {
+    static func uploadSharedChat(chatId: String, encryptedData: Data) async throws {
         let urlString = "\(Constants.API.baseURL)\(Constants.Share.shareAPIPath)/\(chatId)"
         guard let url = URL(string: urlString) else {
             throw ShareAPIError.invalidURL
@@ -26,8 +26,9 @@ enum ShareAPIService {
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(encryptedData)
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.setValue("1", forHTTPHeaderField: "X-Format-Version")
+        request.httpBody = encryptedData
 
         let (_, response) = try await URLSession.shared.data(for: request)
 
