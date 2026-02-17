@@ -1649,14 +1649,17 @@ class ChatViewModel: ObservableObject {
 
     /// Checks if an error is an authentication error (401)
     private func isAuthenticationError(_ error: Error) -> Bool {
-        let nsError = error as NSError
-
-        if nsError.domain == "TinfoilChat" && nsError.code == 401 {
+        // Streaming path: the SDK checks the HTTP status code before reading the body
+        // and throws OpenAIError.statusError with the original status code
+        if case OpenAIError.statusError(_, let statusCode) = error,
+           statusCode == 401 {
             return true
         }
 
-        if let httpResponse = nsError.userInfo[NSUnderlyingErrorKey] as? HTTPURLResponse,
-           httpResponse.statusCode == 401 {
+        // Non-streaming path: the SDK decodes the response body into APIErrorResponse
+        // which contains the error code from our controlplane/shim
+        if let apiError = error as? APIErrorResponse,
+           apiError.error.code == Constants.API.ErrorCode.invalidAPIKey {
             return true
         }
 
@@ -2948,21 +2951,30 @@ extension ChatViewModel {
             model: titleModel.modelName,
         )
 
-        do {
-            let result: ChatResult = try await client.chats(query: query)
+        func parseTitleFromResult(_ result: ChatResult) -> String? {
             let title = result.choices.first?.message.content ?? ""
-
             let cleanTitle = title
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .replacingOccurrences(of: "^[\"']|[\"']$", with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            return cleanTitle.isEmpty ? nil : cleanTitle
+        }
 
-            guard !cleanTitle.isEmpty else {
+        do {
+            let result: ChatResult = try await client.chats(query: query)
+            return parseTitleFromResult(result)
+        } catch {
+            guard isAuthenticationError(error) else { return nil }
+
+            await refreshClientForRetry()
+            guard let freshClient = await MainActor.run(body: { self.client }) else { return nil }
+
+            do {
+                let result: ChatResult = try await freshClient.chats(query: query)
+                return parseTitleFromResult(result)
+            } catch {
                 return nil
             }
-            return cleanTitle
-        } catch {
-            return nil
         }
     }
 
