@@ -2239,7 +2239,6 @@ class ChatViewModel: ObservableObject {
                     let allLocal = await loadAllLocalChats(userId: self.currentUserId)
                     await MainActor.run {
                         self.localChats = allLocal
-                        self.activeStorageTab = .local
                         normalizeLocalChatsArray()
                         if self.currentChat == nil, let first = self.localChats.first {
                             self.currentChat = first
