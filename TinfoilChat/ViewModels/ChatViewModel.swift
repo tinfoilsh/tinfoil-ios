@@ -19,7 +19,7 @@ enum ChatStorageTab: String {
 
 @MainActor
 class ChatViewModel: ObservableObject {
-    private static let citationMarkerRegex = try? NSRegularExpression(pattern: "【(\\d+)[^】]*】", options: [])
+    private static let citationMarkerRegex = try? NSRegularExpression(pattern: "【(\\d+)[^】]*】([.!?,;:。，！？；：]?)", options: [])
 
     // Published properties for UI updates
     @Published var chats: [Chat] = []
@@ -3077,19 +3077,25 @@ extension ChatViewModel {
 
             let source = sources[index]
 
+            // Capture trailing punctuation (group 2) to move before citation link
+            let punct: String
+            if match.numberOfRanges > 2, let punctRange = Range(match.range(at: 2), in: content) {
+                punct = String(content[punctRange])
+            } else {
+                punct = ""
+            }
+
             let encodedUrl = source.url
                 .replacingOccurrences(of: "(", with: "%28")
                 .replacingOccurrences(of: ")", with: "%29")
                 .replacingOccurrences(of: "|", with: "%7C")
-                .replacingOccurrences(of: "~", with: "%7E")
             let encodedTitle = (source.title
                 .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? source.title)
                 .replacingOccurrences(of: "(", with: "%28")
                 .replacingOccurrences(of: ")", with: "%29")
-                .replacingOccurrences(of: "~", with: "%7E")
 
             result += content[lastEnd..<matchRange.lowerBound]
-            result += "[\(num)](#cite-\(num)~\(encodedUrl)~\(encodedTitle))"
+            result += "\(punct)[\(num)](#cite-\(num)~\(encodedUrl)~\(encodedTitle))"
             lastEnd = matchRange.upperBound
         }
 
