@@ -33,7 +33,6 @@ private struct ContentSegment {
                 Markdown(strippedText)
                     .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
                     .markdownCodeSyntaxHighlighter(MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode))
-                    .fixedSize(horizontal: false, vertical: true)
             )
         case .latex(let latex, let isDisplay):
             return AnyView(
@@ -700,7 +699,6 @@ private struct MarkdownTableRowView: View {
             }
         }
         .frame(minHeight: 0, maxHeight: .infinity)
-        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -721,7 +719,6 @@ private struct MarkdownTableCell: View {
             horizontalPadding: 0,
             maxWidthAlignment: alignment.viewAlignment
         )
-        .fixedSize(horizontal: false, vertical: true)
         .padding(.vertical, isHeader ? 6 : 5)
         .padding(.horizontal, 12)
 

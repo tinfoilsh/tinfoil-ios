@@ -908,7 +908,6 @@ struct AdaptiveMarkdownText: View {
             .markdownTheme(MarkdownThemeCache.getUserTheme(isDarkMode: isDarkMode))
             .padding(.horizontal, horizontalPadding)
             .environment(\.colorScheme, .dark)
-            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
