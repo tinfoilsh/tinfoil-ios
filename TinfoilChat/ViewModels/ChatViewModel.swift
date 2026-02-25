@@ -19,6 +19,8 @@ enum ChatStorageTab: String {
 
 @MainActor
 class ChatViewModel: ObservableObject {
+    private static let citationMarkerRegex = try? NSRegularExpression(pattern: "【(\\d+)[^】]*】", options: [])
+
     // Published properties for UI updates
     @Published var chats: [Chat] = []
     @Published var localChats: [Chat] = []
@@ -3057,10 +3059,7 @@ extension ChatViewModel {
     private func processCitationMarkers(_ content: String, sources: [WebSearchSource]) -> String {
         guard !sources.isEmpty else { return content }
 
-        let pattern = "【(\\d+)[^】]*】"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return content
-        }
+        guard let regex = Self.citationMarkerRegex else { return content }
 
         let nsContent = content as NSString
         var result = content
@@ -3083,6 +3082,8 @@ extension ChatViewModel {
                 .replacingOccurrences(of: "~", with: "%7E")
             let encodedTitle = (source.title
                 .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? source.title)
+                .replacingOccurrences(of: "(", with: "%28")
+                .replacingOccurrences(of: ")", with: "%29")
                 .replacingOccurrences(of: "~", with: "%7E")
 
             let replacement = "[\(num)](#cite-\(num)~\(encodedUrl)~\(encodedTitle))"
