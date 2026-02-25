@@ -106,6 +106,13 @@ struct LaTeXMarkdownView: View, Equatable {
     let maxWidthAlignment: Alignment
     let isStreaming: Bool
 
+    // Pre-compiled regex patterns (compiled once, reused across all renders)
+    private static let codeBlockRegex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```", options: [])
+    private static let inlineCodeRegex = try? NSRegularExpression(pattern: "`[^`]+`", options: [])
+    private static let displayLatexRegex = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators])
+    private static let inlineLatexRegex = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: [])
+    private static let citationRegex = try? NSRegularExpression(pattern: "\\[(\\d+)\\]\\(#cite-\\d+~[^)]+\\)", options: [])
+
     static func == (lhs: LaTeXMarkdownView, rhs: LaTeXMarkdownView) -> Bool {
         lhs.content == rhs.content &&
         lhs.isDarkMode == rhs.isDarkMode &&
@@ -139,9 +146,7 @@ struct LaTeXMarkdownView: View, Equatable {
     
     /// Strip citation markers from markdown text
     static func stripCitations(from text: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: "\\[(\\d+)\\]\\(#cite-\\d+~[^)]+\\)", options: []) else {
-            return text
-        }
+        guard let regex = citationRegex else { return text }
         let nsText = text as NSString
         return regex.stringByReplacingMatches(
             in: text,
@@ -177,12 +182,12 @@ struct LaTeXMarkdownView: View, Equatable {
 
         var excludedRanges: [NSRange] = []
 
-        if let codeBlockRegex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```", options: []) {
+        if let codeBlockRegex = Self.codeBlockRegex {
             let matches = codeBlockRegex.matches(in: content, options: [], range: fullRange)
             excludedRanges.append(contentsOf: matches.map(\.range))
         }
 
-        if let inlineCodeRegex = try? NSRegularExpression(pattern: "`[^`]+`", options: []) {
+        if let inlineCodeRegex = Self.inlineCodeRegex {
             let matches = inlineCodeRegex.matches(in: content, options: [], range: fullRange)
             for match in matches where !excludedRanges.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {
                 excludedRanges.append(match.range)
@@ -198,14 +203,14 @@ struct LaTeXMarkdownView: View, Equatable {
 
         var latexRanges: [(range: NSRange, isDisplay: Bool)] = []
 
-        if let displayRegex = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators]) {
+        if let displayRegex = Self.displayLatexRegex {
             let matches = displayRegex.matches(in: content, options: [], range: fullRange)
             for match in matches where !isExcluded(match.range) {
                 latexRanges.append((match.range, true))
             }
         }
 
-        if let inlineRegex = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: []) {
+        if let inlineRegex = Self.inlineLatexRegex {
             let matches = inlineRegex.matches(in: content, options: [], range: fullRange)
             for match in matches where !isExcluded(match.range) {
                 let overlaps = latexRanges.contains { existing in
