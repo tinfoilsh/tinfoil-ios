@@ -33,7 +33,6 @@ private struct ContentSegment {
                 Markdown(strippedText)
                     .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
                     .markdownCodeSyntaxHighlighter(MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode))
-                    .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             )
         case .latex(let latex, let isDisplay):
