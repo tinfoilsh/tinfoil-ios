@@ -7,7 +7,7 @@
 //
 
 import SwiftUI
-import Clerk
+import ClerkKit
 
 struct ForgotPasswordView: View {
     @Environment(Clerk.self) private var clerk
@@ -240,7 +240,8 @@ struct ForgotPasswordView: View {
         forceResetView = false
         
         do {
-            try await SignIn.create(strategy: .identifier(email, strategy: .resetPasswordEmailCode()))
+            let signIn = try await clerk.auth.signIn(email)
+            try await signIn.sendResetPasswordEmailCode()
         } catch {
             errorMessage = "Failed to send reset code. Please check your email and try again."
         }
@@ -259,7 +260,7 @@ struct ForgotPasswordView: View {
                 return
             }
             
-            try await inProgressSignIn.attemptFirstFactor(strategy: .resetPasswordEmailCode(code: code))
+            try await inProgressSignIn.verifyCode(code)
         } catch {
             errorMessage = "Invalid verification code. Please try again."
         }
@@ -278,7 +279,7 @@ struct ForgotPasswordView: View {
                 return
             }
             
-            try await inProgressSignIn.resetPassword(.init(password: newPassword, signOutOfOtherSessions: true))
+            try await inProgressSignIn.resetPassword(newPassword: newPassword, signOutOfOtherSessions: true)
             successMessage = "Password reset successfully!"
             
             // Dismiss after a short delay

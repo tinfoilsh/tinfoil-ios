@@ -11,15 +11,19 @@ import Sentry
 import RevenueCat
 
 import UIKit
-import Clerk
+import ClerkKit
 
 @main
 struct TinfoilChatApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @State private var clerk = Clerk.shared
+    @State private var clerk: Clerk
     @StateObject private var appConfig = AppConfig.shared
     @StateObject private var authManager = AuthManager()
-    @State private var isClerkConfigured = false
+
+    init() {
+        Clerk.configure(publishableKey: AppConfig.shared.clerkPublishableKey)
+        _clerk = State(initialValue: Clerk.shared)
+    }
     
     var body: some Scene {
         WindowGroup {
@@ -36,7 +40,7 @@ struct TinfoilChatApp: App {
                                 // Immediately check auth state when app reopens from OAuth
                                 Task {
                                     do {
-                                        try await clerk.load()
+                                        try await clerk.refreshClient()
                                         if clerk.user != nil {
                                             await authManager.initializeAuthState()
                                             // Post immediate completion notification
@@ -50,16 +54,11 @@ struct TinfoilChatApp: App {
                                 }
                             }
                             .task {
-                            // Configure Clerk only once
-                            if !isClerkConfigured {
-                                clerk.configure(publishableKey: AppConfig.shared.clerkPublishableKey)
-                                isClerkConfigured = true
-                                
                                 // Pass the clerk instance to auth manager
                                 authManager.setClerk(clerk)
-                                
+
                                 do {
-                                    try await clerk.load()
+                                    try await clerk.refreshClient()
                                     
                                     // Initialize authentication state
                                     await authManager.initializeAuthState()
@@ -92,8 +91,6 @@ struct TinfoilChatApp: App {
                                     }
                                 } catch {
                                 }
-                            
-                            }
                         }
                     } else {
                         UpdateRequiredView()

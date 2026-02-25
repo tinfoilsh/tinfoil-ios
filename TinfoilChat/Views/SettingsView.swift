@@ -7,7 +7,7 @@
 //
 
 import SwiftUI
-import Clerk
+import ClerkKit
 import UIKit
 import RevenueCat
 import RevenueCatUI

@@ -6,7 +6,7 @@
 //  Copyright © 2025 Tinfoil. All rights reserved.
 
 import SwiftUI
-import Clerk
+import ClerkKit
 import UIKit
 
 // Preference key to communicate verification state to parent views
@@ -223,22 +223,20 @@ struct SignUpView: View {
             let lastName = nameComponents.count > 1 ? nameComponents.dropFirst().joined(separator: " ") : ""
             
             // Create sign up with email, password, and name using standard strategy
-            let signUp = try await SignUp.create(
-                strategy: .standard(
-                    emailAddress: email,
-                    password: password,
-                    firstName: firstName,
-                    lastName: lastName
-                )
+            let signUp = try await clerk.auth.signUp(
+                emailAddress: email,
+                password: password,
+                firstName: firstName,
+                lastName: lastName
             )
             
             // Store the SignUp instance
             self.currentSignUp = signUp
             
             // Check if email verification is required
-            if signUp.unverifiedFields.contains("email_address") {
+            if signUp.unverifiedFields.contains(.emailAddress) {
                 // Prepare email verification with email code
-                let updatedSignUp = try await signUp.prepareVerification(strategy: .emailCode)
+                let updatedSignUp = try await signUp.sendEmailCode()
                 self.currentSignUp = updatedSignUp
                 
                 await MainActor.run {
@@ -249,7 +247,7 @@ struct SignUpView: View {
                 // Email verification not required, proceed with session creation
                 if signUp.createdSessionId != nil {
                     // Just reload clerk and initialize auth state
-                    try await clerk.load()
+                    try await clerk.refreshClient()
                     await authManager.initializeAuthState()
                     
                     await MainActor.run {
@@ -281,7 +279,7 @@ struct SignUpView: View {
             }
             
             // Resend verification code
-            let updatedSignUp = try await signUp.prepareVerification(strategy: .emailCode)
+            let updatedSignUp = try await signUp.sendEmailCode()
             self.currentSignUp = updatedSignUp
             
             await MainActor.run {
@@ -308,13 +306,13 @@ struct SignUpView: View {
             }
             
             // Attempt verification with the code the user entered
-            let verifiedSignUp = try await signUp.attemptVerification(strategy: .emailCode(code: verificationCode))
+            let verifiedSignUp = try await signUp.verifyEmailCode(verificationCode)
             self.currentSignUp = verifiedSignUp
             
             // Check if there are still any unverified fields required
             if !verifiedSignUp.unverifiedFields.isEmpty {
                 await MainActor.run {
-                    errorMessage = "Additional verification required: \(verifiedSignUp.unverifiedFields.joined(separator: ", "))"
+                    errorMessage = "Additional verification required: \(verifiedSignUp.unverifiedFields.map(\.rawValue).joined(separator: ", "))"
                     isVerifyingCode = false
                 }
                 return
@@ -323,7 +321,7 @@ struct SignUpView: View {
             // Check if there are still missing required fields
             if !verifiedSignUp.missingFields.isEmpty {
                 await MainActor.run {
-                    errorMessage = "Additional information required: \(verifiedSignUp.missingFields.joined(separator: ", "))"
+                    errorMessage = "Additional information required: \(verifiedSignUp.missingFields.map(\.rawValue).joined(separator: ", "))"
                     isVerifyingCode = false
                 }
                 return
@@ -332,11 +330,11 @@ struct SignUpView: View {
             // Manually complete the sign-up process if needed
             if verifiedSignUp.createdSessionId == nil {
                 // Force completion of the sign-up process
-                try await clerk.load()
+                try await clerk.refreshClient()
                 await authManager.initializeAuthState()
             } else {
                 // A session was created, just reload clerk
-                try await clerk.load()
+                try await clerk.refreshClient()
                 await authManager.initializeAuthState()
             }
             

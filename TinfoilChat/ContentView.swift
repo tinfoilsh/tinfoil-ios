@@ -7,7 +7,7 @@
 
 
 import SwiftUI
-import Clerk
+import ClerkKit
 import AVFoundation
 
 struct ContentView: View {

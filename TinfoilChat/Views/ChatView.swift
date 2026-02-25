@@ -8,7 +8,7 @@
 
 import SwiftUI
 import SafariServices
-import Clerk
+import ClerkKit
 import RevenueCat
 import RevenueCatUI
 

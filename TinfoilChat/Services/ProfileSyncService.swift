@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import Clerk
+import ClerkKit
 
 /// Service for managing profile synchronization with cloud
 @MainActor
@@ -40,7 +40,7 @@ class ProfileSyncService: ObservableObject {
             // Ensure Clerk is loaded
             let isLoaded = Clerk.shared.isLoaded
             if !isLoaded {
-                try await Clerk.shared.load()
+                try await Clerk.shared.refreshClient()
             }
             
             // Get session token

@@ -7,7 +7,7 @@
 
 import Foundation
 import Combine
-import Clerk
+import ClerkKit
 
 // MARK: - Helper Functions
 
@@ -189,14 +189,14 @@ class CloudSyncService: ObservableObject {
                 
                 // Ensure Clerk is loaded
                 if !Clerk.shared.isLoaded {
-                    try await Clerk.shared.load()
+                    try await Clerk.shared.refreshClient()
                 }
                 
                 // Get fresh token from session
                 if let session = Clerk.shared.session {
                     // Try to get a fresh token first (refresh if needed)
                     if let token = try? await session.getToken() {
-                        return token.jwt
+                        return token
                     }
                     // Fallback to last active token if refresh fails
                     if let tokenResource = session.lastActiveToken {
