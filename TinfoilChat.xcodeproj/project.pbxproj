@@ -7,40 +7,37 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		99095BBB2DC2BC1E009C8F44 /* Clerk in Frameworks */ = {isa = PBXBuildFile; productRef = 99095BBA2DC2BC1E009C8F44 /* Clerk */; };
-		9933808C2EA5A7C60073276A /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = 9933808B2EA5A7C60073276A /* Highlightr */; };
-		996C8D6E2E83870900C12826 /* TinfoilAI in Frameworks */ = {isa = PBXBuildFile; productRef = 996C8D6D2E83870900C12826 /* TinfoilAI */; };
-		998397652E6657ED00A46274 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = 998397642E6657ED00A46274 /* SwiftMath */; };
-		998ED4D72EA6C75C00D7B6BB /* tinfoil-glass.icon in Resources */ = {isa = PBXBuildFile; fileRef = 998ED4D62EA6C75C00D7B6BB /* tinfoil-glass.icon */; };
-		999769632E295C1A00A570DC /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 999769622E295C1A00A570DC /* RevenueCat */; };
-		999769652E295C1A00A570DC /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 999769642E295C1A00A570DC /* RevenueCatUI */; };
-		99976A572E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit in Resources */ = {isa = PBXBuildFile; fileRef = 99976A562E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit */; };
-		9998BBBB2F41583400BC91CD /* Gzip in Frameworks */ = {isa = PBXBuildFile; productRef = 9998BBBA2F41583400BC91CD /* Gzip */; };
-		99C5A0592EAE824300A1F328 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 99C5A0582EAE824300A1F328 /* MarkdownUI */; };
-		D4FD450D5DF249E2A37CA9CD /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 6E93C3925EE14CD689429CE8 /* Sentry */; };
+		99F154692F4F60C500E9174E /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154682F4F60C500E9174E /* ClerkKit */; };
+		99F1546B2F4F60C500E9174E /* ClerkKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = 99F1546A2F4F60C500E9174E /* ClerkKitUI */; };
+		99F154702F4F610000E9174E /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = 99F1546F2F4F610000E9174E /* SwiftMath */; };
+		99F154732F4F611A00E9174E /* TinfoilAI in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154722F4F611A00E9174E /* TinfoilAI */; };
+		99F154762F4F612600E9174E /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154752F4F612600E9174E /* Highlightr */; };
+		99F154792F4F613700E9174E /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154782F4F613700E9174E /* MarkdownUI */; };
+		99F1547C2F4F614400E9174E /* Gzip in Frameworks */ = {isa = PBXBuildFile; productRef = 99F1547B2F4F614400E9174E /* Gzip */; };
+		99F154822F4F632500E9174E /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154812F4F632500E9174E /* Sentry */; };
+		99F154842F4F632E00E9174E /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154832F4F632E00E9174E /* RevenueCat */; };
+		99F154862F4F633400E9174E /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154852F4F633400E9174E /* RevenueCatUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		9909E5BE2DBD460C0040357B /* TinfoilChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TinfoilChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		998ED4D62EA6C75C00D7B6BB /* tinfoil-glass.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "tinfoil-glass.icon"; sourceTree = "<group>"; };
-		99976A562E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = TinfoilChatStoreKitConfiguration.storekit; sourceTree = "<group>"; };
+		99F153C22F4F5F0200E9174E /* TinfoilChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TinfoilChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		99095C952DC3403B009C8F44 /* Exceptions for "TinfoilChat" folder in "TinfoilChat" target */ = {
+		99F1547E2F4F622400E9174E /* Exceptions for "TinfoilChat" folder in "TinfoilChat" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = 9909E5BD2DBD460C0040357B /* TinfoilChat */;
+			target = 99F153C12F4F5F0200E9174E /* TinfoilChat */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		9909E5C02DBD460C0040357B /* TinfoilChat */ = {
+		99F153C42F4F5F0200E9174E /* TinfoilChat */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				99095C952DC3403B009C8F44 /* Exceptions for "TinfoilChat" folder in "TinfoilChat" target */,
+				99F1547E2F4F622400E9174E /* Exceptions for "TinfoilChat" folder in "TinfoilChat" target */,
 			);
 			path = TinfoilChat;
 			sourceTree = "<group>";
@@ -48,144 +45,153 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		9909E5BB2DBD460C0040357B /* Frameworks */ = {
+		99F153BF2F4F5F0200E9174E /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				996C8D6E2E83870900C12826 /* TinfoilAI in Frameworks */,
-				99095BBB2DC2BC1E009C8F44 /* Clerk in Frameworks */,
-				9998BBBB2F41583400BC91CD /* Gzip in Frameworks */,
-				999769652E295C1A00A570DC /* RevenueCatUI in Frameworks */,
-				99C5A0592EAE824300A1F328 /* MarkdownUI in Frameworks */,
-				999769632E295C1A00A570DC /* RevenueCat in Frameworks */,
-				9933808C2EA5A7C60073276A /* Highlightr in Frameworks */,
-				D4FD450D5DF249E2A37CA9CD /* Sentry in Frameworks */,
-				998397652E6657ED00A46274 /* SwiftMath in Frameworks */,
+				99F154762F4F612600E9174E /* Highlightr in Frameworks */,
+				99F154732F4F611A00E9174E /* TinfoilAI in Frameworks */,
+				99F1547C2F4F614400E9174E /* Gzip in Frameworks */,
+				99F154822F4F632500E9174E /* Sentry in Frameworks */,
+				99F154692F4F60C500E9174E /* ClerkKit in Frameworks */,
+				99F154842F4F632E00E9174E /* RevenueCat in Frameworks */,
+				99F154792F4F613700E9174E /* MarkdownUI in Frameworks */,
+				99F1546B2F4F60C500E9174E /* ClerkKitUI in Frameworks */,
+				99F154862F4F633400E9174E /* RevenueCatUI in Frameworks */,
+				99F154702F4F610000E9174E /* SwiftMath in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		9909E5B52DBD460C0040357B = {
+		99F153B92F4F5F0200E9174E = {
 			isa = PBXGroup;
 			children = (
-				998ED4D62EA6C75C00D7B6BB /* tinfoil-glass.icon */,
-				99976A562E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit */,
-				9909E5C02DBD460C0040357B /* TinfoilChat */,
-				9909E5BF2DBD460C0040357B /* Products */,
+				99F153C42F4F5F0200E9174E /* TinfoilChat */,
+				99F154802F4F632500E9174E /* Frameworks */,
+				99F153C32F4F5F0200E9174E /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		9909E5BF2DBD460C0040357B /* Products */ = {
+		99F153C32F4F5F0200E9174E /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				9909E5BE2DBD460C0040357B /* TinfoilChat.app */,
+				99F153C22F4F5F0200E9174E /* TinfoilChat.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		99F154802F4F632500E9174E /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		9909E5BD2DBD460C0040357B /* TinfoilChat */ = {
+		99F153C12F4F5F0200E9174E /* TinfoilChat */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 9909E5C92DBD460E0040357B /* Build configuration list for PBXNativeTarget "TinfoilChat" */;
+			buildConfigurationList = 99F153CD2F4F5F0300E9174E /* Build configuration list for PBXNativeTarget "TinfoilChat" */;
 			buildPhases = (
-				9909E5BA2DBD460C0040357B /* Sources */,
-				9909E5BB2DBD460C0040357B /* Frameworks */,
-				9909E5BC2DBD460C0040357B /* Resources */,
-				554C569A850F47BEA789F729 /* Upload Debug Symbols to Sentry */,
+				99F153BE2F4F5F0200E9174E /* Sources */,
+				99F153BF2F4F5F0200E9174E /* Frameworks */,
+				99F153C02F4F5F0200E9174E /* Resources */,
+				99F1547D2F4F615600E9174E /* ShellScript */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				9909E5C02DBD460C0040357B /* TinfoilChat */,
+				99F153C42F4F5F0200E9174E /* TinfoilChat */,
 			);
 			name = TinfoilChat;
 			packageProductDependencies = (
-				99095BBA2DC2BC1E009C8F44 /* Clerk */,
-				6E93C3925EE14CD689429CE8 /* Sentry */,
-				999769622E295C1A00A570DC /* RevenueCat */,
-				999769642E295C1A00A570DC /* RevenueCatUI */,
-				998397642E6657ED00A46274 /* SwiftMath */,
-				996C8D6D2E83870900C12826 /* TinfoilAI */,
-				9933808B2EA5A7C60073276A /* Highlightr */,
-				99C5A0582EAE824300A1F328 /* MarkdownUI */,
-				9998BBBA2F41583400BC91CD /* Gzip */,
+				99F154682F4F60C500E9174E /* ClerkKit */,
+				99F1546A2F4F60C500E9174E /* ClerkKitUI */,
+				99F1546F2F4F610000E9174E /* SwiftMath */,
+				99F154722F4F611A00E9174E /* TinfoilAI */,
+				99F154752F4F612600E9174E /* Highlightr */,
+				99F154782F4F613700E9174E /* MarkdownUI */,
+				99F1547B2F4F614400E9174E /* Gzip */,
+				99F154812F4F632500E9174E /* Sentry */,
+				99F154832F4F632E00E9174E /* RevenueCat */,
+				99F154852F4F633400E9174E /* RevenueCatUI */,
 			);
 			productName = TinfoilChat;
-			productReference = 9909E5BE2DBD460C0040357B /* TinfoilChat.app */;
+			productReference = 99F153C22F4F5F0200E9174E /* TinfoilChat.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		9909E5B62DBD460C0040357B /* Project object */ = {
+		99F153BA2F4F5F0200E9174E /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 1630;
-				LastUpgradeCheck = 2610;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2620;
 				TargetAttributes = {
-					9909E5BD2DBD460C0040357B = {
-						CreatedOnToolsVersion = 16.3;
+					99F153C12F4F5F0200E9174E = {
+						CreatedOnToolsVersion = 26.2;
 					};
 				};
 			};
-			buildConfigurationList = 9909E5B92DBD460C0040357B /* Build configuration list for PBXProject "TinfoilChat" */;
+			buildConfigurationList = 99F153BD2F4F5F0200E9174E /* Build configuration list for PBXProject "TinfoilChat" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
 			);
-			mainGroup = 9909E5B52DBD460C0040357B;
+			mainGroup = 99F153B92F4F5F0200E9174E;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				99095BB92DC2BC1E009C8F44 /* XCRemoteSwiftPackageReference "clerk-ios" */,
-				265076DEC67642B78D44265D /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
-				999769612E295C1A00A570DC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
-				998397632E6657ED00A46274 /* XCRemoteSwiftPackageReference "SwiftMath" */,
-				996C8D6C2E83870900C12826 /* XCRemoteSwiftPackageReference "tinfoil-swift" */,
-				9933808A2EA5A7C60073276A /* XCRemoteSwiftPackageReference "Highlightr" */,
-				99C5A0572EAE824300A1F328 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
-				9998BBB92F41583400BC91CD /* XCRemoteSwiftPackageReference "GzipSwift" */,
+				99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */,
+				99F1546C2F4F60E900E9174E /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
+				99F1546D2F4F60F600E9174E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
+				99F1546E2F4F610000E9174E /* XCRemoteSwiftPackageReference "SwiftMath" */,
+				99F154712F4F611A00E9174E /* XCRemoteSwiftPackageReference "tinfoil-swift" */,
+				99F154742F4F612600E9174E /* XCRemoteSwiftPackageReference "Highlightr" */,
+				99F154772F4F613700E9174E /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+				99F1547A2F4F614400E9174E /* XCRemoteSwiftPackageReference "GzipSwift" */,
 			);
 			preferredProjectObjectVersion = 77;
-			productRefGroup = 9909E5BF2DBD460C0040357B /* Products */;
+			productRefGroup = 99F153C32F4F5F0200E9174E /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				9909E5BD2DBD460C0040357B /* TinfoilChat */,
+				99F153C12F4F5F0200E9174E /* TinfoilChat */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		9909E5BC2DBD460C0040357B /* Resources */ = {
+		99F153C02F4F5F0200E9174E /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				99976A572E2ACE1800A570DC /* TinfoilChatStoreKitConfiguration.storekit in Resources */,
-				998ED4D72EA6C75C00D7B6BB /* tinfoil-glass.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		554C569A850F47BEA789F729 /* Upload Debug Symbols to Sentry */ = {
+		99F1547D2F4F615600E9174E /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
+			inputFileListPaths = (
+			);
 			inputPaths = (
 				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${TARGET_NAME}",
 			);
-			name = "Upload Debug Symbols to Sentry";
+			outputFileListPaths = (
+			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -195,7 +201,7 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		9909E5BA2DBD460C0040357B /* Sources */ = {
+		99F153BE2F4F5F0200E9174E /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -205,7 +211,7 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		9909E5C72DBD460E0040357B /* Debug */ = {
+		99F153CB2F4F5F0300E9174E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -258,19 +264,16 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.4;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
 		};
-		9909E5C82DBD460E0040357B /* Release */ = {
+		99F153CC2F4F5F0300E9174E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -317,27 +320,24 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.4;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
-				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
 		};
-		9909E5CA2DBD460E0040357B /* Debug */ = {
+		99F153CE2F4F5F0300E9174E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = "tinfoil-glass";
-				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = TinfoilChat/TinfoilChatDebug.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 8KSH668LZT;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -361,26 +361,28 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
+				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
-				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
-		9909E5CB2DBD460E0040357B /* Release */ = {
+		99F153CF2F4F5F0300E9174E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = "tinfoil-glass";
-				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = TinfoilChat/TinfoilChatRelease.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 8KSH668LZT;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -404,33 +406,34 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
+				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
-				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		9909E5B92DBD460C0040357B /* Build configuration list for PBXProject "TinfoilChat" */ = {
+		99F153BD2F4F5F0200E9174E /* Build configuration list for PBXProject "TinfoilChat" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				9909E5C72DBD460E0040357B /* Debug */,
-				9909E5C82DBD460E0040357B /* Release */,
+				99F153CB2F4F5F0300E9174E /* Debug */,
+				99F153CC2F4F5F0300E9174E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		9909E5C92DBD460E0040357B /* Build configuration list for PBXNativeTarget "TinfoilChat" */ = {
+		99F153CD2F4F5F0300E9174E /* Build configuration list for PBXNativeTarget "TinfoilChat" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				9909E5CA2DBD460E0040357B /* Debug */,
-				9909E5CB2DBD460E0040357B /* Release */,
+				99F153CE2F4F5F0300E9174E /* Debug */,
+				99F153CF2F4F5F0300E9174E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -438,39 +441,31 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		265076DEC67642B78D44265D /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/getsentry/sentry-cocoa/";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 8.0.0;
-			};
-		};
-		99095BB92DC2BC1E009C8F44 /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
+		99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/clerk/clerk-ios";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.1.0;
+				minimumVersion = 1.0.3;
 			};
 		};
-		9933808A2EA5A7C60073276A /* XCRemoteSwiftPackageReference "Highlightr" */ = {
+		99F1546C2F4F60E900E9174E /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/raspu/Highlightr";
+			repositoryURL = "https://github.com/getsentry/sentry-cocoa/";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 2.3.0;
+				minimumVersion = 9.5.1;
 			};
 		};
-		996C8D6C2E83870900C12826 /* XCRemoteSwiftPackageReference "tinfoil-swift" */ = {
+		99F1546D2F4F60F600E9174E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/tinfoilsh/tinfoil-swift";
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.3.1;
+				minimumVersion = 5.59.2;
 			};
 		};
-		998397632E6657ED00A46274 /* XCRemoteSwiftPackageReference "SwiftMath" */ = {
+		99F1546E2F4F610000E9174E /* XCRemoteSwiftPackageReference "SwiftMath" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/mgriebling/SwiftMath";
 			requirement = {
@@ -478,15 +473,31 @@
 				minimumVersion = 1.7.3;
 			};
 		};
-		999769612E295C1A00A570DC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
+		99F154712F4F611A00E9174E /* XCRemoteSwiftPackageReference "tinfoil-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm.git";
+			repositoryURL = "https://github.com/tinfoilsh/tinfoil-swift";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 5.33.0;
+				branch = main;
+				kind = branch;
 			};
 		};
-		9998BBB92F41583400BC91CD /* XCRemoteSwiftPackageReference "GzipSwift" */ = {
+		99F154742F4F612600E9174E /* XCRemoteSwiftPackageReference "Highlightr" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/raspu/Highlightr";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.3.0;
+			};
+		};
+		99F154772F4F613700E9174E /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/tinfoilsh/swift-markdown-ui";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+		99F1547A2F4F614400E9174E /* XCRemoteSwiftPackageReference "GzipSwift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/1024jp/GzipSwift";
 			requirement = {
@@ -494,63 +505,60 @@
 				minimumVersion = 6.1.0;
 			};
 		};
-		99C5A0572EAE824300A1F328 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/tinfoilsh/swift-markdown-ui";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.0.1;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		6E93C3925EE14CD689429CE8 /* Sentry */ = {
+		99F154682F4F60C500E9174E /* ClerkKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 265076DEC67642B78D44265D /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
-			productName = Sentry;
+			package = 99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */;
+			productName = ClerkKit;
 		};
-		99095BBA2DC2BC1E009C8F44 /* Clerk */ = {
+		99F1546A2F4F60C500E9174E /* ClerkKitUI */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 99095BB92DC2BC1E009C8F44 /* XCRemoteSwiftPackageReference "clerk-ios" */;
-			productName = Clerk;
+			package = 99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */;
+			productName = ClerkKitUI;
 		};
-		9933808B2EA5A7C60073276A /* Highlightr */ = {
+		99F1546F2F4F610000E9174E /* SwiftMath */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 9933808A2EA5A7C60073276A /* XCRemoteSwiftPackageReference "Highlightr" */;
-			productName = Highlightr;
-		};
-		996C8D6D2E83870900C12826 /* TinfoilAI */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 996C8D6C2E83870900C12826 /* XCRemoteSwiftPackageReference "tinfoil-swift" */;
-			productName = TinfoilAI;
-		};
-		998397642E6657ED00A46274 /* SwiftMath */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 998397632E6657ED00A46274 /* XCRemoteSwiftPackageReference "SwiftMath" */;
+			package = 99F1546E2F4F610000E9174E /* XCRemoteSwiftPackageReference "SwiftMath" */;
 			productName = SwiftMath;
 		};
-		999769622E295C1A00A570DC /* RevenueCat */ = {
+		99F154722F4F611A00E9174E /* TinfoilAI */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 999769612E295C1A00A570DC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
-			productName = RevenueCat;
+			package = 99F154712F4F611A00E9174E /* XCRemoteSwiftPackageReference "tinfoil-swift" */;
+			productName = TinfoilAI;
 		};
-		999769642E295C1A00A570DC /* RevenueCatUI */ = {
+		99F154752F4F612600E9174E /* Highlightr */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 999769612E295C1A00A570DC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
-			productName = RevenueCatUI;
+			package = 99F154742F4F612600E9174E /* XCRemoteSwiftPackageReference "Highlightr" */;
+			productName = Highlightr;
 		};
-		9998BBBA2F41583400BC91CD /* Gzip */ = {
+		99F154782F4F613700E9174E /* MarkdownUI */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 9998BBB92F41583400BC91CD /* XCRemoteSwiftPackageReference "GzipSwift" */;
+			package = 99F154772F4F613700E9174E /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
+		};
+		99F1547B2F4F614400E9174E /* Gzip */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 99F1547A2F4F614400E9174E /* XCRemoteSwiftPackageReference "GzipSwift" */;
 			productName = Gzip;
 		};
-		99C5A0582EAE824300A1F328 /* MarkdownUI */ = {
+		99F154812F4F632500E9174E /* Sentry */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 99C5A0572EAE824300A1F328 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
-			productName = MarkdownUI;
+			package = 99F1546C2F4F60E900E9174E /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = Sentry;
+		};
+		99F154832F4F632E00E9174E /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 99F1546D2F4F60F600E9174E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCat;
+		};
+		99F154852F4F633400E9174E /* RevenueCatUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 99F1546D2F4F60F600E9174E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCatUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
-	rootObject = 9909E5B62DBD460C0040357B /* Project object */;
+	rootObject = 99F153BA2F4F5F0200E9174E /* Project object */;
 }
