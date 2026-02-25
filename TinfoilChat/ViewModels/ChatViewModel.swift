@@ -3058,16 +3058,18 @@ extension ChatViewModel {
     /// Called at stream end to store processed content.
     private func processCitationMarkers(_ content: String, sources: [WebSearchSource]) -> String {
         guard !sources.isEmpty else { return content }
-
         guard let regex = Self.citationMarkerRegex else { return content }
 
         let nsContent = content as NSString
-        var result = content
-        var offset = 0
-
         let matches = regex.matches(in: content, options: [], range: NSRange(location: 0, length: nsContent.length))
+        guard !matches.isEmpty else { return content }
+
+        var result = ""
+        var lastEnd = content.startIndex
+
         for match in matches {
-            guard let numRange = Range(match.range(at: 1), in: content),
+            guard let matchRange = Range(match.range, in: content),
+                  let numRange = Range(match.range(at: 1), in: content),
                   let num = Int(content[numRange]) else { continue }
 
             let index = num - 1
@@ -3086,15 +3088,12 @@ extension ChatViewModel {
                 .replacingOccurrences(of: ")", with: "%29")
                 .replacingOccurrences(of: "~", with: "%7E")
 
-            let replacement = "[\(num)](#cite-\(num)~\(encodedUrl)~\(encodedTitle))"
-
-            let adjustedRange = NSRange(location: match.range.location + offset, length: match.range.length)
-            if let swiftRange = Range(adjustedRange, in: result) {
-                result.replaceSubrange(swiftRange, with: replacement)
-                offset += replacement.count - match.range.length
-            }
+            result += content[lastEnd..<matchRange.lowerBound]
+            result += "[\(num)](#cite-\(num)~\(encodedUrl)~\(encodedTitle))"
+            lastEnd = matchRange.upperBound
         }
 
+        result += content[lastEnd...]
         return result
     }
 }
