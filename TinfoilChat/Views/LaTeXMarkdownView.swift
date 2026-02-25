@@ -109,7 +109,7 @@ struct LaTeXMarkdownView: View, Equatable {
     private static let inlineCodeRegex = try? NSRegularExpression(pattern: "`[^`]+`", options: [])
     private static let displayLatexRegex = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators])
     private static let inlineLatexRegex = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: [])
-    private static let citationRegex = try? NSRegularExpression(pattern: "\\[(\\d+)\\]\\(#cite-\\d+~[^)]+\\)", options: [])
+    private static let citationRegex = try? NSRegularExpression(pattern: "\\[\\d+\\]\\(#cite-\\d+~(?:[^()]*|\\([^()]*\\))*\\)", options: [])
 
     static func == (lhs: LaTeXMarkdownView, rhs: LaTeXMarkdownView) -> Bool {
         lhs.content == rhs.content &&
