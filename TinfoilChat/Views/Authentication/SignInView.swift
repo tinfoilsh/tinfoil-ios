@@ -6,7 +6,7 @@
 //  Copyright © 2025 Tinfoil. All rights reserved.
 
 import SwiftUI
-import Clerk
+import ClerkKit
 import UIKit
 
 struct SignInView: View {
@@ -133,8 +133,8 @@ struct SignInView: View {
     }
     
     do {
-      try await SignIn.create(strategy: .identifier(email, password: password))
-      try await clerk.load()
+      try await clerk.auth.signInWithPassword(identifier: email, password: password)
+      try await clerk.refreshClient()
       await authManager.initializeAuthState()
       await MainActor.run {
         // Post notification to close sidebar and go to main chat view

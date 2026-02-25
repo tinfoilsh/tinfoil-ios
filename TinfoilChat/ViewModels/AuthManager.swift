@@ -6,7 +6,7 @@
 //  Copyright © 2025 Tinfoil. All rights reserved.
 
 import SwiftUI
-import Clerk
+import ClerkKit
 import Combine
 
 @MainActor
@@ -166,7 +166,7 @@ class AuthManager: ObservableObject {
 
         do {
             if !clerk.isLoaded {
-                try await clerk.load()
+                try await clerk.refreshClient()
             }
         } catch {
             // Network or other error loading Clerk - preserve cached auth state
@@ -219,7 +219,7 @@ class AuthManager: ObservableObject {
         do {
             // If we have a Clerk instance, use it, otherwise fall back to Clerk.shared
             let clerk = self.clerk ?? Clerk.shared
-            try await clerk.signOut()
+            try await clerk.auth.signOut()
             
             clearAuthState()
             

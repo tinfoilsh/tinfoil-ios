@@ -6,7 +6,7 @@
 //  Copyright © 2025 Tinfoil. All rights reserved.
 
 import SwiftUI
-import Clerk
+import ClerkKit
 import SafariServices
 
 struct ChatSidebar: View {

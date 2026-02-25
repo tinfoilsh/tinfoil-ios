@@ -6,7 +6,7 @@
 //  Copyright © 2025 Tinfoil. All rights reserved.
 
 import SwiftUI
-import Clerk
+import ClerkKit
 import UIKit
 
 struct ModularAuthenticationView: View {
@@ -421,21 +421,10 @@ struct ModularAuthenticationView: View {
     dismiss()
     
     do {
-      // Use the Clerk SignInWithAppleHelper class to get your Apple credential
-      let credential = try await SignInWithAppleHelper.getAppleIdCredential()
-      
-      // Convert the identityToken data to String format
-      guard let idToken = credential.identityToken.flatMap({ String(data: $0, encoding: .utf8) }) else {
-        errorMessage = "Failed to get Apple identity token"
-        isLoading = false
-        return
-      }
-      
-      // Authenticate with Clerk
-      try await SignIn.authenticateWithIdToken(provider: .apple, idToken: idToken)
-      
+      try await clerk.auth.signInWithApple()
+
       // Check for successful auth
-      try await clerk.load()
+      try await clerk.refreshClient()
       if clerk.user != nil {
         await authManager.initializeAuthState()
         // Post notification to close sidebar and go to main chat view

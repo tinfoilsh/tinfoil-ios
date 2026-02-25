@@ -6,7 +6,7 @@
 //  Copyright © 2025 Tinfoil. All rights reserved.
 
 import SwiftUI
-import Clerk
+import ClerkKit
 
 /// Manager for handling OAuth authentication flows
 class OAuthManager {
@@ -30,8 +30,7 @@ class OAuthManager {
     do {
       try await Task.sleep(nanoseconds: 100_000_000) // Small delay to ensure UI updates
       
-      // Use SignIn.authenticateWithRedirect for OAuth providers
-      try await SignIn.authenticateWithRedirect(strategy: .oauth(provider: provider))
+      try await clerk.auth.signInWithOAuth(provider: provider)
       
       // Brief delay to ensure redirect completes
       try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
@@ -59,7 +58,7 @@ class OAuthManager {
     while !Task.isCancelled {
       // Check auth state
       do {
-        try await clerk.load()
+        try await clerk.refreshClient()
         if await clerk.user != nil {
           
           // Update auth state

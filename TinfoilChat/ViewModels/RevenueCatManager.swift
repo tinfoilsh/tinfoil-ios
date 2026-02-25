@@ -8,7 +8,7 @@
 
 import SwiftUI
 import RevenueCat
-import Clerk
+import ClerkKit
 
 // MARK: - Purchase Error Types
 enum PurchaseError: LocalizedError {

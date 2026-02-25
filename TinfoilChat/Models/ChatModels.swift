@@ -8,7 +8,7 @@
 
 import Foundation
 import UIKit
-import Clerk
+import ClerkKit
 
 /// Represents a chat conversation
 struct Chat: Identifiable, Codable {
@@ -671,7 +671,7 @@ class APIKeyManager {
             let isLoaded = await Clerk.shared.isLoaded
 
             if !isLoaded {
-                try await Clerk.shared.load()
+                try await Clerk.shared.refreshClient()
             }
 
             // Try a few times with a small delay for the session to be available
