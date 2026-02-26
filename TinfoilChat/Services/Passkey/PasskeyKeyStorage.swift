@@ -27,7 +27,6 @@ struct PasskeyCredentialEntry: Codable {
     let encrypted_keys: String
     let iv: String
     let created_at: String
-    let created_on: String
 }
 
 // MARK: - PasskeyKeyStorage
@@ -170,19 +169,21 @@ final class PasskeyKeyStorage {
         keys: KeyBundle
     ) async throws {
         let encrypted = try encryptKeyBundle(kek: kek, keys: keys)
+
+        let existing = (try? await loadCredentials()) ?? []
+        let previous = existing.first { $0.id == credentialId }
+
         let entry = PasskeyCredentialEntry(
             id: credentialId,
             encrypted_keys: encrypted.data,
             iv: encrypted.iv,
-            created_at: ISO8601DateFormatter().string(from: Date()),
-            created_on: "ios"
+            created_at: previous?.created_at ?? ISO8601DateFormatter().string(from: Date())
         )
 
-        var existing = (try? await loadCredentials()) ?? []
-        existing.removeAll { $0.id == credentialId }
-        existing.append(entry)
+        var updated = existing.filter { $0.id != credentialId }
+        updated.append(entry)
 
-        try await saveCredentials(existing)
+        try await saveCredentials(updated)
     }
 
     /// Decrypt the key bundle for a specific credential entry.
@@ -196,28 +197,6 @@ final class PasskeyKeyStorage {
         }
 
         return try decryptKeyBundle(kek: kek, iv: entry.iv, data: entry.encrypted_keys)
-    }
-
-    /// Check if any credentials were created on an Apple OS (likely in iCloud Keychain).
-    func hasAppleOSCredentials() async -> Bool {
-        do {
-            let entries = try await loadCredentials()
-            return entries.contains { Constants.Passkey.appleCreatedOnValues.contains($0.created_on) }
-        } catch {
-            return false
-        }
-    }
-
-    /// Get credential IDs filtered to Apple-OS entries (for iOS Face ID recovery).
-    func appleOSCredentialIds() async -> [String] {
-        do {
-            let entries = try await loadCredentials()
-            return entries
-                .filter { Constants.Passkey.appleCreatedOnValues.contains($0.created_on) }
-                .map(\.id)
-        } catch {
-            return []
-        }
     }
 
     /// Get all credential IDs (for attempting recovery with any available credential).
