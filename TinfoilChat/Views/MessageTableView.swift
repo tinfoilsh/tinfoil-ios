@@ -125,6 +125,15 @@ struct MessageTableView: UIViewRepresentable {
                 let threshold = currentBufferHeight * 0.9
                 let needsBufferExtension = wrapper.actualContentHeight > threshold
 
+                // Update multiplier synchronously to prevent race condition:
+                // updateUIView is called on every streaming token, and if we defer
+                // the update to DispatchQueue.main.async, many calls will read the
+                // stale multiplier and each queue a +10 increment, causing it to
+                // explode to thousands.
+                if needsBufferExtension {
+                    wrapper.bufferMultiplier += 10.0
+                }
+
                 let coordinator = context.coordinator
                 DispatchQueue.main.async {
                     guard let currentMessage = coordinator.parent.messages.last else { return }
@@ -140,7 +149,6 @@ struct MessageTableView: UIViewRepresentable {
                     )
 
                     if needsBufferExtension {
-                        wrapper.bufferMultiplier += 10.0
                         tableView.beginUpdates()
                         tableView.endUpdates()
                     }
