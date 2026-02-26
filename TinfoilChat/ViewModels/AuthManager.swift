@@ -231,7 +231,7 @@ class AuthManager: ObservableObject {
     func fetchSubscriptionStatus() async {
         guard let clerk = clerk else { return }
         guard let session = clerk.session else { return }
-        guard let token = session.lastActiveToken?.jwt else { return }
+        guard let token = try? await session.getToken() ?? session.lastActiveToken?.jwt else { return }
         
         do {
             let apiURL = "\(Constants.API.baseURL)/api/app/user-metadata"

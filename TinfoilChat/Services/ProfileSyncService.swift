@@ -43,10 +43,13 @@ class ProfileSyncService: ObservableObject {
                 try await Clerk.shared.refreshClient()
             }
             
-            // Get session token
-            if let session = Clerk.shared.session,
-               let tokenResource = session.lastActiveToken {
-                return tokenResource.jwt
+            // Get session token (auto-refresh if expired)
+            if let session = Clerk.shared.session {
+                if let token = try? await session.getToken() {
+                    return token
+                } else if let tokenResource = session.lastActiveToken {
+                    return tokenResource.jwt
+                }
             }
             
             return nil
