@@ -37,22 +37,6 @@ private func parseISODate(_ dateString: String) -> Date? {
     return nil
 }
 
-private actor ReencryptionTracker {
-    private var inProgress: Set<String> = []
-
-    func startIfNeeded(for chatId: String) -> Bool {
-        if inProgress.contains(chatId) {
-            return false
-        }
-        inProgress.insert(chatId)
-        return true
-    }
-
-    func finish(for chatId: String) {
-        inProgress.remove(chatId)
-    }
-}
-
 /// Coalesces rapid upload requests per chat into single uploads with exponential backoff retry.
 /// Uses a dirty-flag + worker-loop pattern to batch rapid successive writes.
 private actor UploadCoalescer {
@@ -164,8 +148,6 @@ class CloudSyncService: ObservableObject {
     private let encryptionService = EncryptionService.shared
     private let deletedChatsTracker = DeletedChatsTracker.shared
     private let streamingTracker = StreamingTracker.shared
-    private let reencryptionTracker = ReencryptionTracker()
-
     // UserDefaults keys for sync status caches
     private let syncStatusKey = "tinfoil-chat-sync-status"
     private let allChatsSyncStatusKey = "tinfoil-all-chats-sync-status"
@@ -362,8 +344,6 @@ class CloudSyncService: ObservableObject {
             // Initialize encryption if available; continue even without a key so we can at least
             // fetch metadata and store encrypted placeholders. Decryption will be attempted per-chat.
             _ = try? await encryptionService.initialize()
-            
-            var chatsNeedingReencryption: [StoredChat] = []
 
             // Process chats sequentially to avoid connection exhaustion
             for remoteChat in chatsToProcess {
@@ -383,9 +363,6 @@ class CloudSyncService: ObservableObject {
 
                 if let decrypted = await decryptRemoteChat(remoteChat, content: content) {
                     downloadedChats.append(decrypted.chat)
-                    if decrypted.usedFallbackKey {
-                        chatsNeedingReencryption.append(decrypted.chat)
-                    }
                 } else {
                     let placeholder = createEncryptedPlaceholder(
                         remoteChat: remoteChat,
@@ -393,10 +370,6 @@ class CloudSyncService: ObservableObject {
                     )
                     downloadedChats.append(placeholder)
                 }
-            }
-            
-            for chat in chatsNeedingReencryption {
-                queueReencryption(for: chat, persistLocal: false)
             }
 
             // Sort by creation date (newest first)
@@ -610,8 +583,6 @@ class CloudSyncService: ObservableObject {
             let remoteConversations = remoteList.conversations
 
             // Process remote chats sequentially to avoid connection exhaustion
-            var chatsNeedingReencryption: [StoredChat] = []
-
             for remoteChat in remoteConversations {
                 // First validate if this remote chat should be processed
                 if !(await shouldProcessRemoteChat(remoteChat)) {
@@ -661,9 +632,6 @@ class CloudSyncService: ObservableObject {
                                 downloaded: result.downloaded + 1,
                                 errors: result.errors
                             )
-                            if decrypted.usedFallbackKey {
-                                chatsNeedingReencryption.append(decrypted.chat)
-                            }
                         } else {
                             // Only save a placeholder if there is no valid local copy.
                             // When a good local version exists (non-empty messages, not
@@ -702,10 +670,6 @@ class CloudSyncService: ObservableObject {
                         }
                     }
                 }
-            }
-
-            for chat in chatsNeedingReencryption {
-                queueReencryption(for: chat, persistLocal: true)
             }
 
             // Delete local chats that were deleted on another device
@@ -826,8 +790,6 @@ class CloudSyncService: ObservableObject {
         do {
             _ = try? await encryptionService.initialize()
 
-            var chatsNeedingReencryption: [StoredChat] = []
-
             let localChats = await getAllChatsFromStorage()
             let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
 
@@ -871,9 +833,6 @@ class CloudSyncService: ObservableObject {
                                 downloaded: result.downloaded + 1,
                                 errors: result.errors
                             )
-                            if decrypted.usedFallbackKey {
-                                chatsNeedingReencryption.append(decrypted.chat)
-                            }
                         } else {
                             // Only save a placeholder when no valid local copy exists.
                             let localChat = localChatMap[remoteChat.id]
@@ -913,10 +872,6 @@ class CloudSyncService: ObservableObject {
                 let nextToken = changedChats.nextContinuationToken?.isEmpty == false ? changedChats.nextContinuationToken : nil
                 hasMore = changedChats.hasMore && nextToken != nil
                 continuationToken = nextToken
-            }
-
-            for chat in chatsNeedingReencryption {
-                queueReencryption(for: chat, persistLocal: true)
             }
 
             // Delete local chats that were deleted on another device
@@ -1107,9 +1062,6 @@ class CloudSyncService: ObservableObject {
                             decrypted.chat.projectId = remoteProjectId
                             await saveChatToStorage(decrypted.chat)
                             await markChatAsSynced(decrypted.chat.id, version: decrypted.chat.syncVersion)
-                            if decrypted.usedFallbackKey {
-                                queueReencryption(for: decrypted.chat, persistLocal: false)
-                            }
                         } else {
                             var placeholder = createEncryptedPlaceholder(
                                 remoteChat: remoteChat,
@@ -1227,51 +1179,6 @@ class CloudSyncService: ObservableObject {
             syncedAt: Date(),
             locallyModified: false
         )
-    }
-
-    private func queueReencryption(for chat: StoredChat, persistLocal: Bool) {
-        Task { [weak self] in
-            guard let self = self else { return }
-            let shouldStart = await self.reencryptionTracker.startIfNeeded(for: chat.id)
-            guard shouldStart else { return }
-            await self.performReencryption(for: chat, persistLocal: persistLocal)
-            await self.reencryptionTracker.finish(for: chat.id)
-        }
-    }
-
-    private func performReencryption(for chat: StoredChat, persistLocal: Bool) async {
-        guard await cloudStorage.isAuthenticated() else { return }
-
-        // Ensure encryption service is initialized with the current default key
-        _ = try? await encryptionService.initialize()
-
-        // Skip placeholder chats that still lack content
-        guard !chat.messages.isEmpty else { return }
-
-        // Convert to Chat for re-encryption - may fail if models aren't available
-        guard var chatForUpload = chat.toChat() else {
-            #if DEBUG
-            print("Warning: Could not convert StoredChat to Chat for re-encryption - no models available. Skipping chat \(chat.id)")
-            #endif
-            return
-        }
-
-        chatForUpload.decryptionFailed = false
-        chatForUpload.encryptedData = nil
-        chatForUpload.locallyModified = true
-        chatForUpload.updatedAt = Date()
-
-        if persistLocal {
-            await saveChatToStorage(StoredChat(from: chatForUpload, syncVersion: chatForUpload.syncVersion))
-        }
-
-        do {
-            try await uploadAndMarkSynced(chatForUpload)
-        } catch {
-            #if DEBUG
-            print("[CloudSync] Failed to re-encrypt chat \(chat.id): \(error)")
-            #endif
-        }
     }
 
     /// Delete local chats that were deleted on another device since `since` timestamp.
@@ -1401,9 +1308,6 @@ class CloudSyncService: ObservableObject {
                 )
 
                 await saveChatToStorage(updatedChat)
-                if decryptionResult.usedFallbackKey {
-                    queueReencryption(for: updatedChat, persistLocal: true)
-                }
                 decryptedCount += 1
             } catch {
                 // Continue to next chat on failure
