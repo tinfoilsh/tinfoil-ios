@@ -89,7 +89,11 @@ struct ContentView: View {
                 }
             }
         }
-        .sheet(isPresented: $chatViewModel.showPasskeyIntro) {
+        .sheet(isPresented: $chatViewModel.showPasskeyIntro, onDismiss: {
+            Task {
+                await chatViewModel.handlePasskeyIntroDismissed()
+            }
+        }) {
             PasskeyIntroView {
                 await chatViewModel.createPasskeyBackup()
             }

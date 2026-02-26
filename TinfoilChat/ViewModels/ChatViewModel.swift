@@ -2141,6 +2141,11 @@ class ChatViewModel: ObservableObject {
         hasLoadedInitialPage = false
         hasAttemptedLoadMore = false
 
+        // Reset passkey state
+        passkeyActive = false
+        passkeySetupAvailable = false
+        showPasskeyIntro = false
+
         // Clear cloud chats and create a new empty one with the free model.
         // Local chats are only cleared from memory — files on disk are preserved
         // and will be reloaded on next sign-in via handleSignIn/loadAllLocalChats.
@@ -2665,6 +2670,46 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Re-encrypt all existing passkey credential entries with the current key bundle.
+    /// Called after key changes (e.g. importing a key from another device) to keep
+    /// the passkey backup in sync.
+    private func updatePasskeyBackup() async {
+        let keyStorage = PasskeyKeyStorage.shared
+        let passkeyService = PasskeyService.shared
+
+        do {
+            let keys = EncryptionService.shared.getAllKeys()
+            guard let primary = keys.primary else { return }
+
+            let entries = try await keyStorage.loadCredentials()
+            guard !entries.isEmpty else { return }
+
+            // Authenticate to get the KEK for re-encryption
+            let allIds = entries.map(\.id)
+            let result = try await passkeyService.authenticatePasskey(credentialIds: allIds)
+            let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
+
+            let bundle = KeyBundle(primary: primary, alternatives: keys.alternatives)
+
+            // Re-encrypt and update only the matched credential entry
+            try await keyStorage.storeEncryptedKeys(
+                credentialId: result.credentialId,
+                kek: kek,
+                keys: bundle
+            )
+        } catch {
+            // Non-fatal — passkey backup is stale but user can re-backup from Settings
+        }
+    }
+
+    /// Called when the PasskeyIntroView sheet is dismissed (either after accept or swipe-down).
+    /// Marks the intro as seen so it won't re-appear.
+    func handlePasskeyIntroDismissed() async {
+        if !passkeyActive {
+            await markPasskeyIntroSeen()
+        }
+    }
+
     /// Mark the passkey intro as seen in Clerk unsafeMetadata.
     private func markPasskeyIntroSeen() async {
         guard let user = await Clerk.shared.user else { return }
@@ -3081,6 +3126,11 @@ class ChatViewModel: ObservableObject {
                         }
                     }
                 }
+            }
+
+            // If passkey is active, re-encrypt the backup with the updated key bundle
+            if passkeyActive {
+                await updatePasskeyBackup()
             }
         } catch {
             await MainActor.run {
