@@ -449,6 +449,54 @@ struct SettingsView: View {
                         .frame(width: 20)
                     }
                 }
+
+                if chatViewModel.passkeyActive {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.badge.key.fill")
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                            Text("Sync and backup using Passkeys")
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                        }
+                        Text("Use Face ID or Touch ID to sync chats across devices")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.shield.fill")
+                                .font(.caption)
+                                .foregroundColor(.green)
+                            Text("Passkey active")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.green)
+                        }
+                        .padding(.top, 2)
+                    }
+                    .padding(.vertical, 2)
+                } else if chatViewModel.passkeySetupAvailable {
+                    Button(action: {
+                        Task {
+                            await chatViewModel.createPasskeyBackup()
+                        }
+                    }) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "person.badge.key.fill")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                Text("Sync and backup using Passkeys")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                            }
+                            Text("Use Face ID or Touch ID to sync chats across devices")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
             }
 
             HStack {
@@ -732,23 +780,39 @@ struct SettingsView: View {
                 .environmentObject(authManager)
         }
         .alert("Sign Out", isPresented: $showSignOutConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Keep Encryption Key") {
-                Task {
-                    // Sign out but keep the encryption key
-                    await authManager.signOut()
-                    dismiss()
+            if chatViewModel.passkeyActive {
+                Button("Cancel", role: .cancel) { }
+                Button("Sign Out") {
+                    Task {
+                        // Passkey is backed up — safe to clear local data
+                        await performFullDataCleanup()
+                        await authManager.signOut()
+                        dismiss()
+                    }
                 }
-            }
-            Button("Delete Everything", role: .destructive) {
-                Task {
-                    await performFullDataCleanup()
-                    await authManager.signOut()
-                    dismiss()
+            } else {
+                Button("Cancel", role: .cancel) { }
+                Button("Keep Encryption Key") {
+                    Task {
+                        // Sign out but keep the encryption key
+                        await authManager.signOut()
+                        dismiss()
+                    }
+                }
+                Button("Delete Everything", role: .destructive) {
+                    Task {
+                        await performFullDataCleanup()
+                        await authManager.signOut()
+                        dismiss()
+                    }
                 }
             }
         } message: {
-            Text("Do you want to keep your encryption key and local chats for next time?\n\nIf you delete everything, you'll need to set up a new encryption key when you sign in again.")
+            if chatViewModel.passkeyActive {
+                Text("Your encryption key is backed up with your passkey. You can use Face ID to recover it when you sign back in.")
+            } else {
+                Text("Save your encryption key to keep access to your chats on other devices.\n\nIf you delete everything, you'll need to set up a new encryption key when you sign in again.")
+            }
         }
         .alert("Delete Account", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
