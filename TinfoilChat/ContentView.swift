@@ -89,6 +89,11 @@ struct ContentView: View {
                 }
             }
         }
+        .sheet(isPresented: $chatViewModel.showPasskeyIntro) {
+            PasskeyIntroView {
+                await chatViewModel.createPasskeyBackup()
+            }
+        }
         // Relay view model's request to show key import view
         .onChange(of: chatViewModel.shouldShowKeyImport) { _, shouldShow in
             if shouldShow {

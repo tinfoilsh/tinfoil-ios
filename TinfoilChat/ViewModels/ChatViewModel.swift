@@ -11,6 +11,7 @@ import SwiftUI
 import TinfoilAI
 import OpenAI
 import AVFoundation
+import ClerkKit
 
 enum ChatStorageTab: String {
     case cloud
@@ -70,6 +71,9 @@ class ChatViewModel: ObservableObject {
     @Published var isFirstTimeUser: Bool = false
     @Published var showEncryptionSetup: Bool = false
     @Published var shouldShowKeyImport: Bool = false
+    @Published var passkeyActive: Bool = false
+    @Published var passkeySetupAvailable: Bool = false
+    @Published var showPasskeyIntro: Bool = false
     private let cloudSync = CloudSyncService.shared
     private let streamingTracker = StreamingTracker.shared
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
@@ -2247,18 +2251,25 @@ class ChatViewModel: ObservableObject {
                         }
                     }
 
-                    // If no cloud key exists yet, let ContentView present the prompt and stop here
+                    // If no cloud key exists, try passkey recovery before falling back
                     if !EncryptionService.shared.hasEncryptionKey() {
-                        await MainActor.run {
-                            self.isFirstTimeUser = true
-                            self.isSignInInProgress = false
+                        let passkeyResult = await self.attemptPasskeyKeyRecovery()
+                        if !passkeyResult {
+                            // Passkey recovery failed or not available — fall back to current behavior
+                            await MainActor.run {
+                                self.isFirstTimeUser = true
+                                self.isSignInInProgress = false
+                            }
+                            return
                         }
-                        return
                     }
 
                     // Initialize encryption - this will load existing key from keychain
                     let key = try await EncryptionService.shared.initialize()
                     self.encryptionKey = key
+
+                    // Check passkey state for users who already have keys
+                    await self.checkPasskeyStateForExistingKey()
 
                     // Retry decryption for any previously failed chats now that key is loaded
                     let decryptedCount = await cloudSync.retryDecryptionWithNewKey(onProgress: nil)
@@ -2457,6 +2468,217 @@ class ChatViewModel: ObservableObject {
         }
     }
     
+    // MARK: - Passkey Methods
+
+    /// Attempt to recover encryption keys via passkey, or auto-generate for new users.
+    /// Returns true if a key was successfully set up, false if caller should fall back.
+    private func attemptPasskeyKeyRecovery() async -> Bool {
+        let keyStorage = PasskeyKeyStorage.shared
+        let passkeyService = PasskeyService.shared
+
+        do {
+            let credentials = try await keyStorage.loadCredentials()
+
+            if credentials.isEmpty {
+                // Brand new user — auto-generate key + create passkey
+                return await attemptNewUserPasskeySetup()
+            }
+
+            // Try silent recovery with all credential IDs — the OS handles
+            // matching against locally-available credential providers
+            let allIds = credentials.map(\.id)
+            let result = try await passkeyService.authenticatePasskey(
+                credentialIds: allIds,
+                silent: true
+            )
+            let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
+
+            guard let bundle = try await keyStorage.retrieveEncryptedKeys(
+                credentialId: result.credentialId,
+                kek: kek
+            ) else {
+                return false
+            }
+
+            // Write recovered keys to keychain and enable cloud sync
+            try await EncryptionService.shared.setAllKeys(
+                primary: bundle.primary,
+                alternatives: bundle.alternatives
+            )
+            SettingsManager.shared.isCloudSyncEnabled = true
+            await MainActor.run {
+                self.passkeyActive = true
+            }
+            return true
+
+        } catch let error as PasskeyError {
+            switch error {
+            case .userCancelled:
+                // User cancelled Face ID — fall back to current behavior
+                return false
+            default:
+                return false
+            }
+        } catch {
+            // Any other failure — fall back to current behavior
+            return false
+        }
+    }
+
+    /// Auto-generate a key and create a passkey for a brand new user.
+    /// Returns true if successful, false if passkey creation was cancelled (key is discarded).
+    private func attemptNewUserPasskeySetup() async -> Bool {
+        guard let user = await Clerk.shared.user else { return false }
+
+        let passkeyService = PasskeyService.shared
+        let keyStorage = PasskeyKeyStorage.shared
+
+        let newKey = EncryptionService.shared.generateKey()
+
+        do {
+            let email = user.emailAddresses.first?.emailAddress ?? ""
+            let displayName = [user.firstName, user.lastName]
+                .compactMap { $0 }
+                .joined(separator: " ")
+                .trimmingCharacters(in: .whitespaces)
+
+            let result = try await passkeyService.createPasskey(
+                userId: user.id,
+                userEmail: email,
+                displayName: displayName.isEmpty ? email : displayName
+            )
+
+            let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
+            let bundle = KeyBundle(primary: newKey, alternatives: [])
+
+            try await keyStorage.storeEncryptedKeys(
+                credentialId: result.credentialId,
+                kek: kek,
+                keys: bundle
+            )
+
+            // Passkey created and stored — persist the key
+            try await EncryptionService.shared.setKey(newKey)
+            SettingsManager.shared.isCloudSyncEnabled = true
+            await MainActor.run {
+                self.passkeyActive = true
+            }
+            return true
+
+        } catch let error as PasskeyError {
+            switch error {
+            case .userCancelled:
+                // User cancelled Face ID — discard the generated key, fall back
+                return false
+            default:
+                return false
+            }
+        } catch {
+            // Passkey creation failed — discard the generated key, fall back
+            return false
+        }
+    }
+
+    /// Check passkey state for users who already have keys loaded.
+    /// Shows the intro modal if they haven't seen it and have no passkey backup.
+    private func checkPasskeyStateForExistingKey() async {
+        let keyStorage = PasskeyKeyStorage.shared
+
+        let hasCredentials = await keyStorage.hasCredentials()
+        if hasCredentials {
+            await MainActor.run {
+                self.passkeyActive = true
+            }
+            return
+        }
+
+        // No passkey credentials — check if user has seen the intro
+        let hasSeenIntro: Bool
+        if let metadata = await Clerk.shared.user?.unsafeMetadata,
+           case .object(let dict) = metadata,
+           case .bool(let seen) = dict[Constants.Passkey.hasSeenIntroKey] {
+            hasSeenIntro = seen
+        } else {
+            hasSeenIntro = false
+        }
+
+        await MainActor.run {
+            self.passkeySetupAvailable = true
+            if !hasSeenIntro {
+                // Show intro after a short delay to not interrupt sign-in
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(Constants.Passkey.introDelaySeconds))
+                    if self.passkeySetupAvailable && !self.passkeyActive {
+                        self.showPasskeyIntro = true
+                    }
+                }
+            }
+        }
+    }
+
+    /// Create a passkey backup for the user's existing keys.
+    /// Called from PasskeyIntroView's onAccept and Settings backup button.
+    func createPasskeyBackup() async {
+        guard let user = await Clerk.shared.user else { return }
+
+        let passkeyService = PasskeyService.shared
+        let keyStorage = PasskeyKeyStorage.shared
+
+        do {
+            let keys = EncryptionService.shared.getAllKeys()
+            guard let primary = keys.primary else { return }
+
+            let email = user.emailAddresses.first?.emailAddress ?? ""
+            let displayName = [user.firstName, user.lastName]
+                .compactMap { $0 }
+                .joined(separator: " ")
+                .trimmingCharacters(in: .whitespaces)
+
+            let result = try await passkeyService.createPasskey(
+                userId: user.id,
+                userEmail: email,
+                displayName: displayName.isEmpty ? email : displayName
+            )
+
+            let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
+            let bundle = KeyBundle(primary: primary, alternatives: keys.alternatives)
+
+            try await keyStorage.storeEncryptedKeys(
+                credentialId: result.credentialId,
+                kek: kek,
+                keys: bundle
+            )
+
+            // Mark intro as seen in Clerk unsafeMetadata
+            await markPasskeyIntroSeen()
+
+            await MainActor.run {
+                self.passkeyActive = true
+                self.passkeySetupAvailable = false
+                self.showPasskeyIntro = false
+            }
+        } catch {
+            // Passkey creation failed or cancelled — leave state unchanged
+            await MainActor.run {
+                self.showPasskeyIntro = false
+            }
+        }
+    }
+
+    /// Mark the passkey intro as seen in Clerk unsafeMetadata.
+    private func markPasskeyIntroSeen() async {
+        guard let user = await Clerk.shared.user else { return }
+
+        var existingMetadata: [String: JSON] = [:]
+        if case .object(let dict) = user.unsafeMetadata {
+            existingMetadata = dict
+        }
+        existingMetadata[Constants.Passkey.hasSeenIntroKey] = .bool(true)
+
+        let params = User.UpdateParams(unsafeMetadata: .object(existingMetadata))
+        try? await user.update(params)
+    }
+
     // MARK: - Pagination Methods
     
     /// Setup pagination state for app restart (when already authenticated)
