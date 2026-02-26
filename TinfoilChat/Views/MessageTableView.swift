@@ -258,6 +258,7 @@ struct MessageTableView: UIViewRepresentable {
         var lastChatId: String? = nil
         var lastMessageIds: Set<String> = []
         private var isDragging = false
+        private var isUpdatingContentInset = false
         var messageWrappers: [String: ObservableMessageWrapper] = [:]
         var shouldScrollToBottomAfterLayout = false
         var shouldScrollToUserMessageAfterLayout = false
@@ -400,7 +401,10 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         func updateContentInset() {
+            guard !isUpdatingContentInset else { return }
             guard let tableView = tableView else { return }
+            isUpdatingContentInset = true
+            defer { isUpdatingContentInset = false }
 
             let targetInset: CGFloat
 
