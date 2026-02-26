@@ -678,12 +678,12 @@ class APIKeyManager {
             for attempt in 1...3 {
                 let session = await Clerk.shared.session
                 if let session = session,
-                   let tokenResource = session.lastActiveToken {
+                   let token = try? await session.getToken() ?? session.lastActiveToken?.jwt {
 
                     // Create URL request with auth header
                     var request = URLRequest(url: URL(string: apiKeyEndpoint)!)
                     request.httpMethod = "GET"
-                    request.addValue("Bearer \(tokenResource.jwt)", forHTTPHeaderField: "Authorization")
+                    request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
                     // Fetch API key from server
                     let (data, response) = try await URLSession.shared.data(for: request)
