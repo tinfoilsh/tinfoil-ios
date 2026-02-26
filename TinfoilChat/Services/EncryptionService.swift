@@ -106,6 +106,38 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         return loadKeyHistory()
     }
 
+    /// Get the primary key and all alternative (fallback) keys as a bundle.
+    /// Used by passkey backup to snapshot the full key state for encryption.
+    func getAllKeys() -> (primary: String?, alternatives: [String]) {
+        return (primary: loadKeyFromKeychain(), alternatives: loadKeyHistory())
+    }
+
+    /// Bulk-load primary + alternative keys from an external source (e.g. passkey recovery).
+    /// Sets the primary key and merges validated alternatives into key history.
+    func setAllKeys(primary: String, alternatives: [String]) async throws {
+        try await setKey(primary)
+
+        var existingHistory = loadKeyHistory()
+        var addedNew = false
+
+        for key in alternatives {
+            if key == primary { continue }
+            do {
+                _ = try normalizeKeyInput(key)
+            } catch {
+                continue
+            }
+            if !existingHistory.contains(key) {
+                existingHistory.append(key)
+                addedNew = true
+            }
+        }
+
+        if addedNew {
+            try saveKeyHistory(existingHistory)
+        }
+    }
+
     /// Remove encryption key
     func clearKey() {
         encryptionKey = nil
