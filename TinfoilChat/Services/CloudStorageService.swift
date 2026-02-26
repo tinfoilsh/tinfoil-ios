@@ -214,9 +214,6 @@ class CloudStorageService: ObservableObject {
 
             var chat = result.value
             chat.formatVersion = formatVersion
-            if result.usedFallbackKey {
-                scheduleReencryption(for: chat)
-            }
             return chat
         } catch {
             // If decryption fails, create a placeholder with encrypted data for recovery
@@ -240,25 +237,6 @@ class CloudStorageService: ObservableObject {
     }
 
     // Re-encrypt with the current key when a legacy key was needed for decryption.
-    private func scheduleReencryption(for chat: StoredChat) {
-        Task { [weak self] in
-            guard let self else { return }
-            guard await self.isAuthenticated() else { return }
-            guard !chat.messages.isEmpty else { return }
-
-            do {
-                var chatForUpload = chat
-                chatForUpload.decryptionFailed = false
-                chatForUpload.encryptedData = nil
-                try await self.uploadChat(chatForUpload)
-            } catch {
-#if DEBUG
-                print("[CloudStorageService] Failed to re-encrypt chat \(chat.id): \(error)")
-#endif
-            }
-        }
-    }
-
     // MARK: - Attachment Operations
 
     /// Fetch a single encrypted attachment blob from the public endpoint (no auth needed).
