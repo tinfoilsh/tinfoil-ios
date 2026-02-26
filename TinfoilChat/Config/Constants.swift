@@ -112,6 +112,17 @@ enum Constants {
         static let copyFeedbackDurationSeconds: TimeInterval = 2.0
     }
 
+    enum Passkey {
+        static let rpId = "tinfoil.sh"
+        static let rpName = "Tinfoil Chat"
+        static let prfSalt = Data("tinfoil-chat-key-encryption".utf8)
+        static let hkdfInfo = Data("tinfoil-chat-kek-v1".utf8)
+        static let backedUpKey = "tinfoil-passkey-backed-up"
+        static let hasSeenIntroKey = "has_seen_passkey_intro"
+        static let introDelaySeconds: TimeInterval = 2.0
+        static let credentialsEndpoint = "/api/passkey-credentials/"
+    }
+
     enum Attachments {
         static let maxImageDimension: CGFloat = 768
         static let imageCompressionQuality: CGFloat = 0.85
