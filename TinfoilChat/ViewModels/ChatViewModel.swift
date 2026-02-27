@@ -75,6 +75,7 @@ class ChatViewModel: ObservableObject {
     @Published var passkeySetupAvailable: Bool = false
     @Published var showPasskeyIntro: Bool = false
     @Published var showPasskeyRecoveryChoice: Bool = false
+    private var passkeyIntroTask: Task<Void, Never>?
     private let cloudSync = CloudSyncService.shared
     private let streamingTracker = StreamingTracker.shared
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
@@ -2147,6 +2148,8 @@ class ChatViewModel: ObservableObject {
         passkeySetupAvailable = false
         showPasskeyIntro = false
         showPasskeyRecoveryChoice = false
+        passkeyIntroTask?.cancel()
+        passkeyIntroTask = nil
 
         // Clear cloud chats and create a new empty one with the free model.
         // Local chats are only cleared from memory — files on disk are preserved
@@ -2678,7 +2681,7 @@ class ChatViewModel: ObservableObject {
             self.passkeySetupAvailable = true
             if !hasSeenIntro {
                 // Show intro after a short delay to not interrupt sign-in
-                Task { @MainActor in
+                self.passkeyIntroTask = Task { @MainActor in
                     try? await Task.sleep(for: .seconds(Constants.Passkey.introDelaySeconds))
                     if self.passkeySetupAvailable && !self.passkeyActive {
                         self.showPasskeyIntro = true
