@@ -1314,13 +1314,37 @@ struct ChunkView: View, Equatable {
     }
 
     var body: some View {
-        LaTeXMarkdownView(
-            content: chunk.content,
-            isDarkMode: isDarkMode,
-            isStreaming: chunk.isComplete ? false : isStreaming
+        if chunk.type == .table && isStreaming {
+            GeneratingTableView(isDarkMode: isDarkMode)
+        } else {
+            LaTeXMarkdownView(
+                content: chunk.content,
+                isDarkMode: isDarkMode,
+                isStreaming: chunk.isComplete ? false : isStreaming
+            )
+            .equatable()
+            .id(chunk.id)
+        }
+    }
+}
+
+struct GeneratingTableView: View {
+    let isDarkMode: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("Generating table")
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(isDarkMode ? .white : .black)
+            InlineLoadingDotsView(isDarkMode: isDarkMode)
+        }
+        .frame(height: 48)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.15), lineWidth: 1)
         )
-        .equatable()
-        .id(chunk.id)
     }
 }
 
