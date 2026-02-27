@@ -98,6 +98,19 @@ struct ContentView: View {
                 await chatViewModel.createPasskeyBackup()
             }
         }
+        .sheet(isPresented: $chatViewModel.showPasskeyRecoveryChoice) {
+            PasskeyRecoveryChoiceView(
+                onTryAgain: {
+                    await chatViewModel.retryPasskeyRecovery()
+                },
+                onStartFresh: {
+                    await chatViewModel.startFreshWithNewKey()
+                },
+                onSkip: {
+                    chatViewModel.showPasskeyRecoveryChoice = false
+                }
+            )
+        }
         // Relay view model's request to show key import view
         .onChange(of: chatViewModel.shouldShowKeyImport) { _, shouldShow in
             if shouldShow {

@@ -74,6 +74,7 @@ class ChatViewModel: ObservableObject {
     @Published var passkeyActive: Bool = false
     @Published var passkeySetupAvailable: Bool = false
     @Published var showPasskeyIntro: Bool = false
+    @Published var showPasskeyRecoveryChoice: Bool = false
     private let cloudSync = CloudSyncService.shared
     private let streamingTracker = StreamingTracker.shared
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
@@ -2145,6 +2146,7 @@ class ChatViewModel: ObservableObject {
         passkeyActive = false
         passkeySetupAvailable = false
         showPasskeyIntro = false
+        showPasskeyRecoveryChoice = false
 
         // Clear cloud chats and create a new empty one with the free model.
         // Local chats are only cleared from memory — files on disk are preserved
@@ -2259,10 +2261,18 @@ class ChatViewModel: ObservableObject {
                     // If no cloud key exists, try passkey recovery before falling back
                     if !EncryptionService.shared.hasEncryptionKey() {
                         let passkeyResult = await self.attemptPasskeyKeyRecovery()
-                        if !passkeyResult {
-                            // Passkey recovery failed or not available — fall back to current behavior
+                        switch passkeyResult {
+                        case .success, .newUserSetupDone:
+                            break
+                        case .newUserSetupCancelled:
                             await MainActor.run {
-                                self.isFirstTimeUser = true
+                                self.passkeySetupAvailable = true
+                                self.isSignInInProgress = false
+                            }
+                            return
+                        case .recoveryFailed:
+                            await MainActor.run {
+                                self.showPasskeyRecoveryChoice = true
                                 self.isSignInInProgress = false
                             }
                             return
@@ -2475,9 +2485,15 @@ class ChatViewModel: ObservableObject {
     
     // MARK: - Passkey Methods
 
+    private enum PasskeyRecoveryResult {
+        case success
+        case newUserSetupDone
+        case newUserSetupCancelled
+        case recoveryFailed
+    }
+
     /// Attempt to recover encryption keys via passkey, or auto-generate for new users.
-    /// Returns true if a key was successfully set up, false if caller should fall back.
-    private func attemptPasskeyKeyRecovery() async -> Bool {
+    private func attemptPasskeyKeyRecovery() async -> PasskeyRecoveryResult {
         let keyStorage = PasskeyKeyStorage.shared
         let passkeyService = PasskeyService.shared
 
@@ -2485,8 +2501,8 @@ class ChatViewModel: ObservableObject {
             let credentials = try await keyStorage.loadCredentials()
 
             if credentials.isEmpty {
-                // Brand new user — auto-generate key + create passkey
-                return await attemptNewUserPasskeySetup()
+                let created = await attemptNewUserPasskeySetup()
+                return created ? .newUserSetupDone : .newUserSetupCancelled
             }
 
             // Try silent recovery with all credential IDs — the OS handles
@@ -2502,7 +2518,7 @@ class ChatViewModel: ObservableObject {
                 credentialId: result.credentialId,
                 kek: kek
             ) else {
-                return false
+                return .recoveryFailed
             }
 
             // Write recovered keys to keychain and enable cloud sync
@@ -2514,19 +2530,10 @@ class ChatViewModel: ObservableObject {
             await MainActor.run {
                 self.passkeyActive = true
             }
-            return true
+            return .success
 
-        } catch let error as PasskeyError {
-            switch error {
-            case .userCancelled:
-                // User cancelled Face ID — fall back to current behavior
-                return false
-            default:
-                return false
-            }
         } catch {
-            // Any other failure — fall back to current behavior
-            return false
+            return .recoveryFailed
         }
     }
 
@@ -2582,6 +2589,66 @@ class ChatViewModel: ObservableObject {
             // Passkey creation failed — discard the generated key, fall back
             return false
         }
+    }
+
+    /// Retry passkey recovery with full auth (system UI including "Use a Device Nearby").
+    /// Called from PasskeyRecoveryChoiceView's "Try Again" button.
+    func retryPasskeyRecovery() async -> Bool {
+        let keyStorage = PasskeyKeyStorage.shared
+        let passkeyService = PasskeyService.shared
+
+        do {
+            let allIds = await keyStorage.allCredentialIds()
+            guard !allIds.isEmpty else { return false }
+
+            let result = try await passkeyService.authenticatePasskey(
+                credentialIds: allIds,
+                silent: false
+            )
+            let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
+
+            guard let bundle = try await keyStorage.retrieveEncryptedKeys(
+                credentialId: result.credentialId,
+                kek: kek
+            ) else {
+                return false
+            }
+
+            try await EncryptionService.shared.setAllKeys(
+                primary: bundle.primary,
+                alternatives: bundle.alternatives
+            )
+            SettingsManager.shared.isCloudSyncEnabled = true
+            await MainActor.run {
+                self.passkeyActive = true
+                self.showPasskeyRecoveryChoice = false
+            }
+
+            // Continue sign-in flow now that key is available
+            handleSignIn()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Generate a new key and create a new passkey (explicit split).
+    /// Called from PasskeyRecoveryChoiceView's "Start Fresh" button.
+    func startFreshWithNewKey() async -> Bool {
+        let success = await attemptNewUserPasskeySetup()
+        if success {
+            await MainActor.run {
+                self.showPasskeyRecoveryChoice = false
+            }
+            handleSignIn()
+        }
+        return success
+    }
+
+    /// Retry passkey setup for users who have a key but no passkey backup.
+    /// Called from Settings when cloud sync toggle is turned ON without a passkey.
+    func retryPasskeySetup() async {
+        await createPasskeyBackup()
     }
 
     /// Check passkey state for users who already have keys loaded.
@@ -2672,7 +2739,8 @@ class ChatViewModel: ObservableObject {
 
     /// Re-encrypt all existing passkey credential entries with the current key bundle.
     /// Called after key changes (e.g. importing a key from another device) to keep
-    /// the passkey backup in sync.
+    /// the passkey backup in sync. Uses silent auth to avoid confusing biometric
+    /// prompts when credentials aren't locally available.
     private func updatePasskeyBackup() async {
         let keyStorage = PasskeyKeyStorage.shared
         let passkeyService = PasskeyService.shared
@@ -2684,14 +2752,15 @@ class ChatViewModel: ObservableObject {
             let entries = try await keyStorage.loadCredentials()
             guard !entries.isEmpty else { return }
 
-            // Authenticate to get the KEK for re-encryption
             let allIds = entries.map(\.id)
-            let result = try await passkeyService.authenticatePasskey(credentialIds: allIds)
+            let result = try await passkeyService.authenticatePasskey(
+                credentialIds: allIds,
+                silent: true
+            )
             let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
 
             let bundle = KeyBundle(primary: primary, alternatives: keys.alternatives)
 
-            // Re-encrypt and update only the matched credential entry
             try await keyStorage.storeEncryptedKeys(
                 credentialId: result.credentialId,
                 kek: kek,
