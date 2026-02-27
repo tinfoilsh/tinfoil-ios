@@ -39,7 +39,6 @@ class StreamingMarkdownChunker {
     private var isInTable = false
     private var codeBlockLanguage: String?
     private var codeBlockFenceCount = 0
-    private var tableBuffer: String = ""
     private var isFinalized: Bool = false
 
     func getAllChunks() -> [ContentChunk] {
