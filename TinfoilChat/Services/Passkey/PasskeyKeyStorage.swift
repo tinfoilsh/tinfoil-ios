@@ -170,7 +170,7 @@ final class PasskeyKeyStorage {
     ) async throws {
         let encrypted = try encryptKeyBundle(kek: kek, keys: keys)
 
-        let existing = (try? await loadCredentials()) ?? []
+        let existing = try await loadCredentials()
         let previous = existing.first { $0.id == credentialId }
 
         let entry = PasskeyCredentialEntry(
