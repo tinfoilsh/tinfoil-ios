@@ -237,7 +237,6 @@ struct SettingsView: View {
     @State private var showLanguagePicker = false
     @State private var showSignOutConfirmation = false
     @State private var showPremiumModal = false
-    @State private var showCloudSyncOnboarding = false
     @State private var accountDeletionError: String? = nil
     
     var shouldOpenCloudSync: Bool = false
@@ -424,7 +423,9 @@ struct SettingsView: View {
                                         await chatViewModel.performFullSync()
                                     }
                                 } else {
-                                    showCloudSyncOnboarding = true
+                                    Task {
+                                        await chatViewModel.retryPasskeySetup()
+                                    }
                                 }
                             } else {
                                 settings.isCloudSyncEnabled = false
@@ -475,7 +476,7 @@ struct SettingsView: View {
                         .padding(.top, 2)
                     }
                     .padding(.vertical, 2)
-                } else if chatViewModel.passkeySetupAvailable {
+                } else if chatViewModel.passkeySetupAvailable && EncryptionService.shared.hasEncryptionKey() {
                     Button(action: {
                         Task {
                             await chatViewModel.createPasskeyBackup()
@@ -486,11 +487,32 @@ struct SettingsView: View {
                                 Image(systemName: "person.badge.key.fill")
                                     .font(.subheadline)
                                     .foregroundColor(.primary)
-                                Text("Sync and backup using Passkeys")
+                                Text("Add Passkey for seamless sync")
                                     .font(.subheadline)
                                     .foregroundColor(.primary)
                             }
                             Text("Use Face ID or Touch ID to sync chats across devices")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                } else if chatViewModel.passkeySetupAvailable && !EncryptionService.shared.hasEncryptionKey() {
+                    Button(action: {
+                        Task {
+                            await chatViewModel.retryPasskeySetup()
+                        }
+                    }) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "person.badge.key.fill")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                Text("Add Passkey for seamless sync")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                            }
+                            Text("Create a passkey to sync chats across devices")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -780,39 +802,16 @@ struct SettingsView: View {
                 .environmentObject(authManager)
         }
         .alert("Sign Out", isPresented: $showSignOutConfirmation) {
-            if chatViewModel.passkeyActive {
-                Button("Cancel", role: .cancel) { }
-                Button("Sign Out") {
-                    Task {
-                        // Passkey is backed up — safe to clear local data
-                        await performFullDataCleanup()
-                        await authManager.signOut()
-                        dismiss()
-                    }
-                }
-            } else {
-                Button("Cancel", role: .cancel) { }
-                Button("Keep Encryption Key") {
-                    Task {
-                        // Sign out but keep the encryption key
-                        await authManager.signOut()
-                        dismiss()
-                    }
-                }
-                Button("Delete Everything", role: .destructive) {
-                    Task {
-                        await performFullDataCleanup()
-                        await authManager.signOut()
-                        dismiss()
-                    }
+            Button("Cancel", role: .cancel) { }
+            Button("Sign Out") {
+                Task {
+                    await performFullDataCleanup()
+                    await authManager.signOut()
+                    dismiss()
                 }
             }
         } message: {
-            if chatViewModel.passkeyActive {
-                Text("Your encryption key is backed up with your passkey. You can use Face ID to recover it when you sign back in.")
-            } else {
-                Text("Save your encryption key to keep access to your chats on other devices.\n\nIf you delete everything, you'll need to set up a new encryption key when you sign in again.")
-            }
+            Text("All local data will be cleared. You can recover your chats by signing back in.")
         }
         .alert("Delete Account", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
@@ -869,26 +868,7 @@ struct SettingsView: View {
                     }
                 }
         }
-        .sheet(isPresented: $showCloudSyncOnboarding) {
-            CloudSyncOnboardingView(
-                onSetupComplete: { key in
-                    Task {
-                        do {
-                            try await chatViewModel.setEncryptionKey(key)
-                            settings.isCloudSyncEnabled = true
-                            chatViewModel.handleSignIn()
-                        } catch {
-                            #if DEBUG
-                            print("Failed to set encryption key from onboarding: \(error)")
-                            #endif
-                        }
-                    }
-                },
-                onDismissWithoutSetup: {
-                    settings.isCloudSyncEnabled = false
-                }
-            )
-        }
+
     }
     
     private func checkIfRevenueCat() -> Bool {
