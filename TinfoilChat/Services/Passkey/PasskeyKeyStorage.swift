@@ -37,6 +37,8 @@ final class PasskeyKeyStorage {
 
     private let apiBaseURL = Constants.API.baseURL
 
+    private static let aesGCMNonceSize = 12
+
     private init() {}
 
     // MARK: - Encrypt / Decrypt
@@ -56,8 +58,8 @@ final class PasskeyKeyStorage {
         }
 
         // Split combined: first 12 bytes = nonce, rest = ciphertext + tag
-        let nonce = combined.prefix(12)
-        let ciphertextAndTag = combined.dropFirst(12)
+        let nonce = combined.prefix(Self.aesGCMNonceSize)
+        let ciphertextAndTag = combined.dropFirst(Self.aesGCMNonceSize)
 
         return (
             iv: Data(nonce).base64EncodedString(),
