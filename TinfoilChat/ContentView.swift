@@ -89,25 +89,25 @@ struct ContentView: View {
                 }
             }
         }
-        .sheet(isPresented: $chatViewModel.showPasskeyIntro, onDismiss: {
+        .sheet(isPresented: passkeyBinding(\.showPasskeyIntro), onDismiss: {
             Task {
-                await chatViewModel.handlePasskeyIntroDismissed()
+                await chatViewModel.passkeyManager.handlePasskeyIntroDismissed()
             }
         }) {
             PasskeyIntroView {
-                await chatViewModel.createPasskeyBackup()
+                await chatViewModel.passkeyManager.createPasskeyBackup()
             }
         }
-        .sheet(isPresented: $chatViewModel.showPasskeyRecoveryChoice) {
+        .sheet(isPresented: passkeyBinding(\.showPasskeyRecoveryChoice)) {
             PasskeyRecoveryChoiceView(
                 onTryAgain: {
-                    await chatViewModel.retryPasskeyRecovery()
+                    await chatViewModel.passkeyManager.retryPasskeyRecovery()
                 },
                 onStartFresh: {
-                    await chatViewModel.startFreshWithNewKey()
+                    await chatViewModel.passkeyManager.startFreshWithNewKey()
                 },
                 onSkip: {
-                    chatViewModel.showPasskeyRecoveryChoice = false
+                    chatViewModel.passkeyManager.showPasskeyRecoveryChoice = false
                 }
             )
         }
@@ -163,8 +163,15 @@ struct ContentView: View {
             )
         }
     }
-    
-    
+
+    /// Create a two-way binding to a `@Published` property on `PasskeyManager`,
+    /// since SwiftUI's `$` key-path syntax can't write through a `let` constant.
+    private func passkeyBinding(_ keyPath: ReferenceWritableKeyPath<PasskeyManager, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { chatViewModel.passkeyManager[keyPath: keyPath] },
+            set: { chatViewModel.passkeyManager[keyPath: keyPath] = $0 }
+        )
+    }
 }
 
 #Preview {
