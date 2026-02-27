@@ -424,7 +424,7 @@ struct SettingsView: View {
                                     }
                                 } else {
                                     Task {
-                                        await chatViewModel.retryPasskeySetup()
+                                        await chatViewModel.passkeyManager.retryPasskeySetup()
                                     }
                                 }
                             } else {
@@ -451,7 +451,7 @@ struct SettingsView: View {
                     }
                 }
 
-                if chatViewModel.passkeyActive {
+                if chatViewModel.passkeyManager.passkeyActive {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 6) {
                             Image(systemName: "person.badge.key.fill")
@@ -476,10 +476,10 @@ struct SettingsView: View {
                         .padding(.top, 2)
                     }
                     .padding(.vertical, 2)
-                } else if chatViewModel.passkeySetupAvailable && EncryptionService.shared.hasEncryptionKey() {
+                } else if chatViewModel.passkeyManager.passkeySetupAvailable && EncryptionService.shared.hasEncryptionKey() {
                     Button(action: {
                         Task {
-                            await chatViewModel.createPasskeyBackup()
+                            await chatViewModel.passkeyManager.createPasskeyBackup()
                         }
                     }) {
                         VStack(alignment: .leading, spacing: 6) {
@@ -497,10 +497,10 @@ struct SettingsView: View {
                         }
                         .padding(.vertical, 2)
                     }
-                } else if chatViewModel.passkeySetupAvailable && !EncryptionService.shared.hasEncryptionKey() {
+                } else if chatViewModel.passkeyManager.passkeySetupAvailable && !EncryptionService.shared.hasEncryptionKey() {
                     Button(action: {
                         Task {
-                            await chatViewModel.retryPasskeySetup()
+                            await chatViewModel.passkeyManager.retryPasskeySetup()
                         }
                     }) {
                         VStack(alignment: .leading, spacing: 6) {
