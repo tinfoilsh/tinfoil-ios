@@ -27,6 +27,8 @@ enum PasskeyError: LocalizedError {
     case prfOutputMissing
     case userCancelled
     case authorizationFailed(Error)
+    case randomGenerationFailed
+    case invalidBase64url
 
     var errorDescription: String? {
         switch self {
@@ -38,6 +40,10 @@ enum PasskeyError: LocalizedError {
             return "User cancelled passkey operation"
         case .authorizationFailed(let error):
             return "Passkey authorization failed: \(error.localizedDescription)"
+        case .randomGenerationFailed:
+            return "Failed to generate secure random bytes"
+        case .invalidBase64url:
+            return "Invalid base64url-encoded credential ID"
         }
     }
 }
@@ -71,7 +77,7 @@ final class PasskeyService: NSObject {
             relyingPartyIdentifier: Constants.Passkey.rpId
         )
 
-        let challenge = Self.randomChallenge()
+        let challenge = try Self.randomChallenge()
         let request = provider.createCredentialRegistrationRequest(
             challenge: challenge,
             name: userEmail,
@@ -139,10 +145,10 @@ final class PasskeyService: NSObject {
             relyingPartyIdentifier: Constants.Passkey.rpId
         )
 
-        let challenge = Self.randomChallenge()
-        let allowedCredentials = credentialIds.map {
+        let challenge = try Self.randomChallenge()
+        let allowedCredentials = try credentialIds.map {
             ASAuthorizationPlatformPublicKeyCredentialDescriptor(
-                credentialID: Self.base64urlDecode($0)
+                credentialID: try Self.base64urlDecode($0)
             )
         }
 
@@ -199,7 +205,7 @@ final class PasskeyService: NSObject {
     }
 
     /// Decode a base64url string back to Data.
-    static func base64urlDecode(_ string: String) -> Data {
+    static func base64urlDecode(_ string: String) throws -> Data {
         var base64 = string
             .replacingOccurrences(of: "-", with: "+")
             .replacingOccurrences(of: "_", with: "/")
@@ -207,15 +213,20 @@ final class PasskeyService: NSObject {
         if remainder > 0 {
             base64 += String(repeating: "=", count: 4 - remainder)
         }
-        return Data(base64Encoded: base64) ?? Data()
+        guard let data = Data(base64Encoded: base64) else {
+            throw PasskeyError.invalidBase64url
+        }
+        return data
     }
 
     // MARK: - Private Helpers
 
     /// Generate a random 32-byte challenge for WebAuthn ceremonies.
-    private static func randomChallenge() -> Data {
+    private static func randomChallenge() throws -> Data {
         var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            throw PasskeyError.randomGenerationFailed
+        }
         return Data(bytes)
     }
 
