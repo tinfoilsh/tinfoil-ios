@@ -24,11 +24,12 @@ private struct ContentSegment {
     let id: String
     let kind: SegmentKind
 
-    func createView(isDarkMode: Bool) -> AnyView {
+    func createView(isDarkMode: Bool, isStreaming: Bool = false) -> AnyView {
         switch kind {
         case .markdown(let text):
             // Strip citation markers from text - sources shown separately at message level
-            let strippedText = LaTeXMarkdownView.stripCitations(from: text)
+            // Skip during streaming to avoid catastrophic regex backtracking on incomplete citations
+            let strippedText = isStreaming ? text : LaTeXMarkdownView.stripCitations(from: text)
             return AnyView(
                 Markdown(strippedText)
                     .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
@@ -109,7 +110,7 @@ struct LaTeXMarkdownView: View, Equatable {
     private static let inlineCodeRegex = try? NSRegularExpression(pattern: "`[^`]+`", options: [])
     private static let displayLatexRegex = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators])
     private static let inlineLatexRegex = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: [])
-    private static let citationRegex = try? NSRegularExpression(pattern: " ?\\[\\d+\\]\\(#cite-\\d+~(?:[^()]*|\\([^()]*\\))*\\)", options: [])
+    private static let citationRegex = try? NSRegularExpression(pattern: " ?\\[\\d+\\]\\(#cite-\\d+~[^()]*(?:\\([^()]*\\)[^()]*)*\\)", options: [])
 
     static func == (lhs: LaTeXMarkdownView, rhs: LaTeXMarkdownView) -> Bool {
         lhs.content == rhs.content &&
@@ -130,7 +131,7 @@ struct LaTeXMarkdownView: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(getOrCreateSegments(), id: \.id) { segment in
-                segment.createView(isDarkMode: isDarkMode)
+                segment.createView(isDarkMode: isDarkMode, isStreaming: isStreaming)
                     .id(segment.id)
             }
         }
