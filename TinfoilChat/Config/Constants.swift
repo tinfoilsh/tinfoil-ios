@@ -123,6 +123,7 @@ enum Constants {
         static let credentialsEndpoint = "/api/passkey-credentials/"
         static let challengeByteCount = 32
         static let kekByteCount = 32
+        static let prfCacheKeychainAccount = "sh.tinfoil.passkey-prf-cache"
     }
 
     enum Attachments {

@@ -55,6 +55,7 @@ final class PasskeyManager: ObservableObject {
         onRecoveryComplete = nil
         introTask?.cancel()
         introTask = nil
+        passkeyService.clearCachedPrfResult()
     }
 
     // MARK: - Recovery Flow
@@ -269,11 +270,19 @@ final class PasskeyManager: ObservableObject {
             let entries = try await keyStorage.loadCredentials()
             guard !entries.isEmpty else { return }
 
+            // Use the cached PRF result to avoid re-prompting biometrics.
+            // Falls back to silent auth if no cache is available.
             let allIds = entries.map(\.id)
-            let result = try await passkeyService.authenticatePasskey(
-                credentialIds: allIds,
-                silent: true
-            )
+            let result: PrfPasskeyResult
+            if let cached = passkeyService.getCachedPrfResult(),
+               entries.contains(where: { $0.id == cached.credentialId }) {
+                result = cached
+            } else {
+                result = try await passkeyService.authenticatePasskey(
+                    credentialIds: allIds,
+                    silent: true
+                )
+            }
             let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
 
             let bundle = KeyBundle(primary: primary, alternatives: keys.alternatives)

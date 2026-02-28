@@ -48,6 +48,12 @@ enum PasskeyError: LocalizedError {
     }
 }
 
+/// Serializable PRF cache entry for Keychain storage.
+private struct PrfCacheEntry: Codable {
+    let credentialId: String
+    let prfOutput: Data
+}
+
 /// Handles passkey creation, authentication, and KEK derivation via PRF + HKDF.
 @MainActor
 final class PasskeyService: NSObject {
@@ -117,7 +123,9 @@ final class PasskeyService: NSObject {
 
         // If PRF results were returned during creation, use them directly
         if let firstKey = prfOutput.first {
-            return PrfPasskeyResult(credentialId: credentialId, prfOutput: firstKey)
+            let result = PrfPasskeyResult(credentialId: credentialId, prfOutput: firstKey)
+            cachePrfResult(result)
+            return result
         }
 
         // PRF supported but no results during create — do an immediate get()
@@ -177,7 +185,69 @@ final class PasskeyService: NSObject {
         }
 
         let credentialId = Self.base64urlEncode(assertion.credentialID)
-        return PrfPasskeyResult(credentialId: credentialId, prfOutput: prfOutput.first)
+        let result = PrfPasskeyResult(credentialId: credentialId, prfOutput: prfOutput.first)
+        cachePrfResult(result)
+        return result
+    }
+
+    // MARK: - PRF Cache (Keychain)
+
+    /// Cache the PRF result in the Keychain to avoid re-prompting biometrics
+    /// when the passkey backup needs re-encryption (e.g. sync_version change).
+    func cachePrfResult(_ result: PrfPasskeyResult) {
+        let entry = PrfCacheEntry(
+            credentialId: result.credentialId,
+            prfOutput: result.prfOutput.withUnsafeBytes { Data($0) }
+        )
+        guard let data = try? JSONEncoder().encode(entry) else { return }
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Constants.Passkey.rpId,
+            kSecAttrAccount as String: Constants.Passkey.prfCacheKeychainAccount
+        ]
+
+        // Delete any existing item then add fresh
+        SecItemDelete(query as CFDictionary)
+
+        var addQuery = query
+        addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        SecItemAdd(addQuery as CFDictionary, nil)
+    }
+
+    /// Retrieve the cached PRF result from the Keychain, if available.
+    func getCachedPrfResult() -> PrfPasskeyResult? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Constants.Passkey.rpId,
+            kSecAttrAccount as String: Constants.Passkey.prfCacheKeychainAccount,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let entry = try? JSONDecoder().decode(PrfCacheEntry.self, from: data) else {
+            return nil
+        }
+
+        return PrfPasskeyResult(
+            credentialId: entry.credentialId,
+            prfOutput: SymmetricKey(data: entry.prfOutput)
+        )
+    }
+
+    /// Clear the cached PRF result (e.g. on sign-out).
+    func clearCachedPrfResult() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Constants.Passkey.rpId,
+            kSecAttrAccount as String: Constants.Passkey.prfCacheKeychainAccount
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 
     // MARK: - Key Derivation
