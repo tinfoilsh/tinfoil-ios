@@ -7,6 +7,7 @@
 //
 
 import ClerkKit
+import CryptoKit
 import Foundation
 
 // MARK: - PasskeyRecoveryResult
@@ -115,23 +116,11 @@ final class PasskeyManager: ObservableObject {
         let newKey = EncryptionService.shared.generateKey()
 
         do {
-            let email = user.emailAddresses.first?.emailAddress ?? ""
-            let displayName = [user.firstName, user.lastName]
-                .compactMap { $0 }
-                .joined(separator: " ")
-                .trimmingCharacters(in: .whitespaces)
-
-            let result = try await passkeyService.createPasskey(
-                userId: user.id,
-                userEmail: email,
-                displayName: displayName.isEmpty ? email : displayName
-            )
-
-            let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
+            let (credentialId, kek) = try await createPasskeyAndDeriveKEK(for: user)
             let bundle = KeyBundle(primary: newKey, alternatives: [])
 
             try await keyStorage.storeEncryptedKeys(
-                credentialId: result.credentialId,
+                credentialId: credentialId,
                 kek: kek,
                 keys: bundle
             )
@@ -142,16 +131,8 @@ final class PasskeyManager: ObservableObject {
             passkeyActive = true
             return true
 
-        } catch let error as PasskeyError {
-            switch error {
-            case .userCancelled:
-                // User cancelled Face ID — discard the generated key, fall back
-                return false
-            default:
-                return false
-            }
         } catch {
-            // Passkey creation failed — discard the generated key, fall back
+            // Passkey creation failed or user cancelled Face ID — discard the generated key, fall back
             return false
         }
     }
@@ -207,10 +188,16 @@ final class PasskeyManager: ObservableObject {
 
     // MARK: - Setup & Backup
 
-    /// Retry passkey setup for users who have a key but no passkey backup.
+    /// Retry passkey setup. When an encryption key already exists, creates a passkey
+    /// backup for it. When no key exists, runs the new-user flow that generates a key
+    /// and creates a passkey in one step.
     /// Called from Settings when cloud sync toggle is turned ON without a passkey.
     func retryPasskeySetup() async {
-        await createPasskeyBackup()
+        if EncryptionService.shared.hasEncryptionKey() {
+            await createPasskeyBackup()
+        } else {
+            await attemptNewUserPasskeySetup()
+        }
     }
 
     /// Check passkey state for users who already have keys loaded.
@@ -253,23 +240,11 @@ final class PasskeyManager: ObservableObject {
             let keys = EncryptionService.shared.getAllKeys()
             guard let primary = keys.primary else { return }
 
-            let email = user.emailAddresses.first?.emailAddress ?? ""
-            let displayName = [user.firstName, user.lastName]
-                .compactMap { $0 }
-                .joined(separator: " ")
-                .trimmingCharacters(in: .whitespaces)
-
-            let result = try await passkeyService.createPasskey(
-                userId: user.id,
-                userEmail: email,
-                displayName: displayName.isEmpty ? email : displayName
-            )
-
-            let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
+            let (credentialId, kek) = try await createPasskeyAndDeriveKEK(for: user)
             let bundle = KeyBundle(primary: primary, alternatives: keys.alternatives)
 
             try await keyStorage.storeEncryptedKeys(
-                credentialId: result.credentialId,
+                credentialId: credentialId,
                 kek: kek,
                 keys: bundle
             )
@@ -334,6 +309,24 @@ final class PasskeyManager: ObservableObject {
     }
 
     // MARK: - Private Helpers
+
+    /// Create a passkey for the given user and derive its KEK.
+    private func createPasskeyAndDeriveKEK(for user: User) async throws -> (credentialId: String, kek: SymmetricKey) {
+        let email = user.emailAddresses.first?.emailAddress ?? ""
+        let displayName = [user.firstName, user.lastName]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
+
+        let result = try await passkeyService.createPasskey(
+            userId: user.id,
+            userEmail: email,
+            displayName: displayName.isEmpty ? email : displayName
+        )
+
+        let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
+        return (credentialId: result.credentialId, kek: kek)
+    }
 
     /// Mark the passkey intro as seen in Clerk unsafeMetadata.
     private func markPasskeyIntroSeen() async {
