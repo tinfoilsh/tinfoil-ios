@@ -812,7 +812,9 @@ struct SettingsView: View {
                 }
             }
         } message: {
-            Text("All local data will be cleared. You can recover your chats by signing back in.")
+            Text(passkeyManager.passkeyActive
+                ? "All local data will be cleared. You can recover your chats by signing back in."
+                : "All local data will be cleared. You will need your encryption key to recover your chats.")
         }
         .alert("Delete Account", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
