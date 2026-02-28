@@ -122,11 +122,12 @@ final class PasskeyKeyStorage {
             return []
         }
 
-        let decoded = try JSONDecoder().decode(
-            PasskeyCredentialsResponse.self,
-            from: data
-        )
-        return decoded.credentials ?? []
+        // Backend returns either a bare array or {"credentials": [...]}
+        if let array = try? JSONDecoder().decode([PasskeyCredentialEntry].self, from: data) {
+            return array
+        }
+        let wrapped = try JSONDecoder().decode(PasskeyCredentialsResponse.self, from: data)
+        return wrapped.credentials ?? []
     }
 
     /// Save the full array of passkey credential entries for the authenticated user.
