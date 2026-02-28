@@ -36,7 +36,7 @@ enum Constants {
     enum API {
         static let chatCompletionsEndpoint = "/v1/chat/completions"
         static let baseURL = "https://api.tinfoil.sh"
-        static let chatKeyTTLSeconds: TimeInterval = 300  // 5 minutes
+        static let sessionTokenExpiryBufferSeconds: TimeInterval = 300  // 5 minutes
 
         enum ErrorCode {
             static let invalidAPIKey = "invalid_api_key"

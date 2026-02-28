@@ -500,10 +500,10 @@ class ChatViewModel: ObservableObject {
         Task {
             do {
                 await AppConfig.shared.waitForInitialization()
-                let apiKey = await AppConfig.shared.getApiKey()
+                let sessionToken = await AppConfig.shared.getSessionToken()
 
                 client = try await TinfoilAI.create(
-                    apiKey: apiKey,
+                    apiKey: sessionToken,
                     onVerification: { [weak self] verificationDoc in
                         DispatchQueue.main.async {
                             guard let self = self else { return }
@@ -1669,9 +1669,9 @@ class ChatViewModel: ObservableObject {
         return false
     }
 
-    /// Refreshes the API key and recreates the client
+    /// Refreshes the session token and recreates the client
     private func refreshClientForRetry() async {
-        APIKeyManager.shared.clearApiKey()
+        SessionTokenManager.shared.clearSessionToken()
         setupTinfoilClient()
 
         // Wait for client initialization to complete
@@ -2057,8 +2057,8 @@ class ChatViewModel: ObservableObject {
         lastKnownAuthState = isAuthenticated
 
         if authStateChanged {
-            // Clear cached API key and reinitialize client only when auth changes
-            APIKeyManager.shared.clearApiKey()
+            // Clear cached session token and reinitialize client only when auth changes
+            SessionTokenManager.shared.clearSessionToken()
             setupTinfoilClient()
         }
 

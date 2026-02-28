@@ -637,35 +637,40 @@ enum HapticFeedback {
     }
 }
 
-// MARK: - API Key Management
+// MARK: - Session Token Management
 
-/// Manages API key retrieval for premium models
-class APIKeyManager {
-    static let shared = APIKeyManager()
+/// Manages session token retrieval for premium models
+class SessionTokenManager {
+    static let shared = SessionTokenManager()
 
-    private var apiKey: String?
-    private var apiKeyFetchedAt: Date?
-    private let apiKeyEndpoint = "\(Constants.API.baseURL)/api/keys/chat"
+    private var sessionToken: String?
+    private var sessionTokenExpiresAt: Date?
+    private let sessionTokenEndpoint = "\(Constants.API.baseURL)/api/keys/chat"
+
+    /// Returns true if the cached token is expired or near expiry and needs refresh
+    var needsRefresh: Bool {
+        guard sessionToken != nil else { return true }
+        guard let expiresAt = sessionTokenExpiresAt else { return true }
+        return expiresAt.timeIntervalSinceNow <= Constants.API.sessionTokenExpiryBufferSeconds
+    }
 
     private init() {}
 
-    /// Retrieves the API key for premium models
-    /// - Returns: API key string or empty string if unavailable
-    func getApiKey() async -> String {
-        if let existingKey = apiKey,
-           let fetchedAt = apiKeyFetchedAt,
-           Date().timeIntervalSince(fetchedAt) < Constants.API.chatKeyTTLSeconds {
-            return existingKey
+    /// Retrieves the session token for premium models
+    /// - Returns: Session token string or empty string if unavailable
+    func getSessionToken() async -> String {
+        if let existingToken = sessionToken,
+           let expiresAt = sessionTokenExpiresAt,
+           expiresAt.timeIntervalSinceNow > Constants.API.sessionTokenExpiryBufferSeconds {
+            return existingToken
         }
 
-        return await fetchFreshApiKey()
+        return await fetchFreshSessionToken()
     }
 
-    /// Forces a fresh API key fetch, ignoring any cached value
-    /// - Returns: API key string or empty string if unavailable
-    func fetchFreshApiKey() async -> String {
-        clearApiKey()
-
+    /// Forces a fresh session token fetch, ignoring any cached value
+    /// - Returns: Session token string or empty string if unavailable
+    func fetchFreshSessionToken() async -> String {
         do {
             // Try to load Clerk if it's not loaded
             let isLoaded = await Clerk.shared.isLoaded
@@ -681,11 +686,11 @@ class APIKeyManager {
                    let token = try? await session.getToken() ?? session.lastActiveToken?.jwt {
 
                     // Create URL request with auth header
-                    var request = URLRequest(url: URL(string: apiKeyEndpoint)!)
+                    var request = URLRequest(url: URL(string: sessionTokenEndpoint)!)
                     request.httpMethod = "GET"
                     request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-                    // Fetch API key from server
+                    // Fetch session token from server
                     let (data, response) = try await URLSession.shared.data(for: request)
 
                     guard let httpResponse = response as? HTTPURLResponse,
@@ -696,9 +701,14 @@ class APIKeyManager {
                     // Parse response
                     if let responseDict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                        let key = responseDict["key"] as? String {
-                        // Cache key in memory
-                        self.apiKey = key
-                        self.apiKeyFetchedAt = Date()
+                        self.sessionToken = key
+                        if let expiresAtString = responseDict["expires_at"] as? String,
+                           let parsed = ISO8601DateFormatter().date(from: expiresAtString) {
+                            self.sessionTokenExpiresAt = parsed
+                        } else {
+                            // Fallback: assume a conservative expiry so we don't refetch on every call
+                            self.sessionTokenExpiresAt = Date().addingTimeInterval(Constants.API.sessionTokenExpiryBufferSeconds * 2)
+                        }
                         return key
                     }
 
@@ -717,9 +727,9 @@ class APIKeyManager {
         }
     }
 
-    /// Clears the cached API key
-    func clearApiKey() {
-        apiKey = nil
-        apiKeyFetchedAt = nil
+    /// Clears the cached session token
+    func clearSessionToken() {
+        sessionToken = nil
+        sessionTokenExpiresAt = nil
     }
 }
