@@ -2191,6 +2191,14 @@ class ChatViewModel: ObservableObject {
             self?.handleSignIn()
         }
 
+        // Wire up periodic passkey sync callback — retry decryption when
+        // another device updates the key bundle
+        passkeyManager.onKeyRefreshedFromBackup = { [weak self] in
+            Task { @MainActor in
+                await self?.retryDecryptionWithNewKey()
+            }
+        }
+
         // Prevent duplicate sign-in flows
         guard !isSignInInProgress else {
             #if DEBUG
