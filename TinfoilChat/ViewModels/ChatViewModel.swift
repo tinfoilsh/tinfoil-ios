@@ -11,7 +11,6 @@ import SwiftUI
 import TinfoilAI
 import OpenAI
 import AVFoundation
-import ClerkKit
 
 enum ChatStorageTab: String {
     case cloud
