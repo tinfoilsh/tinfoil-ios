@@ -240,6 +240,13 @@ final class PasskeyService: NSObject {
         requests: [ASAuthorizationRequest],
         silent: Bool = false
     ) async throws -> ASAuthorization {
+        guard authContinuation == nil else {
+            throw PasskeyError.authorizationFailed(
+                NSError(domain: "PasskeyService", code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Another passkey operation is already in progress"])
+            )
+        }
+
         return try await withCheckedThrowingContinuation { continuation in
             self.authContinuation = continuation
             let controller = ASAuthorizationController(authorizationRequests: requests)
