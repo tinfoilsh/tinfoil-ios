@@ -214,8 +214,11 @@ final class PasskeyKeyStorage {
     }
 
     private func getHeaders() async throws -> [String: String] {
-        guard let session = await Clerk.shared.session,
-              let token = try? await session.getToken() else {
+        guard let session = await Clerk.shared.session else {
+            throw PasskeyKeyStorageError.authenticationRequired
+        }
+
+        guard let token = try await session.getToken() else {
             throw PasskeyKeyStorageError.authenticationRequired
         }
 
