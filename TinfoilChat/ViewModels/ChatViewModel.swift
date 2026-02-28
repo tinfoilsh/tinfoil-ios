@@ -1546,7 +1546,7 @@ class ChatViewModel: ObservableObject {
             } catch {
                 // Check if this is a 401 auth error and we haven't retried yet
                 let shouldRetry = await MainActor.run {
-                    if !hasRetriedWithFreshKey && self.isAuthenticationError(error) {
+                    if !hasRetriedWithFreshKey && ChatViewModel.isAuthenticationError(error) {
                         return true
                     }
                     return false
@@ -1666,7 +1666,7 @@ class ChatViewModel: ObservableObject {
     }
 
     /// Checks if an error is an authentication error (401)
-    private func isAuthenticationError(_ error: Error) -> Bool {
+    static func isAuthenticationError(_ error: Error) -> Bool {
         // Streaming path: the SDK checks the HTTP status code before reading the body
         // and throws OpenAIError.statusError with the original status code
         if case OpenAIError.statusError(_, let statusCode) = error,
@@ -3010,7 +3010,7 @@ extension ChatViewModel {
             let result: ChatResult = try await client.chats(query: query)
             return parseTitleFromResult(result)
         } catch {
-            guard isAuthenticationError(error) else { return nil }
+            guard ChatViewModel.isAuthenticationError(error) else { return nil }
 
             await refreshClientForRetry()
             guard let freshClient = await MainActor.run(body: { self.client }) else { return nil }

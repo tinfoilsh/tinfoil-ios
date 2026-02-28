@@ -110,8 +110,6 @@ struct LaTeXMarkdownView: View, Equatable {
     private static let inlineCodeRegex = try? NSRegularExpression(pattern: "`[^`]+`", options: [])
     private static let displayLatexRegex = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators])
     private static let inlineLatexRegex = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: [])
-    private static let citationRegex = try? NSRegularExpression(pattern: " ?\\[\\d+\\]\\(#cite-\\d+~[^()]*(?:\\([^()]*\\)[^()]*)*\\)", options: [])
-
     static func == (lhs: LaTeXMarkdownView, rhs: LaTeXMarkdownView) -> Bool {
         lhs.content == rhs.content &&
         lhs.isDarkMode == rhs.isDarkMode &&
@@ -142,17 +140,107 @@ struct LaTeXMarkdownView: View, Equatable {
             transaction.animation = nil
         }
     }
-    
-    /// Strip citation markers from markdown text
+
+    /// Strip citation markers from markdown text.
+    /// Uses a linear-time scanner instead of regex to avoid catastrophic backtracking
+    /// on incomplete citations during streaming.
+    /// Matches: ` ?[N](#cite-N~...)`  where parens in URLs are balanced one level deep.
     static func stripCitations(from text: String) -> String {
-        guard let regex = citationRegex else { return text }
-        let nsText = text as NSString
-        return regex.stringByReplacingMatches(
-            in: text,
-            options: [],
-            range: NSRange(location: 0, length: nsText.length),
-            withTemplate: ""
-        )
+        let chars = Array(text.unicodeScalars)
+        let count = chars.count
+        var result = String.UnicodeScalarView()
+        result.reserveCapacity(count)
+        var i = 0
+        let citePrefix: [UnicodeScalar] = Array("#cite-".unicodeScalars)
+
+        while i < count {
+            // Check for optional leading space before `[`
+            var start = i
+            if chars[start] == " " && start + 1 < count && chars[start + 1] == "[" {
+                start += 1
+            }
+            guard start < count, chars[start] == "[" else {
+                result.append(chars[i])
+                i += 1
+                continue
+            }
+
+            // Match `[digits]`
+            var j = start + 1
+            guard j < count, chars[j] >= "0", chars[j] <= "9" else {
+                result.append(chars[i])
+                i += 1
+                continue
+            }
+            while j < count, chars[j] >= "0", chars[j] <= "9" { j += 1 }
+            guard j < count, chars[j] == "]" else {
+                result.append(chars[i])
+                i += 1
+                continue
+            }
+            j += 1
+
+            // Match `(#cite-digits~`
+            guard j < count, chars[j] == "(" else {
+                result.append(chars[i])
+                i += 1
+                continue
+            }
+            j += 1
+            var matches = true
+            for c in citePrefix {
+                guard j < count, chars[j] == c else { matches = false; break }
+                j += 1
+            }
+            guard matches else {
+                result.append(chars[i])
+                i += 1
+                continue
+            }
+            guard j < count, chars[j] >= "0", chars[j] <= "9" else {
+                result.append(chars[i])
+                i += 1
+                continue
+            }
+            while j < count, chars[j] >= "0", chars[j] <= "9" { j += 1 }
+            guard j < count, chars[j] == "~" else {
+                result.append(chars[i])
+                i += 1
+                continue
+            }
+            j += 1
+
+            // Scan content with balanced parens (one level deep) until closing `)`
+            var depth = 1 // we're inside the outer `(`
+            var found = false
+            while j < count {
+                if chars[j] == "(" {
+                    depth += 1
+                } else if chars[j] == ")" {
+                    depth -= 1
+                    if depth == 0 {
+                        j += 1
+                        found = true
+                        break
+                    }
+                }
+                j += 1
+            }
+
+            if found {
+                // Skip the entire citation (including optional leading space)
+                i = j
+            } else {
+                // Incomplete citation — keep original text, skip past the verified prefix
+                // to avoid re-scanning the same characters
+                for k in i..<j {
+                    result.append(chars[k])
+                }
+                i = j
+            }
+        }
+
+        return String(result)
     }
 
     private func getOrCreateSegments() -> [ContentSegment] {
