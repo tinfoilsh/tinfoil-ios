@@ -37,6 +37,10 @@ final class PasskeyManager: ObservableObject {
     /// Called after successful recovery/fresh-start to resume the sign-in flow.
     var onRecoveryComplete: (() -> Void)?
 
+    /// Called when the periodic sync check detects a key change from another device
+    /// and applies it locally. The consumer should retry decryption of failed chats.
+    var onKeyRefreshedFromBackup: (() -> Void)?
+
     // MARK: - Private
 
     private var introTask: Task<Void, Never>?
@@ -54,6 +58,7 @@ final class PasskeyManager: ObservableObject {
         showPasskeyIntro = false
         showPasskeyRecoveryChoice = false
         onRecoveryComplete = nil
+        onKeyRefreshedFromBackup = nil
         introTask?.cancel()
         introTask = nil
         syncCheckTask?.cancel()
@@ -452,6 +457,8 @@ final class PasskeyManager: ObservableObject {
             #if DEBUG
             print("[PasskeyManager] Refreshed encryption key from passkey backup (sync_version: \(entry.sync_version))")
             #endif
+
+            onKeyRefreshedFromBackup?()
         } catch {
             // Non-fatal — will retry on next interval
         }
