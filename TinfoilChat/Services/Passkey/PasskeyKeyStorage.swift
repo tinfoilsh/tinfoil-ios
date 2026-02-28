@@ -28,6 +28,7 @@ struct PasskeyCredentialEntry: Codable {
     let iv: String
     let created_at: String
     let version: Int  // schema version (1 = AES-256-GCM + HKDF-SHA256 KEK)
+    let sync_version: Int  // monotonic counter, incremented each time the key bundle is re-encrypted
 }
 
 private let currentCredentialVersion = 1
@@ -164,12 +165,20 @@ final class PasskeyKeyStorage {
         let existing = try await loadCredentials()
         let previous = existing.first { $0.id == credentialId }
 
+        let nextSyncVersion: Int
+        if let previous {
+            nextSyncVersion = previous.sync_version + 1
+        } else {
+            nextSyncVersion = 1
+        }
+
         let entry = PasskeyCredentialEntry(
             id: credentialId,
             encrypted_keys: encrypted.data,
             iv: encrypted.iv,
             created_at: previous?.created_at ?? ISO8601DateFormatter().string(from: Date()),
-            version: currentCredentialVersion
+            version: currentCredentialVersion,
+            sync_version: nextSyncVersion
         )
 
         var updated = existing.filter { $0.id != credentialId }
