@@ -64,15 +64,17 @@ final class PasskeyManager: ObservableObject {
 
             if credentials.isEmpty {
                 let created = await attemptNewUserPasskeySetup()
+                if !created {
+                    passkeySetupAvailable = true
+                }
                 return created ? .newUserSetupDone : .newUserSetupCancelled
             }
 
-            // Try silent recovery with all credential IDs — the OS handles
-            // matching against locally-available credential providers
+            // Try recovery with all credential IDs — shows system passkey UI
+            // (iCloud Keychain, nearby devices, etc.)
             let allIds = credentials.map(\.id)
             let result = try await passkeyService.authenticatePasskey(
-                credentialIds: allIds,
-                silent: true
+                credentialIds: allIds
             )
             let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
 
@@ -80,6 +82,10 @@ final class PasskeyManager: ObservableObject {
                 credentialId: result.credentialId,
                 kek: kek
             ) else {
+                #if DEBUG
+                print("[PasskeyManager] Failed to decrypt key bundle for credential: \(result.credentialId)")
+                #endif
+                showPasskeyRecoveryChoice = true
                 return .recoveryFailed
             }
 
@@ -93,6 +99,10 @@ final class PasskeyManager: ObservableObject {
             return .success
 
         } catch {
+            #if DEBUG
+            print("[PasskeyManager] Recovery failed with error: \(error)")
+            #endif
+            showPasskeyRecoveryChoice = true
             return .recoveryFailed
         }
     }
