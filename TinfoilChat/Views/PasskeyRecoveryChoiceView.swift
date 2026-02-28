@@ -47,6 +47,7 @@ struct PasskeyRecoveryChoiceView: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal)
 
             Spacer()
@@ -81,7 +82,7 @@ struct PasskeyRecoveryChoiceView: View {
                             ProgressView()
                                 .tint(.primary)
                         } else {
-                            Label("Start Fresh with New Key", systemImage: "plus.key.fill"
+                            Label("Start Fresh with New Key", systemImage: "key.fill"
                             )
                         }
                     }
