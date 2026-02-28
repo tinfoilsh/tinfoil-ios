@@ -155,11 +155,13 @@ final class PasskeyKeyStorage {
 
     /// Encrypt the key bundle and upsert a credential entry, then save to backend.
     /// If a credential with the same ID already exists, it is replaced.
+    /// Returns the new sync_version of the stored entry.
+    @discardableResult
     func storeEncryptedKeys(
         credentialId: String,
         kek: SymmetricKey,
         keys: KeyBundle
-    ) async throws {
+    ) async throws -> Int {
         let encrypted = try encryptKeyBundle(kek: kek, keys: keys)
 
         let existing = try await loadCredentials()
@@ -185,6 +187,7 @@ final class PasskeyKeyStorage {
         updated.append(entry)
 
         try await saveCredentials(updated)
+        return nextSyncVersion
     }
 
     /// Decrypt the key bundle for a specific credential entry.

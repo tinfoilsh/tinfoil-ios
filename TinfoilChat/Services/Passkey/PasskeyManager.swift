@@ -40,6 +40,7 @@ final class PasskeyManager: ObservableObject {
     // MARK: - Private
 
     private var introTask: Task<Void, Never>?
+    private var syncCheckTask: Task<Void, Never>?
     private let passkeyService = PasskeyService.shared
     private let keyStorage = PasskeyKeyStorage.shared
 
@@ -55,7 +56,10 @@ final class PasskeyManager: ObservableObject {
         onRecoveryComplete = nil
         introTask?.cancel()
         introTask = nil
+        syncCheckTask?.cancel()
+        syncCheckTask = nil
         passkeyService.clearCachedPrfResult()
+        UserDefaults.standard.removeObject(forKey: Constants.Passkey.syncVersionUserDefaultsKey)
     }
 
     // MARK: - Recovery Flow
@@ -76,7 +80,7 @@ final class PasskeyManager: ObservableObject {
             // Try recovery with all credential IDs — shows system passkey UI
             // (iCloud Keychain, nearby devices, etc.)
             let allIds = credentials.map(\.id)
-            guard let bundle = try await recoverKeyBundle(credentialIds: allIds) else {
+            guard let recovery = try await recoverKeyBundle(credentialIds: allIds) else {
                 #if DEBUG
                 print("[PasskeyManager] Failed to decrypt key bundle")
                 #endif
@@ -86,9 +90,15 @@ final class PasskeyManager: ObservableObject {
 
             // Write recovered keys to keychain and enable cloud sync
             try await EncryptionService.shared.setAllKeys(
-                primary: bundle.primary,
-                alternatives: bundle.alternatives
+                primary: recovery.bundle.primary,
+                alternatives: recovery.bundle.alternatives
             )
+
+            // Record sync_version so the periodic check has a baseline
+            if let entry = credentials.first(where: { $0.id == recovery.credentialId }) {
+                setLocalSyncVersion(credentialId: recovery.credentialId, version: entry.sync_version)
+            }
+
             activatePasskey()
             return .success
 
@@ -113,11 +123,12 @@ final class PasskeyManager: ObservableObject {
             let (credentialId, kek) = try await createPasskeyAndDeriveKEK(for: user)
             let bundle = KeyBundle(primary: newKey, alternatives: [])
 
-            try await keyStorage.storeEncryptedKeys(
+            let syncVersion = try await keyStorage.storeEncryptedKeys(
                 credentialId: credentialId,
                 kek: kek,
                 keys: bundle
             )
+            setLocalSyncVersion(credentialId: credentialId, version: syncVersion)
 
             // Passkey created and stored — persist the key
             try await EncryptionService.shared.setKey(newKey)
@@ -142,14 +153,20 @@ final class PasskeyManager: ObservableObject {
             let allIds = await keyStorage.allCredentialIds()
             guard !allIds.isEmpty else { return false }
 
-            guard let bundle = try await recoverKeyBundle(credentialIds: allIds) else {
+            let entries = try await keyStorage.loadCredentials()
+            guard let recovery = try await recoverKeyBundle(credentialIds: allIds) else {
                 return false
             }
 
             try await EncryptionService.shared.setAllKeys(
-                primary: bundle.primary,
-                alternatives: bundle.alternatives
+                primary: recovery.bundle.primary,
+                alternatives: recovery.bundle.alternatives
             )
+
+            if let entry = entries.first(where: { $0.id == recovery.credentialId }) {
+                setLocalSyncVersion(credentialId: recovery.credentialId, version: entry.sync_version)
+            }
+
             activatePasskey()
             showPasskeyRecoveryChoice = false
 
@@ -195,6 +212,7 @@ final class PasskeyManager: ObservableObject {
         let hasCredentials = await keyStorage.hasCredentials()
         if hasCredentials {
             passkeyActive = true
+            startSyncCheck()
             return
         }
 
@@ -234,11 +252,12 @@ final class PasskeyManager: ObservableObject {
             let (credentialId, kek) = try await createPasskeyAndDeriveKEK(for: user)
             let bundle = KeyBundle(primary: primary, alternatives: keys.alternatives)
 
-            try await keyStorage.storeEncryptedKeys(
+            let syncVersion = try await keyStorage.storeEncryptedKeys(
                 credentialId: credentialId,
                 kek: kek,
                 keys: bundle
             )
+            setLocalSyncVersion(credentialId: credentialId, version: syncVersion)
 
             // Mark intro as seen in Clerk unsafeMetadata
             await markPasskeyIntroSeen()
@@ -246,6 +265,7 @@ final class PasskeyManager: ObservableObject {
             passkeyActive = true
             passkeySetupAvailable = false
             showPasskeyIntro = false
+            startSyncCheck()
         } catch {
             // Passkey creation failed or cancelled — leave state unchanged
             showPasskeyIntro = false
@@ -287,11 +307,12 @@ final class PasskeyManager: ObservableObject {
 
             let bundle = KeyBundle(primary: primary, alternatives: keys.alternatives)
 
-            try await keyStorage.storeEncryptedKeys(
+            let syncVersion = try await keyStorage.storeEncryptedKeys(
                 credentialId: result.credentialId,
                 kek: kek,
                 keys: bundle
             )
+            setLocalSyncVersion(credentialId: result.credentialId, version: syncVersion)
         } catch {
             // Non-fatal — passkey backup is stale but user can re-backup from Settings
         }
@@ -312,19 +333,24 @@ final class PasskeyManager: ObservableObject {
     private func activatePasskey() {
         SettingsManager.shared.isCloudSyncEnabled = true
         passkeyActive = true
+        startSyncCheck()
     }
 
     /// Authenticate with a passkey, derive the KEK, and decrypt the stored key bundle.
-    private func recoverKeyBundle(credentialIds: [String], silent: Bool = false) async throws -> KeyBundle? {
+    /// Returns the bundle and the credential ID that was used.
+    private func recoverKeyBundle(credentialIds: [String], silent: Bool = false) async throws -> (bundle: KeyBundle, credentialId: String)? {
         let result = try await passkeyService.authenticatePasskey(
             credentialIds: credentialIds,
             silent: silent
         )
         let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
-        return try await keyStorage.retrieveEncryptedKeys(
+        guard let bundle = try await keyStorage.retrieveEncryptedKeys(
             credentialId: result.credentialId,
             kek: kek
-        )
+        ) else {
+            return nil
+        }
+        return (bundle: bundle, credentialId: result.credentialId)
     }
 
     /// Create a passkey for the given user and derive its KEK.
@@ -357,5 +383,77 @@ final class PasskeyManager: ObservableObject {
 
         let params = User.UpdateParams(unsafeMetadata: .object(existingMetadata))
         try? await user.update(params)
+    }
+
+    // MARK: - Sync Version Tracking
+
+    private func getLocalSyncVersion(credentialId: String) -> Int? {
+        let dict = UserDefaults.standard.dictionary(forKey: Constants.Passkey.syncVersionUserDefaultsKey)
+        return dict?[credentialId] as? Int
+    }
+
+    private func setLocalSyncVersion(credentialId: String, version: Int) {
+        var dict = UserDefaults.standard.dictionary(forKey: Constants.Passkey.syncVersionUserDefaultsKey) ?? [:]
+        dict[credentialId] = version
+        UserDefaults.standard.set(dict, forKey: Constants.Passkey.syncVersionUserDefaultsKey)
+    }
+
+    // MARK: - Periodic Sync Check
+
+    /// Start a repeating timer that checks whether another device has updated
+    /// the passkey backup (sync_version changed). If so, decrypts the updated
+    /// backup using the cached PRF and applies the new keys locally.
+    func startSyncCheck() {
+        syncCheckTask?.cancel()
+        syncCheckTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(Constants.Passkey.syncCheckIntervalSeconds))
+                guard !Task.isCancelled else { break }
+                await self?.refreshKeyFromPasskeyBackup()
+            }
+        }
+    }
+
+    /// Check if the passkey backup has been updated by another device.
+    /// Uses the cached PRF to avoid biometric prompts. If no cached PRF
+    /// is available, the check is skipped silently.
+    private func refreshKeyFromPasskeyBackup() async {
+        do {
+            guard let cached = passkeyService.getCachedPrfResult() else { return }
+
+            let entries = try await keyStorage.loadCredentials()
+            guard let entry = entries.first(where: { $0.id == cached.credentialId }) else { return }
+
+            let localVersion = getLocalSyncVersion(credentialId: cached.credentialId)
+            if let localVersion, entry.sync_version <= localVersion { return }
+
+            // sync_version increased — another device updated the backup
+            let kek = PasskeyService.deriveKeyEncryptionKey(from: cached.prfOutput)
+            let bundle = try keyStorage.decryptKeyBundle(
+                kek: kek,
+                iv: entry.iv,
+                data: entry.encrypted_keys
+            )
+
+            let localKey = EncryptionService.shared.getAllKeys().primary
+            if bundle.primary == localKey {
+                // Key matches — just record the version
+                setLocalSyncVersion(credentialId: cached.credentialId, version: entry.sync_version)
+                return
+            }
+
+            // Key differs — apply the recovered key bundle
+            try await EncryptionService.shared.setAllKeys(
+                primary: bundle.primary,
+                alternatives: bundle.alternatives
+            )
+            setLocalSyncVersion(credentialId: cached.credentialId, version: entry.sync_version)
+
+            #if DEBUG
+            print("[PasskeyManager] Refreshed encryption key from passkey backup (sync_version: \(entry.sync_version))")
+            #endif
+        } catch {
+            // Non-fatal — will retry on next interval
+        }
     }
 }
