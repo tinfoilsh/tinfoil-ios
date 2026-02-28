@@ -94,14 +94,7 @@ final class PasskeyKeyStorage {
 
     /// Load all passkey credential entries for the authenticated user.
     func loadCredentials() async throws -> [PasskeyCredentialEntry] {
-        let headers = try await getHeaders()
-        let url = URL(string: "\(apiBaseURL)\(Constants.Passkey.credentialsEndpoint)")!
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        for (key, value) in headers {
-            request.setValue(value, forHTTPHeaderField: key)
-        }
+        let request = try await makeAuthenticatedRequest(method: "GET")
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -133,15 +126,7 @@ final class PasskeyKeyStorage {
     /// Save the full array of passkey credential entries for the authenticated user.
     /// The backend overwrites the entire JSONB column — the client owns the structure.
     func saveCredentials(_ entries: [PasskeyCredentialEntry]) async throws {
-        let headers = try await getHeaders()
-        let url = URL(string: "\(apiBaseURL)\(Constants.Passkey.credentialsEndpoint)")!
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        for (key, value) in headers {
-            request.setValue(value, forHTTPHeaderField: key)
-        }
-
+        var request = try await makeAuthenticatedRequest(method: "PUT")
         request.httpBody = try JSONEncoder().encode(entries)
 
         let (_, response) = try await URLSession.shared.data(for: request)
@@ -213,6 +198,20 @@ final class PasskeyKeyStorage {
     }
 
     // MARK: - Private Helpers
+
+    private func makeAuthenticatedRequest(method: String) async throws -> URLRequest {
+        let headers = try await getHeaders()
+        guard let url = URL(string: "\(apiBaseURL)\(Constants.Passkey.credentialsEndpoint)") else {
+            throw PasskeyKeyStorageError.networkError
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        for (key, value) in headers {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        return request
+    }
 
     private func getHeaders() async throws -> [String: String] {
         guard let session = await Clerk.shared.session,
