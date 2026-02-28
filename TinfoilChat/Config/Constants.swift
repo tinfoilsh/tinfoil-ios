@@ -121,6 +121,8 @@ enum Constants {
         static let hasSeenIntroKey = "has_seen_passkey_intro"
         static let introDelaySeconds: TimeInterval = 2.0
         static let credentialsEndpoint = "/api/passkey-credentials/"
+        static let challengeByteCount = 32
+        static let kekByteCount = 32
     }
 
     enum Attachments {

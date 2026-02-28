@@ -191,7 +191,7 @@ final class PasskeyService: NSObject {
             inputKeyMaterial: prfOutput,
             salt: Data(),
             info: Constants.Passkey.hkdfInfo,
-            outputByteCount: 32
+            outputByteCount: Constants.Passkey.kekByteCount
         )
     }
 
@@ -224,7 +224,7 @@ final class PasskeyService: NSObject {
 
     /// Generate a random 32-byte challenge for WebAuthn ceremonies.
     nonisolated private static func randomChallenge() throws -> Data {
-        var bytes = [UInt8](repeating: 0, count: 32)
+        var bytes = [UInt8](repeating: 0, count: Constants.Passkey.challengeByteCount)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
             throw PasskeyError.randomGenerationFailed
         }
