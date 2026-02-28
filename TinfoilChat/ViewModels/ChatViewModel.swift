@@ -71,7 +71,7 @@ class ChatViewModel: ObservableObject {
     @Published var isFirstTimeUser: Bool = false
     @Published var showEncryptionSetup: Bool = false
     @Published var shouldShowKeyImport: Bool = false
-    let passkeyManager = PasskeyManager.shared
+    private let passkeyManager = PasskeyManager.shared
     private let cloudSync = CloudSyncService.shared
     private let streamingTracker = StreamingTracker.shared
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
@@ -2265,12 +2265,7 @@ class ChatViewModel: ObservableObject {
                         switch passkeyResult {
                         case .success, .newUserSetupDone:
                             break
-                        case .newUserSetupCancelled:
-                            await MainActor.run {
-                                self.isSignInInProgress = false
-                            }
-                            return
-                        case .recoveryFailed:
+                        case .newUserSetupCancelled, .recoveryFailed:
                             await MainActor.run {
                                 self.isSignInInProgress = false
                             }

@@ -92,23 +92,23 @@ struct ContentView: View {
         }
         .sheet(isPresented: $passkeyManager.showPasskeyIntro, onDismiss: {
             Task {
-                await chatViewModel.passkeyManager.handlePasskeyIntroDismissed()
+                await passkeyManager.handlePasskeyIntroDismissed()
             }
         }) {
             PasskeyIntroView {
-                await chatViewModel.passkeyManager.createPasskeyBackup()
+                await passkeyManager.createPasskeyBackup()
             }
         }
         .sheet(isPresented: $passkeyManager.showPasskeyRecoveryChoice) {
             PasskeyRecoveryChoiceView(
                 onTryAgain: {
-                    await chatViewModel.passkeyManager.retryPasskeyRecovery()
+                    await passkeyManager.retryPasskeyRecovery()
                 },
                 onStartFresh: {
-                    await chatViewModel.passkeyManager.startFreshWithNewKey()
+                    await passkeyManager.startFreshWithNewKey()
                 },
                 onSkip: {
-                    chatViewModel.passkeyManager.showPasskeyRecoveryChoice = false
+                    passkeyManager.showPasskeyRecoveryChoice = false
                 }
             )
         }
