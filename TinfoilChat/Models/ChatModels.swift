@@ -682,34 +682,38 @@ class SessionTokenManager {
             // Try a few times with a small delay for the session to be available
             for attempt in 1...3 {
                 let session = await Clerk.shared.session
-                if let session = session,
-                   let token = try? await session.getToken() ?? session.lastActiveToken?.jwt {
+                if let session = session {
+                    let token = try? await session.getToken()
 
-                    // Create URL request with auth header
-                    var request = URLRequest(url: URL(string: sessionTokenEndpoint)!)
-                    request.httpMethod = "GET"
-                    request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                    guard let jwt = token ?? session.lastActiveToken?.jwt else {
+                        // No token available at all, wait and retry
+                        if attempt < 3 {
+                            try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                        }
+                        continue
+                    }
 
-                    // Fetch session token from server
-                    let (data, response) = try await URLSession.shared.data(for: request)
+                    // Try fetching the session key with this JWT
+                    let result = await fetchSessionKey(jwt: jwt)
 
-                    guard let httpResponse = response as? HTTPURLResponse,
-                          httpResponse.statusCode == 200 else {
+                    if let key = result {
+                        return key
+                    }
+
+                    // If getToken() gave us a fresh token and it still failed,
+                    // the issue isn't a stale JWT — stop retrying
+                    if token != nil {
                         return ""
                     }
 
-                    // Parse response
-                    if let responseDict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let key = responseDict["key"] as? String {
-                        self.sessionToken = key
-                        if let expiresAtString = responseDict["expires_at"] as? String,
-                           let parsed = ISO8601DateFormatter().date(from: expiresAtString) {
-                            self.sessionTokenExpiresAt = parsed
-                        } else {
-                            // Fallback: assume a conservative expiry so we don't refetch on every call
-                            self.sessionTokenExpiresAt = Date().addingTimeInterval(Constants.API.sessionTokenExpiryBufferSeconds * 2)
+                    // The fresh getToken() call failed so we used a stale
+                    // lastActiveToken that the server rejected.
+                    // Refresh the Clerk client to get a new JWT and retry.
+                    try? await Clerk.shared.refreshClient()
+                    if let refreshedToken = try? await session.getToken() {
+                        if let key = await fetchSessionKey(jwt: refreshedToken) {
+                            return key
                         }
-                        return key
                     }
 
                     return ""
@@ -724,6 +728,40 @@ class SessionTokenManager {
             return ""
         } catch {
             return ""
+        }
+    }
+
+    /// Exchanges a Clerk JWT for a session API key
+    /// - Returns: The API key string, or nil on failure
+    private func fetchSessionKey(jwt: String) async -> String? {
+        do {
+            var request = URLRequest(url: URL(string: sessionTokenEndpoint)!)
+            request.httpMethod = "GET"
+            request.addValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else {
+                return nil
+            }
+
+            if let responseDict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let key = responseDict["key"] as? String {
+                self.sessionToken = key
+                if let expiresAtString = responseDict["expires_at"] as? String,
+                   let parsed = ISO8601DateFormatter().date(from: expiresAtString) {
+                    self.sessionTokenExpiresAt = parsed
+                } else {
+                    // Fallback: assume a conservative expiry so we don't refetch on every call
+                    self.sessionTokenExpiresAt = Date().addingTimeInterval(Constants.API.sessionTokenExpiryBufferSeconds * 2)
+                }
+                return key
+            }
+
+            return nil
+        } catch {
+            return nil
         }
     }
 
