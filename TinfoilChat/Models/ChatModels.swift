@@ -710,7 +710,8 @@ class SessionTokenManager {
                     // lastActiveToken that the server rejected.
                     // Refresh the Clerk client to get a new JWT and retry.
                     try? await Clerk.shared.refreshClient()
-                    if let refreshedToken = try? await session.getToken() {
+                    let refreshedSession = await Clerk.shared.session
+                    if let refreshedToken = try? await refreshedSession?.getToken() {
                         if let key = await fetchSessionKey(jwt: refreshedToken) {
                             return key
                         }
