@@ -49,6 +49,7 @@ enum PasskeyError: LocalizedError {
 }
 
 /// Handles passkey creation, authentication, and KEK derivation via PRF + HKDF.
+@MainActor
 final class PasskeyService: NSObject {
     static let shared = PasskeyService()
 
@@ -185,7 +186,7 @@ final class PasskeyService: NSObject {
     ///
     /// Raw PRF output is treated as Input Keying Material (IKM), not used directly.
     /// HKDF with a purpose-binding info string produces the final SymmetricKey.
-    static func deriveKeyEncryptionKey(from prfOutput: SymmetricKey) -> SymmetricKey {
+    nonisolated static func deriveKeyEncryptionKey(from prfOutput: SymmetricKey) -> SymmetricKey {
         return HKDF<SHA256>.deriveKey(
             inputKeyMaterial: prfOutput,
             salt: Data(),
@@ -197,7 +198,7 @@ final class PasskeyService: NSObject {
     // MARK: - Base64url Helpers
 
     /// Base64url-encode data (no padding, URL-safe alphabet).
-    static func base64urlEncode(_ data: Data) -> String {
+    nonisolated static func base64urlEncode(_ data: Data) -> String {
         return data.base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
@@ -205,7 +206,7 @@ final class PasskeyService: NSObject {
     }
 
     /// Decode a base64url string back to Data.
-    static func base64urlDecode(_ string: String) throws -> Data {
+    nonisolated static func base64urlDecode(_ string: String) throws -> Data {
         var base64 = string
             .replacingOccurrences(of: "-", with: "+")
             .replacingOccurrences(of: "_", with: "/")
@@ -222,7 +223,7 @@ final class PasskeyService: NSObject {
     // MARK: - Private Helpers
 
     /// Generate a random 32-byte challenge for WebAuthn ceremonies.
-    private static func randomChallenge() throws -> Data {
+    nonisolated private static func randomChallenge() throws -> Data {
         var bytes = [UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
             throw PasskeyError.randomGenerationFailed
@@ -252,7 +253,7 @@ final class PasskeyService: NSObject {
     }
 
     /// Map ASAuthorizationError to PasskeyError.
-    private static func mapAuthError(_ error: Error) -> PasskeyError {
+    nonisolated private static func mapAuthError(_ error: Error) -> PasskeyError {
         if let authError = error as? ASAuthorizationError,
            authError.code == .canceled {
             return .userCancelled
