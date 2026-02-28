@@ -87,58 +87,64 @@ struct CitationRegexTests {
 
     // MARK: - stripCitations: catastrophic backtracking regression
 
-    /// Runs stripCitations on a background thread and fails if it takes longer than the given timeout.
-    private func assertStripCitationsCompletesQuickly(_ input: String, timeoutMs: Int = 500, sourceLocation: SourceLocation = #_sourceLocation) {
-        let semaphore = DispatchSemaphore(value: 0)
-        var result: String?
-
-        DispatchQueue.global().async {
-            result = LaTeXMarkdownView.stripCitations(from: input)
-            semaphore.signal()
+    /// Runs stripCitations and fails if it takes longer than the given timeout.
+    private func assertStripCitationsCompletesQuickly(_ input: String, timeoutMs: Int = 500, sourceLocation: SourceLocation = #_sourceLocation) async {
+        let capturedInput = input
+        let result = await withTaskGroup(of: String?.self) { group in
+            group.addTask {
+                LaTeXMarkdownView.stripCitations(from: capturedInput)
+            }
+            group.addTask {
+                try? await Task.sleep(for: .milliseconds(timeoutMs))
+                return nil
+            }
+            let first = await group.next()!
+            group.cancelAll()
+            return first
         }
 
-        let timedOut = semaphore.wait(timeout: .now() + .milliseconds(timeoutMs)) == .timedOut
-        #expect(!timedOut, "stripCitations took longer than \(timeoutMs)ms — likely catastrophic backtracking", sourceLocation: sourceLocation)
-        if !timedOut {
-            #expect(result == input, "Incomplete citation should not be stripped", sourceLocation: sourceLocation)
+        guard let result else {
+            Issue.record("stripCitations did not complete within \(timeoutMs)ms — likely catastrophic backtracking", sourceLocation: sourceLocation)
+            return
         }
+        #expect(result == input, "Incomplete citation should not be stripped", sourceLocation: sourceLocation)
     }
 
     @Test("Partial citation with no closing paren completes quickly")
-    func partialCitationNoClosingParen() {
+    func partialCitationNoClosingParen() async {
         // Exact crash scenario: streaming delivers a citation with opening paren but no close
         let input = "iOS's version [1](#cite-1~https://github.com/ds4sd/docling/blob/main/docling/pipeline_options.py"
-        assertStripCitationsCompletesQuickly(input)
+        await assertStripCitationsCompletesQuickly(input)
     }
 
     @Test("Partial citation with long URL and no closing paren completes quickly")
-    func partialCitationLongURLNoClosingParen() {
+    func partialCitationLongURLNoClosingParen() async {
         let longPath = String(repeating: "/segment", count: 50)
         let input = "text [1](#cite-1~https://example.com\(longPath)"
-        assertStripCitationsCompletesQuickly(input)
+        await assertStripCitationsCompletesQuickly(input)
     }
 
     @Test("Partial citation with nested open parens and no closing paren completes quickly")
-    func partialCitationNestedOpenParens() {
+    func partialCitationNestedOpenParens() async {
         // Multiple open parens without matching closes — worst case for backtracking
         let input = "text [1](#cite-1~https://url.com/a(b(c(d(e"
-        assertStripCitationsCompletesQuickly(input)
+        await assertStripCitationsCompletesQuickly(input)
     }
 
     @Test("Partial citation mid-stream with trailing content completes quickly")
-    func partialCitationMidStream() {
+    func partialCitationMidStream() async {
         // Simulates the exact crash from the Sentry report
         let input = "The \"Apple Vision\" option in Docling specifically uses macOS's Vision framework via Python bindings (PyObjC), not iOS's version[1](#cite-1~https://github.com/ds4sd/docling/blob/main/docling/pipeline_options.py"
-        assertStripCitationsCompletesQuickly(input)
+        await assertStripCitationsCompletesQuickly(input)
     }
 
     @Test("Repeated partial citations do not cause cumulative slowdown")
-    func repeatedPartialCitations() {
+    func repeatedPartialCitations() async {
         // Simulates many streaming re-renders with growing content
         var content = ""
         for i in 1...20 {
             content += "Paragraph \(i) with a citation [\(i)](#cite-\(i)~https://example.com/very/long/path/to/resource"
-            assertStripCitationsCompletesQuickly(content)
+            await assertStripCitationsCompletesQuickly(content)
         }
     }
 
