@@ -235,9 +235,9 @@ class AppConfig: ObservableObject {
         }
     }
     
-    /// Get the global API key
-    func getApiKey() async -> String {
-        return await APIKeyManager.shared.getApiKey()
+    /// Get the global session token
+    func getSessionToken() async -> String {
+        return await SessionTokenManager.shared.getSessionToken()
     }
     
     var maxMessagesPerRequest: Int {

@@ -276,13 +276,13 @@ class AuthManager: ObservableObject {
                         NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
                     }
 
-                    // If subscription became active, clear cached API key to force refetch
+                    // If subscription became active, clear cached session token to force refetch
                     if self.hasActiveSubscription && !wasActive {
-                        APIKeyManager.shared.clearApiKey()
-                        
-                        // Proactively fetch new API key
+                        SessionTokenManager.shared.clearSessionToken()
+
+                        // Proactively fetch new session token
                         Task {
-                            let _ = await APIKeyManager.shared.getApiKey()
+                            let _ = await SessionTokenManager.shared.getSessionToken()
                         }
                     }
                 }
