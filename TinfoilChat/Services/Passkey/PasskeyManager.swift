@@ -88,8 +88,7 @@ final class PasskeyManager: ObservableObject {
                 primary: bundle.primary,
                 alternatives: bundle.alternatives
             )
-            SettingsManager.shared.isCloudSyncEnabled = true
-            passkeyActive = true
+            activatePasskey()
             return .success
 
         } catch {
@@ -121,8 +120,7 @@ final class PasskeyManager: ObservableObject {
 
             // Passkey created and stored — persist the key
             try await EncryptionService.shared.setKey(newKey)
-            SettingsManager.shared.isCloudSyncEnabled = true
-            passkeyActive = true
+            activatePasskey()
             return true
 
         } catch {
@@ -151,8 +149,7 @@ final class PasskeyManager: ObservableObject {
                 primary: bundle.primary,
                 alternatives: bundle.alternatives
             )
-            SettingsManager.shared.isCloudSyncEnabled = true
-            passkeyActive = true
+            activatePasskey()
             showPasskeyRecoveryChoice = false
 
             // Continue sign-in flow now that key is available
@@ -302,6 +299,11 @@ final class PasskeyManager: ObservableObject {
     }
 
     // MARK: - Private Helpers
+
+    private func activatePasskey() {
+        SettingsManager.shared.isCloudSyncEnabled = true
+        passkeyActive = true
+    }
 
     /// Authenticate with a passkey, derive the KEK, and decrypt the stored key bundle.
     private func recoverKeyBundle(credentialIds: [String], silent: Bool = false) async throws -> KeyBundle? {
