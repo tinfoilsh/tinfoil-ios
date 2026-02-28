@@ -19,7 +19,18 @@
 		99F154862F4F633400E9174E /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154852F4F633400E9174E /* RevenueCatUI */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		992FC2992F532EA800699029 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 99F153BA2F4F5F0200E9174E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 99F153C12F4F5F0200E9174E;
+			remoteInfo = TinfoilChat;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		992FC2952F532EA800699029 /* TinfoilChatTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TinfoilChatTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		99F153C22F4F5F0200E9174E /* TinfoilChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TinfoilChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -34,6 +45,11 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		992FC2962F532EA800699029 /* TinfoilChatTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TinfoilChatTests;
+			sourceTree = "<group>";
+		};
 		99F153C42F4F5F0200E9174E /* TinfoilChat */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -45,6 +61,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		992FC2922F532EA800699029 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		99F153BF2F4F5F0200E9174E /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -69,6 +92,7 @@
 			isa = PBXGroup;
 			children = (
 				99F153C42F4F5F0200E9174E /* TinfoilChat */,
+				992FC2962F532EA800699029 /* TinfoilChatTests */,
 				99F154802F4F632500E9174E /* Frameworks */,
 				99F153C32F4F5F0200E9174E /* Products */,
 			);
@@ -78,6 +102,7 @@
 			isa = PBXGroup;
 			children = (
 				99F153C22F4F5F0200E9174E /* TinfoilChat.app */,
+				992FC2952F532EA800699029 /* TinfoilChatTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -92,6 +117,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		992FC2942F532EA800699029 /* TinfoilChatTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 992FC29B2F532EA800699029 /* Build configuration list for PBXNativeTarget "TinfoilChatTests" */;
+			buildPhases = (
+				992FC2912F532EA800699029 /* Sources */,
+				992FC2922F532EA800699029 /* Frameworks */,
+				992FC2932F532EA800699029 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				992FC29A2F532EA800699029 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				992FC2962F532EA800699029 /* TinfoilChatTests */,
+			);
+			name = TinfoilChatTests;
+			packageProductDependencies = (
+			);
+			productName = TinfoilChatTests;
+			productReference = 992FC2952F532EA800699029 /* TinfoilChatTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		99F153C12F4F5F0200E9174E /* TinfoilChat */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 99F153CD2F4F5F0300E9174E /* Build configuration list for PBXNativeTarget "TinfoilChat" */;
@@ -135,6 +183,10 @@
 				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
+					992FC2942F532EA800699029 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 99F153C12F4F5F0200E9174E;
+					};
 					99F153C12F4F5F0200E9174E = {
 						CreatedOnToolsVersion = 26.2;
 					};
@@ -165,11 +217,19 @@
 			projectRoot = "";
 			targets = (
 				99F153C12F4F5F0200E9174E /* TinfoilChat */,
+				992FC2942F532EA800699029 /* TinfoilChatTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		992FC2932F532EA800699029 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		99F153C02F4F5F0200E9174E /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -201,6 +261,13 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		992FC2912F532EA800699029 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		99F153BE2F4F5F0200E9174E /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -210,7 +277,62 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		992FC29A2F532EA800699029 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 99F153C12F4F5F0200E9174E /* TinfoilChat */;
+			targetProxy = 992FC2992F532EA800699029 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		992FC29C2F532EA800699029 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8KSH668LZT;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = sh.tinfoil.TinfoilChatTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TinfoilChat.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TinfoilChat";
+			};
+			name = Debug;
+		};
+		992FC29D2F532EA800699029 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8KSH668LZT;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = sh.tinfoil.TinfoilChatTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TinfoilChat.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TinfoilChat";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 		99F153CB2F4F5F0300E9174E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -420,6 +542,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		992FC29B2F532EA800699029 /* Build configuration list for PBXNativeTarget "TinfoilChatTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				992FC29C2F532EA800699029 /* Debug */,
+				992FC29D2F532EA800699029 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		99F153BD2F4F5F0200E9174E /* Build configuration list for PBXProject "TinfoilChat" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
