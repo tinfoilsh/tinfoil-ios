@@ -74,15 +74,7 @@ final class PasskeyManager: ObservableObject {
             // Try recovery with all credential IDs — shows system passkey UI
             // (iCloud Keychain, nearby devices, etc.)
             let allIds = credentials.map(\.id)
-            let result = try await passkeyService.authenticatePasskey(
-                credentialIds: allIds
-            )
-            let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
-
-            guard let bundle = try await keyStorage.retrieveEncryptedKeys(
-                credentialId: result.credentialId,
-                kek: kek
-            ) else {
+            guard let bundle = try await recoverKeyBundle(credentialIds: allIds) else {
                 #if DEBUG
                 print("[PasskeyManager] Failed to decrypt key bundle for credential: \(result.credentialId)")
                 #endif
@@ -110,6 +102,7 @@ final class PasskeyManager: ObservableObject {
 
     /// Auto-generate a key and create a passkey for a brand new user.
     /// Returns true if successful, false if passkey creation was cancelled (key is discarded).
+    @discardableResult
     private func attemptNewUserPasskeySetup() async -> Bool {
         guard let user = await Clerk.shared.user else { return false }
 
@@ -146,16 +139,7 @@ final class PasskeyManager: ObservableObject {
             let allIds = await keyStorage.allCredentialIds()
             guard !allIds.isEmpty else { return false }
 
-            let result = try await passkeyService.authenticatePasskey(
-                credentialIds: allIds,
-                silent: false
-            )
-            let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
-
-            guard let bundle = try await keyStorage.retrieveEncryptedKeys(
-                credentialId: result.credentialId,
-                kek: kek
-            ) else {
+            guard let bundle = try await recoverKeyBundle(credentialIds: allIds) else {
                 return false
             }
 
@@ -310,6 +294,19 @@ final class PasskeyManager: ObservableObject {
     }
 
     // MARK: - Private Helpers
+
+    /// Authenticate with a passkey, derive the KEK, and decrypt the stored key bundle.
+    private func recoverKeyBundle(credentialIds: [String], silent: Bool = false) async throws -> KeyBundle? {
+        let result = try await passkeyService.authenticatePasskey(
+            credentialIds: credentialIds,
+            silent: silent
+        )
+        let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
+        return try await keyStorage.retrieveEncryptedKeys(
+            credentialId: result.credentialId,
+            kek: kek
+        )
+    }
 
     /// Create a passkey for the given user and derive its KEK.
     private func createPasskeyAndDeriveKEK(for user: User) async throws -> (credentialId: String, kek: SymmetricKey) {
