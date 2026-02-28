@@ -224,6 +224,7 @@ struct MessageView: View {
                     ErrorMessageView(
                         errorMessage: message.streamError!,
                         isDarkMode: isDarkMode,
+                        isRequestError: message.isRequestError,
                         onRegenerate: isLastMessage ? { viewModel.regenerateLastResponse() } : nil
                     )
                     .padding(.top, message.content.isEmpty && message.thoughts == nil ? 0 : 8)
@@ -342,6 +343,13 @@ struct MessageView: View {
                 .onChange(of: message.id) { _, _ in
                     isEditMode = false
                     editedContent = ""
+                }
+                .onChange(of: viewModel.editRequestedForMessageIndex) { _, newValue in
+                    if newValue == messageIndex && message.role == .user {
+                        editedContent = message.content
+                        isEditMode = true
+                        viewModel.editRequestedForMessageIndex = nil
+                    }
                 }
 
             }
@@ -1351,16 +1359,21 @@ struct GeneratingTableView: View {
 struct ErrorMessageView: View {
     let errorMessage: String
     let isDarkMode: Bool
+    var isRequestError: Bool = false
     var onRegenerate: (() -> Void)? = nil
+
+    private var accentColor: Color {
+        isRequestError ? .red : .orange
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Image(systemName: "wifi.exclamationmark")
-                    .foregroundColor(.orange)
+                Image(systemName: isRequestError ? "exclamationmark.triangle" : "wifi.exclamationmark")
+                    .foregroundColor(accentColor)
                     .font(.system(size: 16))
 
-                Text("Connection Lost")
+                Text(isRequestError ? "Request Failed" : "Connection Lost")
                     .font(.subheadline.weight(.medium))
                     .foregroundColor(isDarkMode ? .white : .black)
 
@@ -1377,7 +1390,7 @@ struct ErrorMessageView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 12, weight: .medium))
-                        Text("Regenerate")
+                        Text("Try again")
                             .font(.subheadline.weight(.medium))
                     }
                     .foregroundColor(.white)
@@ -1385,7 +1398,7 @@ struct ErrorMessageView: View {
                     .padding(.vertical, 8)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.orange)
+                            .fill(accentColor)
                     )
                 }
                 .buttonStyle(PlainButtonStyle())
@@ -1395,10 +1408,10 @@ struct ErrorMessageView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color.orange.opacity(0.1))
+                .fill(accentColor.opacity(0.1))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                        .stroke(accentColor.opacity(0.3), lineWidth: 1)
                 )
         )
     }

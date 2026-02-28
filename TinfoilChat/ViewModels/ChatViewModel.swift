@@ -43,6 +43,7 @@ class ChatViewModel: ObservableObject {
     @Published var imageViewerImages: [Attachment] = []
     @Published var imageViewerIndex: Int = 0
     @Published var showImageViewer: Bool = false
+    @Published var editRequestedForMessageIndex: Int? = nil
 
     // Verification properties - consolidated to reduce update frequency
     struct VerificationInfo {
@@ -1657,7 +1658,8 @@ class ChatViewModel: ObservableObject {
            (400...499).contains(statusCode), statusCode != 401 {
             return true
         }
-        if error is APIErrorResponse {
+        if let apiError = error as? APIErrorResponse,
+           apiError.error.code != Constants.API.ErrorCode.invalidAPIKey {
             return true
         }
         return false
