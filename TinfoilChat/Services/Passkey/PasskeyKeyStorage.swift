@@ -27,7 +27,10 @@ struct PasskeyCredentialEntry: Codable {
     let encrypted_keys: String
     let iv: String
     let created_at: String
+    let version: Int  // schema version (1 = AES-256-GCM + HKDF-SHA256 KEK)
 }
+
+private let currentCredentialVersion = 1
 
 // MARK: - PasskeyKeyStorage
 
@@ -165,7 +168,8 @@ final class PasskeyKeyStorage {
             id: credentialId,
             encrypted_keys: encrypted.data,
             iv: encrypted.iv,
-            created_at: previous?.created_at ?? ISO8601DateFormatter().string(from: Date())
+            created_at: previous?.created_at ?? ISO8601DateFormatter().string(from: Date()),
+            version: currentCredentialVersion
         )
 
         var updated = existing.filter { $0.id != credentialId }
