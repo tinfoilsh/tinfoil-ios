@@ -124,6 +124,8 @@ enum Constants {
         static let challengeByteCount = 32
         static let kekByteCount = 32
         static let prfCacheKeychainAccount = "sh.tinfoil.passkey-prf-cache"
+        static let syncVersionUserDefaultsKey = "tinfoil-passkey-sync-version"
+        static let syncCheckIntervalSeconds: TimeInterval = 30
     }
 
     enum Attachments {
