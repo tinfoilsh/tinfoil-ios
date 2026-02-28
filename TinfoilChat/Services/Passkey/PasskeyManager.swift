@@ -76,7 +76,7 @@ final class PasskeyManager: ObservableObject {
             let allIds = credentials.map(\.id)
             guard let bundle = try await recoverKeyBundle(credentialIds: allIds) else {
                 #if DEBUG
-                print("[PasskeyManager] Failed to decrypt key bundle for credential: \(result.credentialId)")
+                print("[PasskeyManager] Failed to decrypt key bundle")
                 #endif
                 showPasskeyRecoveryChoice = true
                 return .recoveryFailed
