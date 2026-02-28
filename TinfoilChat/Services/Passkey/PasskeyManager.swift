@@ -127,6 +127,9 @@ final class PasskeyManager: ObservableObject {
 
         } catch {
             // Passkey creation failed or user cancelled Face ID — discard the generated key, fall back
+            #if DEBUG
+            print("[PasskeyManager] New user passkey setup failed: \(error)")
+            #endif
             return false
         }
     }
@@ -156,6 +159,9 @@ final class PasskeyManager: ObservableObject {
             onRecoveryComplete?()
             return true
         } catch {
+            #if DEBUG
+            print("[PasskeyManager] Retry passkey recovery failed: \(error)")
+            #endif
             return false
         }
     }
