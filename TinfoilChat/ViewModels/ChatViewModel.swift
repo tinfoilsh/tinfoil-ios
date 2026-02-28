@@ -1598,6 +1598,7 @@ class ChatViewModel: ObservableObject {
 
                             // Set the stream error - the ErrorMessageView will display it nicely
                             // Keep any partial content that was received
+                            chat.messages[lastIndex].isRequestError = self.isRequestError(error)
                             chat.messages[lastIndex].streamError = userFriendlyError
 
                             self.updateChat(chat)
@@ -1648,6 +1649,18 @@ class ChatViewModel: ObservableObject {
         
         // Default error message if nothing specific matches
         return "An error occurred: \(error.localizedDescription)"
+    }
+
+    /// Checks if an error is a client request error (4xx, excluding 401 which is handled by retry)
+    private func isRequestError(_ error: Error) -> Bool {
+        if case OpenAIError.statusError(_, let statusCode) = error,
+           (400...499).contains(statusCode), statusCode != 401 {
+            return true
+        }
+        if error is APIErrorResponse {
+            return true
+        }
+        return false
     }
 
     /// Checks if an error is an authentication error (401)

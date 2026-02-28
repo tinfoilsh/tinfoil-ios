@@ -387,6 +387,7 @@ struct Message: Identifiable, Codable, Equatable {
     var isCollapsed: Bool = true
     var isStreaming: Bool = false
     var streamError: String? = nil
+    var isRequestError: Bool = false
     var generationTimeSeconds: Double? = nil
     var contentChunks: [ContentChunk] = []
     var thinkingChunks: [ThinkingChunk] = []
