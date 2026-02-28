@@ -436,7 +436,7 @@ struct Message: Identifiable, Codable, Equatable {
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, generationTimeSeconds, webSearchState
+        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, generationTimeSeconds, webSearchState
         case webSearch // Alternative key used by React app
         case attachments
         case thinkingDuration, isError
@@ -470,6 +470,7 @@ struct Message: Identifiable, Codable, Equatable {
         isCollapsed = try container.decodeIfPresent(Bool.self, forKey: .isCollapsed) ?? true
         isStreaming = try container.decodeIfPresent(Bool.self, forKey: .isStreaming) ?? false
         streamError = try container.decodeIfPresent(String.self, forKey: .streamError)
+        isRequestError = try container.decodeIfPresent(Bool.self, forKey: .isRequestError) ?? false
         generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)
         // contentChunks and thinkingChunks are transient UI rendering state — never decoded from storage
         contentChunks = []
@@ -505,6 +506,7 @@ struct Message: Identifiable, Codable, Equatable {
         try container.encode(isCollapsed, forKey: .isCollapsed)
         try container.encode(isStreaming, forKey: .isStreaming)
         try container.encodeIfPresent(streamError, forKey: .streamError)
+        if isRequestError { try container.encode(isRequestError, forKey: .isRequestError) }
         try container.encodeIfPresent(generationTimeSeconds, forKey: .generationTimeSeconds)
         // contentChunks is transient UI rendering state — never encode it
         // Encode as "webSearch" for React app compatibility
