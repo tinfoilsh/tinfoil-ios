@@ -226,6 +226,7 @@ struct SettingsView: View {
     @Environment(Clerk.self) private var clerk
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var profileManager = ProfileManager.shared
+    @ObservedObject private var passkeyManager = PasskeyManager.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAuthView = false
     @State private var showDeleteConfirmation = false
@@ -424,7 +425,7 @@ struct SettingsView: View {
                                     }
                                 } else {
                                     Task {
-                                        await chatViewModel.passkeyManager.retryPasskeySetup()
+                                        await passkeyManager.retryPasskeySetup()
                                     }
                                 }
                             } else {
@@ -451,7 +452,7 @@ struct SettingsView: View {
                     }
                 }
 
-                if chatViewModel.passkeyManager.passkeyActive {
+                if passkeyManager.passkeyActive {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 6) {
                             Image(systemName: "person.badge.key.fill")
@@ -476,10 +477,10 @@ struct SettingsView: View {
                         .padding(.top, 2)
                     }
                     .padding(.vertical, 2)
-                } else if chatViewModel.passkeyManager.passkeySetupAvailable && EncryptionService.shared.hasEncryptionKey() {
+                } else if passkeyManager.passkeySetupAvailable && EncryptionService.shared.hasEncryptionKey() {
                     Button(action: {
                         Task {
-                            await chatViewModel.passkeyManager.createPasskeyBackup()
+                            await passkeyManager.createPasskeyBackup()
                         }
                     }) {
                         VStack(alignment: .leading, spacing: 6) {
@@ -497,10 +498,10 @@ struct SettingsView: View {
                         }
                         .padding(.vertical, 2)
                     }
-                } else if chatViewModel.passkeyManager.passkeySetupAvailable && !EncryptionService.shared.hasEncryptionKey() {
+                } else if passkeyManager.passkeySetupAvailable && !EncryptionService.shared.hasEncryptionKey() {
                     Button(action: {
                         Task {
-                            await chatViewModel.passkeyManager.retryPasskeySetup()
+                            await passkeyManager.retryPasskeySetup()
                         }
                     }) {
                         VStack(alignment: .leading, spacing: 6) {
