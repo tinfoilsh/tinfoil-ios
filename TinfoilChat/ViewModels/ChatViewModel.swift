@@ -2186,11 +2186,9 @@ class ChatViewModel: ObservableObject {
         print("handleSignIn called")
         #endif
 
-        // Wire up passkey recovery callback (idempotent)
-        if passkeyManager.onRecoveryComplete == nil {
-            passkeyManager.onRecoveryComplete = { [weak self] in
-                self?.handleSignIn()
-            }
+        // Wire up passkey recovery callback
+        passkeyManager.onRecoveryComplete = { [weak self] in
+            self?.handleSignIn()
         }
 
         // Prevent duplicate sign-in flows

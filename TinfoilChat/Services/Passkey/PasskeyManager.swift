@@ -52,6 +52,7 @@ final class PasskeyManager: ObservableObject {
         passkeySetupAvailable = false
         showPasskeyIntro = false
         showPasskeyRecoveryChoice = false
+        onRecoveryComplete = nil
         introTask?.cancel()
         introTask = nil
     }
