@@ -222,6 +222,7 @@ final class PasskeyManager: ObservableObject {
         passkeySetupAvailable = true
         if !hasSeenIntro {
             // Show intro after a short delay to not interrupt sign-in
+            introTask?.cancel()
             introTask = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(Constants.Passkey.introDelaySeconds))
                 if self.passkeySetupAvailable && !self.passkeyActive {
