@@ -64,6 +64,7 @@ enum Constants {
     enum CloudSync {
         static let enabledKey = "cloudSyncEnabled"
         static let activeTabKey = "cloudSyncActiveTab"
+        static let localOnlyModeEnabledKey = "localOnlyModeEnabled"
         static let clipboardExpirationSeconds: TimeInterval = 300
     }
 

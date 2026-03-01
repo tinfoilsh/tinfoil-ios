@@ -94,6 +94,13 @@ class SettingsManager: ObservableObject {
         }
     }
 
+    // Local-only mode toggle (only relevant when cloud sync is enabled)
+    @Published var isLocalOnlyModeEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isLocalOnlyModeEnabled, forKey: Constants.CloudSync.localOnlyModeEnabledKey)
+        }
+    }
+
     // Available personality traits
     let availableTraits = [
         "witty", "encouraging", "formal", "casual", "analytical", "creative",
@@ -143,6 +150,9 @@ class SettingsManager: ObservableObject {
         } else {
             self.isCloudSyncEnabled = false
         }
+
+        // Initialize local-only mode setting (defaults to false)
+        self.isLocalOnlyModeEnabled = UserDefaults.standard.object(forKey: Constants.CloudSync.localOnlyModeEnabledKey) as? Bool ?? false
 
         // Ensure defaults are saved if they weren't present
         if UserDefaults.standard.object(forKey: "hapticFeedbackEnabled") == nil {

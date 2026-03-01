@@ -219,7 +219,7 @@ struct ChatContainer: View {
                         .frame(height: 22)
                         .opacity(isSidebarOpen ? 1 : 0)
 
-                    if authManager.isAuthenticated && settings.isCloudSyncEnabled && viewModel.activeStorageTab == .local {
+                    if authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled && viewModel.activeStorageTab == .local {
                         chatStorageLabel
                             .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
                     }
