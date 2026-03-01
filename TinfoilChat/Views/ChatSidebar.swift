@@ -169,7 +169,7 @@ struct ChatSidebar: View {
             )
 
             // Cloud / Local tab switcher
-            if authManager.isAuthenticated && settings.isCloudSyncEnabled {
+            if authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled {
                 cloudLocalTabSwitcher
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)

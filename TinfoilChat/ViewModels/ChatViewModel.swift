@@ -273,6 +273,10 @@ class ChatViewModel: ObservableObject {
            let tab = ChatStorageTab(rawValue: savedTab) {
             self.activeStorageTab = tab
         }
+        // Force cloud tab when local-only mode is disabled
+        if SettingsManager.shared.isCloudSyncEnabled && !SettingsManager.shared.isLocalOnlyModeEnabled {
+            self.activeStorageTab = .cloud
+        }
 
         // Load persisted last sync date (will be loaded per-user when auth is set)
         // Initial load happens in the authManager didSet
@@ -561,6 +565,10 @@ class ChatViewModel: ObservableObject {
     /// Switches the active storage tab and selects an appropriate chat
     func switchStorageTab(to tab: ChatStorageTab) {
         guard activeStorageTab != tab else { return }
+        // Prevent switching to local when local-only mode is disabled
+        if tab == .local && SettingsManager.shared.isCloudSyncEnabled && !SettingsManager.shared.isLocalOnlyModeEnabled {
+            return
+        }
         activeStorageTab = tab
         UserDefaults.standard.set(tab.rawValue, forKey: Constants.CloudSync.activeTabKey)
 
@@ -595,6 +603,8 @@ class ChatViewModel: ObservableObject {
             shouldBeLocal = explicit
         } else if !SettingsManager.shared.isCloudSyncEnabled {
             shouldBeLocal = true
+        } else if !SettingsManager.shared.isLocalOnlyModeEnabled {
+            shouldBeLocal = false
         } else {
             shouldBeLocal = activeStorageTab == .local
         }
@@ -2273,6 +2283,13 @@ class ChatViewModel: ObservableObject {
                         normalizeLocalChatsArray()
                         if self.currentChat == nil, let first = self.localChats.first {
                             self.currentChat = first
+                        }
+                        // Auto-enable local-only mode when local chats with messages exist,
+                        // but only if the user has never explicitly set the preference
+                        let hasNonEmptyLocalChats = self.localChats.contains { !$0.messages.isEmpty }
+                        let userHasSetPreference = UserDefaults.standard.object(forKey: Constants.CloudSync.localOnlyModeEnabledKey) != nil
+                        if hasNonEmptyLocalChats && !userHasSetPreference {
+                            SettingsManager.shared.isLocalOnlyModeEnabled = true
                         }
                     }
 

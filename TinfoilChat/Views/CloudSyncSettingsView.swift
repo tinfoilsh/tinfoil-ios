@@ -126,6 +126,26 @@ struct CloudSyncSettingsView: View {
                         .font(.caption)
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
+
+            // Local-Only Mode Section
+            Section {
+                Toggle("Local-Only Mode", isOn: Binding(
+                    get: { SettingsManager.shared.isLocalOnlyModeEnabled },
+                    set: { newValue in
+                        SettingsManager.shared.isLocalOnlyModeEnabled = newValue
+                        if !newValue {
+                            viewModel.switchStorageTab(to: .cloud)
+                        }
+                    }
+                ))
+                .tint(Color.accentPrimary)
+            } header: {
+                Text("Local Storage")
+            } footer: {
+                Text("Enable to create chats that stay only on this device and are never synced to the cloud.")
+                    .font(.caption)
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
         }
         .scrollContentBackground(.hidden)
         .background(Color.settingsBackground(for: colorScheme))
