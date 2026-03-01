@@ -1004,9 +1004,6 @@ private struct MarkdownThemeCache {
     }
 
     private static func createTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
-        let textColor = isDarkMode ? SwiftUI.Color.white : SwiftUI.Color.black.opacity(0.8)
-        let codeBackgroundColor = isDarkMode ? SwiftUI.Color.white.opacity(0.15) : SwiftUI.Color.black.opacity(0.08)
-        let codeForegroundColor = isDarkMode ? SwiftUI.Color(red: 1.0, green: 0.6, blue: 0.4) : SwiftUI.Color(red: 0.8, green: 0.3, blue: 0.2)
         let codeBlockHeaderBg = isDarkMode ? SwiftUI.Color.white.opacity(0.05) : SwiftUI.Color.black.opacity(0.03)
         let codeBlockHeaderFg = isDarkMode ? SwiftUI.Color.white.opacity(0.7) : SwiftUI.Color.black.opacity(0.6)
         let codeBlockBodyBg = isDarkMode ? SwiftUI.Color.black.opacity(0.3) : SwiftUI.Color.gray.opacity(0.05)

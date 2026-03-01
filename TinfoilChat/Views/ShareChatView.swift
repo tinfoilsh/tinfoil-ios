@@ -271,7 +271,7 @@ struct ShareChatView: View {
         }
     }
 
-    private static func buildShareableData(messages: [Message], chatTitle: String?, chatCreatedAt: Date?) -> ShareableChatData {
+    nonisolated private static func buildShareableData(messages: [Message], chatTitle: String?, chatCreatedAt: Date?) -> ShareableChatData {
         let shareableMessages = messages.map { msg in
             let docContent: String? = {
                 let docs = msg.attachments.filter { $0.type == .document && $0.textContent != nil }
