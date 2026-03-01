@@ -120,7 +120,7 @@ final class PasskeyManager: ObservableObject {
     /// Returns true if successful, false if passkey creation was cancelled (key is discarded).
     @discardableResult
     private func attemptNewUserPasskeySetup() async -> Bool {
-        guard let user = await Clerk.shared.user else { return false }
+        guard let user = Clerk.shared.user else { return false }
 
         let newKey = EncryptionService.shared.generateKey()
 
@@ -223,7 +223,7 @@ final class PasskeyManager: ObservableObject {
 
         // No passkey credentials — check if user has seen the intro
         let hasSeenIntro: Bool
-        if let metadata = await Clerk.shared.user?.unsafeMetadata,
+        if let metadata = Clerk.shared.user?.unsafeMetadata,
            case .object(let dict) = metadata,
            case .bool(let seen) = dict[Constants.Passkey.hasSeenIntroKey] {
             hasSeenIntro = seen
@@ -248,7 +248,7 @@ final class PasskeyManager: ObservableObject {
     /// Create a passkey backup for the user's existing keys.
     /// Called from PasskeyIntroView's onAccept and Settings backup button.
     func createPasskeyBackup() async {
-        guard let user = await Clerk.shared.user else { return }
+        guard let user = Clerk.shared.user else { return }
 
         do {
             let keys = EncryptionService.shared.getAllKeys()
@@ -378,7 +378,7 @@ final class PasskeyManager: ObservableObject {
 
     /// Mark the passkey intro as seen in Clerk unsafeMetadata.
     private func markPasskeyIntroSeen() async {
-        guard let user = await Clerk.shared.user else { return }
+        guard let user = Clerk.shared.user else { return }
 
         var existingMetadata: [String: JSON] = [:]
         if case .object(let dict) = user.unsafeMetadata {
@@ -387,7 +387,7 @@ final class PasskeyManager: ObservableObject {
         existingMetadata[Constants.Passkey.hasSeenIntroKey] = .bool(true)
 
         let params = User.UpdateParams(unsafeMetadata: .object(existingMetadata))
-        try? await user.update(params)
+        _ = try? await user.update(params)
     }
 
     // MARK: - Sync Version Tracking

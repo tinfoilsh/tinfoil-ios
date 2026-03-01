@@ -8,7 +8,7 @@
 import Foundation
 import Combine
 import SwiftUI
-import TinfoilAI
+@preconcurrency import TinfoilAI
 import OpenAI
 import AVFoundation
 
@@ -369,40 +369,37 @@ class ChatViewModel: ObservableObject {
                 
                 
                 // Perform sync in background
-                do {
-                    // Use smart sync for periodic sync (checks if sync is needed first)
-                    let syncResult = await self.cloudSync.smartSync()
-                    
-                    // Update last sync date after successful sync
-                    self.lastSyncDate = Date()
-                    
-                    // If chats were downloaded or deleted remotely, reload the chat list
-                    if syncResult.downloaded > 0 || syncResult.deleted > 0 {
-                        // Use intelligent update that preserves pagination
-                        await self.updateChatsAfterSync()
-                        
-                        // Force UI update
-                        self.objectWillChange.send()
-                        
-                        // Restore current chat selection if it still exists
-                        if let currentChatId = self.currentChat?.id,
-                           let location = self.findChatLocation(currentChatId) {
-                            self.currentChat = self.chat(at: location)
-                        }
-                        
-                    }
-                    
-                    // Also backup current chat if it has changes
-                    if let currentChat = await MainActor.run(body: { self.currentChat }),
-                       !currentChat.messages.isEmpty,
-                       !currentChat.hasActiveStream {
-                        await self.cloudSync.backupChat(currentChat.id)
+                // Use smart sync for periodic sync (checks if sync is needed first)
+                let syncResult = await self.cloudSync.smartSync()
+
+                // Update last sync date after successful sync
+                self.lastSyncDate = Date()
+
+                // If chats were downloaded or deleted remotely, reload the chat list
+                if syncResult.downloaded > 0 || syncResult.deleted > 0 {
+                    // Use intelligent update that preserves pagination
+                    await self.updateChatsAfterSync()
+
+                    // Force UI update
+                    self.objectWillChange.send()
+
+                    // Restore current chat selection if it still exists
+                    if let currentChatId = self.currentChat?.id,
+                       let location = self.findChatLocation(currentChatId) {
+                        self.currentChat = self.chat(at: location)
                     }
 
-                    // Sync profile settings periodically
-                    await ProfileManager.shared.syncFromCloud()
-                } catch {
                 }
+
+                // Also backup current chat if it has changes
+                if let currentChat = await MainActor.run(body: { self.currentChat }),
+                   !currentChat.messages.isEmpty,
+                   !currentChat.hasActiveStream {
+                    await self.cloudSync.backupChat(currentChat.id)
+                }
+
+                // Sync profile settings periodically
+                await ProfileManager.shared.syncFromCloud()
             }
         }
         // Ensure the timer fires during UI interactions (scrolling, modal sheets)
