@@ -699,14 +699,18 @@ private struct MarkdownTableView: View {
         }
         .padding(.vertical, 8)
         .background(
-            tableContainer(useColumnWidths: false)
-                .hidden()
-                .onPreferenceChange(ColumnWidthPreferenceKey.self) { newValues in
-                    let cappedValues = newValues.mapValues { min($0, Constants.UI.tableMaxColumnWidth) }
-                    if columnWidths != cappedValues {
-                        columnWidths = cappedValues
-                    }
+            Group {
+                if columnWidths.isEmpty {
+                    tableContainer(useColumnWidths: false)
+                        .hidden()
+                        .onPreferenceChange(ColumnWidthPreferenceKey.self) { newValues in
+                            let cappedValues = newValues.mapValues { min($0, Constants.UI.tableMaxColumnWidth) }
+                            if columnWidths != cappedValues {
+                                columnWidths = cappedValues
+                            }
+                        }
                 }
+            }
         )
     }
 
