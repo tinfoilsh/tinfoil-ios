@@ -166,9 +166,11 @@ class SettingsManager: ObservableObject {
         }
     }
 
-    /// Clear all personalization settings (call on logout with data deletion)
-    func clearPersonalization() {
-        // Clear personalization data from UserDefaults
+    /// Clear all settings (call on logout with data deletion)
+    func clearAllSettings() {
+        // Clear all user data from UserDefaults
+        UserDefaults.standard.removeObject(forKey: "hapticFeedbackEnabled")
+        UserDefaults.standard.removeObject(forKey: "selectedLanguage")
         UserDefaults.standard.removeObject(forKey: "isPersonalizationEnabled")
         UserDefaults.standard.removeObject(forKey: "userNickname")
         UserDefaults.standard.removeObject(forKey: "userProfession")
@@ -177,8 +179,13 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "maxPromptMessages")
         UserDefaults.standard.removeObject(forKey: "isUsingCustomPrompt")
         UserDefaults.standard.removeObject(forKey: "customSystemPrompt")
+        UserDefaults.standard.removeObject(forKey: "webSearchEnabled")
+        UserDefaults.standard.removeObject(forKey: Constants.CloudSync.enabledKey)
+        UserDefaults.standard.removeObject(forKey: Constants.CloudSync.localOnlyModeEnabledKey)
 
         // Reset in-memory state to defaults
+        hapticFeedbackEnabled = true
+        selectedLanguage = "System"
         isPersonalizationEnabled = false
         nickname = ""
         profession = ""
@@ -187,6 +194,9 @@ class SettingsManager: ObservableObject {
         maxMessages = Constants.Context.defaultMaxMessages
         isUsingCustomPrompt = false
         customSystemPrompt = ""
+        webSearchEnabled = false
+        isCloudSyncEnabled = false
+        isLocalOnlyModeEnabled = false
     }
 
     // Generate user preferences XML for system prompt
@@ -305,9 +315,8 @@ struct SettingsView: View {
         EncryptionService.shared.clearKey()
         await DeviceEncryptionService.shared.clearKey()
         UserDefaults.standard.removeObject(forKey: "hasLaunchedBefore")
-        settings.isCloudSyncEnabled = false
         await chatViewModel.clearAllChatsFromDevice()
-        settings.clearPersonalization()
+        settings.clearAllSettings()
         ProfileManager.shared.clearProfile()
     }
 
@@ -822,9 +831,16 @@ struct SettingsView: View {
                 }
             }
         } message: {
-            Text(passkeyManager.passkeyActive
-                ? "All local data will be cleared. You can recover your chats by signing back in."
-                : "All local data will be cleared. You will need your encryption key to recover your chats.")
+            if settings.isLocalOnlyModeEnabled {
+                Text(passkeyManager.passkeyActive
+                    ? "All local data will be cleared. You can recover your chats by signing back in.\n"
+                    : "All local data will be cleared. You will need your encryption key to recover your chats.\n")
+                + Text("\n⚠️ Your local chats will be deleted forever.").bold()
+            } else {
+                Text(passkeyManager.passkeyActive
+                    ? "All local data will be cleared. You can recover your chats by signing back in."
+                    : "All local data will be cleared. You will need your encryption key to recover your chats.")
+            }
         }
         .alert("Delete Account", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
