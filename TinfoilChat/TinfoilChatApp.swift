@@ -21,6 +21,7 @@ struct TinfoilChatApp: App {
     @StateObject private var authManager = AuthManager()
 
     init() {
+        StorageKeysMigration.migrateIfNeeded()
         Clerk.configure(publishableKey: AppConfig.shared.clerkPublishableKey)
         _clerk = State(initialValue: Clerk.shared)
     }

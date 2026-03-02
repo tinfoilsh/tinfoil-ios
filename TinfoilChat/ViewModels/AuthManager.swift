@@ -22,9 +22,9 @@ class AuthManager: ObservableObject {
     private var hasTriggeredSignIn = false
     
     // UserDefaults keys
-    private let authStateKey = "sh.tinfoil.authState"
-    private let userDataKey = "sh.tinfoil.userData"
-    private let subscriptionKey = "sh.tinfoil.subscription"
+    private let authStateKey = Constants.StorageKeys.Auth.state
+    private let userDataKey = Constants.StorageKeys.Auth.userData
+    private let subscriptionKey = Constants.StorageKeys.Auth.subscription
 
     private func isSubscriptionActive(status: String, expiresAt: String?) -> Bool {
         if status == "active" || status == "trialing" {

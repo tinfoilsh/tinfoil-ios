@@ -19,85 +19,85 @@ class SettingsManager: ObservableObject {
     
     @Published var hapticFeedbackEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(hapticFeedbackEnabled, forKey: "hapticFeedbackEnabled")
+            UserDefaults.standard.set(hapticFeedbackEnabled, forKey: Constants.StorageKeys.Settings.hapticFeedbackEnabled)
         }
     }
     
     @Published var selectedLanguage: String {
         didSet {
-            UserDefaults.standard.set(selectedLanguage, forKey: "selectedLanguage")
+            UserDefaults.standard.set(selectedLanguage, forKey: Constants.StorageKeys.Settings.selectedLanguage)
         }
     }
     
     // Personalization settings
     @Published var isPersonalizationEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(isPersonalizationEnabled, forKey: "isPersonalizationEnabled")
+            UserDefaults.standard.set(isPersonalizationEnabled, forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled)
         }
     }
     
     @Published var nickname: String {
         didSet {
-            UserDefaults.standard.set(nickname, forKey: "userNickname")
+            UserDefaults.standard.set(nickname, forKey: Constants.StorageKeys.UserPrefs.nickname)
         }
     }
     
     @Published var profession: String {
         didSet {
-            UserDefaults.standard.set(profession, forKey: "userProfession")
+            UserDefaults.standard.set(profession, forKey: Constants.StorageKeys.UserPrefs.profession)
         }
     }
     
     @Published var selectedTraits: [String] {
         didSet {
-            UserDefaults.standard.set(selectedTraits, forKey: "userTraits")
+            UserDefaults.standard.set(selectedTraits, forKey: Constants.StorageKeys.UserPrefs.traits)
         }
     }
     
     @Published var additionalContext: String {
         didSet {
-            UserDefaults.standard.set(additionalContext, forKey: "userAdditionalContext")
+            UserDefaults.standard.set(additionalContext, forKey: Constants.StorageKeys.UserPrefs.additionalContext)
         }
     }
     
     // Max messages setting
     @Published var maxMessages: Int {
         didSet {
-            UserDefaults.standard.set(maxMessages, forKey: "maxPromptMessages")
+            UserDefaults.standard.set(maxMessages, forKey: Constants.StorageKeys.Settings.maxPromptMessages)
         }
     }
     
     // Custom system prompt settings
     @Published var isUsingCustomPrompt: Bool {
         didSet {
-            UserDefaults.standard.set(isUsingCustomPrompt, forKey: "isUsingCustomPrompt")
+            UserDefaults.standard.set(isUsingCustomPrompt, forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled)
         }
     }
     
     @Published var customSystemPrompt: String {
         didSet {
-            UserDefaults.standard.set(customSystemPrompt, forKey: "customSystemPrompt")
+            UserDefaults.standard.set(customSystemPrompt, forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt)
         }
     }
 
     // Web search toggle
     @Published var webSearchEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(webSearchEnabled, forKey: "webSearchEnabled")
+            UserDefaults.standard.set(webSearchEnabled, forKey: Constants.StorageKeys.Settings.webSearchEnabled)
         }
     }
 
     // Cloud sync toggle
     @Published var isCloudSyncEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(isCloudSyncEnabled, forKey: Constants.CloudSync.enabledKey)
+            UserDefaults.standard.set(isCloudSyncEnabled, forKey: Constants.StorageKeys.Settings.cloudSyncEnabled)
         }
     }
 
     // Local-only mode toggle (only relevant when cloud sync is enabled)
     @Published var isLocalOnlyModeEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(isLocalOnlyModeEnabled, forKey: Constants.CloudSync.localOnlyModeEnabledKey)
+            UserDefaults.standard.set(isLocalOnlyModeEnabled, forKey: Constants.StorageKeys.Settings.localOnlyModeEnabled)
         }
     }
 
@@ -110,78 +110,78 @@ class SettingsManager: ObservableObject {
     
     private init() {
         // Initialize with stored values or defaults if not present
-        self.hapticFeedbackEnabled = UserDefaults.standard.object(forKey: "hapticFeedbackEnabled") as? Bool ?? true
-        self.selectedLanguage = UserDefaults.standard.string(forKey: "selectedLanguage") ?? "System"
+        self.hapticFeedbackEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.hapticFeedbackEnabled) as? Bool ?? true
+        self.selectedLanguage = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.selectedLanguage) ?? "System"
         
         // Initialize personalization settings
-        self.isPersonalizationEnabled = UserDefaults.standard.object(forKey: "isPersonalizationEnabled") as? Bool ?? false
-        self.nickname = UserDefaults.standard.string(forKey: "userNickname") ?? ""
-        self.profession = UserDefaults.standard.string(forKey: "userProfession") ?? ""
-        self.additionalContext = UserDefaults.standard.string(forKey: "userAdditionalContext") ?? ""
+        self.isPersonalizationEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled) as? Bool ?? false
+        self.nickname = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.nickname) ?? ""
+        self.profession = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.profession) ?? ""
+        self.additionalContext = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.additionalContext) ?? ""
         
-        if let traitsData = UserDefaults.standard.array(forKey: "userTraits") as? [String] {
+        if let traitsData = UserDefaults.standard.array(forKey: Constants.StorageKeys.UserPrefs.traits) as? [String] {
             self.selectedTraits = traitsData
         } else {
             self.selectedTraits = []
         }
         
         // Initialize max messages setting
-        if let savedMaxMessages = UserDefaults.standard.object(forKey: "maxPromptMessages") as? Int {
+        if let savedMaxMessages = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.maxPromptMessages) as? Int {
             self.maxMessages = min(max(savedMaxMessages, 1), Constants.Context.maxMessagesLimit)
         } else {
             self.maxMessages = Constants.Context.defaultMaxMessages
-            UserDefaults.standard.set(Constants.Context.defaultMaxMessages, forKey: "maxPromptMessages")
+            UserDefaults.standard.set(Constants.Context.defaultMaxMessages, forKey: Constants.StorageKeys.Settings.maxPromptMessages)
         }
         
         // Initialize custom system prompt settings
-        self.isUsingCustomPrompt = UserDefaults.standard.object(forKey: "isUsingCustomPrompt") as? Bool ?? false
-        self.customSystemPrompt = UserDefaults.standard.string(forKey: "customSystemPrompt") ?? ""
+        self.isUsingCustomPrompt = UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled) as? Bool ?? false
+        self.customSystemPrompt = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt) ?? ""
 
         // Initialize web search setting
-        self.webSearchEnabled = UserDefaults.standard.object(forKey: "webSearchEnabled") as? Bool ?? false
+        self.webSearchEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.webSearchEnabled) as? Bool ?? false
 
         // Initialize cloud sync setting
         // If no explicit value has been stored, auto-enable for existing users who already have an encryption key
-        if let storedValue = UserDefaults.standard.object(forKey: Constants.CloudSync.enabledKey) as? Bool {
+        if let storedValue = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.cloudSyncEnabled) as? Bool {
             self.isCloudSyncEnabled = storedValue
         } else if EncryptionService.shared.hasEncryptionKey() {
             self.isCloudSyncEnabled = true
-            UserDefaults.standard.set(true, forKey: Constants.CloudSync.enabledKey)
+            UserDefaults.standard.set(true, forKey: Constants.StorageKeys.Settings.cloudSyncEnabled)
         } else {
             self.isCloudSyncEnabled = false
         }
 
         // Initialize local-only mode setting (defaults to false)
-        self.isLocalOnlyModeEnabled = UserDefaults.standard.object(forKey: Constants.CloudSync.localOnlyModeEnabledKey) as? Bool ?? false
+        self.isLocalOnlyModeEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.localOnlyModeEnabled) as? Bool ?? false
 
         // Ensure defaults are saved if they weren't present
-        if UserDefaults.standard.object(forKey: "hapticFeedbackEnabled") == nil {
-            UserDefaults.standard.set(true, forKey: "hapticFeedbackEnabled")
+        if UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.hapticFeedbackEnabled) == nil {
+            UserDefaults.standard.set(true, forKey: Constants.StorageKeys.Settings.hapticFeedbackEnabled)
         }
-        if UserDefaults.standard.string(forKey: "selectedLanguage") == nil {
-            UserDefaults.standard.set("System", forKey: "selectedLanguage")
+        if UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.selectedLanguage) == nil {
+            UserDefaults.standard.set("System", forKey: Constants.StorageKeys.Settings.selectedLanguage)
         }
-        if UserDefaults.standard.object(forKey: "isPersonalizationEnabled") == nil {
-            UserDefaults.standard.set(false, forKey: "isPersonalizationEnabled")
+        if UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled) == nil {
+            UserDefaults.standard.set(false, forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled)
         }
     }
 
     /// Clear all settings (call on logout with data deletion)
     func clearAllSettings() {
         // Clear all user data from UserDefaults
-        UserDefaults.standard.removeObject(forKey: "hapticFeedbackEnabled")
-        UserDefaults.standard.removeObject(forKey: "selectedLanguage")
-        UserDefaults.standard.removeObject(forKey: "isPersonalizationEnabled")
-        UserDefaults.standard.removeObject(forKey: "userNickname")
-        UserDefaults.standard.removeObject(forKey: "userProfession")
-        UserDefaults.standard.removeObject(forKey: "userTraits")
-        UserDefaults.standard.removeObject(forKey: "userAdditionalContext")
-        UserDefaults.standard.removeObject(forKey: "maxPromptMessages")
-        UserDefaults.standard.removeObject(forKey: "isUsingCustomPrompt")
-        UserDefaults.standard.removeObject(forKey: "customSystemPrompt")
-        UserDefaults.standard.removeObject(forKey: "webSearchEnabled")
-        UserDefaults.standard.removeObject(forKey: Constants.CloudSync.enabledKey)
-        UserDefaults.standard.removeObject(forKey: Constants.CloudSync.localOnlyModeEnabledKey)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.hapticFeedbackEnabled)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.selectedLanguage)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.nickname)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.profession)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.traits)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.additionalContext)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.maxPromptMessages)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.webSearchEnabled)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.cloudSyncEnabled)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.localOnlyModeEnabled)
 
         // Reset in-memory state to defaults
         hapticFeedbackEnabled = true
@@ -314,7 +314,7 @@ struct SettingsView: View {
     private func performFullDataCleanup() async {
         EncryptionService.shared.clearKey()
         await DeviceEncryptionService.shared.clearKey()
-        UserDefaults.standard.removeObject(forKey: "hasLaunchedBefore")
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.hasLaunchedBefore)
         await chatViewModel.clearAllChatsFromDevice()
         settings.clearAllSettings()
         ProfileManager.shared.clearProfile()
