@@ -33,6 +33,14 @@ enum Constants {
         static let actionButtonCornerRadius: CGFloat = 6
     }
 
+    enum StreamingBuffer {
+        static let initialMultiplier: CGFloat = 50.0
+        static let multiplierIncrement: CGFloat = 10.0
+        static let maxMultiplier: CGFloat = 200.0
+        static let extensionThresholdRatio: CGFloat = 0.9
+        static let maxCellHeight: CGFloat = 200_000
+    }
+
     enum API {
         static let chatCompletionsEndpoint = "/v1/chat/completions"
         static let baseURL = "https://api.tinfoil.sh"

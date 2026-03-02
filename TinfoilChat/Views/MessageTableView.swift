@@ -54,10 +54,16 @@ struct MessageTableView: UIViewRepresentable {
         if keyboardHeightChanged {
             let wasAtBottom = context.coordinator.parent.isAtBottom
             context.coordinator.lastKeyboardHeight = keyboardHeight
+            context.coordinator.isKeyboardTransitioning = true
 
             if wasAtBottom && keyboardHeight > 0 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     context.coordinator.scrollToBottom(animated: true)
+                    context.coordinator.isKeyboardTransitioning = false
+                }
+            } else {
+                DispatchQueue.main.async {
+                    context.coordinator.isKeyboardTransitioning = false
                 }
             }
         }
@@ -120,19 +126,13 @@ struct MessageTableView: UIViewRepresentable {
                 let isArchived = messages.count - 1 < archivedMessagesStartIndex
                 let showArchiveSeparator = messages.count - 1 == archivedMessagesStartIndex && archivedMessagesStartIndex > 0
 
-                let screenHeight = UIScreen.main.bounds.height
-                let currentBufferHeight = screenHeight * wrapper.bufferMultiplier
-                let threshold = currentBufferHeight * 0.9
-                let needsBufferExtension = wrapper.actualContentHeight > threshold
-
                 // Update multiplier synchronously to prevent race condition:
                 // updateUIView is called on every streaming token, and if we defer
                 // the update to DispatchQueue.main.async, many calls will read the
                 // stale multiplier and each queue a +10 increment, causing it to
                 // explode to thousands.
-                if needsBufferExtension {
-                    wrapper.bufferMultiplier += 10.0
-                }
+                let screenHeight = UIScreen.main.bounds.height
+                let needsBufferExtension = wrapper.extendBufferIfNeeded(screenHeight: screenHeight)
 
                 let coordinator = context.coordinator
                 DispatchQueue.main.async {
@@ -148,7 +148,7 @@ struct MessageTableView: UIViewRepresentable {
                         messageIndex: coordinator.parent.messages.count - 1
                     )
 
-                    if needsBufferExtension {
+                    if needsBufferExtension && !coordinator.isKeyboardTransitioning {
                         tableView.beginUpdates()
                         tableView.endUpdates()
                     }
@@ -176,8 +176,7 @@ struct MessageTableView: UIViewRepresentable {
                 )
 
                 DispatchQueue.main.async {
-                    wrapper.bufferMultiplier = 50.0
-                    wrapper.actualContentHeight = 0
+                    wrapper.resetBuffer()
                 }
             }
 
@@ -267,6 +266,7 @@ struct MessageTableView: UIViewRepresentable {
         var isUserMessageScrollMode = false
         var heightCache: [IndexPath: CGFloat] = [:]
         var shownMessageIds: Set<String> = []
+        var isKeyboardTransitioning = false
 
         init(_ parent: MessageTableView) {
             self.parent = parent
@@ -540,7 +540,7 @@ class ObservableMessageWrapper: ObservableObject {
     @Published var showArchiveSeparator: Bool
     @Published var shouldAnimateAppearance: Bool = false
     @Published var messageIndex: Int
-    var bufferMultiplier: CGFloat = 50.0
+    var bufferMultiplier: CGFloat = Constants.StreamingBuffer.initialMultiplier
     var actualContentHeight: CGFloat = 0
     var cachedHeight: CGFloat?
     var cachedHeightKey: Int?
@@ -596,6 +596,26 @@ class ObservableMessageWrapper: ObservableObject {
         }
     }
 
+    /// Checks whether the streaming buffer needs to grow and extends it if so.
+    /// Returns true if the buffer was extended.
+    @discardableResult
+    func extendBufferIfNeeded(screenHeight: CGFloat) -> Bool {
+        let currentBufferHeight = screenHeight * bufferMultiplier
+        let threshold = currentBufferHeight * Constants.StreamingBuffer.extensionThresholdRatio
+        let needsExtension = actualContentHeight > threshold
+            && bufferMultiplier < Constants.StreamingBuffer.maxMultiplier
+
+        if needsExtension {
+            bufferMultiplier += Constants.StreamingBuffer.multiplierIncrement
+        }
+        return needsExtension
+    }
+
+    func resetBuffer() {
+        bufferMultiplier = Constants.StreamingBuffer.initialMultiplier
+        actualContentHeight = 0
+    }
+
     func getCacheKey() -> Int {
         message.content.hashValue ^
         (message.thoughts?.hashValue ?? 0) ^
@@ -613,7 +633,10 @@ struct ObservableMessageCell: View {
 
     private var bufferHeight: CGFloat {
         let screenHeight = UIScreen.main.bounds.height
-        return screenHeight * wrapper.bufferMultiplier
+        return min(
+            screenHeight * wrapper.bufferMultiplier,
+            Constants.StreamingBuffer.maxCellHeight
+        )
     }
 
     var body: some View {
