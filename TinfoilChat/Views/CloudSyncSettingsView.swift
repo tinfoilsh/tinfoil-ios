@@ -13,6 +13,7 @@ struct CloudSyncSettingsView: View {
     @Environment(\.colorScheme) var colorScheme
     @ObservedObject var viewModel: ChatViewModel
     @ObservedObject var authManager: AuthManager
+    @ObservedObject private var settings = SettingsManager.shared
     
     @State private var showKeyInput: Bool = false
     @State private var copiedToClipboard: Bool = false
@@ -129,18 +130,25 @@ struct CloudSyncSettingsView: View {
 
             // Local-Only Mode Section
             Section {
-                Toggle("Local-Only Mode", isOn: Binding(
-                    get: { SettingsManager.shared.isLocalOnlyModeEnabled },
-                    set: { newValue in
-                        SettingsManager.shared.isLocalOnlyModeEnabled = newValue
-                        if !newValue {
-                            viewModel.switchStorageTab(to: .cloud)
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("Enable local chats", isOn: Binding(
+                        get: { settings.isLocalOnlyModeEnabled },
+                        set: { newValue in
+                            settings.isLocalOnlyModeEnabled = newValue
+                            if !newValue {
+                                viewModel.switchStorageTab(to: .cloud)
+                            }
                         }
+                    ))
+                    .tint(Color.accentPrimary)
+                    if settings.isLocalOnlyModeEnabled {
+                        Text("Local chats will be permanently erased when you sign out. Treat local chats as temporary.")
+                            .font(.caption)
+                            .foregroundColor(.orange)
                     }
-                ))
-                .tint(Color.accentPrimary)
+                }
             } header: {
-                Text("Local Storage")
+                Text("Local Chats")
             } footer: {
                 Text("Enable to create chats that stay only on this device and are never synced to the cloud.")
                     .font(.caption)
