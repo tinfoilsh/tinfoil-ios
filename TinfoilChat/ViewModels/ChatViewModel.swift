@@ -840,6 +840,7 @@ class ChatViewModel: ObservableObject {
 
     /// Sends a user message and generates a response
     func sendMessage(text: String) {
+        guard !isLoading else { return }
         let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasAttachments = !pendingAttachments.isEmpty
         guard hasText || hasAttachments else { return }
