@@ -627,7 +627,7 @@ enum HapticFeedback {
 
     /// Triggers haptic feedback of specified type if enabled in settings
     static func trigger(_ type: FeedbackType) {
-        let hapticEnabled = UserDefaults.standard.object(forKey: "hapticFeedbackEnabled") as? Bool ?? true
+        let hapticEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.hapticFeedbackEnabled) as? Bool ?? true
         guard hapticEnabled else { return }
 
         let generator = UINotificationFeedbackGenerator()

@@ -62,9 +62,6 @@ enum Constants {
     }
 
     enum CloudSync {
-        static let enabledKey = "cloudSyncEnabled"
-        static let activeTabKey = "cloudSyncActiveTab"
-        static let localOnlyModeEnabledKey = "localOnlyModeEnabled"
         static let clipboardExpirationSeconds: TimeInterval = 300
     }
 
@@ -118,15 +115,82 @@ enum Constants {
         static let rpName = "Tinfoil Chat"
         static let prfSalt = Data("tinfoil-chat-key-encryption".utf8)
         static let hkdfInfo = Data("tinfoil-chat-kek-v1".utf8)
-        static let backedUpKey = "tinfoil-passkey-backed-up"
-        static let hasSeenIntroKey = "has_seen_passkey_intro"
         static let introDelaySeconds: TimeInterval = 2.0
         static let credentialsEndpoint = "/api/passkey-credentials/"
         static let challengeByteCount = 32
         static let kekByteCount = 32
         static let prfCacheKeychainAccount = "sh.tinfoil.passkey-prf-cache"
-        static let syncVersionUserDefaultsKey = "tinfoil-passkey-sync-version"
         static let syncCheckIntervalSeconds: TimeInterval = 30
+    }
+
+    // MARK: - Centralized UserDefaults Storage Keys
+    // All keys use lowercase dash-case with a semantic `tinfoil-` prefix.
+    // Aligned with the web app's storage-keys.ts where the same data is represented.
+    enum StorageKeys {
+
+        // MARK: - Auth
+        enum Auth {
+            static let state = "tinfoil-auth-state"
+            static let userData = "tinfoil-auth-user-data"
+            static let subscription = "tinfoil-auth-subscription"
+        }
+
+        // MARK: - App Settings
+        enum Settings {
+            static let selectedModel = "tinfoil-settings-selected-model"
+            static let hapticFeedbackEnabled = "tinfoil-settings-haptic-feedback-enabled"
+            static let selectedLanguage = "tinfoil-settings-selected-language"
+            static let maxPromptMessages = "tinfoil-settings-max-prompt-messages"
+            static let webSearchEnabled = "tinfoil-settings-web-search-enabled"
+            static let cloudSyncEnabled = "tinfoil-settings-cloud-sync-enabled"
+            static let cloudSyncActiveTab = "tinfoil-settings-cloud-sync-active-tab"
+            static let localOnlyModeEnabled = "tinfoil-settings-local-only-mode-enabled"
+            static let hasLaunchedBefore = "tinfoil-settings-has-launched-before"
+            static let hasSeenPasskeyIntro = "tinfoil-settings-has-seen-passkey-intro"
+        }
+
+        // MARK: - User Personalization Preferences
+        enum UserPrefs {
+            static let personalizationEnabled = "tinfoil-user-prefs-personalization-enabled"
+            static let nickname = "tinfoil-user-prefs-nickname"
+            static let profession = "tinfoil-user-prefs-profession"
+            static let traits = "tinfoil-user-prefs-traits"
+            static let additionalContext = "tinfoil-user-prefs-additional-context"
+            static let customPromptEnabled = "tinfoil-user-prefs-custom-prompt-enabled"
+            static let customSystemPrompt = "tinfoil-user-prefs-custom-system-prompt"
+        }
+
+        // MARK: - Sync / Data State
+        enum Sync {
+            static let chatStatus = "tinfoil-sync-chat-status"
+            static let allChatsStatus = "tinfoil-sync-all-chats-status"
+
+            static func lastSyncDate(userId: String) -> String {
+                "tinfoil-sync-last-sync-date-\(userId)"
+            }
+            static func paginationToken(userId: String) -> String {
+                "tinfoil-sync-pagination-token-\(userId)"
+            }
+            static func paginationHasMore(userId: String) -> String {
+                "tinfoil-sync-pagination-has-more-\(userId)"
+            }
+            static func paginationActive(userId: String) -> String {
+                "tinfoil-sync-pagination-active-\(userId)"
+            }
+            static func paginationLoadedFirst(userId: String) -> String {
+                "tinfoil-sync-pagination-loaded-first-\(userId)"
+            }
+            static func paginationAttempted(userId: String) -> String {
+                "tinfoil-sync-pagination-attempted-\(userId)"
+            }
+        }
+
+        // MARK: - Secret / Sensitive
+        enum Secret {
+            static let encryptionKeySetUp = "tinfoil-secret-encryption-key-set-up"
+            static let passkeyBackedUp = "tinfoil-secret-passkey-backed-up"
+            static let passkeySyncVersion = "tinfoil-secret-passkey-sync-version"
+        }
     }
 
     enum Attachments {
@@ -142,6 +206,58 @@ enum Constants {
         static let supportedDocumentExtensions: Set<String> = ["pdf", "txt", "md", "csv", "html"]
         static let supportedImageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic"]
         static let defaultImageMimeType = "image/jpeg"
+    }
+}
+
+// MARK: - Storage Keys Migration
+// One-time migration from old UserDefaults keys to new `tinfoil-` prefixed keys.
+enum StorageKeysMigration {
+    private static let migrationCompleteKey = "tinfoil-settings-storage-keys-migrated"
+
+    static func migrateIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: migrationCompleteKey) else { return }
+
+        let migrations: [(old: String, new: String)] = [
+            // Auth
+            ("sh.tinfoil.authState", Constants.StorageKeys.Auth.state),
+            ("sh.tinfoil.userData", Constants.StorageKeys.Auth.userData),
+            ("sh.tinfoil.subscription", Constants.StorageKeys.Auth.subscription),
+            // Settings
+            ("lastSelectedModel", Constants.StorageKeys.Settings.selectedModel),
+            ("hapticFeedbackEnabled", Constants.StorageKeys.Settings.hapticFeedbackEnabled),
+            ("selectedLanguage", Constants.StorageKeys.Settings.selectedLanguage),
+            ("maxPromptMessages", Constants.StorageKeys.Settings.maxPromptMessages),
+            ("webSearchEnabled", Constants.StorageKeys.Settings.webSearchEnabled),
+            ("cloudSyncEnabled", Constants.StorageKeys.Settings.cloudSyncEnabled),
+            ("cloudSyncActiveTab", Constants.StorageKeys.Settings.cloudSyncActiveTab),
+            ("localOnlyModeEnabled", Constants.StorageKeys.Settings.localOnlyModeEnabled),
+            ("hasLaunchedBefore", Constants.StorageKeys.Settings.hasLaunchedBefore),
+            // User prefs
+            ("isPersonalizationEnabled", Constants.StorageKeys.UserPrefs.personalizationEnabled),
+            ("userNickname", Constants.StorageKeys.UserPrefs.nickname),
+            ("userProfession", Constants.StorageKeys.UserPrefs.profession),
+            ("userTraits", Constants.StorageKeys.UserPrefs.traits),
+            ("userAdditionalContext", Constants.StorageKeys.UserPrefs.additionalContext),
+            ("isUsingCustomPrompt", Constants.StorageKeys.UserPrefs.customPromptEnabled),
+            ("customSystemPrompt", Constants.StorageKeys.UserPrefs.customSystemPrompt),
+            // Sync
+            ("tinfoil-chat-sync-status", Constants.StorageKeys.Sync.chatStatus),
+            ("tinfoil-all-chats-sync-status", Constants.StorageKeys.Sync.allChatsStatus),
+            // Secret / Passkey
+            ("encryptionKeyWasSetUp", Constants.StorageKeys.Secret.encryptionKeySetUp),
+            ("tinfoil-passkey-backed-up", Constants.StorageKeys.Secret.passkeyBackedUp),
+            ("has_seen_passkey_intro", Constants.StorageKeys.Settings.hasSeenPasskeyIntro),
+            ("tinfoil-passkey-sync-version", Constants.StorageKeys.Secret.passkeySyncVersion),
+        ]
+
+        for (old, new) in migrations where old != new {
+            if let value = UserDefaults.standard.object(forKey: old) {
+                UserDefaults.standard.set(value, forKey: new)
+                UserDefaults.standard.removeObject(forKey: old)
+            }
+        }
+
+        UserDefaults.standard.set(true, forKey: migrationCompleteKey)
     }
 }
  

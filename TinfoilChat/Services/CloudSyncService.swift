@@ -149,8 +149,8 @@ class CloudSyncService: ObservableObject {
     private let deletedChatsTracker = DeletedChatsTracker.shared
     private let streamingTracker = StreamingTracker.shared
     // UserDefaults keys for sync status caches
-    private let syncStatusKey = "tinfoil-chat-sync-status"
-    private let allChatsSyncStatusKey = "tinfoil-all-chats-sync-status"
+    private let syncStatusKey = Constants.StorageKeys.Sync.chatStatus
+    private let allChatsSyncStatusKey = Constants.StorageKeys.Sync.allChatsStatus
 
     private init() {}
     

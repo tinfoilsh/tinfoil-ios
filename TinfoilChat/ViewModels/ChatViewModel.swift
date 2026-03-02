@@ -60,9 +60,9 @@ class ChatViewModel: ObservableObject {
         didSet {
             // Persist to UserDefaults whenever it changes (scoped to user)
             if let date = lastSyncDate, let userId = currentUserId {
-                UserDefaults.standard.set(date, forKey: "lastSyncDate_\(userId)")
+                UserDefaults.standard.set(date, forKey: Constants.StorageKeys.Sync.lastSyncDate(userId: userId))
             } else if let userId = currentUserId {
-                UserDefaults.standard.removeObject(forKey: "lastSyncDate_\(userId)")
+                UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Sync.lastSyncDate(userId: userId))
             }
         }
     }
@@ -152,7 +152,7 @@ class ChatViewModel: ObservableObject {
         didSet {
             // Load user-specific last sync date when auth changes
             if let userId = currentUserId {
-                lastSyncDate = UserDefaults.standard.object(forKey: "lastSyncDate_\(userId)") as? Date
+                lastSyncDate = UserDefaults.standard.object(forKey: Constants.StorageKeys.Sync.lastSyncDate(userId: userId)) as? Date
             } else {
                 lastSyncDate = nil
             }
@@ -198,39 +198,46 @@ class ChatViewModel: ObservableObject {
     
     private func paginationDefaultsKey(_ suffix: String) -> String? {
         guard let userId = currentUserId else { return nil }
-        return "pagination_\(suffix)_\(userId)"
+        switch suffix {
+        case "token": return Constants.StorageKeys.Sync.paginationToken(userId: userId)
+        case "hasMore": return Constants.StorageKeys.Sync.paginationHasMore(userId: userId)
+        case "active": return Constants.StorageKeys.Sync.paginationActive(userId: userId)
+        case "loadedFirst": return Constants.StorageKeys.Sync.paginationLoadedFirst(userId: userId)
+        case "attempted": return Constants.StorageKeys.Sync.paginationAttempted(userId: userId)
+        default: return nil
+        }
     }
     
     private func persistPaginationStateIfPossible() {
         guard shouldPersistPaginationState else { return }
         guard let userId = currentUserId else { return }
         if let token = paginationToken, !token.isEmpty {
-            UserDefaults.standard.set(token, forKey: "pagination_token_\(userId)")
+            UserDefaults.standard.set(token, forKey: Constants.StorageKeys.Sync.paginationToken(userId: userId))
         } else {
-            UserDefaults.standard.removeObject(forKey: "pagination_token_\(userId)")
+            UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Sync.paginationToken(userId: userId))
         }
-        UserDefaults.standard.set(hasMoreChats, forKey: "pagination_hasMore_\(userId)")
-        UserDefaults.standard.set(isPaginationActive, forKey: "pagination_active_\(userId)")
-        UserDefaults.standard.set(hasLoadedInitialPage, forKey: "pagination_loadedFirst_\(userId)")
-        UserDefaults.standard.set(hasAttemptedLoadMore, forKey: "pagination_attempted_\(userId)")
+        UserDefaults.standard.set(hasMoreChats, forKey: Constants.StorageKeys.Sync.paginationHasMore(userId: userId))
+        UserDefaults.standard.set(isPaginationActive, forKey: Constants.StorageKeys.Sync.paginationActive(userId: userId))
+        UserDefaults.standard.set(hasLoadedInitialPage, forKey: Constants.StorageKeys.Sync.paginationLoadedFirst(userId: userId))
+        UserDefaults.standard.set(hasAttemptedLoadMore, forKey: Constants.StorageKeys.Sync.paginationAttempted(userId: userId))
     }
     
     private func loadPersistedPaginationState() {
         guard let userId = currentUserId else { return }
-        if let token = UserDefaults.standard.string(forKey: "pagination_token_\(userId)") {
+        if let token = UserDefaults.standard.string(forKey: Constants.StorageKeys.Sync.paginationToken(userId: userId)) {
             paginationToken = token
         }
-        if UserDefaults.standard.object(forKey: "pagination_hasMore_\(userId)") != nil {
-            hasMoreChats = UserDefaults.standard.bool(forKey: "pagination_hasMore_\(userId)")
+        if UserDefaults.standard.object(forKey: Constants.StorageKeys.Sync.paginationHasMore(userId: userId)) != nil {
+            hasMoreChats = UserDefaults.standard.bool(forKey: Constants.StorageKeys.Sync.paginationHasMore(userId: userId))
         }
-        if UserDefaults.standard.object(forKey: "pagination_active_\(userId)") != nil {
-            isPaginationActive = UserDefaults.standard.bool(forKey: "pagination_active_\(userId)")
+        if UserDefaults.standard.object(forKey: Constants.StorageKeys.Sync.paginationActive(userId: userId)) != nil {
+            isPaginationActive = UserDefaults.standard.bool(forKey: Constants.StorageKeys.Sync.paginationActive(userId: userId))
         }
-        if UserDefaults.standard.object(forKey: "pagination_loadedFirst_\(userId)") != nil {
-            hasLoadedInitialPage = UserDefaults.standard.bool(forKey: "pagination_loadedFirst_\(userId)")
+        if UserDefaults.standard.object(forKey: Constants.StorageKeys.Sync.paginationLoadedFirst(userId: userId)) != nil {
+            hasLoadedInitialPage = UserDefaults.standard.bool(forKey: Constants.StorageKeys.Sync.paginationLoadedFirst(userId: userId))
         }
-        if UserDefaults.standard.object(forKey: "pagination_attempted_\(userId)") != nil {
-            hasAttemptedLoadMore = UserDefaults.standard.bool(forKey: "pagination_attempted_\(userId)")
+        if UserDefaults.standard.object(forKey: Constants.StorageKeys.Sync.paginationAttempted(userId: userId)) != nil {
+            hasAttemptedLoadMore = UserDefaults.standard.bool(forKey: Constants.StorageKeys.Sync.paginationAttempted(userId: userId))
         }
         // Enable persistence after we've loaded any saved state to prevent clobbering
         shouldPersistPaginationState = true
@@ -269,7 +276,7 @@ class ChatViewModel: ObservableObject {
         }
         self.currentModel = model
         self.isWebSearchEnabled = SettingsManager.shared.webSearchEnabled
-        if let savedTab = UserDefaults.standard.string(forKey: Constants.CloudSync.activeTabKey),
+        if let savedTab = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.cloudSyncActiveTab),
            let tab = ChatStorageTab(rawValue: savedTab) {
             self.activeStorageTab = tab
         }
@@ -570,7 +577,7 @@ class ChatViewModel: ObservableObject {
             return
         }
         activeStorageTab = tab
-        UserDefaults.standard.set(tab.rawValue, forKey: Constants.CloudSync.activeTabKey)
+        UserDefaults.standard.set(tab.rawValue, forKey: Constants.StorageKeys.Settings.cloudSyncActiveTab)
 
         let shouldBeLocal = tab == .local
 
@@ -2287,7 +2294,7 @@ class ChatViewModel: ObservableObject {
                         // Auto-enable local-only mode when local chats with messages exist,
                         // but only if the user has never explicitly set the preference
                         let hasNonEmptyLocalChats = self.localChats.contains { !$0.messages.isEmpty }
-                        let userHasSetPreference = UserDefaults.standard.object(forKey: Constants.CloudSync.localOnlyModeEnabledKey) != nil
+                        let userHasSetPreference = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.localOnlyModeEnabled) != nil
                         if hasNonEmptyLocalChats && !userHasSetPreference {
                             SettingsManager.shared.isLocalOnlyModeEnabled = true
                         }
@@ -2350,7 +2357,7 @@ class ChatViewModel: ObservableObject {
                         await initializeCloudSync()
 
                         // Restore persisted tab preference now that cloud chats are loaded
-                        if let savedTab = UserDefaults.standard.string(forKey: Constants.CloudSync.activeTabKey),
+                        if let savedTab = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.cloudSyncActiveTab),
                            let tab = ChatStorageTab(rawValue: savedTab) {
                             await MainActor.run {
                                 self.activeStorageTab = tab

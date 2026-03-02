@@ -64,7 +64,7 @@ final class PasskeyManager: ObservableObject {
         syncCheckTask?.cancel()
         syncCheckTask = nil
         passkeyService.clearCachedPrfResult()
-        UserDefaults.standard.removeObject(forKey: Constants.Passkey.syncVersionUserDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Secret.passkeySyncVersion)
     }
 
     // MARK: - Recovery Flow
@@ -225,7 +225,7 @@ final class PasskeyManager: ObservableObject {
         let hasSeenIntro: Bool
         if let metadata = Clerk.shared.user?.unsafeMetadata,
            case .object(let dict) = metadata,
-           case .bool(let seen) = dict[Constants.Passkey.hasSeenIntroKey] {
+           case .bool(let seen) = dict[Constants.StorageKeys.Settings.hasSeenPasskeyIntro] {
             hasSeenIntro = seen
         } else {
             hasSeenIntro = false
@@ -384,7 +384,7 @@ final class PasskeyManager: ObservableObject {
         if case .object(let dict) = user.unsafeMetadata {
             existingMetadata = dict
         }
-        existingMetadata[Constants.Passkey.hasSeenIntroKey] = .bool(true)
+        existingMetadata[Constants.StorageKeys.Settings.hasSeenPasskeyIntro] = .bool(true)
 
         let params = User.UpdateParams(unsafeMetadata: .object(existingMetadata))
         _ = try? await user.update(params)
@@ -393,14 +393,14 @@ final class PasskeyManager: ObservableObject {
     // MARK: - Sync Version Tracking
 
     private func getLocalSyncVersion(credentialId: String) -> Int? {
-        let dict = UserDefaults.standard.dictionary(forKey: Constants.Passkey.syncVersionUserDefaultsKey)
+        let dict = UserDefaults.standard.dictionary(forKey: Constants.StorageKeys.Secret.passkeySyncVersion)
         return dict?[credentialId] as? Int
     }
 
     private func setLocalSyncVersion(credentialId: String, version: Int) {
-        var dict = UserDefaults.standard.dictionary(forKey: Constants.Passkey.syncVersionUserDefaultsKey) ?? [:]
+        var dict = UserDefaults.standard.dictionary(forKey: Constants.StorageKeys.Secret.passkeySyncVersion) ?? [:]
         dict[credentialId] = version
-        UserDefaults.standard.set(dict, forKey: Constants.Passkey.syncVersionUserDefaultsKey)
+        UserDefaults.standard.set(dict, forKey: Constants.StorageKeys.Secret.passkeySyncVersion)
     }
 
     // MARK: - Periodic Sync Check

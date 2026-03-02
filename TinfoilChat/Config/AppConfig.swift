@@ -122,7 +122,7 @@ class AppConfig: ObservableObject {
         didSet {
             // Persist the selected model to UserDefaults whenever it changes
             if let model = currentModel {
-                UserDefaults.standard.set(model.id, forKey: "lastSelectedModel")
+                UserDefaults.standard.set(model.id, forKey: Constants.StorageKeys.Settings.selectedModel)
             }
         }
     }
@@ -209,7 +209,7 @@ class AppConfig: ObservableObject {
 
     // Load the last selected model from UserDefaults
     private func loadLastSelectedModel() {
-        if let savedModelId = UserDefaults.standard.string(forKey: "lastSelectedModel"),
+        if let savedModelId = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.selectedModel),
            let appModel = appModels.first(where: { $0.modelName == savedModelId }) {
             currentModel = ModelType(from: appModel)
         } else {
