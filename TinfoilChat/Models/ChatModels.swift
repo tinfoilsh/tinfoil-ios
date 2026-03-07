@@ -651,13 +651,27 @@ struct RateLimitInfo {
 
 // MARK: - Session Token Management
 
-/// Manages session token retrieval for premium models
+/// Manages session token retrieval and rate limit tracking
 class SessionTokenManager {
     static let shared = SessionTokenManager()
 
     private var sessionToken: String?
     private var sessionTokenExpiresAt: Date?
     private let sessionTokenEndpoint = "\(Constants.API.baseURL)/api/keys/chat"
+
+    /// Current rate limit info for free-tier users (nil for premium)
+    private(set) var rateLimitInfo: RateLimitInfo? {
+        didSet { onRateLimitChanged?(rateLimitInfo) }
+    }
+
+    /// Callback invoked whenever rateLimitInfo changes, used by ChatViewModel to sync state
+    var onRateLimitChanged: ((RateLimitInfo?) -> Void)?
+
+    /// Snapshot of remaining count taken before a request, used for stale-response detection
+    private var remainingBeforeRequest: Int?
+
+    /// Guards against concurrent refreshRateLimit calls
+    private var refreshTask: Task<Void, Never>?
 
     /// Returns true if the cached token is expired or near expiry and needs refresh
     var needsRefresh: Bool {
@@ -769,6 +783,23 @@ class SessionTokenManager {
                     // Fallback: assume a conservative expiry so we don't refetch on every call
                     self.sessionTokenExpiresAt = Date().addingTimeInterval(Constants.API.sessionTokenExpiryBufferSeconds * 2)
                 }
+
+                // Parse rate limit info for free-tier users
+                if let isFreeTier = responseDict["is_free_tier"] as? Bool,
+                   isFreeTier,
+                   let rateLimitDict = responseDict["rate_limit"] as? [String: Any],
+                   let maxRequests = rateLimitDict["max_requests"] as? Int,
+                   let remaining = rateLimitDict["remaining"] as? Int,
+                   let resetsAt = rateLimitDict["resets_at"] as? String {
+                    self.rateLimitInfo = RateLimitInfo(
+                        maxRequests: maxRequests,
+                        remaining: remaining,
+                        resetsAt: resetsAt
+                    )
+                } else {
+                    self.rateLimitInfo = nil
+                }
+
                 return key
             }
 
@@ -778,7 +809,42 @@ class SessionTokenManager {
         }
     }
 
-    /// Clears the cached session token
+    /// Saves the current remaining count and optimistically decrements by 1.
+    /// Called just before sending a chat request so the UI updates immediately.
+    func snapshotAndDecrementRemaining() {
+        guard var rateLimit = rateLimitInfo else { return }
+        remainingBeforeRequest = rateLimit.remaining
+        rateLimit.remaining = max(0, rateLimit.remaining - 1)
+        rateLimitInfo = rateLimit
+    }
+
+    /// Re-fetches the session token (and rate limit) from the server.
+    /// Handles stale responses: if the server returns a remaining count >= the pre-request
+    /// snapshot, the server hasn't yet accounted for our last request, so we use snapshot - 1.
+    func refreshRateLimit() {
+        guard rateLimitInfo != nil else { return }
+        guard refreshTask == nil else { return }
+
+        let snapshot = remainingBeforeRequest
+        remainingBeforeRequest = nil
+
+        refreshTask = Task {
+            defer { refreshTask = nil }
+
+            sessionToken = nil
+            sessionTokenExpiresAt = nil
+            _ = await fetchFreshSessionToken()
+
+            if let snapshot = snapshot,
+               var rateLimit = rateLimitInfo,
+               rateLimit.remaining >= snapshot {
+                rateLimit.remaining = max(0, snapshot - 1)
+                rateLimitInfo = rateLimit
+            }
+        }
+    }
+
+    /// Clears the cached session token and rate limit info
     func clearSessionToken() {
         sessionToken = nil
         sessionTokenExpiresAt = nil
