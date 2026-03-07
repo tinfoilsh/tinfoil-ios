@@ -487,20 +487,20 @@ private struct LongMessageAttachmentView: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "doc.text")
                 .font(.system(size: 22, weight: .medium))
-                .foregroundColor(.white.opacity(0.85))
+                .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode).opacity(0.85))
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Long Message")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode))
 
                 Text(wordCountText)
                     .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode).opacity(0.6))
 
                 Text(previewText)
                     .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.85))
+                    .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode).opacity(0.85))
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
             }
@@ -509,7 +509,7 @@ private struct LongMessageAttachmentView: View {
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.white.opacity(0.5))
+                .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode).opacity(0.5))
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
