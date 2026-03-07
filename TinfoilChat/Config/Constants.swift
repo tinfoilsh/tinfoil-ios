@@ -215,6 +215,10 @@ enum Constants {
         }
     }
 
+    enum RateLimit {
+        static let warningThreshold = 3
+    }
+
     enum Attachments {
         static let maxImageDimension: CGFloat = 768
         static let imageCompressionQuality: CGFloat = 0.85
