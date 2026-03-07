@@ -640,6 +640,15 @@ enum HapticFeedback {
     }
 }
 
+// MARK: - Rate Limit Info
+
+/// Rate limit information returned by the backend for free-tier users
+struct RateLimitInfo {
+    var maxRequests: Int
+    var remaining: Int
+    var resetsAt: String
+}
+
 // MARK: - Session Token Management
 
 /// Manages session token retrieval for premium models
