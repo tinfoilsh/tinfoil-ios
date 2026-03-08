@@ -118,6 +118,10 @@ class ChatViewModel: ObservableObject {
     var isVerified: Bool { verification.isVerified }
     var verificationError: String? { verification.error }
     
+    // Rate limit properties
+    @Published var rateLimit: RateLimitInfo?
+    @Published var showRateLimitPaywall: Bool = false
+
     // Model properties
     @Published var currentModel: ModelType
 
@@ -310,6 +314,13 @@ class ChatViewModel: ObservableObject {
         setupNetworkStatusObserver()
 
         // Initial sync will be triggered when authManager is set (see authManager didSet)
+
+        // Sync rate limit state from SessionTokenManager to this view model
+        SessionTokenManager.shared.onRateLimitChanged = { [weak self] info in
+            Task { @MainActor in
+                self?.rateLimit = info
+            }
+        }
 
         // Setup Tinfoil client immediately
         setupTinfoilClient()
@@ -844,6 +855,15 @@ class ChatViewModel: ObservableObject {
         let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasAttachments = !pendingAttachments.isEmpty
         guard hasText || hasAttachments else { return }
+
+        // Block send when free-tier requests are exhausted
+        if let rl = rateLimit, rl.remaining <= 0 {
+            showRateLimitPaywall = true
+            return
+        }
+
+        // Optimistically decrement the remaining request count
+        SessionTokenManager.shared.snapshotAndDecrementRemaining()
 
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -1616,12 +1636,16 @@ class ChatViewModel: ObservableObject {
                             // Keep any partial content that was received
                             chat.messages[lastIndex].isRequestError = self.isRequestError(error)
                             chat.messages[lastIndex].streamError = userFriendlyError
+                            chat.messages[lastIndex].isRateLimitError = self.isRateLimitError(error)
 
                             self.updateChat(chat)
                         }
                     }
                 }
             }
+
+            // Refresh rate limit from the server after each request completes (success or error)
+            SessionTokenManager.shared.refreshRateLimit()
         }
     }
     
@@ -1665,6 +1689,15 @@ class ChatViewModel: ObservableObject {
         
         // Default error message if nothing specific matches
         return "An error occurred: \(error.localizedDescription)"
+    }
+
+    /// Checks if an error indicates the user has hit their rate limit
+    private func isRateLimitError(_ error: Error) -> Bool {
+        if case OpenAIError.statusError(_, let statusCode) = error, statusCode == 429 {
+            return true
+        }
+        let msg = error.localizedDescription.lowercased()
+        return msg.contains("rate limit") || msg.contains("request limit") || msg.contains("insufficient_quota")
     }
 
     /// Checks if an error is a client request error (4xx, excluding 401 which is handled by retry)

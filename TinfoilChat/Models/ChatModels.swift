@@ -388,6 +388,7 @@ struct Message: Identifiable, Codable, Equatable {
     var isStreaming: Bool = false
     var streamError: String? = nil
     var isRequestError: Bool = false
+    var isRateLimitError: Bool = false
     var generationTimeSeconds: Double? = nil
     var contentChunks: [ContentChunk] = []
     var thinkingChunks: [ThinkingChunk] = []
@@ -436,7 +437,7 @@ struct Message: Identifiable, Codable, Equatable {
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, generationTimeSeconds, webSearchState
+        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, isRateLimitError, generationTimeSeconds, webSearchState
         case webSearch // Alternative key used by React app
         case attachments
         case thinkingDuration, isError
@@ -471,6 +472,7 @@ struct Message: Identifiable, Codable, Equatable {
         isStreaming = try container.decodeIfPresent(Bool.self, forKey: .isStreaming) ?? false
         streamError = try container.decodeIfPresent(String.self, forKey: .streamError)
         isRequestError = try container.decodeIfPresent(Bool.self, forKey: .isRequestError) ?? false
+        isRateLimitError = try container.decodeIfPresent(Bool.self, forKey: .isRateLimitError) ?? false
         generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)
         // contentChunks and thinkingChunks are transient UI rendering state — never decoded from storage
         contentChunks = []
@@ -507,6 +509,7 @@ struct Message: Identifiable, Codable, Equatable {
         try container.encode(isStreaming, forKey: .isStreaming)
         try container.encodeIfPresent(streamError, forKey: .streamError)
         if isRequestError { try container.encode(isRequestError, forKey: .isRequestError) }
+        if isRateLimitError { try container.encode(isRateLimitError, forKey: .isRateLimitError) }
         try container.encodeIfPresent(generationTimeSeconds, forKey: .generationTimeSeconds)
         // contentChunks is transient UI rendering state — never encode it
         // Encode as "webSearch" for React app compatibility
