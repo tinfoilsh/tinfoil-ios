@@ -185,8 +185,8 @@ class AppConfig: ObservableObject {
             // Confirm current model is still valid
             if let currentModel = currentModel,
                !availableModels.contains(currentModel) {
-                // Fall back to first available model (preferring free model)
-                self.currentModel = availableModels.first(where: { $0.isFree }) ?? availableModels.first
+                // Fall back to first available model
+                self.currentModel = availableModels.first
             }
 
             // Clear any previous error
@@ -213,8 +213,8 @@ class AppConfig: ObservableObject {
            let appModel = appModels.first(where: { $0.modelName == savedModelId }) {
             currentModel = ModelType(from: appModel)
         } else {
-            // Fall back to first free model, or first available model
-            currentModel = availableModels.first(where: { $0.isFree }) ?? availableModels.first
+            // Fall back to first available model
+            currentModel = availableModels.first
         }
     }
     
@@ -306,15 +306,9 @@ class AppConfig: ObservableObject {
         return model.type == "chat"
     }
 
-    /// Get filtered model types based on authentication status
-    func filteredModelTypes(isAuthenticated: Bool, hasActiveSubscription: Bool) -> [ModelType] {
-        if isAuthenticated && hasActiveSubscription {
-            // Return only premium models for premium users
-            return availableModels.filter { !$0.isFree }
-        } else {
-            // Return all models for non-premium users (they'll see locks on premium ones)
-            return availableModels
-        }
+    /// Get all model types available for selection (all models accessible to all users)
+    func filteredModelTypes(isAuthenticated: Bool = false, hasActiveSubscription: Bool = false) -> [ModelType] {
+        return availableModels
     }
 
     /// Get the title model for generating titles and thinking summaries

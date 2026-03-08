@@ -443,33 +443,13 @@ struct WelcomeView: View {
     }
 }
 
-/// A tabbed welcome view that allows model selection
+/// Welcome view shown when a chat has no messages
 struct TabbedWelcomeView: View {
     let isDarkMode: Bool
     @ObservedObject var authManager: AuthManager
     let onRequestSignIn: () -> Void
-    @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
-    @State private var selectedModelId: String = AppConfig.shared.currentModel?.id ?? ""
     @ObservedObject private var settings = SettingsManager.shared
-    @ObservedObject private var revenueCat = RevenueCatManager.shared
-    @State private var showPremiumModal = false
-    @State private var isWaitingForSubscription = false
-    
-    private var availableModels: [ModelType] {
-        return AppConfig.shared.filteredModelTypes(
-            isAuthenticated: authManager.isAuthenticated,
-            hasActiveSubscription: authManager.hasActiveSubscription
-        )
-    }
-    
-    private var canUseModel: (ModelType) -> Bool {
-        { model in
-            let isAuthenticated = authManager.isAuthenticated
-            let hasSubscription = authManager.hasActiveSubscription
-            return model.isFree || (isAuthenticated && hasSubscription)
-        }
-    }
-    
+
     var body: some View {
         VStack(spacing: 24) {
             // Greeting section
@@ -489,131 +469,23 @@ struct TabbedWelcomeView: View {
                 }
             }
             .padding(.horizontal, 32)
-            
-            // Model selection tabs
-            VStack(spacing: 2) {
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
-                            ForEach(availableModels) { model in
-                                ModelTab(
-                                    model: model,
-                                    isSelected: selectedModelId == model.id,
-                                    isDarkMode: isDarkMode,
-                                    isEnabled: canUseModel(model),
-                                    showPricingLabel: !(authManager.isAuthenticated && authManager.hasActiveSubscription)
-                                ) {
-                                    if !canUseModel(model) {
-                                        guard authManager.isAuthenticated else {
-                                            onRequestSignIn()
-                                            return
-                                        }
-                                        // Set clerk_user_id attribute right before showing paywall
-                                        if authManager.isAuthenticated, let clerkUserId = authManager.localUserData?["id"] as? String {
-                                            Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
-                                        }
-                                        showPremiumModal = true
-                                    } else {
-                                        selectModel(model)
-                                    }
-                                }
-                                .id(model.id)
-                            }
-                        }
-                        .padding(.horizontal, 32)
-                    }
-                    .frame(height: 100)
-                    .onAppear {
-                        proxy.scrollTo(selectedModelId, anchor: .center)
-                    }
-                    .onChange(of: selectedModelId) { _, newModelId in
-                        // Scroll to newly selected model
-                        withAnimation {
-                            proxy.scrollTo(newModelId, anchor: .center)
-                        }
-                    }
-                }
-            }
-            
-            // Show loading view while waiting for subscription (where the subscription prompt used to be)
-            if isWaitingForSubscription && !(authManager.isAuthenticated && authManager.hasActiveSubscription) {
-                InlineSubscriptionLoadingView(
-                    authManager: authManager,
-                    onSuccess: {
-                        isWaitingForSubscription = false
-
-                        // Create a new chat to show premium models
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            if !viewModel.messages.isEmpty {
-                                let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
-                                viewModel.createNewChat(language: language)
-                            }
-                        }
-                    },
-                    onTimeout: {
-                        isWaitingForSubscription = false
-                    }
-                )
-                .padding(.horizontal, 32)
-                .padding(.top, 8)
-            }
         }
         .padding(.top, 24)
         .padding(.bottom, 4)
-        .onAppear {
-            selectedModelId = viewModel.currentModel.id
-        }
-        .onChange(of: viewModel.currentModel) { _, newModel in
-            selectedModelId = newModel.id
-        }
-        .sheet(isPresented: $showPremiumModal) {
-            PaywallView(displayCloseButton: true)
-                .onPurchaseCompleted { _ in
-                    showPremiumModal = false
-                    isWaitingForSubscription = true
-                }
-                .onDisappear {
-                    // Quick check when paywall is dismissed
-                    Task {
-                        await authManager.fetchSubscriptionStatus()
-                    }
-                }
-        }
     }
-    
-    
-    private func selectModel(_ model: ModelType) {
-        guard model.id != viewModel.currentModel.id else { return }
-        
-        if !canUseModel(model) {
-            guard authManager.isAuthenticated else {
-                onRequestSignIn()
-                return
-            }
-            // Set clerk_user_id attribute right before showing paywall
-            if authManager.isAuthenticated, let clerkUserId = authManager.localUserData?["id"] as? String {
-                Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
-            }
-            showPremiumModal = true
-            return
-        }
-        
-        selectedModelId = model.id
-        viewModel.changeModel(to: model)
-    }
-    
+
     /// Gets the display name for the user - prioritizes nickname from settings, falls back to first name from auth
     private func getDisplayName(authManager: AuthManager) -> String {
         // First, check if user has set a nickname in settings
         if settings.isPersonalizationEnabled && !settings.nickname.isEmpty {
             return settings.nickname
         }
-        
+
         // Fall back to first name from auth data
         if let firstName = authManager.localUserData?["name"] as? String, !firstName.isEmpty {
             return firstName
         }
-        
+
         return ""
     }
 }
