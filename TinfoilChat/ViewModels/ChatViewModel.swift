@@ -2080,25 +2080,6 @@ class ChatViewModel: ObservableObject {
         currentTask = nil
         isLoading = false
         
-        // Check if we need a premium key for this model
-        let isPremiumModel = !modelType.isFree
-        
-        // If switching to premium model, verify authentication and subscription
-        if isPremiumModel {
-            let isAuthenticated = authManager?.isAuthenticated ?? false
-            let hasSubscription = authManager?.hasActiveSubscription ?? false
-            
-            // Show warning if user is not authenticated or doesn't have subscription
-            if !isAuthenticated || !hasSubscription {
-                self.verification.error = isAuthenticated 
-                    ? "Premium model requires an active subscription." 
-                    : "Premium model requires authentication."
-                
-                // Don't proceed with model change if not authorized
-                return
-            }
-        }
-        
         // Update model settings
         self.currentModel = modelType
         // This will trigger the didSet in AppConfig which persists to UserDefaults
@@ -2125,13 +2106,8 @@ class ChatViewModel: ObservableObject {
             setupTinfoilClient()
         }
 
-        // Get available models based on auth status
-        let availableModels = AppConfig.shared.filteredModelTypes(
-            isAuthenticated: isAuthenticated,
-            hasActiveSubscription: hasActiveSubscription
-        )
-        
-        // If current model is not available, switch to first available model
+        // If current model is no longer in the available list, switch to first available model
+        let availableModels = AppConfig.shared.filteredModelTypes()
         if !availableModels.contains(where: { $0.id == currentModel.id }), let firstModel = availableModels.first {
             changeModel(to: firstModel)
         }
@@ -2184,14 +2160,11 @@ class ChatViewModel: ObservableObject {
         cloudSync.clearSyncStatus()
         DeletedChatsTracker.shared.clear()
 
-        // Reset to a free model when signing out
-        let freeModels = AppConfig.shared.filteredModelTypes(
-            isAuthenticated: false,
-            hasActiveSubscription: false
-        )
-        if let defaultFreeModel = freeModels.first {
-            currentModel = defaultFreeModel
-            AppConfig.shared.currentModel = defaultFreeModel
+        // Reset to the default model when signing out
+        let allModels = AppConfig.shared.filteredModelTypes()
+        if let defaultModel = allModels.first {
+            currentModel = defaultModel
+            AppConfig.shared.currentModel = defaultModel
         }
 
         // Reset pagination state when signing out

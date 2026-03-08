@@ -817,15 +817,10 @@ struct VerificationStatusIndicator: View {
 /// Model picker for selecting between different AI models
 struct ModelPicker: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
-    @EnvironmentObject private var authManager: AuthManager
-    @State private var showModelPicker = false
 
     var body: some View {
         Menu {
-            let availableModels = AppConfig.shared.filteredModelTypes(
-                isAuthenticated: authManager.isAuthenticated,
-                hasActiveSubscription: authManager.hasActiveSubscription
-            )
+            let availableModels = AppConfig.shared.filteredModelTypes()
 
             ForEach(availableModels) { model in
                 Button(action: {
