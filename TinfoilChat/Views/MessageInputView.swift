@@ -151,11 +151,30 @@ struct MessageInputView: View {
             }
     }
 
+    /// Small label shown above the input when remaining free requests are low
+    @ViewBuilder
+    private var rateLimitLabel: some View {
+        if let rl = viewModel.rateLimit, rl.remaining <= Constants.RateLimit.warningThreshold {
+            Text(rl.remaining <= 0
+                 ? "No requests left"
+                 : "\(rl.remaining) request\(rl.remaining == 1 ? "" : "s") left")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(rl.remaining <= 0 ? .orange : .secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.25), value: rl.remaining)
+        }
+    }
+
     @ViewBuilder
     private var inputContent: some View {
         if #available(iOS 26, *) {
             // iOS 26+ with liquid glass effect
-            VStack(spacing: 0) {
+            VStack(spacing: 4) {
+                rateLimitLabel
+
+                VStack(spacing: 0) {
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {
                     AttachmentPreviewBar(
@@ -240,11 +259,15 @@ struct MessageInputView: View {
                 .padding(.vertical, 8)
             }
             .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 26))
+            }
             .padding(.horizontal, 12)
             .padding(.bottom, isKeyboardVisible ? 12 : 0)
         } else {
             // Older iOS with material effect
-            VStack(spacing: 0) {
+            VStack(spacing: 4) {
+                rateLimitLabel
+
+                VStack(spacing: 0) {
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {
                     AttachmentPreviewBar(
@@ -331,6 +354,7 @@ struct MessageInputView: View {
             .background {
                 RoundedRectangle(cornerRadius: 26)
                     .fill(.thickMaterial)
+            }
             }
             .padding(.horizontal, 12)
             .padding(.bottom, isKeyboardVisible ? 12 : 0)
