@@ -436,17 +436,8 @@ struct AddToSheetView: View {
     let onPhotos: () -> Void
     let onFiles: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var showPremiumModal = false
-
     private var availableModels: [ModelType] {
-        AppConfig.shared.filteredModelTypes(
-            isAuthenticated: authManager.isAuthenticated,
-            hasActiveSubscription: authManager.hasActiveSubscription
-        )
-    }
-
-    private func canUseModel(_ model: ModelType) -> Bool {
-        model.isFree || (authManager.isAuthenticated && authManager.hasActiveSubscription)
+        AppConfig.shared.filteredModelTypes()
     }
 
     var body: some View {
@@ -488,18 +479,11 @@ struct AddToSheetView: View {
                                     model: model,
                                     isSelected: viewModel.currentModel.id == model.id,
                                     isDarkMode: isDarkMode,
-                                    isEnabled: canUseModel(model),
-                                    showPricingLabel: !(authManager.isAuthenticated && authManager.hasActiveSubscription),
+                                    isEnabled: true,
+                                    showPricingLabel: false,
                                     style: .regular
                                 ) {
-                                    if canUseModel(model) {
-                                        viewModel.changeModel(to: model)
-                                    } else {
-                                        if authManager.isAuthenticated, let clerkUserId = authManager.localUserData?["id"] as? String {
-                                            Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
-                                        }
-                                        showPremiumModal = true
-                                    }
+                                    viewModel.changeModel(to: model)
                                 }
                                 .id(model.id)
                             }
@@ -529,17 +513,6 @@ struct AddToSheetView: View {
                             .font(.system(size: 18, weight: .medium))
                     }
                 }
-            }
-            .sheet(isPresented: $showPremiumModal) {
-                PaywallView(displayCloseButton: true)
-                    .onPurchaseCompleted { _ in
-                        showPremiumModal = false
-                    }
-                    .onDisappear {
-                        Task {
-                            await authManager.fetchSubscriptionStatus()
-                        }
-                    }
             }
         }
     }
