@@ -227,7 +227,9 @@ struct MessageView: View {
                         errorMessage: message.streamError!,
                         isDarkMode: isDarkMode,
                         isRequestError: message.isRequestError,
-                        onRegenerate: isLastMessage ? { viewModel.regenerateLastResponse() } : nil
+                        isRateLimitError: message.isRateLimitError,
+                        onRegenerate: isLastMessage ? { viewModel.regenerateLastResponse() } : nil,
+                        onUpgrade: message.isRateLimitError ? { viewModel.showRateLimitPaywall = true } : nil
                     )
                     .padding(.top, message.content.isEmpty && message.thoughts == nil ? 0 : 8)
                 }
@@ -1368,20 +1370,34 @@ struct ErrorMessageView: View {
     let errorMessage: String
     let isDarkMode: Bool
     var isRequestError: Bool = false
+    var isRateLimitError: Bool = false
     var onRegenerate: (() -> Void)? = nil
+    var onUpgrade: (() -> Void)? = nil
 
     private var accentColor: Color {
-        isRequestError ? .red : .orange
+        isRateLimitError ? .orange : (isRequestError ? .red : .orange)
+    }
+
+    private var headerIcon: String {
+        if isRateLimitError { return "gauge.with.dots.needle.67percent" }
+        if isRequestError { return "exclamationmark.triangle" }
+        return "wifi.exclamationmark"
+    }
+
+    private var headerText: String {
+        if isRateLimitError { return "Rate Limit Reached" }
+        if isRequestError { return "Request Failed" }
+        return "Connection Lost"
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Image(systemName: isRequestError ? "exclamationmark.triangle" : "wifi.exclamationmark")
+                Image(systemName: headerIcon)
                     .foregroundColor(accentColor)
                     .font(.system(size: 16))
 
-                Text(isRequestError ? "Request Failed" : "Connection Lost")
+                Text(headerText)
                     .font(.subheadline.weight(.medium))
                     .foregroundColor(isDarkMode ? .white : .black)
 
@@ -1393,23 +1409,44 @@ struct ErrorMessageView: View {
                 .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
                 .multilineTextAlignment(.leading)
 
-            if let onRegenerate = onRegenerate {
-                Button(action: onRegenerate) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12, weight: .medium))
-                        Text("Try again")
-                            .font(.subheadline.weight(.medium))
+            HStack(spacing: 8) {
+                if let onRegenerate = onRegenerate, !isRateLimitError {
+                    Button(action: onRegenerate) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Try again")
+                                .font(.subheadline.weight(.medium))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(accentColor)
+                        )
                     }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(accentColor)
-                    )
+                    .buttonStyle(PlainButtonStyle())
                 }
-                .buttonStyle(PlainButtonStyle())
+
+                if let onUpgrade = onUpgrade, isRateLimitError {
+                    Button(action: onUpgrade) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Upgrade to Premium")
+                                .font(.subheadline.weight(.medium))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.accentPrimary)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
             }
         }
         .padding()

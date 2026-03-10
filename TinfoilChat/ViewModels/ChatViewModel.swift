@@ -1681,7 +1681,7 @@ class ChatViewModel: ObservableObject {
             case 500...599:
                 return "Server error. Our team has been notified and is working on it."
             case 429:
-                return "Rate limit exceeded. Please wait a moment before sending another message."
+                return "You've used all your free requests. Upgrade to Premium for unlimited access."
             default:
                 break
             }
