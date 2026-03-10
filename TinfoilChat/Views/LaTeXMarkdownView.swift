@@ -12,7 +12,7 @@ import SwiftMath
 import UIKit
 import Highlightr
 
-private enum SegmentKind {
+private enum SegmentKind: Sendable {
     case markdown(String)
     case latex(String, isDisplay: Bool)
     case table(ParsedTable)
@@ -20,7 +20,7 @@ private enum SegmentKind {
 
 
 
-private struct ContentSegment {
+private struct ContentSegment: Sendable {
     let id: String
     let kind: SegmentKind
 
@@ -55,7 +55,7 @@ private struct ContentSegment {
 }
 
 /// Simple cache for parsed markdown segments
-private class MarkdownRenderCache {
+private class MarkdownRenderCache: @unchecked Sendable {
     static let shared = MarkdownRenderCache()
 
     private var cache: [String: [ContentSegment]] = [:]
@@ -105,6 +105,8 @@ struct LaTeXMarkdownView: View, Equatable {
     let maxWidthAlignment: Alignment
     let isStreaming: Bool
 
+    @State private var segments: [ContentSegment]? = nil
+
     // Pre-compiled regex patterns (compiled once, reused across all renders)
     private static let codeBlockRegex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```", options: [])
     private static let inlineCodeRegex = try? NSRegularExpression(pattern: "`[^`]+`", options: [])
@@ -128,9 +130,15 @@ struct LaTeXMarkdownView: View, Equatable {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(getOrCreateSegments(), id: \.id) { segment in
-                segment.createView(isDarkMode: isDarkMode, isStreaming: isStreaming)
-                    .id(segment.id)
+            if isStreaming {
+                markdownFallback(content: content)
+            } else if let segments = segments {
+                ForEach(segments, id: \.id) { segment in
+                    segment.createView(isDarkMode: isDarkMode, isStreaming: false)
+                        .id(segment.id)
+                }
+            } else {
+                markdownFallback(content: content)
             }
         }
         .environment(\.colorScheme, isDarkMode ? .dark : .light)
@@ -139,6 +147,27 @@ struct LaTeXMarkdownView: View, Equatable {
         .transaction { transaction in
             transaction.animation = nil
         }
+        .task(id: content) {
+            guard !isStreaming else { return }
+            let cacheKey = "\(content.hashValue)"
+            if let cached = MarkdownRenderCache.shared.get(for: cacheKey) {
+                segments = cached
+                return
+            }
+            let contentToProcess = content
+            let parsed = await Task.detached {
+                Self.parseContent(contentToProcess)
+            }.value
+            MarkdownRenderCache.shared.set(parsed, for: cacheKey)
+            segments = parsed
+        }
+    }
+
+    private func markdownFallback(content: String) -> some View {
+        let strippedText = LaTeXMarkdownView.stripCitations(from: content)
+        return Markdown(strippedText)
+            .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
+            .markdownCodeSyntaxHighlighter(MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode))
     }
 
     /// Strip citation markers from markdown text.
@@ -243,27 +272,12 @@ struct LaTeXMarkdownView: View, Equatable {
         return String(result)
     }
 
-    private func getOrCreateSegments() -> [ContentSegment] {
-        if isStreaming {
-            return [ContentSegment(
-                id: "streaming_\(content.hashValue)",
-                kind: .markdown(content)
-            )]
-        }
-
-        let cacheKey = "\(content.hashValue)"
-
-        if let cached = MarkdownRenderCache.shared.get(for: cacheKey) {
-            return cached
-        }
-
-        let segments = parseContent()
-        MarkdownRenderCache.shared.set(segments, for: cacheKey)
-        return segments
-    }
-    
     /// Parse content into segments of markdown and LaTeX
-    private func parseContent() -> [ContentSegment] {
+    private static func parseContent(_ content: String) -> [ContentSegment] {
+        if content.count > Constants.Rendering.maxFullParsingCharacters {
+            return [ContentSegment(id: "md_full_\(content.hashValue)", kind: .markdown(content))]
+        }
+
         let nsContent = content as NSString
         let fullRange = NSRange(location: 0, length: nsContent.length)
 
@@ -281,7 +295,7 @@ struct LaTeXMarkdownView: View, Equatable {
             }
         }
 
-        let tableSegments = findMarkdownTables(in: content)
+        let tableSegments = Self.findMarkdownTables(in: content)
         excludedRanges.append(contentsOf: tableSegments.map(\.range))
 
         func isExcluded(_ range: NSRange) -> Bool {
@@ -355,7 +369,7 @@ struct LaTeXMarkdownView: View, Equatable {
                     }
                 }
 
-                let sanitizedLatex = sanitizeLatex(latex)
+                let sanitizedLatex = Self.sanitizeLatex(latex)
 
                 segments.append(ContentSegment(
                     id: "latex_\(special.range.location)_\(sanitizedLatex.hashValue)",
@@ -391,16 +405,16 @@ struct LaTeXMarkdownView: View, Equatable {
         return segments
     }
 
-    private func sanitizeLatex(_ latex: String) -> String {
+    private static func sanitizeLatex(_ latex: String) -> String {
         let trimmed = latex.trimmingCharacters(in: .whitespacesAndNewlines)
         let base = trimmed.isEmpty ? latex : trimmed
 
         guard base.contains("\\text{") else { return base }
 
-        return normalizeTextCommands(in: base)
+        return Self.normalizeTextCommands(in: base)
     }
 
-    private func normalizeTextCommands(in latex: String) -> String {
+    private static func normalizeTextCommands(in latex: String) -> String {
         var result = ""
         var index = latex.startIndex
 
@@ -423,7 +437,7 @@ struct LaTeXMarkdownView: View, Equatable {
 
                 if depth == 0 {
                     let content = String(latex[contentStart..<cursor])
-                    result += rewriteTextContent(content)
+                    result += Self.rewriteTextContent(content)
                     index = latex.index(after: cursor)
                 } else {
                     result += String(latex[index...])
@@ -438,7 +452,7 @@ struct LaTeXMarkdownView: View, Equatable {
         return result
     }
 
-    private func rewriteTextContent(_ content: String) -> String {
+    private static func rewriteTextContent(_ content: String) -> String {
         guard content.contains("\\(") else {
             return "\\text{\(content)}"
         }
@@ -494,7 +508,7 @@ struct LaTeXMarkdownView: View, Equatable {
         let enclosingRange: Range<String.Index>
     }
 
-    private func findMarkdownTables(in content: String) -> [TableMatch] {
+    private static func findMarkdownTables(in content: String) -> [TableMatch] {
         guard content.contains("|") else { return [] }
 
         var lines: [LineInfo] = []
@@ -520,7 +534,7 @@ struct LaTeXMarkdownView: View, Equatable {
             }
 
             let alignmentLine = lines[alignmentIndex].text
-            guard isAlignmentLine(alignmentLine) else {
+            guard Self.isAlignmentLine(alignmentLine) else {
                 index += 1
                 continue
             }
@@ -538,7 +552,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 rowIndex += 1
             }
 
-            if let parsed = parseTable(lines: collected) {
+            if let parsed = Self.parseTable(lines: collected) {
                 let lowerBound = lines[index].enclosingRange.lowerBound
                 let upperBound = lines[lastIndex].enclosingRange.upperBound
                 let range = NSRange(lowerBound..<upperBound, in: content)
@@ -552,7 +566,7 @@ struct LaTeXMarkdownView: View, Equatable {
         return matches
     }
 
-    private func parseTable(lines: [String]) -> ParsedTable? {
+    private static func parseTable(lines: [String]) -> ParsedTable? {
         guard lines.count >= 2 else { return nil }
 
         let headerCells = parseTableCells(from: lines[0])
@@ -572,7 +586,7 @@ struct LaTeXMarkdownView: View, Equatable {
         return ParsedTable(headers: normalizedHeader, alignments: normalizedAlignments, rows: rows)
     }
 
-    private func parseAlignmentRow(from line: String, columnCount: Int) -> [TableAlignment] {
+    private static func parseAlignmentRow(from line: String, columnCount: Int) -> [TableAlignment] {
         let cells = parseTableCells(from: line)
         guard !cells.isEmpty else { return Array(repeating: .leading, count: columnCount) }
 
@@ -594,7 +608,7 @@ struct LaTeXMarkdownView: View, Equatable {
         return normalizeAlignments(alignments, targetCount: max(columnCount, alignments.count))
     }
 
-    private func normalizeAlignments(_ alignments: [TableAlignment], targetCount: Int) -> [TableAlignment] {
+    private static func normalizeAlignments(_ alignments: [TableAlignment], targetCount: Int) -> [TableAlignment] {
         if alignments.count == targetCount {
             return alignments
         } else if alignments.count < targetCount {
@@ -604,7 +618,7 @@ struct LaTeXMarkdownView: View, Equatable {
         }
     }
 
-    private func normalizeRow(_ cells: [String], targetCount: Int) -> [String] {
+    private static func normalizeRow(_ cells: [String], targetCount: Int) -> [String] {
         if cells.count == targetCount {
             return cells
         } else if cells.count < targetCount {
@@ -614,7 +628,7 @@ struct LaTeXMarkdownView: View, Equatable {
         }
     }
 
-    private func parseTableCells(from line: String) -> [String] {
+    private static func parseTableCells(from line: String) -> [String] {
         let placeholder = "__ESCAPED_PIPE__"
         var working = line.trimmingCharacters(in: .whitespaces)
 
@@ -633,7 +647,7 @@ struct LaTeXMarkdownView: View, Equatable {
         }
     }
 
-    private func isAlignmentLine(_ line: String) -> Bool {
+    private static func isAlignmentLine(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("|") else { return false }
 
@@ -649,13 +663,13 @@ struct LaTeXMarkdownView: View, Equatable {
     }
 }
 
-private struct ParsedTable {
+private struct ParsedTable: Sendable {
     let headers: [String]
     let alignments: [TableAlignment]
     let rows: [[String]]
 }
 
-private enum TableAlignment {
+private enum TableAlignment: Sendable {
     case leading
     case center
     case trailing
@@ -692,29 +706,43 @@ private struct MarkdownTableView: View {
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            tableContainer(useColumnWidths: true)
+            tableContainer
             ScrollView(.horizontal, showsIndicators: true) {
-                tableContainer(useColumnWidths: true)
+                tableContainer
             }
         }
         .padding(.vertical, 8)
-        .background(
-            Group {
-                if columnWidths.isEmpty {
-                    tableContainer(useColumnWidths: false)
-                        .hidden()
-                        .onPreferenceChange(ColumnWidthPreferenceKey.self) { newValues in
-                            let cappedValues = newValues.mapValues { min($0, Constants.UI.tableMaxColumnWidth) }
-                            if columnWidths != cappedValues {
-                                columnWidths = cappedValues
-                            }
-                        }
-                }
+        .onAppear {
+            if columnWidths.isEmpty {
+                columnWidths = Self.measureColumnWidths(for: table)
             }
-        )
+        }
     }
 
-    private func tableContainer(useColumnWidths: Bool) -> some View {
+    /// Measure column widths using text measurement instead of rendering a hidden table.
+    private static func measureColumnWidths(for table: ParsedTable) -> [Int: CGFloat] {
+        let font = UIFont.systemFont(ofSize: 16)
+        let boldFont = UIFont.boldSystemFont(ofSize: 16)
+        let horizontalPadding: CGFloat = 24
+        var widths: [Int: CGFloat] = [:]
+
+        for (index, header) in table.headers.enumerated() {
+            let size = (header as NSString).size(withAttributes: [.font: boldFont])
+            widths[index] = min(size.width + horizontalPadding, Constants.UI.tableMaxColumnWidth)
+        }
+
+        for row in table.rows {
+            for (index, cell) in row.enumerated() {
+                let size = (cell as NSString).size(withAttributes: [.font: font])
+                let width = min(size.width + horizontalPadding, Constants.UI.tableMaxColumnWidth)
+                widths[index] = max(widths[index] ?? 0, width)
+            }
+        }
+
+        return widths
+    }
+
+    private var tableContainer: some View {
         VStack(spacing: 0) {
             if !table.headers.isEmpty {
                 MarkdownTableRowView(
@@ -724,8 +752,7 @@ private struct MarkdownTableView: View {
                     isDarkMode: isDarkMode,
                     borderColor: borderColor,
                     background: headerBackground,
-                    columnWidths: useColumnWidths ? columnWidths : [:],
-                    measureColumns: !useColumnWidths
+                    columnWidths: columnWidths
                 )
                 Rectangle()
                     .fill(borderColor)
@@ -740,8 +767,7 @@ private struct MarkdownTableView: View {
                     isDarkMode: isDarkMode,
                     borderColor: borderColor,
                     background: index.isMultiple(of: 2) ? alternatingRowBackground : SwiftUI.Color.clear,
-                    columnWidths: useColumnWidths ? columnWidths : [:],
-                    measureColumns: !useColumnWidths
+                    columnWidths: columnWidths
                 )
 
                 if index < table.rows.count - 1 {
@@ -767,7 +793,6 @@ private struct MarkdownTableRowView: View {
     let borderColor: SwiftUI.Color
     let background: SwiftUI.Color
     let columnWidths: [Int: CGFloat]
-    let measureColumns: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -777,9 +802,7 @@ private struct MarkdownTableRowView: View {
                     alignment: alignments.indices.contains(index) ? alignments[index] : .leading,
                     isHeader: isHeader,
                     isDarkMode: isDarkMode,
-                    columnIndex: index,
                     columnWidth: columnWidths[index],
-                    measureColumn: measureColumns,
                     background: background
                 )
                 .frame(maxHeight: .infinity, alignment: .top)
@@ -800,9 +823,7 @@ private struct MarkdownTableCell: View {
     let alignment: TableAlignment
     let isHeader: Bool
     let isDarkMode: Bool
-    let columnIndex: Int
     let columnWidth: CGFloat?
-    let measureColumn: Bool
     let background: SwiftUI.Color
 
     var body: some View {
@@ -815,11 +836,7 @@ private struct MarkdownTableCell: View {
         .padding(.vertical, isHeader ? 6 : 5)
         .padding(.horizontal, 12)
 
-        if measureColumn {
-            cellContent
-                .fixedSize(horizontal: true, vertical: true)
-                .background(ColumnWidthReader(columnIndex: columnIndex))
-        } else if let width = columnWidth {
+        if let width = columnWidth {
             cellContent
                 .frame(width: width, alignment: alignment.viewAlignment)
                 .frame(maxHeight: .infinity)
@@ -828,32 +845,6 @@ private struct MarkdownTableCell: View {
             cellContent
                 .frame(maxHeight: .infinity)
                 .background(background)
-        }
-    }
-}
-
-private struct ColumnWidthReader: View {
-    let columnIndex: Int
-
-    var body: some View {
-        GeometryReader { proxy in
-            SwiftUI.Color.clear
-                .preference(key: ColumnWidthPreferenceKey.self, value: [columnIndex: proxy.size.width])
-        }
-    }
-}
-
-private struct ColumnWidthPreferenceKey: PreferenceKey {
-    static var defaultValue: [Int: CGFloat] = [:]
-
-    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
-        let newValue = nextValue()
-        for (index, width) in newValue {
-            if let existing = value[index] {
-                value[index] = max(existing, width)
-            } else {
-                value[index] = width
-            }
         }
     }
 }
