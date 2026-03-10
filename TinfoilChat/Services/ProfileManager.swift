@@ -35,6 +35,7 @@ class ProfileManager: ObservableObject {
     @Published var syncError: String?
     
     // Private properties
+    private let keychainQueue = DispatchQueue(label: "com.tinfoil.chat.profile-keychain")
     private let keychainHelper = KeychainHelper.shared
     private let profileSync = ProfileSyncService.shared
     private var syncTimer: Timer?
@@ -88,9 +89,14 @@ class ProfileManager: ObservableObject {
         guard let data = try? JSONEncoder().encode(profile) else {
             return
         }
-        
-        keychainHelper.save(data, for: keychainKey, service: keychainService)
-        
+
+        let helper = keychainHelper
+        let key = keychainKey
+        let service = keychainService
+        keychainQueue.async {
+            helper.save(data, for: key, service: service)
+        }
+
         // For user-initiated changes, schedule a debounced cloud sync
         if !isApplyingProfile {
             if !isSyncing {
@@ -298,7 +304,12 @@ class ProfileManager: ObservableObject {
                     // Save to keychain without triggering local change observers
                     let data = try? JSONEncoder().encode(cloudProfile)
                     if let data = data {
-                        keychainHelper.save(data, for: keychainKey, service: keychainService)
+                        let helper = self.keychainHelper
+                        let key = self.keychainKey
+                        let service = self.keychainService
+                        self.keychainQueue.async {
+                            helper.save(data, for: key, service: service)
+                        }
                     }
                     
                     lastSyncedVersion = cloudVersion
