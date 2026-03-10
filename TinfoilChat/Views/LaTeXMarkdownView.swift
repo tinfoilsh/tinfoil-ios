@@ -25,49 +25,6 @@ private struct ContentSegment: Sendable {
     let kind: SegmentKind
 }
 
-private struct IndexedParagraph: Identifiable {
-    let index: Int
-    let text: String
-    let isLast: Bool
-    var id: Int { index }
-}
-
-private struct StreamingParagraphsView: View {
-    let content: String
-    let isDarkMode: Bool
-
-    var body: some View {
-        let paragraphs = content.components(separatedBy: "\n\n")
-        let items = paragraphs.enumerated().map {
-            IndexedParagraph(index: $0.offset, text: $0.element, isLast: $0.offset == paragraphs.count - 1)
-        }
-        let theme = MarkdownThemeCache.getTheme(isDarkMode: isDarkMode)
-        let highlighter = MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode)
-        ForEach(items) { item in
-            StreamingParagraphItemView(item: item, theme: theme, highlighter: highlighter)
-        }
-    }
-}
-
-private struct StreamingParagraphItemView: View {
-    let item: IndexedParagraph
-    let theme: MarkdownUI.Theme
-    let highlighter: HighlightrCodeSyntaxHighlighter
-
-    var body: some View {
-        if item.isLast {
-            Markdown(item.text)
-                .markdownTheme(theme)
-                .markdownCodeSyntaxHighlighter(highlighter)
-        } else {
-            Markdown(item.text)
-                .markdownTheme(theme)
-                .markdownCodeSyntaxHighlighter(highlighter)
-                .id("sp_\(item.index)_\(item.text.hashValue)")
-        }
-    }
-}
-
 private struct SegmentView: View {
     let segment: ContentSegment
     let isDarkMode: Bool
@@ -151,10 +108,10 @@ struct LaTeXMarkdownView: View, Equatable {
     @State private var segments: [ContentSegment]? = nil
 
     // Pre-compiled regex patterns (compiled once, reused across all renders)
-    private static let codeBlockRegex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```", options: [])
-    private static let inlineCodeRegex = try? NSRegularExpression(pattern: "`[^`]+`", options: [])
-    private static let displayLatexRegex = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators])
-    private static let inlineLatexRegex = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: [])
+    private nonisolated(unsafe) static let codeBlockRegex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```", options: [])
+    private nonisolated(unsafe) static let inlineCodeRegex = try? NSRegularExpression(pattern: "`[^`]+`", options: [])
+    private nonisolated(unsafe) static let displayLatexRegex = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators])
+    private nonisolated(unsafe) static let inlineLatexRegex = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: [])
     static func == (lhs: LaTeXMarkdownView, rhs: LaTeXMarkdownView) -> Bool {
         lhs.content == rhs.content &&
         lhs.isDarkMode == rhs.isDarkMode &&
@@ -174,7 +131,7 @@ struct LaTeXMarkdownView: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if isStreaming {
-                streamingParagraphs(content: content)
+                markdownFallback(content: content)
             } else if let segments = segments {
                 ForEach(segments, id: \.id) { segment in
                     SegmentView(segment: segment, isDarkMode: isDarkMode, isStreaming: false)
@@ -211,15 +168,6 @@ struct LaTeXMarkdownView: View, Equatable {
         return Markdown(strippedText)
             .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
             .markdownCodeSyntaxHighlighter(MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode))
-    }
-
-    /// Splits streaming content at paragraph boundaries so only the last
-    /// (actively-growing) paragraph re-renders on each new token.
-    private func streamingParagraphs(content: String) -> some View {
-        StreamingParagraphsView(
-            content: content,
-            isDarkMode: isDarkMode
-        )
     }
 
     /// Strip citation markers from markdown text.
