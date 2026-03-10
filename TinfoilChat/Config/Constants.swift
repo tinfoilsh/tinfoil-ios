@@ -33,6 +33,15 @@ enum Constants {
         static let actionButtonCornerRadius: CGFloat = 6
     }
 
+    enum Rendering {
+        /// Code blocks larger than this skip JS-based syntax highlighting
+        /// to avoid blocking the main thread via JavaScriptCore.
+        static let maxSyntaxHighlightCharacters = 15_000
+        /// Messages larger than this skip LaTeX/table regex parsing
+        /// and render as plain markdown.
+        static let maxFullParsingCharacters = 50_000
+    }
+
     enum StreamingBuffer {
         static let initialMultiplier: CGFloat = 50.0
         static let multiplierIncrement: CGFloat = 10.0
