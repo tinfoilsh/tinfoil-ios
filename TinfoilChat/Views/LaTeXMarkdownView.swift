@@ -759,9 +759,9 @@ private struct MarkdownTableView: View {
 
     /// Measure column widths using text measurement instead of rendering a hidden table.
     private static func measureColumnWidths(for table: ParsedTable) -> [Int: CGFloat] {
-        let font = UIFont.systemFont(ofSize: 16)
-        let boldFont = UIFont.boldSystemFont(ofSize: 16)
-        let horizontalPadding: CGFloat = 24
+        let font = UIFont.systemFont(ofSize: Constants.UI.tableFontSize)
+        let boldFont = UIFont.boldSystemFont(ofSize: Constants.UI.tableFontSize)
+        let horizontalPadding = Constants.UI.tableCellHorizontalPadding * 2
         var widths: [Int: CGFloat] = [:]
 
         for (index, header) in table.headers.enumerated() {
@@ -872,7 +872,7 @@ private struct MarkdownTableCell: View {
             maxWidthAlignment: alignment.viewAlignment
         )
         .padding(.vertical, isHeader ? 6 : 5)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, Constants.UI.tableCellHorizontalPadding)
 
         if let width = columnWidth {
             cellContent
