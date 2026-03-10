@@ -149,6 +149,17 @@ struct MessageInputView: View {
                 .presentationDetents([.height(340)])
                 .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
             }
+            .sheet(isPresented: $viewModel.showRateLimitPaywall) {
+                PaywallView(displayCloseButton: true)
+                    .onPurchaseCompleted { _ in
+                        viewModel.showRateLimitPaywall = false
+                    }
+                    .onDisappear {
+                        Task {
+                            await authManager.fetchSubscriptionStatus()
+                        }
+                    }
+            }
     }
 
     /// Small label shown above the input when remaining free requests are low
