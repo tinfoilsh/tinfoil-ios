@@ -517,18 +517,7 @@ struct TabbedWelcomeView: View {
     @State private var isPrivacyExpanded = false
     @State private var showLinks = false
 
-    private static let privacyText = """
-        Your messages are encrypted directly to the AI models running inside secure hardware enclaves.
-
-        These are hardware-isolated environments powered by confidential computing GPUs with verifiable confidentiality and integrity guarantees.
-
-        Not even Tinfoil can access your data. This applies to all chats, images, documents, and voice input.
-
-        Our open-source stack lets you verify this yourself by inspecting the hardware attestation.
-        """
-        .split(separator: "\n")
-        .map { $0.trimmingCharacters(in: .whitespaces) }
-        .joined(separator: "\n")
+    private static let privacyText = "Your messages are encrypted directly to the AI models running inside secure hardware enclaves. These are hardware-isolated environments powered by confidential computing GPUs with verifiable confidentiality and integrity guarantees. Not even Tinfoil can access your data. This applies to all chats, images, documents, and voice input. Our open-source stack lets you verify this yourself by inspecting the hardware attestation."
 
     var body: some View {
         VStack(spacing: 24) {
@@ -576,8 +565,8 @@ struct TabbedWelcomeView: View {
                     fullText: Self.privacyText,
                     isActive: isPrivacyExpanded,
                     font: .system(size: 14),
-                    color: .secondary,
-                    charsPerTick: 4,
+                    color: .primary.opacity(0.7),
+                    charsPerTick: 8,
                     tickInterval: 0.012,
                     onFinished: {
                         withAnimation(.easeOut(duration: 0.3)) {
