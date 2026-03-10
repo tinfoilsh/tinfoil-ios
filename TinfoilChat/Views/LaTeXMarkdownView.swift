@@ -892,9 +892,17 @@ struct LaTeXView: View {
     let latex: String
     let isDisplay: Bool
     let isDarkMode: Bool
-    
+
+    private var isUnsupportedEnvironment: Bool {
+        latex.contains("\\begin{array}") ||
+        latex.contains("\\begin{tabular}") ||
+        latex.contains("\\begin{longtable}")
+    }
+
     var body: some View {
-        if isDisplay {
+        if isUnsupportedEnvironment {
+            UnsupportedLaTeXView(isDarkMode: isDarkMode)
+        } else if isDisplay {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     Spacer(minLength: 0)
@@ -920,6 +928,54 @@ struct LaTeXView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 2)
         }
+    }
+}
+
+private struct UnsupportedLaTeXView: View {
+    let isDarkMode: Bool
+    @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
+    @Environment(\.openURL) private var openURL
+
+    private var canViewOnWeb: Bool {
+        guard let chat = viewModel.currentChat else { return false }
+        return !chat.isLocalOnly
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Text("LaTeX table not supported on iOS")
+                .font(.subheadline)
+                .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
+
+            if canViewOnWeb, let chatId = viewModel.currentChat?.id {
+                Button(action: {
+                    if let url = URL(string: "\(Constants.Share.shareBaseURL)/chat/\(chatId)") {
+                        openURL(url)
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "safari")
+                            .font(.subheadline)
+                        Text("View on web")
+                            .font(.subheadline.weight(.medium))
+                    }
+                    .foregroundColor(isDarkMode ? .white : .black)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isDarkMode ? Color.white.opacity(0.05) : Color.black.opacity(0.03))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.1), lineWidth: 1)
+        )
+        .padding(.vertical, 8)
     }
 }
 
