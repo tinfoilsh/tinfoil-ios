@@ -894,7 +894,6 @@ struct LaTeXView: View {
     let isDarkMode: Bool
 
     private var isUnsupportedEnvironment: Bool {
-        latex.contains("\\begin{array}") ||
         latex.contains("\\begin{tabular}") ||
         latex.contains("\\begin{longtable}")
     }
