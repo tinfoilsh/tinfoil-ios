@@ -24,31 +24,33 @@ private struct ContentSegment: Sendable {
     let id: String
     let kind: SegmentKind
 
-    func createView(isDarkMode: Bool, isStreaming: Bool = false) -> AnyView {
-        switch kind {
+}
+}
+
+private struct SegmentView: View {
+    let segment: ContentSegment
+    let isDarkMode: Bool
+    let isStreaming: Bool
+
+    var body: some View {
+        switch segment.kind {
         case .markdown(let text):
             // Strip citation markers from text - sources shown separately at message level
             // Skip during streaming to avoid catastrophic regex backtracking on incomplete citations
             let strippedText = isStreaming ? text : LaTeXMarkdownView.stripCitations(from: text)
-            return AnyView(
-                Markdown(strippedText)
-                    .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-                    .markdownCodeSyntaxHighlighter(MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode))
-            )
+            Markdown(strippedText)
+                .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
+                .markdownCodeSyntaxHighlighter(MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode))
         case .latex(let latex, let isDisplay):
-            return AnyView(
-                LaTeXView(
-                    latex: latex,
-                    isDisplay: isDisplay,
-                    isDarkMode: isDarkMode
-                )
+            LaTeXView(
+                latex: latex,
+                isDisplay: isDisplay,
+                isDarkMode: isDarkMode
             )
         case .table(let table):
-            return AnyView(
-                MarkdownTableView(
-                    table: table,
-                    isDarkMode: isDarkMode
-                )
+            MarkdownTableView(
+                table: table,
+                isDarkMode: isDarkMode
             )
         }
     }
@@ -134,7 +136,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 markdownFallback(content: content)
             } else if let segments = segments {
                 ForEach(segments, id: \.id) { segment in
-                    segment.createView(isDarkMode: isDarkMode, isStreaming: false)
+                    SegmentView(segment: segment, isDarkMode: isDarkMode, isStreaming: false)
                         .id(segment.id)
                 }
             } else {
