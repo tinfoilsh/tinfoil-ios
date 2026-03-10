@@ -679,15 +679,14 @@ struct ObservableMessageCell: View {
                         .frame(maxWidth: .infinity)
                 }
                 .if(wrapper.isLoading && wrapper.isLastMessage) { view in
-                    view.overlay(
+                    view.background(
                         GeometryReader { geometry in
                             Color.clear
-                                .preference(key: StreamingContentHeightKey.self, value: geometry.size.height)
+                                .onChange(of: geometry.size.height) { _, newHeight in
+                                    wrapper.actualContentHeight = newHeight
+                                }
                         }
                     )
-                    .onPreferenceChange(StreamingContentHeightKey.self) { height in
-                        wrapper.actualContentHeight = height
-                    }
                 }
             }
         }
@@ -704,9 +703,3 @@ struct ObservableMessageCell: View {
     }
 }
 
-struct StreamingContentHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
