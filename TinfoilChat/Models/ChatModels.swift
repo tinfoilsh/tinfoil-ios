@@ -834,8 +834,6 @@ class SessionTokenManager {
         refreshTask = Task {
             defer { refreshTask = nil }
 
-            sessionToken = nil
-            sessionTokenExpiresAt = nil
             _ = await fetchFreshSessionToken()
 
             if let snapshot = snapshot,
