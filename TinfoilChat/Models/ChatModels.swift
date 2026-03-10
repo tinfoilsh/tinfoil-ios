@@ -685,7 +685,7 @@ class SessionTokenManager {
 
     private init() {}
 
-    /// Retrieves the session token for premium models
+    /// Retrieves the session token, returning the cached value if still valid
     /// - Returns: Session token string or empty string if unavailable
     func getSessionToken() async -> String {
         if let existingToken = sessionToken,
@@ -755,19 +755,26 @@ class SessionTokenManager {
                 }
             }
 
+            // No Clerk session — fetch an anonymous key without auth
+            if let key = await fetchSessionKey(jwt: nil) {
+                return key
+            }
+
             return ""
         } catch {
             return ""
         }
     }
 
-    /// Exchanges a Clerk JWT for a session API key
+    /// Exchanges a Clerk JWT for a session API key, or fetches an anonymous key when jwt is nil
     /// - Returns: The API key string, or nil on failure
-    private func fetchSessionKey(jwt: String) async -> String? {
+    private func fetchSessionKey(jwt: String?) async -> String? {
         do {
             var request = URLRequest(url: URL(string: sessionTokenEndpoint)!)
             request.httpMethod = "GET"
-            request.addValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
+            if let jwt = jwt {
+                request.addValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
+            }
 
             let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -788,8 +795,8 @@ class SessionTokenManager {
                 }
 
                 // Parse rate limit info for free-tier users
-                if let isFreeTier = responseDict["is_free_tier"] as? Bool,
-                   isFreeTier,
+                let isFreeTier = responseDict["is_free_tier"] as? Bool ?? false
+                if isFreeTier,
                    let rateLimitDict = responseDict["rate_limit"] as? [String: Any],
                    let maxRequests = rateLimitDict["max_requests"] as? Int,
                    let remaining = rateLimitDict["remaining"] as? Int,
@@ -834,6 +841,9 @@ class SessionTokenManager {
         refreshTask = Task {
             defer { refreshTask = nil }
 
+            #if DEBUG
+            print("[SessionToken] refreshRateLimit: re-fetching token and rate limit")
+            #endif
             _ = await fetchFreshSessionToken()
 
             if let snapshot = snapshot,

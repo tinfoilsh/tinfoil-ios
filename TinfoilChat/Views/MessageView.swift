@@ -1378,16 +1378,21 @@ struct ErrorMessageView: View {
         isRateLimitError ? .orange : (isRequestError ? .red : .orange)
     }
 
+    private var isConnectionError: Bool {
+        let msg = errorMessage.lowercased()
+        return msg.contains("internet connection") || msg.contains("network") || msg.contains("connection was lost") || msg.contains("unable to connect")
+    }
+
     private var headerIcon: String {
         if isRateLimitError { return "gauge.with.dots.needle.67percent" }
-        if isRequestError { return "exclamationmark.triangle" }
-        return "wifi.exclamationmark"
+        if isConnectionError { return "wifi.exclamationmark" }
+        return "exclamationmark.triangle"
     }
 
     private var headerText: String {
         if isRateLimitError { return "Rate Limit Reached" }
-        if isRequestError { return "Request Failed" }
-        return "Connection Lost"
+        if isConnectionError { return "Connection Lost" }
+        return "Something Went Wrong"
     }
 
     var body: some View {
