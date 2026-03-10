@@ -40,6 +40,9 @@ enum Constants {
         /// Messages larger than this skip LaTeX/table regex parsing
         /// and render as plain markdown.
         static let maxFullParsingCharacters = 50_000
+        /// Individual markdown segments larger than this are split at
+        /// paragraph boundaries to bound CoreText measurement time.
+        static let maxMarkdownSegmentCharacters = 8_000
     }
 
     enum StreamingBuffer {

@@ -404,7 +404,45 @@ struct LaTeXMarkdownView: View, Equatable {
             ))
         }
 
+        segments = segments.flatMap { segment -> [ContentSegment] in
+            guard case .markdown(let text) = segment.kind,
+                  text.count > Constants.Rendering.maxMarkdownSegmentCharacters else {
+                return [segment]
+            }
+            return splitMarkdownSegment(text, baseId: segment.id)
+        }
+
         return segments
+    }
+
+    private static func splitMarkdownSegment(_ text: String, baseId: String) -> [ContentSegment] {
+        let paragraphs = text.components(separatedBy: "\n\n")
+        var result: [ContentSegment] = []
+        var current = ""
+        var subIndex = 0
+
+        for (i, paragraph) in paragraphs.enumerated() {
+            let candidate = current.isEmpty ? paragraph : current + "\n\n" + paragraph
+            if candidate.count > Constants.Rendering.maxMarkdownSegmentCharacters && !current.isEmpty {
+                result.append(ContentSegment(
+                    id: "\(baseId)_split_\(subIndex)",
+                    kind: .markdown(current)
+                ))
+                subIndex += 1
+                current = paragraph
+            } else {
+                current = candidate
+            }
+        }
+
+        if !current.isEmpty {
+            result.append(ContentSegment(
+                id: "\(baseId)_split_\(subIndex)",
+                kind: .markdown(current)
+            ))
+        }
+
+        return result
     }
 
     private static func sanitizeLatex(_ latex: String) -> String {
