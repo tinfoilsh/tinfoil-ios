@@ -481,14 +481,10 @@ struct MessageTableView: UIViewRepresentable {
 
             let numberOfRows = tableView.numberOfRows(inSection: 0)
             guard numberOfRows > 0 else { return }
+            guard numberOfRows == parent.messages.count || parent.messages.isEmpty else { return }
 
-            // Use contentSize-based scrolling instead of scrollToRow to avoid
-            // faulting in heights for all intermediate cells, which triggers
-            // expensive markdown layout on the main thread.
-            let bottomOffset = tableView.contentSize.height - tableView.bounds.height + tableView.contentInset.bottom
-            if bottomOffset > 0 {
-                tableView.setContentOffset(CGPoint(x: 0, y: bottomOffset), animated: animated)
-            }
+            let lastIndexPath = IndexPath(row: numberOfRows - 1, section: 0)
+            tableView.scrollToRow(at: lastIndexPath, at: .bottom, animated: animated)
         }
 
         /// Scrolls so the user's message sits at the top of the visible area,
@@ -501,15 +497,12 @@ struct MessageTableView: UIViewRepresentable {
                 scrollToBottom(animated: animated)
                 return
             }
+            guard numberOfRows == parent.messages.count else { return }
 
             updateContentInset()
 
-            // Use rectForRow + setContentOffset instead of scrollToRow to avoid
-            // faulting in heights for all intermediate cells.
             let userMessageIndexPath = IndexPath(row: numberOfRows - 2, section: 0)
-            let rowRect = tableView.rectForRow(at: userMessageIndexPath)
-            let targetOffset = rowRect.origin.y - tableView.contentInset.top
-            tableView.setContentOffset(CGPoint(x: 0, y: max(0, targetOffset)), animated: animated)
+            tableView.scrollToRow(at: userMessageIndexPath, at: .top, animated: animated)
         }
 
         func checkIfAtBottom() {
