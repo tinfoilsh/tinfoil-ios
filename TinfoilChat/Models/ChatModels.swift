@@ -859,5 +859,6 @@ class SessionTokenManager {
     func clearSessionToken() {
         sessionToken = nil
         sessionTokenExpiresAt = nil
+        rateLimitInfo = nil
     }
 }
