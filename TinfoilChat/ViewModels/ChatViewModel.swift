@@ -857,6 +857,13 @@ class ChatViewModel: ObservableObject {
         guard hasText || hasAttachments else { return }
 
         // Block send when free-tier requests are exhausted
+        #if DEBUG
+        if let rl = rateLimit {
+            print("[Chat] sendMessage: rateLimit \(rl.remaining)/\(rl.maxRequests)")
+        } else {
+            print("[Chat] sendMessage: no rate limit info (premium or not yet fetched)")
+        }
+        #endif
         if let rl = rateLimit, rl.remaining <= 0 {
             showRateLimitPaywall = true
             return
@@ -1579,9 +1586,17 @@ class ChatViewModel: ObservableObject {
                     }
                 }
             } catch {
+                #if DEBUG
+                print("[Chat] generateResponse error: \(type(of: error)) — \(error)")
+                print("[Chat] isAuthError=\(ChatViewModel.isAuthenticationError(error)), isRequestError=\(self.isRequestError(error)), isRateLimitError=\(self.isRateLimitError(error))")
+                #endif
+
                 // Check if this is a 401 auth error and we haven't retried yet
                 let shouldRetry = await MainActor.run {
                     if !hasRetriedWithFreshKey && ChatViewModel.isAuthenticationError(error) {
+                        #if DEBUG
+                        print("[Chat] Will retry with fresh key")
+                        #endif
                         return true
                     }
                     return false
