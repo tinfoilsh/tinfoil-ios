@@ -114,6 +114,7 @@ struct MessageView: View {
                         if !message.content.isEmpty {
                             if !message.contentChunks.isEmpty {
                                 ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
+                                    .equatable()
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             } else {
                                 LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
@@ -209,6 +210,7 @@ struct MessageView: View {
 
                             if !message.contentChunks.isEmpty {
                                 ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
+                                    .equatable()
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             } else {
                                 LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
@@ -1291,10 +1293,16 @@ extension CodeBlockConfiguration: @retroactive Equatable {
     }
 }
 
-struct ChunkedContentView: View {
+struct ChunkedContentView: View, Equatable {
     let chunks: [ContentChunk]
     let isDarkMode: Bool
     let isStreaming: Bool
+
+    static func == (lhs: ChunkedContentView, rhs: ChunkedContentView) -> Bool {
+        lhs.chunks == rhs.chunks &&
+        lhs.isDarkMode == rhs.isDarkMode &&
+        lhs.isStreaming == rhs.isStreaming
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
