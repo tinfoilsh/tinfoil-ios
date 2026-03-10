@@ -10,7 +10,7 @@ import Foundation
 import Security
 
 /// A helper class for secure storage in the iOS Keychain
-class KeychainHelper {
+class KeychainHelper: @unchecked Sendable {
     
     static let shared = KeychainHelper()
     
