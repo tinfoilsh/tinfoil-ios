@@ -23,8 +23,6 @@ private enum SegmentKind: Sendable {
 private struct ContentSegment: Sendable {
     let id: String
     let kind: SegmentKind
-
-}
 }
 
 private struct SegmentView: View {
