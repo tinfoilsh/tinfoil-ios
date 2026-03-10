@@ -17,6 +17,8 @@ class ThinkingSummaryService {
     private var isGenerating = false
     private var currentSummary: String = ""
     private var generationTask: Task<Void, Never>?
+    private var lastGenerationTime: Date?
+    private var summarizedContentLength: Int = 0
 
     private init() {}
 
@@ -30,8 +32,10 @@ class ThinkingSummaryService {
             return
         }
 
-        // Only generate if we have enough content
-        guard thoughts.count >= Constants.ThinkingSummary.minContentLength else {
+        let newContent = String(thoughts.dropFirst(summarizedContentLength))
+
+        // Only generate if we have enough new content
+        guard newContent.count >= Constants.ThinkingSummary.minContentLength else {
             return
         }
 
@@ -40,7 +44,15 @@ class ThinkingSummaryService {
             return
         }
 
+        // Enforce cooldown between generations
+        if let lastTime = lastGenerationTime,
+           Date().timeIntervalSince(lastTime) < Constants.ThinkingSummary.cooldownSeconds {
+            return
+        }
+
         isGenerating = true
+        lastGenerationTime = Date()
+        let contentLengthAtGeneration = thoughts.count
 
         // Cancel any pending generation
         generationTask?.cancel()
@@ -53,6 +65,7 @@ class ThinkingSummaryService {
             defer {
                 Task { @MainActor in
                     self.isGenerating = false
+                    self.summarizedContentLength = contentLengthAtGeneration
                 }
             }
 
@@ -60,7 +73,7 @@ class ThinkingSummaryService {
                 let query = ChatQuery(
                     messages: [
                         .system(.init(content: .textContent(Constants.ThinkingSummary.systemPrompt))),
-                        .user(.init(content: .string(thoughts)))
+                        .user(.init(content: .string(newContent)))
                     ],
                     model: modelName,
                 )
@@ -89,6 +102,8 @@ class ThinkingSummaryService {
         generationTask = nil
         isGenerating = false
         currentSummary = ""
+        lastGenerationTime = nil
+        summarizedContentLength = 0
     }
 
     /// Get the current summary without generating a new one

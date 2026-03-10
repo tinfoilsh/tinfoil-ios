@@ -108,6 +108,7 @@ enum Constants {
 
     enum ThinkingSummary {
         static let minContentLength = 100
+        static let cooldownSeconds: TimeInterval = 3.0
         static let systemPrompt = "Generate a summary sentence of minimum 5 words, maximum 15 words summarizing the following text. NEVER output markdown."
     }
 
