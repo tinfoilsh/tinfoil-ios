@@ -198,7 +198,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 return
             }
             let contentToProcess = content
-            let parsed = await Task.detached { @MainActor in
+            let parsed = await Task.detached {
                 Self.parseContent(contentToProcess)
             }.value
             MarkdownRenderCache.shared.set(parsed, for: cacheKey)
@@ -325,7 +325,7 @@ struct LaTeXMarkdownView: View, Equatable {
     }
 
     /// Parse content into segments of markdown and LaTeX
-    private static func parseContent(_ content: String) -> [ContentSegment] {
+    private nonisolated static func parseContent(_ content: String) -> [ContentSegment] {
         if content.count > Constants.Rendering.maxFullParsingCharacters {
             return [ContentSegment(id: "md_full_\(content.hashValue)", kind: .markdown(content))]
         }
@@ -465,13 +465,13 @@ struct LaTeXMarkdownView: View, Equatable {
         return segments
     }
 
-    private static func splitMarkdownSegment(_ text: String, baseId: String) -> [ContentSegment] {
+    private nonisolated static func splitMarkdownSegment(_ text: String, baseId: String) -> [ContentSegment] {
         let paragraphs = text.components(separatedBy: "\n\n")
         var result: [ContentSegment] = []
         var current = ""
         var subIndex = 0
 
-        for (i, paragraph) in paragraphs.enumerated() {
+        for (_, paragraph) in paragraphs.enumerated() {
             let candidate = current.isEmpty ? paragraph : current + "\n\n" + paragraph
             if candidate.count > Constants.Rendering.maxMarkdownSegmentCharacters && !current.isEmpty {
                 result.append(ContentSegment(
@@ -495,7 +495,7 @@ struct LaTeXMarkdownView: View, Equatable {
         return result
     }
 
-    private static func sanitizeLatex(_ latex: String) -> String {
+    private nonisolated static func sanitizeLatex(_ latex: String) -> String {
         let trimmed = latex.trimmingCharacters(in: .whitespacesAndNewlines)
         let base = trimmed.isEmpty ? latex : trimmed
 
@@ -504,7 +504,7 @@ struct LaTeXMarkdownView: View, Equatable {
         return Self.normalizeTextCommands(in: base)
     }
 
-    private static func normalizeTextCommands(in latex: String) -> String {
+    private nonisolated static func normalizeTextCommands(in latex: String) -> String {
         var result = ""
         var index = latex.startIndex
 
@@ -542,7 +542,7 @@ struct LaTeXMarkdownView: View, Equatable {
         return result
     }
 
-    private static func rewriteTextContent(_ content: String) -> String {
+    private nonisolated static func rewriteTextContent(_ content: String) -> String {
         guard content.contains("\\(") else {
             return "\\text{\(content)}"
         }
@@ -598,7 +598,7 @@ struct LaTeXMarkdownView: View, Equatable {
         let enclosingRange: Range<String.Index>
     }
 
-    private static func findMarkdownTables(in content: String) -> [TableMatch] {
+    private nonisolated static func findMarkdownTables(in content: String) -> [TableMatch] {
         guard content.contains("|") else { return [] }
 
         var lines: [LineInfo] = []
@@ -656,7 +656,7 @@ struct LaTeXMarkdownView: View, Equatable {
         return matches
     }
 
-    private static func parseTable(lines: [String]) -> ParsedTable? {
+    private nonisolated static func parseTable(lines: [String]) -> ParsedTable? {
         guard lines.count >= 2 else { return nil }
 
         let headerCells = parseTableCells(from: lines[0])
@@ -676,7 +676,7 @@ struct LaTeXMarkdownView: View, Equatable {
         return ParsedTable(headers: normalizedHeader, alignments: normalizedAlignments, rows: rows)
     }
 
-    private static func parseAlignmentRow(from line: String, columnCount: Int) -> [TableAlignment] {
+    private nonisolated static func parseAlignmentRow(from line: String, columnCount: Int) -> [TableAlignment] {
         let cells = parseTableCells(from: line)
         guard !cells.isEmpty else { return Array(repeating: .leading, count: columnCount) }
 
@@ -698,7 +698,7 @@ struct LaTeXMarkdownView: View, Equatable {
         return normalizeAlignments(alignments, targetCount: max(columnCount, alignments.count))
     }
 
-    private static func normalizeAlignments(_ alignments: [TableAlignment], targetCount: Int) -> [TableAlignment] {
+    private nonisolated static func normalizeAlignments(_ alignments: [TableAlignment], targetCount: Int) -> [TableAlignment] {
         if alignments.count == targetCount {
             return alignments
         } else if alignments.count < targetCount {
@@ -708,7 +708,7 @@ struct LaTeXMarkdownView: View, Equatable {
         }
     }
 
-    private static func normalizeRow(_ cells: [String], targetCount: Int) -> [String] {
+    private nonisolated static func normalizeRow(_ cells: [String], targetCount: Int) -> [String] {
         if cells.count == targetCount {
             return cells
         } else if cells.count < targetCount {
@@ -718,7 +718,7 @@ struct LaTeXMarkdownView: View, Equatable {
         }
     }
 
-    private static func parseTableCells(from line: String) -> [String] {
+    private nonisolated static func parseTableCells(from line: String) -> [String] {
         let placeholder = "__ESCAPED_PIPE__"
         var working = line.trimmingCharacters(in: .whitespaces)
 
@@ -737,7 +737,7 @@ struct LaTeXMarkdownView: View, Equatable {
         }
     }
 
-    private static func isAlignmentLine(_ line: String) -> Bool {
+    private nonisolated static func isAlignmentLine(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("|") else { return false }
 
