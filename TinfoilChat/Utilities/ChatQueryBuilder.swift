@@ -39,11 +39,9 @@ struct ChatQueryBuilder {
 
         var messages: [ChatQuery.ChatCompletionMessageParam] = []
 
-        // Always use system role - all models we support handle it properly
-        // This is the standard OpenAI API format
-        let useSystemRole = true
+        // Most models support system role; DeepSeek is the known exception
+        let useSystemRole = !modelId.hasPrefix("deepseek")
 
-        // Add system message
         if useSystemRole {
             let fullPrompt = rules.isEmpty ? systemPrompt : systemPrompt + "\n\n" + rules
             messages.append(.system(.init(content: .textContent(fullPrompt))))
@@ -57,10 +55,11 @@ struct ChatQueryBuilder {
             if msg.role == .user {
                 var userContent = msg.content
 
-                // For models that don't use system role: prepend system instructions to the FIRST user message
+                // For models that don't use system role (e.g. DeepSeek): inject system instructions as a separate user message
                 if !hasAddedSystemInstructions {
-                    let instructions = rules.isEmpty ? systemPrompt : systemPrompt + "\n\n" + rules
-                    userContent = instructions + "\n\n" + msg.content
+                    let rawInstructions = rules.isEmpty ? systemPrompt : systemPrompt + "\n\n" + rules
+                    let systemContent = "<system>\n\(rawInstructions)\n</system>"
+                    messages.append(.user(.init(content: .string(systemContent))))
                     hasAddedSystemInstructions = true
                 }
 
