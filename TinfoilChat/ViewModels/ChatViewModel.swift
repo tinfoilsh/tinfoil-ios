@@ -316,6 +316,7 @@ class ChatViewModel: ObservableObject {
         // Initial sync will be triggered when authManager is set (see authManager didSet)
 
         // Sync rate limit state from SessionTokenManager to this view model
+        rateLimit = SessionTokenManager.shared.rateLimitInfo
         SessionTokenManager.shared.onRateLimitChanged = { [weak self] info in
             Task { @MainActor in
                 self?.rateLimit = info
