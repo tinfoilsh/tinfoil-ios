@@ -201,7 +201,9 @@ struct LaTeXMarkdownView: View, Equatable {
                 i += 1
                 continue
             }
+            let digitStart = j
             while j < count, chars[j] >= "0", chars[j] <= "9" { j += 1 }
+            let digitEnd = j
             guard j < count, chars[j] == "]" else {
                 result.append(chars[i])
                 i += 1
@@ -239,8 +241,30 @@ struct LaTeXMarkdownView: View, Equatable {
             }
             j += 1
 
-            // Scan content with balanced parens (one level deep) until closing `)`
-            var depth = 1 // we're inside the outer `(`
+            // Capture URL (everything up to the next `~`)
+            let urlStart = j
+            var urlEnd = j
+            var foundTilde = false
+            while j < count {
+                if chars[j] == "~" {
+                    urlEnd = j
+                    foundTilde = true
+                    break
+                }
+                j += 1
+            }
+
+            guard foundTilde else {
+                for k in i..<j {
+                    result.append(chars[k])
+                }
+                i = j
+                continue
+            }
+            j += 1
+
+            // Scan past the title with balanced parens until closing `)`
+            var depth = 1
             var found = false
             while j < count {
                 if chars[j] == "(" {
@@ -257,11 +281,22 @@ struct LaTeXMarkdownView: View, Equatable {
             }
 
             if found {
-                // Skip the entire citation (including optional leading space)
+                // Convert citation to a markdown link: [domain](URL)
+                var urlView = String.UnicodeScalarView()
+                for k in urlStart..<urlEnd { urlView.append(chars[k]) }
+                let url = String(urlView)
+                let linkUrl = url.removingPercentEncoding ?? url
+                let domain: String
+                if let parsed = URL(string: linkUrl), let host = parsed.host {
+                    domain = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+                } else {
+                    domain = linkUrl
+                }
+                for c in " [\(domain)](\(linkUrl))".unicodeScalars {
+                    result.append(c)
+                }
                 i = j
             } else {
-                // Incomplete citation — keep original text, skip past the verified prefix
-                // to avoid re-scanning the same characters
                 for k in i..<j {
                     result.append(chars[k])
                 }
