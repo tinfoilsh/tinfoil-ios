@@ -46,7 +46,7 @@ class StreamingMarkdownChunker {
 
         if !workingBuffer.isEmpty {
             let chunkType: ContentChunkType = isInTable ? .table : (isInCodeBlock ? .codeBlock(language: codeBlockLanguage) : .paragraph)
-            let chunkId = isInTable ? "working_table" : "working_\(workingBuffer.hashValue)"
+            let chunkId = isInTable ? "working_table" : "working_current"
             result.append(ContentChunk(
                 id: chunkId,
                 type: chunkType,

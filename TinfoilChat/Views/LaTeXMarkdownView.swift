@@ -1123,7 +1123,7 @@ private struct MarkdownThemeCache {
             .heading1 { configuration in
                 configuration.label
                     .fixedSize(horizontal: false, vertical: true)
-                    .markdownMargin(top: 20, bottom: 10)
+                    .markdownMargin(top: 28, bottom: 12)
                     .markdownTextStyle {
                         FontWeight(.bold)
                         FontSize(.em(1.75))
@@ -1132,7 +1132,7 @@ private struct MarkdownThemeCache {
             .heading2 { configuration in
                 configuration.label
                     .fixedSize(horizontal: false, vertical: true)
-                    .markdownMargin(top: 16, bottom: 8)
+                    .markdownMargin(top: 24, bottom: 10)
                     .markdownTextStyle {
                         FontWeight(.semibold)
                         FontSize(.em(1.5))
@@ -1141,7 +1141,7 @@ private struct MarkdownThemeCache {
             .heading3 { configuration in
                 configuration.label
                     .fixedSize(horizontal: false, vertical: true)
-                    .markdownMargin(top: 14, bottom: 8)
+                    .markdownMargin(top: 22, bottom: 10)
                     .markdownTextStyle {
                         FontWeight(.semibold)
                         FontSize(.em(1.25))
@@ -1151,6 +1151,7 @@ private struct MarkdownThemeCache {
         let withBlockElements = withHeadings
             .blockquote { configuration in
                 let paddedLabel = configuration.label
+                    .fixedSize(horizontal: false, vertical: true)
                     .markdownTextStyle {
                         FontStyle(.italic)
                         ForegroundColor(.secondary)
