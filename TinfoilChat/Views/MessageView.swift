@@ -835,6 +835,7 @@ private struct MarkdownThemeCache {
             }
             .heading1 { configuration in
                 configuration.label
+                    .fixedSize(horizontal: false, vertical: true)
                     .markdownMargin(top: 20, bottom: 10)
                     .markdownTextStyle {
                         FontWeight(.bold)
@@ -843,6 +844,7 @@ private struct MarkdownThemeCache {
             }
             .heading2 { configuration in
                 configuration.label
+                    .fixedSize(horizontal: false, vertical: true)
                     .markdownMargin(top: 16, bottom: 8)
                     .markdownTextStyle {
                         FontWeight(.semibold)
@@ -851,6 +853,7 @@ private struct MarkdownThemeCache {
             }
             .heading3 { configuration in
                 configuration.label
+                    .fixedSize(horizontal: false, vertical: true)
                     .markdownMargin(top: 14, bottom: 8)
                     .markdownTextStyle {
                         FontWeight(.semibold)
