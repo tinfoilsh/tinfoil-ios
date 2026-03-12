@@ -2,12 +2,10 @@
 //  ThinkingSummaryService.swift
 //  TinfoilChat
 //
-//  Service for generating brief summaries of thinking content using the title model
+//  Service for generating brief summaries of thinking content using the summarizer enclave
 //
 
 import Foundation
-import OpenAI
-import TinfoilAI
 
 /// Service for generating thinking summaries during streaming
 @MainActor
@@ -25,18 +23,22 @@ class ThinkingSummaryService {
     /// Generate a summary of the thinking content
     /// - Parameters:
     ///   - thoughts: The current thinking text to summarize
-    ///   - client: The TinfoilAI client to use for generation (reuse existing client)
     ///   - completion: Called with the generated summary on the main actor
-    func generateSummary(thoughts: String, client: TinfoilAI, completion: @escaping @MainActor (String) -> Void) {
-        guard let titleModel = AppConfig.shared.titleModel else {
-            return
-        }
-
+    func generateSummary(thoughts: String, completion: @escaping @MainActor (String) -> Void) {
         let newContent = String(thoughts.dropFirst(summarizedContentLength))
 
         // Only generate if we have enough new content
         guard newContent.count >= Constants.ThinkingSummary.minContentLength else {
             return
+        }
+
+        // Send only the tail of the thoughts so the summary reflects current reasoning
+        let words = thoughts.split(separator: " ")
+        let tailText: String
+        if words.count > Constants.ThinkingSummary.tailWordCount {
+            tailText = words.suffix(Constants.ThinkingSummary.tailWordCount).joined(separator: " ")
+        } else {
+            tailText = thoughts
         }
 
         // Don't start a new generation if one is already in progress
@@ -57,8 +59,6 @@ class ThinkingSummaryService {
         // Cancel any pending generation
         generationTask?.cancel()
 
-        let modelName = titleModel.modelName
-
         generationTask = Task { [weak self] in
             guard let self = self else { return }
 
@@ -70,25 +70,16 @@ class ThinkingSummaryService {
             }
 
             do {
-                let query = ChatQuery(
-                    messages: [
-                        .system(.init(content: .textContent(Constants.ThinkingSummary.systemPrompt))),
-                        .user(.init(content: .string(newContent)))
-                    ],
-                    model: modelName,
+                let summary = try await SummarizerService.shared.summarize(
+                    content: tailText,
+                    style: .thoughtsSummary
                 )
-
-                let result = try await client.chats(query: query)
 
                 guard !Task.isCancelled else { return }
 
-                if let summary = result.choices.first?.message.content,
-                   !summary.isEmpty {
-                    let cleanSummary = Self.cleanupSummary(summary)
-                    if !cleanSummary.isEmpty {
-                        self.currentSummary = cleanSummary
-                        completion(cleanSummary)
-                    }
+                if !summary.isEmpty {
+                    self.currentSummary = summary
+                    completion(summary)
                 }
             } catch {
                 // Silently fail - summary is optional enhancement
@@ -111,13 +102,4 @@ class ThinkingSummaryService {
         currentSummary
     }
 
-    /// Clean up the generated summary: remove quotes, dots, possessives, and capitalize
-    private static func cleanupSummary(_ summary: String) -> String {
-        let cleaned = summary
-            .replacingOccurrences(of: "[\".]", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "\\b(my|your|yours|mine|our|ours|their|theirs|his|her|hers)\\b", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return cleaned.prefix(1).uppercased() + cleaned.dropFirst()
-    }
 }

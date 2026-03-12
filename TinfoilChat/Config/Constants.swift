@@ -106,10 +106,15 @@ enum Constants {
         static let collapseDelaySeconds: TimeInterval = 3.0
     }
 
+    enum Summarizer {
+        static let enclaveURL = "https://summarizer.tinfoil.sh"
+        static let configRepo = "tinfoilsh/confidential-summarizer"
+    }
+
     enum ThinkingSummary {
         static let minContentLength = 100
         static let cooldownSeconds: TimeInterval = 3.0
-        static let systemPrompt = "Generate a summary sentence of minimum 5 words, maximum 15 words summarizing the following text. NEVER output markdown."
+        static let tailWordCount = 200
     }
 
     enum TitleGeneration {
