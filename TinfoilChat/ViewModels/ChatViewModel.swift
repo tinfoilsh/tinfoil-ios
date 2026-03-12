@@ -1309,9 +1309,8 @@ class ChatViewModel: ObservableObject {
                             didMutateState = true
                             // Generate thinking summary (reuse existing client)
                             let currentThoughtsForSummary = thoughtsBuffer
-                            let summaryClient = client
                             Task { @MainActor [weak self] in
-                                ThinkingSummaryService.shared.generateSummary(thoughts: currentThoughtsForSummary, client: summaryClient) { summary in
+                                ThinkingSummaryService.shared.generateSummary(thoughts: currentThoughtsForSummary) { summary in
                                     self?.thinkingSummary = summary
                                 }
                             }
@@ -1418,9 +1417,8 @@ class ChatViewModel: ObservableObject {
                                 didMutateState = true
                                 // Generate thinking summary (reuse existing client)
                                 let currentThoughtsForSummary = thoughtsBuffer
-                                let summaryClient = client
                                 Task { @MainActor [weak self] in
-                                    ThinkingSummaryService.shared.generateSummary(thoughts: currentThoughtsForSummary, client: summaryClient) { summary in
+                                    ThinkingSummaryService.shared.generateSummary(thoughts: currentThoughtsForSummary) { summary in
                                         self?.thinkingSummary = summary
                                     }
                                 }
@@ -3010,61 +3008,22 @@ extension ChatViewModel {
             return nil
         }
 
-        // Look for a title generation model
-        let allModelTypes = AppConfig.shared.appModels.map { ModelType(from: $0) }
-        guard let titleModel = allModelTypes.first(where: { $0.type == "title" }) else {
-            return nil
-        }
-
         // Truncate content to word threshold
         let words = assistantMessage.content.split(separator: " ", omittingEmptySubsequences: true)
         let truncatedContent = words
             .prefix(Constants.TitleGeneration.wordThreshold)
             .joined(separator: " ")
 
-        // Ensure client is available
-        if client == nil {
-            setupTinfoilClient()
-            let maxWait: TimeInterval = Constants.Sync.clientInitTimeoutSeconds
-            let start = Date()
-            while client == nil && Date().timeIntervalSince(start) < maxWait {
-                try? await Task.sleep(nanoseconds: 100_000_000)
-            }
-        }
-        guard let client else { return nil }
-
-        let query = ChatQuery(
-            messages: [
-                .system(.init(content: .textContent(Constants.TitleGeneration.systemPrompt))),
-                .user(.init(content: .string(truncatedContent)))
-            ],
-            model: titleModel.modelName,
-        )
-
-        func parseTitleFromResult(_ result: ChatResult) -> String? {
-            let title = result.choices.first?.message.content ?? ""
-            let cleanTitle = title
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .replacingOccurrences(of: "^[\"']|[\"']$", with: "", options: .regularExpression)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return cleanTitle.isEmpty ? nil : cleanTitle
-        }
-
         do {
-            let result: ChatResult = try await client.chats(query: query)
-            return parseTitleFromResult(result)
+            let title = try await SummarizerService.shared.summarize(
+                content: truncatedContent,
+                style: .titleSummary
+            )
+
+            guard !title.isEmpty else { return nil }
+            return title
         } catch {
-            guard ChatViewModel.isAuthenticationError(error) else { return nil }
-
-            await refreshClientForRetry()
-            guard let freshClient = await MainActor.run(body: { self.client }) else { return nil }
-
-            do {
-                let result: ChatResult = try await freshClient.chats(query: query)
-                return parseTitleFromResult(result)
-            } catch {
-                return nil
-            }
+            return nil
         }
     }
 
