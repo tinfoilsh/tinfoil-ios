@@ -11,6 +11,7 @@ import SwiftUI
 @preconcurrency import TinfoilAI
 import OpenAI
 import AVFoundation
+import os
 
 enum ChatStorageTab: String {
     case cloud
@@ -1157,6 +1158,8 @@ class ChatViewModel: ObservableObject {
                 // Web search state tracking
                 var collectedSources: [WebSearchSource] = []
                 let isWebSearchEnabled = self.isWebSearchEnabled
+                // Track whether web search started before thinking (shared across callback and streaming loop)
+                let webSearchStartedFlag = OSAllocatedUnfairLock(initialState: false)
 
                 // Create stream with web search callback if enabled
                 let stream: AsyncThrowingStream<ChatStreamResult, Error>
@@ -1174,6 +1177,7 @@ class ChatViewModel: ObservableObject {
                             // Update web search state based on event
                             switch event.status {
                             case .inProgress, .searching:
+                                webSearchStartedFlag.withLock { $0 = true }
                                 chat.messages[lastIndex].webSearchState = WebSearchState(
                                     query: event.action?.query,
                                     status: .searching,
@@ -1207,6 +1211,8 @@ class ChatViewModel: ObservableObject {
                 var thoughtsBuffer = ""
                 var isInThinkingMode = false
                 var isUsingReasoningFormat = false
+                var didRecordWebSearchBeforeThinking = false
+                var webSearchBeforeThinking: Bool? = nil
                 var initialContentBuffer = ""
                 var isFirstChunk = true
                 var responseContent = ""
@@ -1292,6 +1298,10 @@ class ChatViewModel: ObservableObject {
                         isInThinkingMode = true
                         isFirstChunk = false
                         thinkStartTime = Date()
+                        if !didRecordWebSearchBeforeThinking {
+                            didRecordWebSearchBeforeThinking = true
+                            webSearchBeforeThinking = webSearchStartedFlag.withLock { $0 }
+                        }
                         thoughtsBuffer = reasoningContent
                         thinkingChunker.appendToken(reasoningContent)
                         currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
@@ -1360,6 +1370,10 @@ class ChatViewModel: ObservableObject {
                                     isInThinkingMode = true
                                     hasThinkTag = true
                                     thinkStartTime = Date()
+                                    if !didRecordWebSearchBeforeThinking {
+                                        didRecordWebSearchBeforeThinking = true
+                                        webSearchBeforeThinking = webSearchStartedFlag.withLock { $0 }
+                                    }
                                     let afterThink = String(processContent[thinkRange.upperBound...])
                                     thoughtsBuffer = afterThink
                                     thinkingChunker.appendToken(afterThink)
@@ -1539,6 +1553,8 @@ class ChatViewModel: ObservableObject {
                         chat.messages[lastIndex].thinkingChunks = thinkingChunker.getAllChunks()
                         chat.messages[lastIndex].isThinking = false
                         chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
+                        chat.messages[lastIndex].thinkingDuration = generationTimeSeconds
+                        chat.messages[lastIndex].webSearchBeforeThinking = webSearchBeforeThinking
                         // Process citation markers in chunks too since UI renders from chunks
                         let processedChunks = self.processChunksWithCitations(chunker.getAllChunks(), sources: collectedSources)
                         chat.messages[lastIndex].contentChunks = processedChunks
