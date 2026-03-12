@@ -1312,7 +1312,7 @@ struct ChunkedContentView: View, Equatable {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(chunks) { chunk in
                 ChunkView(chunk: chunk, isDarkMode: isDarkMode, isStreaming: isStreaming)
             }
