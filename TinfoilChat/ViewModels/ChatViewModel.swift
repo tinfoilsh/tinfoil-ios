@@ -1171,6 +1171,32 @@ class ChatViewModel: ObservableObject {
                                   !chat.messages.isEmpty,
                                   let lastIndex = chat.messages.indices.last else { return }
 
+                            // Handle URL fetch events (open_page actions)
+                            if event.action?.type == "open_page", let url = event.action?.url {
+                                let fetchId = event.itemId ?? url
+                                switch event.status {
+                                case .inProgress, .searching:
+                                    if !chat.messages[lastIndex].urlFetches.contains(where: { $0.id == fetchId }) {
+                                        chat.messages[lastIndex].urlFetches.append(
+                                            URLFetchState(id: fetchId, url: url, status: .fetching)
+                                        )
+                                    }
+                                case .completed:
+                                    if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
+                                        chat.messages[lastIndex].urlFetches[idx].status = .completed
+                                    }
+                                case .failed:
+                                    if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
+                                        chat.messages[lastIndex].urlFetches[idx].status = .failed
+                                    }
+                                case .blocked:
+                                    break
+                                }
+
+                                self.updateChat(chat, throttleForStreaming: true)
+                                return
+                            }
+
                             // Read current state from the message to preserve sources added by the streaming loop
                             let existingSources = chat.messages[lastIndex].webSearchState?.sources ?? []
 

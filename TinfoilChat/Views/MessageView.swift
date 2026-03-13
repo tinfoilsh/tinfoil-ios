@@ -63,6 +63,10 @@ struct MessageView: View {
                     isLoading &&
                     isLastMessage {
                     VStack(alignment: .leading, spacing: 4) {
+                        if !message.urlFetches.isEmpty {
+                            URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode)
+                        }
+
                         // Show web search box if searching
                         if let webSearchState = message.webSearchState {
                             WebSearchBox(
@@ -87,6 +91,10 @@ struct MessageView: View {
                 // If the message is thinking or has thoughts, display them in a thinking box
                 else if message.isThinking || message.thoughts != nil {
                     VStack(alignment: .leading, spacing: 4) {
+                        if !message.urlFetches.isEmpty {
+                            URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode)
+                        }
+
                         // Web search box (if applicable) - shown before thoughts since search happens first
                         if let webSearchState = message.webSearchState {
                             WebSearchBox(
@@ -196,6 +204,10 @@ struct MessageView: View {
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 4) {
+                            if !message.urlFetches.isEmpty {
+                                URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode)
+                            }
+
                             // Web search box for non-thinking assistant messages
                             if let webSearchState = message.webSearchState {
                                 WebSearchBox(
