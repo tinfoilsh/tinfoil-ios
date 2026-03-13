@@ -17,6 +17,7 @@
 		99F154822F4F632500E9174E /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154812F4F632500E9174E /* Sentry */; };
 		99F154842F4F632E00E9174E /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154832F4F632E00E9174E /* RevenueCat */; };
 		99F154862F4F633400E9174E /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154852F4F633400E9174E /* RevenueCatUI */; };
+		AA1234012F5A000000000001 /* LLMStream in Frameworks */ = {isa = PBXBuildFile; productRef = AA1234002F5A000000000001 /* LLMStream */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
