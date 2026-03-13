@@ -362,6 +362,28 @@ struct WebSearchState: Codable, Equatable {
     }
 }
 
+// MARK: - URL Fetch Types
+
+/// Status of a URL fetch operation
+enum URLFetchStatus: String, Codable, Equatable {
+    case fetching
+    case completed
+    case failed
+}
+
+/// Tracks the state of a single URL being fetched during web search
+struct URLFetchState: Codable, Equatable, Identifiable {
+    let id: String
+    let url: String
+    var status: URLFetchStatus
+
+    init(id: String = UUID().uuidString.lowercased(), url: String, status: URLFetchStatus = .fetching) {
+        self.id = id
+        self.url = url
+        self.status = status
+    }
+}
+
 /// URL citation from web search results, matching React's Annotation type
 struct URLCitation: Codable, Equatable {
     let title: String
@@ -393,6 +415,7 @@ struct Message: Identifiable, Codable, Equatable {
     var contentChunks: [ContentChunk] = []
     var thinkingChunks: [ThinkingChunk] = []
     var webSearchState: WebSearchState? = nil
+    var urlFetches: [URLFetchState] = []
     var attachments: [Attachment] = []
 
     // Passthrough fields for cross-platform round-trip (used by React, preserved by iOS)
@@ -439,6 +462,7 @@ struct Message: Identifiable, Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, isRateLimitError, generationTimeSeconds, webSearchState
         case webSearch // Alternative key used by React app
+        case urlFetches
         case attachments
         case thinkingDuration, isError
         case webSearchBeforeThinking, annotations, searchReasoning
@@ -480,6 +504,7 @@ struct Message: Identifiable, Codable, Equatable {
         // Try iOS key first, then React key for cross-platform compatibility
         webSearchState = try container.decodeIfPresent(WebSearchState.self, forKey: .webSearchState)
             ?? container.decodeIfPresent(WebSearchState.self, forKey: .webSearch)
+        urlFetches = try container.decodeIfPresent([URLFetchState].self, forKey: .urlFetches) ?? []
         let decodedAttachments = try container.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
 
         if !decodedAttachments.isEmpty {
@@ -514,6 +539,9 @@ struct Message: Identifiable, Codable, Equatable {
         // contentChunks is transient UI rendering state — never encode it
         // Encode as "webSearch" for React app compatibility
         try container.encodeIfPresent(webSearchState, forKey: .webSearch)
+        if !urlFetches.isEmpty {
+            try container.encode(urlFetches, forKey: .urlFetches)
+        }
         if !attachments.isEmpty {
             try container.encode(attachments, forKey: .attachments)
         }
