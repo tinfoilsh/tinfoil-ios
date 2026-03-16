@@ -265,6 +265,7 @@ struct MessageTableView: UIViewRepresentable {
         /// bottom inset so the user message can be scrolled to the top of the screen.
         var isUserMessageScrollMode = false
         var heightCache: [IndexPath: CGFloat] = [:]
+        var messageHeightCache: [String: CGFloat] = [:]
         var shownMessageIds: Set<String> = []
         var isKeyboardTransitioning = false
 
@@ -354,6 +355,13 @@ struct MessageTableView: UIViewRepresentable {
             if let cachedHeight = heightCache[indexPath] {
                 return cachedHeight
             }
+            // Fall back to message-ID-based cache (survives reloadData)
+            if indexPath.row < parent.messages.count {
+                let messageId = parent.messages[indexPath.row].id
+                if let cachedHeight = messageHeightCache[messageId] {
+                    return cachedHeight
+                }
+            }
             return 100
         }
 
@@ -361,6 +369,9 @@ struct MessageTableView: UIViewRepresentable {
             let height = cell.frame.size.height
             if height > 0 {
                 heightCache[indexPath] = height
+                if indexPath.row < parent.messages.count {
+                    messageHeightCache[parent.messages[indexPath.row].id] = height
+                }
             }
 
             if shouldScrollToBottomAfterLayout {

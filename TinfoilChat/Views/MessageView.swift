@@ -7,7 +7,7 @@
 //
 
 import SwiftUI
-import MarkdownUI
+import Textual
 import SwiftMath
 import UIKit
 
@@ -827,105 +827,7 @@ struct MessageBubbleModifier: ViewModifier {
     }
 }
 
-/// Cached markdown themes to avoid recreation on every render
-private struct MarkdownThemeCache {
-    static let darkTheme = createTheme(isDarkMode: true)
-    static let lightTheme = createTheme(isDarkMode: false)
-    static let userDarkTheme = createTheme(
-        isDarkMode: true,
-        textColor: Color.userMessageForegroundDark
-    )
-    static let userLightTheme = createTheme(
-        isDarkMode: false,
-        textColor: Color.userMessageForegroundLight
-    )
-    
-    static func getTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
-        isDarkMode ? darkTheme : lightTheme
-    }
-    
-    static func getUserTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
-        isDarkMode ? userDarkTheme : userLightTheme
-    }
-    
-    private static func createTheme(isDarkMode: Bool, textColor: Color? = nil) -> MarkdownUI.Theme {
-        MarkdownUI.Theme.gitHub
-            .text {
-                FontFamily(.system(.default))
-                FontSize(.em(1.0))
-                ForegroundColor(textColor ?? (isDarkMode ? .white : Color.black.opacity(0.8)))
-            }
-            .paragraph { configuration in
-                configuration.label
-                    .fixedSize(horizontal: false, vertical: true)
-                    .markdownMargin(top: 0, bottom: 12)
-            }
-            .code {
-                FontFamilyVariant(.monospaced)
-                FontSize(.em(0.85))
-                BackgroundColor(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
-            }
-            .codeBlock { configuration in
-                SimpleCodeBlockView(
-                    configuration: configuration,
-                    isDarkMode: isDarkMode
-                )
-            }
-            .heading1 { configuration in
-                configuration.label
-                    .fixedSize(horizontal: false, vertical: true)
-                    .markdownMargin(top: 28, bottom: 12)
-                    .markdownTextStyle {
-                        FontWeight(.bold)
-                        FontSize(.em(1.75))
-                    }
-            }
-            .heading2 { configuration in
-                configuration.label
-                    .fixedSize(horizontal: false, vertical: true)
-                    .markdownMargin(top: 24, bottom: 10)
-                    .markdownTextStyle {
-                        FontWeight(.semibold)
-                        FontSize(.em(1.5))
-                    }
-            }
-            .heading3 { configuration in
-                configuration.label
-                    .fixedSize(horizontal: false, vertical: true)
-                    .markdownMargin(top: 22, bottom: 10)
-                    .markdownTextStyle {
-                        FontWeight(.semibold)
-                        FontSize(.em(1.25))
-                    }
-            }
-            .blockquote { configuration in
-                configuration.label
-                    .fixedSize(horizontal: false, vertical: true)
-                    .markdownTextStyle {
-                        FontStyle(.italic)
-                        ForegroundColor(.secondary)
-                    }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
-                    .markdownMargin(top: 8, bottom: 8)
-                    .background(Color.secondary.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-            .listItem { configuration in
-                configuration.label
-                    .markdownMargin(top: 4, bottom: 4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .table { configuration in
-                ScrollView(.horizontal, showsIndicators: true) {
-                    configuration.label
-                        .markdownTableBorderStyle(.init(color: isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2)))
-                }
-            }
-    }
-}
-
-/// A view that renders Markdown content using the MarkdownUI library.
+/// A view that renders Markdown content using the Textual library.
 struct MarkdownText: View {
     let content: String
     let isDarkMode: Bool
@@ -938,15 +840,18 @@ struct MarkdownText: View {
     }
 
     var body: some View {
-        Markdown(content)
-            .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
+        StructuredText(markdown: content)
+            .textual.structuredTextStyle(.gitHub)
+            .textual.highlighterTheme(.default)
+            .textual.textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, horizontalPadding)
             .environment(\.colorScheme, isDarkMode ? .dark : .light)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-/// A specialized markdown text view that properly handles width constraints
+/// A specialized markdown text view for user messages
 struct AdaptiveMarkdownText: View {
     let content: String
     let isDarkMode: Bool
@@ -959,8 +864,11 @@ struct AdaptiveMarkdownText: View {
     }
 
     var body: some View {
-        Markdown(content)
-            .markdownTheme(MarkdownThemeCache.getUserTheme(isDarkMode: isDarkMode))
+        StructuredText(markdown: content)
+            .textual.structuredTextStyle(.gitHub)
+            .textual.highlighterTheme(.default)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, -16)
             .padding(.horizontal, horizontalPadding)
             .environment(\.colorScheme, .dark)
     }
@@ -1181,92 +1089,6 @@ struct MessageActionsView: View {
 }
 
 /// A simplified code block view without syntax highlighting
-struct SimpleCodeBlockView: View {
-    let configuration: CodeBlockConfiguration
-    let isDarkMode: Bool
-    @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
-    @State private var showCopyFeedback = false
-    
-    private var headerBackgroundColor: Color {
-        isDarkMode ? Color.black.opacity(0.3) : Color.gray.opacity(0.1)
-    }
-    
-    private var blockBackgroundColor: Color {
-        isDarkMode ? Color.black.opacity(0.2) : Color.gray.opacity(0.05)
-    }
-    
-    private var borderColor: Color {
-        isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.1)
-    }
-    
-    var body: some View {
-        VStack(spacing: 0) {
-            // Header with language and copy button
-            HStack {
-                Text(configuration.language?.lowercased() ?? "plain text")
-                    .font(.system(.footnote, design: .rounded, weight: .medium))
-                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
-                    .tracking(0.3)
-                Spacer()
-
-                Button(action: copyAction) {
-                    Image(systemName: showCopyFeedback ? "checkmark" : "clipboard")
-                        .font(.caption)
-                }
-                .buttonStyle(.borderless)
-                .foregroundColor(showCopyFeedback ? .green : (isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6)))
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(headerBackgroundColor)
-
-            Divider()
-            
-            // Simple code content view without syntax highlighting
-            ScrollView(.horizontal, showsIndicators: true) {
-                Text(configuration.content)
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
-                    .padding(8)
-            }
-        }
-        .frame(maxWidth: UIScreen.main.bounds.width * 0.85)
-        .background(blockBackgroundColor)
-        .cornerRadius(8)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(borderColor, lineWidth: 1)
-        )
-        .markdownMargin(top: .em(0.5), bottom: .em(0.8))
-    }
-    
-    private func copyAction() {
-        #if os(macOS)
-        if let pasteboard = NSPasteboard.general {
-            pasteboard.clearContents()
-            pasteboard.setString(configuration.content, forType: .string)
-        }
-        #elseif os(iOS)
-        UIPasteboard.general.string = configuration.content
-        #endif
-        
-        withAnimation {
-            showCopyFeedback = true
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            withAnimation {
-                showCopyFeedback = false
-            }
-        }
-    }
-}
-
-// Make sure the CodeBlockConfiguration is Equatable for .task(id:) to work correctly
-extension CodeBlockConfiguration: @retroactive Equatable {
-    public static func == (lhs: CodeBlockConfiguration, rhs: CodeBlockConfiguration) -> Bool {
-        lhs.language == rhs.language && lhs.content == rhs.content
-    }
-}
 
 struct ChunkedContentView: View, Equatable {
     let chunks: [ContentChunk]
