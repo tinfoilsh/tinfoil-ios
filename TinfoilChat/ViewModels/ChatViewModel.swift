@@ -1190,7 +1190,9 @@ class ChatViewModel: ObservableObject {
                                         chat.messages[lastIndex].urlFetches[idx].status = .failed
                                     }
                                 case .blocked:
-                                    break
+                                    if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
+                                        chat.messages[lastIndex].urlFetches[idx].status = .blocked
+                                    }
                                 }
 
                                 self.updateChat(chat, throttleForStreaming: true)

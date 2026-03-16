@@ -369,6 +369,7 @@ enum URLFetchStatus: String, Codable, Equatable {
     case fetching
     case completed
     case failed
+    case blocked
 }
 
 /// Tracks the state of a single URL being fetched during web search
