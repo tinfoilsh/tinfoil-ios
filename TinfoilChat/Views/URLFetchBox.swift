@@ -55,7 +55,7 @@ struct URLFetchBox: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(NoHighlightButtonStyle())
-        .disabled(isFetching)
+        .disabled(urlFetches.isEmpty)
     }
 
     @ViewBuilder
@@ -116,7 +116,7 @@ private struct URLFetchSheetRow: View {
         Button(action: openURL) {
             HStack(spacing: 10) {
                 FaviconView(url: fetch.url, isDarkMode: isDarkMode)
-                    .opacity(fetch.status == .failed ? 0.4 : 1.0)
+                    .opacity(fetch.status == .failed || fetch.status == .blocked ? 0.4 : 1.0)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(displayHost)
@@ -149,6 +149,7 @@ private struct URLFetchSheetRow: View {
         case .fetching: return "Reading..."
         case .completed: return "Read"
         case .failed: return "Failed"
+        case .blocked: return "Blocked"
         }
     }
 
@@ -157,11 +158,13 @@ private struct URLFetchSheetRow: View {
         case .fetching: return isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5)
         case .completed: return isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5)
         case .failed: return .red.opacity(0.7)
+        case .blocked: return .orange.opacity(0.7)
         }
     }
 
     private func openURL() {
-        guard let url = URL(string: fetch.url) else { return }
+        guard let url = URL(string: fetch.url),
+              url.scheme == "https" || url.scheme == "http" else { return }
         UIApplication.shared.open(url)
     }
 }

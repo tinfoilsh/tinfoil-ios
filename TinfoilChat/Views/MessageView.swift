@@ -335,7 +335,7 @@ struct MessageView: View {
                         }
                     } else if message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil) {
                         Button {
-                            UIPasteboard.general.string = message.content
+                            UIPasteboard.general.string = responseContent
                         } label: {
                             Label("Copy", systemImage: "doc.on.doc")
                         }
