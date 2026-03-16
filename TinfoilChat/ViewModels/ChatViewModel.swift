@@ -1731,13 +1731,18 @@ class ChatViewModel: ObservableObject {
             return "Authentication error. Please sign in again."
         }
         
+        // Rate limit (OpenAI SDK error)
+        if case OpenAIError.statusError(_, let statusCode) = error, statusCode == 429 {
+            return "You've reached your daily limit of free requests. Your limit will reset tomorrow, or you can upgrade to Premium for unlimited access."
+        }
+
         // Server issues
         if let httpResponse = nsError.userInfo[NSUnderlyingErrorKey] as? HTTPURLResponse {
             switch httpResponse.statusCode {
             case 500...599:
                 return "Server error. Our team has been notified and is working on it."
             case 429:
-                return "You've used all your free requests. Upgrade to Premium for unlimited access."
+                return "You've reached your daily limit of free requests. Your limit will reset tomorrow, or you can upgrade to Premium for unlimited access."
             default:
                 break
             }

@@ -1340,10 +1340,17 @@ struct ErrorMessageView: View {
                 Spacer()
             }
 
-            Text(errorMessage)
-                .font(.caption)
-                .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
-                .multilineTextAlignment(.leading)
+            if isRateLimitError {
+                Text("You've reached your daily limit of free requests. Your limit will reset tomorrow, or you can upgrade to Premium for unlimited access.")
+                    .font(.subheadline)
+                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
+                    .multilineTextAlignment(.leading)
+            } else {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
+                    .multilineTextAlignment(.leading)
+            }
 
             HStack(spacing: 8) {
                 if let onRegenerate = onRegenerate, !isRateLimitError {
@@ -1367,19 +1374,15 @@ struct ErrorMessageView: View {
 
                 if let onUpgrade = onUpgrade, isRateLimitError {
                     Button(action: onUpgrade) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "star.fill")
-                                .font(.system(size: 12, weight: .medium))
-                            Text("Upgrade to Premium")
-                                .font(.subheadline.weight(.medium))
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.accentPrimary)
-                        )
+                        Text("Upgrade to Premium")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.accentPrimary)
+                            )
                     }
                     .buttonStyle(PlainButtonStyle())
                 }
