@@ -1,5 +1,5 @@
 {
-  "originHash" : "e2383aa4219116c1b8a090135ab2dd16594592f7b7d33c796b10e5c97456133c",
+  "originHash" : "9f359d0e83c6fd430947e6b1a7e07bac1ede9ad7157d0b50143cfb8cbe5c243d",
   "pins" : [
     {
       "identity" : "clerk-ios",
@@ -139,10 +139,10 @@
     {
       "identity" : "textual",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/gonzalezreal/textual",
+      "location" : "https://github.com/tinfoilsh/textual",
       "state" : {
-        "revision" : "5b06b811c0f5313b6b84bbef98c635a630638c38",
-        "version" : "0.3.1"
+        "branch" : "main",
+        "revision" : "d255c23028345314fac085685e49447b7c498772"
       }
     },
     {

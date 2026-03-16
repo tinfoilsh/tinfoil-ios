@@ -7,10 +7,9 @@
 //
 
 import SwiftUI
-import MarkdownUI
+import Textual
 import SwiftMath
 import UIKit
-import Highlightr
 
 private enum SegmentKind: Sendable {
     case markdown(String)
@@ -36,9 +35,12 @@ private struct SegmentView: View {
             // Strip citation markers from text - sources shown separately at message level
             // Skip during streaming to avoid catastrophic regex backtracking on incomplete citations
             let strippedText = isStreaming ? text : LaTeXMarkdownView.stripCitations(from: text)
-            Markdown(strippedText)
-                .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-                .markdownCodeSyntaxHighlighter(MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode))
+            StructuredText(markdown: strippedText)
+                .textual.structuredTextStyle(.gitHub)
+                .textual.highlighterTheme(isStreaming ? .plain : .default)
+                .textual.textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .environment(\.colorScheme, isDarkMode ? .dark : .light)
         case .latex(let latex, let isDisplay):
             LaTeXView(
                 latex: latex,
@@ -165,9 +167,12 @@ struct LaTeXMarkdownView: View, Equatable {
 
     private func markdownFallback(content: String) -> some View {
         let strippedText = LaTeXMarkdownView.stripCitations(from: content)
-        return Markdown(strippedText)
-            .markdownTheme(MarkdownThemeCache.getTheme(isDarkMode: isDarkMode))
-            .markdownCodeSyntaxHighlighter(MarkdownThemeCache.getHighlighter(isDarkMode: isDarkMode))
+        return StructuredText(markdown: strippedText)
+            .textual.structuredTextStyle(.gitHub)
+            .textual.highlighterTheme(isStreaming ? .plain : .default)
+            .textual.textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .environment(\.colorScheme, isDarkMode ? .dark : .light)
     }
 
     /// Strip citation markers from markdown text.
@@ -1048,168 +1053,4 @@ struct MathView: UIViewRepresentable {
     }
 }
 
-private struct CodeBlockWithCopy: View {
-    let configuration: CodeBlockConfiguration
-    let headerBg: SwiftUI.Color
-    let headerFg: SwiftUI.Color
-    let bodyBg: SwiftUI.Color
-    let border: SwiftUI.Color
 
-    @State private var showCopyFeedback = false
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(configuration.language ?? "code")
-                    .font(.system(.caption, design: .monospaced))
-                    .fontWeight(.semibold)
-                    .foregroundColor(headerFg)
-                Spacer()
-
-                Button(action: copyAction) {
-                    Image(systemName: showCopyFeedback ? "checkmark" : "doc.on.doc")
-                        .font(.caption)
-                }
-                .buttonStyle(.borderless)
-                .foregroundColor(showCopyFeedback ? .green : headerFg)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(headerBg)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                configuration.label
-                    .relativeLineSpacing(.em(0.25))
-                    .markdownTextStyle {
-                        FontFamilyVariant(.monospaced)
-                        FontSize(.em(0.85))
-                    }
-                    .padding(12)
-            }
-            .background(bodyBg)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(border, lineWidth: 1))
-        .markdownMargin(top: .zero, bottom: .em(0.8))
-    }
-
-    private func copyAction() {
-        UIPasteboard.general.string = configuration.content
-
-        withAnimation {
-            showCopyFeedback = true
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            withAnimation {
-                showCopyFeedback = false
-            }
-        }
-    }
-}
-
-/// Cached markdown themes (referenced from original MessageView)
-private struct MarkdownThemeCache {
-    static let darkTheme = createTheme(isDarkMode: true)
-    static let lightTheme = createTheme(isDarkMode: false)
-    static let darkHighlighter = HighlightrCodeSyntaxHighlighter(theme: "monokai-sublime")
-    static let lightHighlighter = HighlightrCodeSyntaxHighlighter(theme: "xcode")
-
-    static func getTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
-        isDarkMode ? darkTheme : lightTheme
-    }
-
-    static func getHighlighter(isDarkMode: Bool) -> HighlightrCodeSyntaxHighlighter {
-        isDarkMode ? darkHighlighter : lightHighlighter
-    }
-
-    static func getHighlightrTheme(isDarkMode: Bool) -> String {
-        isDarkMode ? "monokai-sublime" : "xcode"
-    }
-
-    private static func createTheme(isDarkMode: Bool) -> MarkdownUI.Theme {
-        let codeBlockHeaderBg = isDarkMode ? SwiftUI.Color.white.opacity(0.05) : SwiftUI.Color.black.opacity(0.03)
-        let codeBlockHeaderFg = isDarkMode ? SwiftUI.Color.white.opacity(0.7) : SwiftUI.Color.black.opacity(0.6)
-        let codeBlockBodyBg = isDarkMode ? SwiftUI.Color.black.opacity(0.3) : SwiftUI.Color.gray.opacity(0.05)
-        let codeBlockBorder = isDarkMode ? SwiftUI.Color.white.opacity(0.1) : SwiftUI.Color.black.opacity(0.1)
-
-        let textTheme = MarkdownUI.Theme.gitHub
-            .text {
-                FontFamily(.system(.default))
-                FontSize(.em(1.0))
-                ForegroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
-            }
-            .paragraph { configuration in
-                configuration.label
-                    .markdownMargin(top: 0, bottom: 12)
-            }
-
-        let baseTheme = textTheme
-            .code {
-                FontFamilyVariant(.monospaced)
-                FontSize(.em(0.85))
-                ForegroundColor(isDarkMode ? Color(red: 1.0, green: 0.6, blue: 0.4) : Color(red: 0.8, green: 0.3, blue: 0.2))
-                BackgroundColor(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.08))
-            }
-            .codeBlock { configuration in
-                CodeBlockWithCopy(configuration: configuration, headerBg: codeBlockHeaderBg, headerFg: codeBlockHeaderFg, bodyBg: codeBlockBodyBg, border: codeBlockBorder)
-            }
-
-        let withHeadings = baseTheme
-            .heading1 { configuration in
-                configuration.label
-                    .fixedSize(horizontal: false, vertical: true)
-                    .markdownMargin(top: 28, bottom: 12)
-                    .markdownTextStyle {
-                        FontWeight(.bold)
-                        FontSize(.em(1.75))
-                    }
-            }
-            .heading2 { configuration in
-                configuration.label
-                    .fixedSize(horizontal: false, vertical: true)
-                    .markdownMargin(top: 24, bottom: 10)
-                    .markdownTextStyle {
-                        FontWeight(.semibold)
-                        FontSize(.em(1.5))
-                    }
-            }
-            .heading3 { configuration in
-                configuration.label
-                    .fixedSize(horizontal: false, vertical: true)
-                    .markdownMargin(top: 22, bottom: 10)
-                    .markdownTextStyle {
-                        FontWeight(.semibold)
-                        FontSize(.em(1.25))
-                    }
-            }
-
-        let withBlockElements = withHeadings
-            .blockquote { configuration in
-                let paddedLabel = configuration.label
-                    .fixedSize(horizontal: false, vertical: true)
-                    .markdownTextStyle {
-                        FontStyle(.italic)
-                        ForegroundColor(.secondary)
-                    }
-                    .markdownMargin(top: 8, bottom: 8)
-
-                return paddedLabel
-                    .padding(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-                    .background(SwiftUI.Color.secondary.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-            .listItem { configuration in
-                configuration.label
-                    .markdownMargin(top: 4, bottom: 4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-        return withBlockElements
-            .table { configuration in
-                ScrollView(.horizontal, showsIndicators: true) {
-                    configuration.label
-                        .markdownTableBorderStyle(MarkdownUI.TableBorderStyle(color: isDarkMode ? SwiftUI.Color.white.opacity(0.2) : SwiftUI.Color.black.opacity(0.2)))
-                }
-            }
-    }
-}

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		99DDBFA42F6869250038A729 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = 99DDBFA32F6869250038A729 /* Textual */; };
 		99F154692F4F60C500E9174E /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154682F4F60C500E9174E /* ClerkKit */; };
 		99F1546B2F4F60C500E9174E /* ClerkKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = 99F1546A2F4F60C500E9174E /* ClerkKitUI */; };
 		99F154702F4F610000E9174E /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = 99F1546F2F4F610000E9174E /* SwiftMath */; };
@@ -73,6 +74,7 @@
 				99F154732F4F611A00E9174E /* TinfoilAI in Frameworks */,
 				99F1547C2F4F614400E9174E /* Gzip in Frameworks */,
 				99F154822F4F632500E9174E /* Sentry in Frameworks */,
+				99DDBFA42F6869250038A729 /* Textual in Frameworks */,
 				99F154692F4F60C500E9174E /* ClerkKit in Frameworks */,
 				99F154842F4F632E00E9174E /* RevenueCat in Frameworks */,
 				99F1546B2F4F60C500E9174E /* ClerkKitUI in Frameworks */,
@@ -162,6 +164,7 @@
 				99F154812F4F632500E9174E /* Sentry */,
 				99F154832F4F632E00E9174E /* RevenueCat */,
 				99F154852F4F633400E9174E /* RevenueCatUI */,
+				99DDBFA32F6869250038A729 /* Textual */,
 			);
 			productName = TinfoilChat;
 			productReference = 99F153C22F4F5F0200E9174E /* TinfoilChat.app */;
@@ -202,7 +205,7 @@
 				99F1546E2F4F610000E9174E /* XCRemoteSwiftPackageReference "SwiftMath" */,
 				99F154712F4F611A00E9174E /* XCRemoteSwiftPackageReference "tinfoil-swift" */,
 				99F1547A2F4F614400E9174E /* XCRemoteSwiftPackageReference "GzipSwift" */,
-				99DDBF9F2F6800610038A729 /* XCRemoteSwiftPackageReference "textual" */,
+				99DDBFA22F68667C0038A729 /* XCRemoteSwiftPackageReference "textual" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 99F153C32F4F5F0200E9174E /* Products */;
@@ -565,12 +568,12 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		99DDBF9F2F6800610038A729 /* XCRemoteSwiftPackageReference "textual" */ = {
+		99DDBFA22F68667C0038A729 /* XCRemoteSwiftPackageReference "textual" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/gonzalezreal/textual";
+			repositoryURL = "https://github.com/tinfoilsh/textual";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.3.1;
+				branch = main;
+				kind = branch;
 			};
 		};
 		99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
@@ -624,6 +627,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		99DDBFA32F6869250038A729 /* Textual */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 99DDBFA22F68667C0038A729 /* XCRemoteSwiftPackageReference "textual" */;
+			productName = Textual;
+		};
 		99F154682F4F60C500E9174E /* ClerkKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */;
