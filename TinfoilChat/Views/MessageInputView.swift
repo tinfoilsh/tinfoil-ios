@@ -172,7 +172,13 @@ struct MessageInputView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(rl.remaining <= 0 ? .orange : .secondary)
                 .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(rl.remaining <= 0
+                              ? Color.orange.opacity(0.15)
+                              : Color.secondary.opacity(0.12))
+                )
                 .transition(.opacity)
                 .animation(.easeInOut(duration: 0.25), value: rl.remaining)
         }
