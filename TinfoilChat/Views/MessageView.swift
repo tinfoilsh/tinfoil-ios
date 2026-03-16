@@ -11,16 +11,6 @@ import MarkdownUI
 import SwiftMath
 import UIKit
 
-/// Preference key for tracking which thinking box is expanded
-struct ThinkingBoxExpansionPreferenceKey: PreferenceKey {
-    static var defaultValue: String? = nil
-    static func reduce(value: inout String?, nextValue: () -> String?) {
-        if let next = nextValue() {
-            value = next
-        }
-    }
-}
-
 struct MessageView: View {
     let message: Message
     let isDarkMode: Bool
@@ -38,6 +28,8 @@ struct MessageView: View {
     @State private var showSourcesSheet = false
     @State private var showUserMessageActions = false
     @State private var showShareSheet = false
+    @State private var showThoughtsSheet = false
+    @State private var showURLFetchSheet = false
 
     var body: some View {
         HStack {
@@ -64,18 +56,17 @@ struct MessageView: View {
                     isLastMessage {
                     VStack(alignment: .leading, spacing: 4) {
                         if !message.urlFetches.isEmpty {
-                            URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode)
+                            URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode, onTap: { showURLFetchSheet = true })
                         }
 
                         // Show web search box if searching
                         if let webSearchState = message.webSearchState {
                             WebSearchBox(
-                                messageId: message.id,
                                 webSearchState: webSearchState,
                                 isDarkMode: isDarkMode,
-                                messageCollapsed: false,
                                 isStreaming: true,
-                                webSearchSummary: viewModel.webSearchSummary
+                                webSearchSummary: viewModel.webSearchSummary,
+                                onTap: { showSourcesSheet = true }
                             )
                         }
 
@@ -92,31 +83,27 @@ struct MessageView: View {
                 else if message.isThinking || message.thoughts != nil {
                     VStack(alignment: .leading, spacing: 4) {
                         if !message.urlFetches.isEmpty {
-                            URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode)
+                            URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode, onTap: { showURLFetchSheet = true })
                         }
 
                         // Web search box (if applicable) - shown before thoughts since search happens first
                         if let webSearchState = message.webSearchState {
                             WebSearchBox(
-                                messageId: message.id,
                                 webSearchState: webSearchState,
                                 isDarkMode: isDarkMode,
-                                messageCollapsed: message.isCollapsed,
                                 isStreaming: isLoading && isLastMessage,
-                                webSearchSummary: isLastMessage ? viewModel.webSearchSummary : nil
+                                webSearchSummary: isLastMessage ? viewModel.webSearchSummary : nil,
+                                onTap: { showSourcesSheet = true }
                             )
                         }
 
                         CollapsibleThinkingBox(
-                            messageId: message.id,
                             thinkingText: message.thoughts ?? "",
-                            thinkingChunks: message.thinkingChunks,
                             isDarkMode: isDarkMode,
-                            isCollapsible: !message.isThinking,
                             isStreaming: message.isThinking && isLoading && isLastMessage,
                             generationTimeSeconds: message.generationTimeSeconds,
-                            messageCollapsed: message.isCollapsed,
-                            thinkingSummary: isLastMessage && message.isThinking ? viewModel.thinkingSummary : nil
+                            thinkingSummary: isLastMessage && message.isThinking ? viewModel.thinkingSummary : nil,
+                            onTap: { showThoughtsSheet = true }
                         )
 
                         if !message.content.isEmpty {
@@ -140,14 +127,12 @@ struct MessageView: View {
                 else if let parsed = getParsedMessageContent() {
                     VStack(alignment: .leading, spacing: 4) {
                         CollapsibleThinkingBox(
-                            messageId: message.id,
                             thinkingText: parsed.thinkingText,
                             isDarkMode: isDarkMode,
-                            isCollapsible: message.content.contains("</think>"),
                             isStreaming: isLoading && isLastMessage,
                             generationTimeSeconds: message.generationTimeSeconds,
-                            messageCollapsed: message.isCollapsed,
-                            thinkingSummary: isLastMessage && !message.content.contains("</think>") ? viewModel.thinkingSummary : nil
+                            thinkingSummary: isLastMessage && !message.content.contains("</think>") ? viewModel.thinkingSummary : nil,
+                            onTap: { showThoughtsSheet = true }
                         )
                         
                         // Remainder: text after </think> if present
@@ -205,18 +190,17 @@ struct MessageView: View {
                     } else {
                         VStack(alignment: .leading, spacing: 4) {
                             if !message.urlFetches.isEmpty {
-                                URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode)
+                                URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode, onTap: { showURLFetchSheet = true })
                             }
 
                             // Web search box for non-thinking assistant messages
                             if let webSearchState = message.webSearchState {
                                 WebSearchBox(
-                                    messageId: message.id,
                                     webSearchState: webSearchState,
                                     isDarkMode: isDarkMode,
-                                    messageCollapsed: message.isCollapsed,
                                     isStreaming: isLoading && isLastMessage,
-                                    webSearchSummary: isLastMessage ? viewModel.webSearchSummary : nil
+                                    webSearchSummary: isLastMessage ? viewModel.webSearchSummary : nil,
+                                    onTap: { showSourcesSheet = true }
                                 )
                             }
 
@@ -391,6 +375,21 @@ struct MessageView: View {
                 SourcesSheetView(sources: sources, isDarkMode: isDarkMode)
                     .presentationDetents([.medium, .large])
             }
+        }
+        .sheet(isPresented: $showThoughtsSheet) {
+            ThoughtsSheetView(
+                thinkingText: message.thoughts ?? "",
+                thinkingChunks: message.thinkingChunks,
+                generationTimeSeconds: message.generationTimeSeconds,
+                isDarkMode: isDarkMode
+            )
+            .presentationDetents([.medium, .large])
+            .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
+        }
+        .sheet(isPresented: $showURLFetchSheet) {
+            URLFetchSheetView(urlFetches: message.urlFetches, isDarkMode: isDarkMode)
+                .presentationDetents([.medium, .large])
+                .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
         }
         .sheet(isPresented: $showShareSheet) {
             if let currentChat = viewModel.currentChat {
@@ -942,181 +941,96 @@ struct AdaptiveMarkdownText: View {
 }
 
 struct CollapsibleThinkingBox: View {
-    let messageId: String
     let thinkingText: String
-    let thinkingChunks: [ThinkingChunk]
     let isDarkMode: Bool
-    let isCollapsible: Bool
     let isStreaming: Bool
     let generationTimeSeconds: Double?
-    let messageCollapsed: Bool
     let thinkingSummary: String?
-
-    @State private var isCollapsed: Bool
-    @State private var contentVisible: Bool
-    @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
-
-    init(
-        messageId: String,
-        thinkingText: String,
-        thinkingChunks: [ThinkingChunk] = [],
-        isDarkMode: Bool,
-        isCollapsible: Bool,
-        isStreaming: Bool,
-        generationTimeSeconds: Double?,
-        messageCollapsed: Bool,
-        thinkingSummary: String? = nil
-    ) {
-        self.messageId = messageId
-        self.thinkingText = thinkingText
-        self.thinkingChunks = thinkingChunks
-        self.isDarkMode = isDarkMode
-        self.isCollapsible = isCollapsible
-        self.isStreaming = isStreaming
-        self.generationTimeSeconds = generationTimeSeconds
-        self.messageCollapsed = messageCollapsed
-        self.thinkingSummary = thinkingSummary
-        _isCollapsed = State(initialValue: messageCollapsed)
-        _contentVisible = State(initialValue: !messageCollapsed)
-    }
+    let onTap: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button(action: {
-                let newCollapsed = !isCollapsed
-
-                if newCollapsed {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        contentVisible = false
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        isCollapsed = true
-                        viewModel.setThoughtsCollapsed(for: messageId, collapsed: true)
-                        if let tableView = findTableView() {
-                            UIView.performWithoutAnimation {
-                                tableView.beginUpdates()
-                                tableView.endUpdates()
-                            }
+        Button(action: onTap) {
+            HStack {
+                if let seconds = generationTimeSeconds {
+                    Text("Thought for \(String(format: "%.1f", seconds))s")
+                        .font(.subheadline)
+                        .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
+                } else if isStreaming {
+                    if let summary = thinkingSummary, !summary.isEmpty {
+                        Text(summary)
+                            .font(.subheadline)
+                            .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .modifier(TextPulseAnimation())
+                    } else {
+                        HStack(spacing: 4) {
+                            Text("Thinking")
+                                .font(.system(size: 16))
+                                .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
+                            InlineLoadingDotsView(isDarkMode: isDarkMode)
                         }
                     }
                 } else {
-                    isCollapsed = false
-                    viewModel.setThoughtsCollapsed(for: messageId, collapsed: false)
-                    if let tableView = findTableView() {
-                        UIView.performWithoutAnimation {
-                            tableView.beginUpdates()
-                            tableView.endUpdates()
-                        }
-                    }
-                    withAnimation(.easeIn(duration: 0.2).delay(0.05)) {
-                        contentVisible = true
-                    }
+                    Text("Thinking")
+                        .font(.system(size: 16))
+                        .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                 }
-            }) {
-                HStack {
-                    if let seconds = generationTimeSeconds {
-                        Text("Thought for \(String(format: "%.1f", seconds))s")
-                            .font(.subheadline)
-                            .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
-                    } else if isStreaming {
-                        if let summary = thinkingSummary, !summary.isEmpty {
-                            Text(summary)
-                                .font(.subheadline)
-                                .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .modifier(TextPulseAnimation())
-                        } else {
-                            HStack(spacing: 4) {
-                                Text("Thinking")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
-                                InlineLoadingDotsView(isDarkMode: isDarkMode)
-                            }
-                        }
-                    } else {
-                        Text("Thinking")
-                            .font(.system(size: 16))
-                            .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.down")
-                        .rotationEffect(.degrees(isCollapsed ? 0 : -180))
+                Spacer()
+                if !isStreaming {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 16)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(NoHighlightButtonStyle())
-            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(NoHighlightButtonStyle())
+        .disabled(isStreaming)
+    }
+}
 
-            if !isCollapsed {
+struct ThoughtsSheetView: View {
+    let thinkingText: String
+    let thinkingChunks: [ThinkingChunk]
+    let generationTimeSeconds: Double?
+    let isDarkMode: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    private var titleText: String {
+        if let seconds = generationTimeSeconds {
+            return "Thought for \(String(format: "%.1f", seconds))s"
+        }
+        return "Thoughts"
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Divider()
-
                     if !thinkingChunks.isEmpty {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(thinkingChunks) { chunk in
-                                ThinkingChunkView(chunk: chunk, isDarkMode: isDarkMode)
-                                    .equatable()
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .transaction { transaction in
-                            transaction.animation = nil
+                        ForEach(thinkingChunks) { chunk in
+                            ThinkingChunkView(chunk: chunk, isDarkMode: isDarkMode)
+                                .equatable()
                         }
                     } else {
                         Text(thinkingText)
                             .font(.system(.body))
                             .foregroundColor(isDarkMode ? .white.opacity(0.9) : Color.black.opacity(0.8))
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .opacity(contentVisible ? 1 : 0)
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
-        .background(Color.clear)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(.vertical, 4)
-        .preference(key: ThinkingBoxExpansionPreferenceKey.self, value: !isCollapsed ? messageId : nil)
-        .onChange(of: isStreaming) { oldValue, newValue in
-        }
-        .onChange(of: messageCollapsed) { _, newValue in
-            if newValue != isCollapsed {
-                isCollapsed = newValue
-                contentVisible = !newValue
-            }
-        }
-    }
-
-    private func findTableView() -> UITableView? {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = windowScene.windows.first else {
-            return nil
-        }
-
-        func findTableView(in view: UIView) -> UITableView? {
-            if let tableView = view as? UITableView {
-                return tableView
-            }
-            for subview in view.subviews {
-                if let found = findTableView(in: subview) {
-                    return found
+            .navigationTitle(titleText)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
                 }
             }
-            return nil
         }
-
-        return findTableView(in: window)
     }
 }
 
