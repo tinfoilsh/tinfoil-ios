@@ -105,8 +105,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swiftlang/swift-cmark",
       "state" : {
-        "revision" : "b022b08312decdc46585e0b3440d97f6f22ef703",
-        "version" : "0.6.0"
+        "revision" : "5d9bdaa4228b381639fff09403e39a04926e2dbe",
+        "version" : "0.7.1"
       }
     },
     {
@@ -133,7 +133,7 @@
       "location" : "https://github.com/tinfoilsh/swift-markdown-ui",
       "state" : {
         "branch" : "main",
-        "revision" : "10a74aea0a52a1ce24dee1bd631cfbe796fa6dc3"
+        "revision" : "89a297ba54399e8444b370a635fd3f933fde9b9d"
       }
     },
     {
