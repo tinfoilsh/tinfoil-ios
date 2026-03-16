@@ -20,7 +20,7 @@ struct WebSearchBox: View {
             HStack {
                 headerContent
                 Spacer()
-                if webSearchState.status != .searching {
+                if webSearchState.status != .searching && !webSearchState.sources.isEmpty {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
