@@ -247,13 +247,11 @@ struct MessageView: View {
                         }
 
                         Button {
-                            Task { @MainActor in
-                                showRawContentModal = true
-                            }
+                            copyMessagePart(message.content)
                         } label: {
-                            Image(systemName: "doc.on.doc")
+                            Image(systemName: showCopyFeedback ? "checkmark" : "doc.on.doc")
                                 .font(.system(size: 16))
-                                .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                                .foregroundColor(showCopyFeedback ? .green : (isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5)))
                                 .frame(width: 32, height: 32)
                                 .contentShape(Rectangle())
                         }
@@ -314,31 +312,40 @@ struct MessageView: View {
                 }
                 .cornerRadius(16)
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
-                .onLongPressGesture {
+                .contextMenu {
                     if message.role == .user && !message.content.isEmpty {
-                        showUserMessageActions = true
+                        Button {
+                            viewModel.regenerateMessage(at: messageIndex)
+                        } label: {
+                            Label("Resend", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(viewModel.isLoading)
+
+                        Button {
+                            UIPasteboard.general.string = message.content
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                        }
+
+                        Button {
+                            editedContent = message.content
+                            isEditMode = true
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
                     } else if message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil) {
-                        Task { @MainActor in
+                        Button {
+                            UIPasteboard.general.string = message.content
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                        }
+
+                        Button {
                             showRawContentModal = true
+                        } label: {
+                            Label("Select Text", systemImage: "text.cursor")
                         }
                     }
-                }
-                .confirmationDialog("", isPresented: $showUserMessageActions, titleVisibility: .hidden) {
-                    Button("Resend", role: nil) {
-                        viewModel.regenerateMessage(at: messageIndex)
-                    }
-                    .disabled(viewModel.isLoading)
-
-                    Button("Copy", role: nil) {
-                        UIPasteboard.general.string = message.content
-                    }
-
-                    Button("Edit", role: nil) {
-                        editedContent = message.content
-                        isEditMode = true
-                    }
-
-                    Button("Cancel", role: .cancel) {}
                 }
                 .onChange(of: message.id) { _, _ in
                     isEditMode = false
@@ -970,6 +977,7 @@ struct CollapsibleThinkingBox: View {
                                 .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                             InlineLoadingDotsView(isDarkMode: isDarkMode)
                         }
+                        .modifier(TextPulseAnimation())
                     }
                 } else {
                     Text("Thinking")
@@ -977,17 +985,14 @@ struct CollapsibleThinkingBox: View {
                         .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                 }
                 Spacer()
-                if !isStreaming {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
-                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
             }
             .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(NoHighlightButtonStyle())
-        .disabled(isStreaming)
     }
 }
 
@@ -1115,18 +1120,35 @@ struct PulsingAnimation: ViewModifier {
 }
 
 struct TextPulseAnimation: ViewModifier {
-    @State private var isPulsing = false
+    @State private var offset: CGFloat = -1.0
 
     func body(content: Content) -> some View {
         content
-            .opacity(isPulsing ? 1.0 : 0.5)
-            .animation(
-                Animation.easeInOut(duration: 1.0)
-                    .repeatForever(autoreverses: true),
-                value: isPulsing
+            .overlay(
+                GeometryReader { geometry in
+                    let shimmerWidth = geometry.size.width * 0.4
+                    LinearGradient(
+                        colors: [
+                            .clear,
+                            .white.opacity(0.35),
+                            .clear
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: shimmerWidth)
+                    .offset(x: offset * (geometry.size.width + shimmerWidth))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .mask(content)
             )
             .onAppear {
-                isPulsing = true
+                withAnimation(
+                    .easeInOut(duration: 2.0)
+                    .repeatForever(autoreverses: false)
+                ) {
+                    offset = 1.0
+                }
             }
     }
 }
