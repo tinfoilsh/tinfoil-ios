@@ -247,11 +247,11 @@ struct MessageView: View {
                         }
 
                         Button {
-                            copyMessagePart(message.content)
+                            showRawContentModal = true
                         } label: {
-                            Image(systemName: showCopyFeedback ? "checkmark" : "doc.on.doc")
+                            Image(systemName: "doc.on.doc")
                                 .font(.system(size: 16))
-                                .foregroundColor(showCopyFeedback ? .green : (isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5)))
+                                .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
                                 .frame(width: 32, height: 32)
                                 .contentShape(Rectangle())
                         }
@@ -332,18 +332,6 @@ struct MessageView: View {
                             isEditMode = true
                         } label: {
                             Label("Edit", systemImage: "pencil")
-                        }
-                    } else if message.role == .assistant && (!message.content.isEmpty || message.thoughts != nil) {
-                        Button {
-                            UIPasteboard.general.string = responseContent
-                        } label: {
-                            Label("Copy", systemImage: "doc.on.doc")
-                        }
-
-                        Button {
-                            showRawContentModal = true
-                        } label: {
-                            Label("Select Text", systemImage: "text.cursor")
                         }
                     }
                 }
@@ -466,6 +454,37 @@ struct MessageView: View {
         return text.replacingOccurrences(of: "<think>", with: "")
     }
     
+    private var thoughtsContent: String? {
+        if let thoughts = message.thoughts, !thoughts.isEmpty {
+            return thoughts
+        }
+        if message.content.hasPrefix("<think>") {
+            let tagPrefix = "<think>"
+            let tagSuffix = "</think>"
+            let start = message.content.index(message.content.startIndex, offsetBy: tagPrefix.count)
+
+            if let endTagRange = message.content.range(of: tagSuffix, range: start..<message.content.endIndex) {
+                return String(message.content[start..<endTagRange.lowerBound])
+            } else {
+                return String(message.content[start...])
+            }
+        }
+        return nil
+    }
+
+    private var responseContent: String {
+        if message.thoughts != nil {
+            return message.content.hasPrefix("<think>") ? "" : message.content
+        }
+        if message.content.hasPrefix("<think>") {
+            let tagSuffix = "</think>"
+            if let endTagRange = message.content.range(of: tagSuffix) {
+                return String(message.content[endTagRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return message.content
+    }
+
     /// Parse message content with <think> tags
     private func getParsedMessageContent() -> (thinkingText: String, remainderText: String)? {
         // Parse if content starts with <think>
