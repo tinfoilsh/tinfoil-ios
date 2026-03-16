@@ -832,6 +832,7 @@ private struct MarkdownThemeCache {
             }
             .paragraph { configuration in
                 configuration.label
+                    .fixedSize(horizontal: false, vertical: true)
                     .markdownMargin(top: 0, bottom: 12)
             }
             .code {
