@@ -385,7 +385,7 @@ struct MessageView: View {
         }
         .sheet(isPresented: $showThoughtsSheet) {
             ThoughtsSheetView(
-                thinkingText: message.thoughts ?? "",
+                thinkingText: thoughtsContent ?? "",
                 thinkingChunks: message.thinkingChunks,
                 generationTimeSeconds: message.generationTimeSeconds,
                 isDarkMode: isDarkMode
