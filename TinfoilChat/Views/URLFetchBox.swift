@@ -7,31 +7,102 @@
 
 import SwiftUI
 
-/// Displays a list of URLs being fetched during web search
+/// Inline row showing URL fetch count; tapping opens detail sheet
 struct URLFetchBox: View {
     let urlFetches: [URLFetchState]
     let isDarkMode: Bool
+    let onTap: () -> Void
+
+    private var isFetching: Bool {
+        urlFetches.contains { $0.status == .fetching }
+    }
+
+    private var completedCount: Int {
+        urlFetches.filter { $0.status == .completed }.count
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(urlFetches) { fetch in
-                URLFetchRow(fetch: fetch, isDarkMode: isDarkMode)
+        Button(action: onTap) {
+            HStack {
+                if isFetching {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                            .frame(width: 14, height: 14)
+                        Text("Reading \(urlFetches.count) link\(urlFetches.count == 1 ? "" : "s")")
+                            .font(.subheadline)
+                            .foregroundColor(isDarkMode ? .white : .black.opacity(0.8))
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        Image(systemName: "link")
+                            .font(.system(size: 13))
+                            .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                        Text("Read \(completedCount) link\(completedCount == 1 ? "" : "s")")
+                            .font(.subheadline)
+                            .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
+                        fetchFavicons
+                    }
+                }
+                Spacer()
+                if !isFetching {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
+                }
+            }
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(NoHighlightButtonStyle())
+        .disabled(isFetching)
+    }
+
+    @ViewBuilder
+    private var fetchFavicons: some View {
+        HStack(spacing: -4) {
+            ForEach(Array(urlFetches.filter { $0.status == .completed }.prefix(4).enumerated()), id: \.element.id) { index, fetch in
+                FaviconView(url: fetch.url, isDarkMode: isDarkMode)
+                    .zIndex(Double(4 - index))
+            }
+            if completedCount > 4 {
+                Text("+\(completedCount - 4)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
+                    .padding(.leading, 6)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.vertical, 4)
     }
 }
 
-/// A single row showing a URL fetch with status
-struct URLFetchRow: View {
+/// Sheet view showing all URL fetches with their status
+struct URLFetchSheetView: View {
+    let urlFetches: [URLFetchState]
+    let isDarkMode: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(urlFetches) { fetch in
+                    URLFetchSheetRow(fetch: fetch, isDarkMode: isDarkMode)
+                        .listRowBackground(Color.clear)
+                }
+            }
+            .listStyle(.plain)
+            .navigationTitle("Links")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+/// A single row in the URL fetch sheet
+private struct URLFetchSheetRow: View {
     let fetch: URLFetchState
     let isDarkMode: Bool
 
@@ -42,58 +113,55 @@ struct URLFetchRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            if fetch.status == .fetching {
-                ProgressView()
-                    .scaleEffect(0.6)
-                    .frame(width: 14, height: 14)
-            } else {
+        Button(action: openURL) {
+            HStack(spacing: 10) {
                 FaviconView(url: fetch.url, isDarkMode: isDarkMode)
                     .opacity(fetch.status == .failed ? 0.4 : 1.0)
-            }
 
-            statusText
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayHost)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(isDarkMode ? .white : .black.opacity(0.85))
+                        .lineLimit(1)
+
+                    Text(statusLabel)
+                        .font(.system(size: 12))
+                        .foregroundColor(statusColor)
+                }
+
+                Spacer()
+
+                if fetch.status == .completed {
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
+                }
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
         }
-        .padding(.vertical, 4)
+        .buttonStyle(PlainButtonStyle())
+        .disabled(fetch.status != .completed)
     }
 
-    @ViewBuilder
-    private var statusText: some View {
+    private var statusLabel: String {
         switch fetch.status {
-        case .fetching:
-            HStack(spacing: 0) {
-                Text("Reading ")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(isDarkMode ? .white : .black.opacity(0.85))
-                Text(displayHost)
-                    .font(.system(size: 13))
-                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
-            }
-            .lineLimit(1)
-            .truncationMode(.tail)
-        case .completed:
-            HStack(spacing: 0) {
-                Text("Read ")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
-                Text(displayHost)
-                    .font(.system(size: 13))
-                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
-            }
-            .lineLimit(1)
-            .truncationMode(.tail)
-        case .failed:
-            HStack(spacing: 0) {
-                Text("Failed to read ")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
-                Text(displayHost)
-                    .font(.system(size: 13))
-                    .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
-                    .strikethrough()
-            }
-            .lineLimit(1)
-            .truncationMode(.tail)
+        case .fetching: return "Reading..."
+        case .completed: return "Read"
+        case .failed: return "Failed"
         }
+    }
+
+    private var statusColor: Color {
+        switch fetch.status {
+        case .fetching: return isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5)
+        case .completed: return isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5)
+        case .failed: return .red.opacity(0.7)
+        }
+    }
+
+    private func openURL() {
+        guard let url = URL(string: fetch.url) else { return }
+        UIApplication.shared.open(url)
     }
 }

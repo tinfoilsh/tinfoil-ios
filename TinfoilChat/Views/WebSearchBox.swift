@@ -6,86 +6,31 @@
 //  Copyright © 2026 Tinfoil. All rights reserved.
 
 import SwiftUI
-import UIKit
 
-/// Collapsible box showing web search status and sources
+/// Inline row showing web search status; tapping opens sources sheet
 struct WebSearchBox: View {
-    let messageId: String
     let webSearchState: WebSearchState
     let isDarkMode: Bool
-    let messageCollapsed: Bool
     let isStreaming: Bool
     let webSearchSummary: String?
-
-    @State private var isCollapsed: Bool
-    @State private var contentVisible: Bool
-
-    init(
-        messageId: String,
-        webSearchState: WebSearchState,
-        isDarkMode: Bool,
-        messageCollapsed: Bool,
-        isStreaming: Bool,
-        webSearchSummary: String? = nil
-    ) {
-        self.messageId = messageId
-        self.webSearchState = webSearchState
-        self.isDarkMode = isDarkMode
-        self.messageCollapsed = messageCollapsed
-        self.isStreaming = isStreaming
-        self.webSearchSummary = webSearchSummary
-        _isCollapsed = State(initialValue: messageCollapsed && webSearchState.status != .searching)
-        _contentVisible = State(initialValue: !messageCollapsed || webSearchState.status == .searching)
-    }
+    let onTap: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button(action: toggleCollapse) {
-                HStack {
-                    headerContent
-                    Spacer()
-                    if webSearchState.status != .searching {
-                        Image(systemName: "chevron.down")
-                            .rotationEffect(.degrees(isCollapsed ? 0 : -180))
-                            .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
-                    }
+        Button(action: onTap) {
+            HStack {
+                headerContent
+                Spacer()
+                if webSearchState.status != .searching {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(NoHighlightButtonStyle())
-            .disabled(webSearchState.status == .searching)
-
-            if !isCollapsed && !webSearchState.sources.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(webSearchState.sources) { source in
-                            SourceRowView(source: source, isDarkMode: isDarkMode)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                }
-                .opacity(contentVisible ? 1 : 0)
-            }
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
         }
-        .background(Color.clear)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.2), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(.vertical, 4)
-        .onChange(of: webSearchState.status) { _, newStatus in
-            if newStatus == .completed && webSearchState.sources.isEmpty {
-                isCollapsed = true
-                contentVisible = false
-            }
-        }
+        .buttonStyle(NoHighlightButtonStyle())
+        .disabled(webSearchState.status == .searching || webSearchState.sources.isEmpty)
     }
 
     @ViewBuilder
@@ -172,58 +117,6 @@ struct WebSearchBox: View {
         }
     }
 
-    private func toggleCollapse() {
-        guard webSearchState.status != .searching else { return }
-
-        let newCollapsed = !isCollapsed
-
-        if newCollapsed {
-            withAnimation(.easeOut(duration: 0.15)) {
-                contentVisible = false
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                isCollapsed = true
-                if let tableView = findTableView() {
-                    UIView.performWithoutAnimation {
-                        tableView.beginUpdates()
-                        tableView.endUpdates()
-                    }
-                }
-            }
-        } else {
-            isCollapsed = false
-            if let tableView = findTableView() {
-                UIView.performWithoutAnimation {
-                    tableView.beginUpdates()
-                    tableView.endUpdates()
-                }
-            }
-            withAnimation(.easeIn(duration: 0.2).delay(0.05)) {
-                contentVisible = true
-            }
-        }
-    }
-    
-    private func findTableView() -> UITableView? {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = windowScene.windows.first else {
-            return nil
-        }
-
-        func findTableView(in view: UIView) -> UITableView? {
-            if let tableView = view as? UITableView {
-                return tableView
-            }
-            for subview in view.subviews {
-                if let found = findTableView(in: subview) {
-                    return found
-                }
-            }
-            return nil
-        }
-
-        return findTableView(in: window)
-    }
 }
 
 /// Animated dots for searching state
