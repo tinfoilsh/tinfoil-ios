@@ -96,7 +96,7 @@ struct ForgotPasswordView: View {
     
     private var emailInputView: some View {
         VStack(spacing: 16) {
-            UIKitTextField(text: $email, placeholder: "Email", keyboardType: .emailAddress)
+            UIKitTextField(text: $email, placeholder: "Email", keyboardType: .emailAddress, textContentType: .emailAddress)
                 .frame(height: 50)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
@@ -191,7 +191,7 @@ struct ForgotPasswordView: View {
     
     private var newPasswordView: some View {
         VStack(spacing: 16) {
-            UIKitTextField(text: $newPassword, placeholder: "New Password", isSecure: true)
+            UIKitTextField(text: $newPassword, placeholder: "New Password", isSecure: true, textContentType: .newPassword)
                 .frame(height: 50)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)

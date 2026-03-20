@@ -91,15 +91,17 @@ struct UIKitTextField: UIViewRepresentable {
     var keyboardType: UIKeyboardType
     var isSecure: Bool
     var autocapitalizationType: UITextAutocapitalizationType
-    
-    init(text: Binding<String>, placeholder: String, keyboardType: UIKeyboardType = .default, isSecure: Bool = false, autocapitalizationType: UITextAutocapitalizationType = .none) {
+    var textContentType: UITextContentType?
+
+    init(text: Binding<String>, placeholder: String, keyboardType: UIKeyboardType = .default, isSecure: Bool = false, autocapitalizationType: UITextAutocapitalizationType = .none, textContentType: UITextContentType? = nil) {
         self._text = text
         self.placeholder = placeholder
         self.keyboardType = keyboardType
         self.isSecure = isSecure
         self.autocapitalizationType = autocapitalizationType
+        self.textContentType = textContentType
     }
-    
+
     func makeUIView(context: Context) -> UITextField {
         let textField = UITextField()
         textField.delegate = context.coordinator
@@ -115,11 +117,8 @@ struct UIKitTextField: UIViewRepresentable {
         textField.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 10, height: textField.frame.height))
         textField.leftViewMode = .always
         textField.clearButtonMode = .whileEditing
-        
-        // This is crucial to prevent auto layout conflicts
-        textField.inputAssistantItem.leadingBarButtonGroups = []
-        textField.inputAssistantItem.trailingBarButtonGroups = []
-        
+        textField.textContentType = textContentType
+
         return textField
     }
     
