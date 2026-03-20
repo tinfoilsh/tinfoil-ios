@@ -39,7 +39,7 @@ struct SignInView: View {
   
   var body: some View {
     VStack(spacing: 12) {
-      UIKitTextField(text: $email, placeholder: "Email", keyboardType: .emailAddress)
+      UIKitTextField(text: $email, placeholder: "Email", keyboardType: .emailAddress, textContentType: .emailAddress)
         .frame(height: 50)
         .overlay(
           RoundedRectangle(cornerRadius: 8)
@@ -57,7 +57,7 @@ struct SignInView: View {
           }
         }
       
-      UIKitTextField(text: $password, placeholder: "Password", isSecure: true)
+      UIKitTextField(text: $password, placeholder: "Password", isSecure: true, textContentType: .password)
         .frame(height: 50)
         .overlay(
           RoundedRectangle(cornerRadius: 8)

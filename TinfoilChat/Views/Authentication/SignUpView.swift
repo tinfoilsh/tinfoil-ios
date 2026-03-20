@@ -133,7 +133,7 @@ struct SignUpView: View {
                 }
             } else {
                 // Sign-up form
-                UIKitTextField(text: $fullName, placeholder: "Full Name", keyboardType: .default, isSecure: false, autocapitalizationType: .words)
+                UIKitTextField(text: $fullName, placeholder: "Full Name", keyboardType: .default, isSecure: false, autocapitalizationType: .words, textContentType: .name)
                     .frame(height: 50)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
@@ -141,7 +141,7 @@ struct SignUpView: View {
                     )
                     .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
                 
-                UIKitTextField(text: $email, placeholder: "Email", keyboardType: .emailAddress)
+                UIKitTextField(text: $email, placeholder: "Email", keyboardType: .emailAddress, textContentType: .emailAddress)
                     .frame(height: 50)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
@@ -149,7 +149,7 @@ struct SignUpView: View {
                     )
                     .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
                 
-                UIKitTextField(text: $password, placeholder: "Password", isSecure: true)
+                UIKitTextField(text: $password, placeholder: "Password", isSecure: true, textContentType: .newPassword)
                     .frame(height: 50)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
