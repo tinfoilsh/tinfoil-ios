@@ -133,7 +133,7 @@ struct ForgotPasswordView: View {
     
     private var verificationCodeView: some View {
         VStack(spacing: 16) {
-            UIKitTextField(text: $code, placeholder: "Verification Code", keyboardType: .numberPad)
+            UIKitTextField(text: $code, placeholder: "Verification Code", keyboardType: .numberPad, textContentType: .oneTimeCode)
                 .frame(height: 50)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)

@@ -65,7 +65,7 @@ struct SignUpView: View {
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                     
-                    UIKitTextField(text: $verificationCode, placeholder: "Verification Code", keyboardType: .numberPad)
+                    UIKitTextField(text: $verificationCode, placeholder: "Verification Code", keyboardType: .numberPad, textContentType: .oneTimeCode)
                         .frame(height: 50)
                         .overlay(
                             RoundedRectangle(cornerRadius: 8)
