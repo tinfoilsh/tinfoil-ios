@@ -870,7 +870,7 @@ struct AdaptiveMarkdownText: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.bottom, -16)
             .padding(.horizontal, horizontalPadding)
-            .environment(\.colorScheme, .dark)
+            .environment(\.colorScheme, isDarkMode ? .dark : .light)
     }
 }
 
