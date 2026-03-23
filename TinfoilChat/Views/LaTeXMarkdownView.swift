@@ -128,6 +128,18 @@ struct LaTeXMarkdownView: View, Equatable {
         self.horizontalPadding = horizontalPadding
         self.maxWidthAlignment = maxWidthAlignment
         self.isStreaming = isStreaming
+
+        // Resolve segments synchronously from cache when available so the
+        // first render already has the final view tree. This prevents
+        // UIHostingConfiguration from calculating the cell height based on
+        // the fallback view and then never recalculating after the async
+        // .task swaps in the parsed segments.
+        if !isStreaming {
+            let cacheKey = "\(content.hashValue)"
+            if let cached = MarkdownRenderCache.shared.get(for: cacheKey) {
+                _segments = State(initialValue: cached)
+            }
+        }
     }
 
     var body: some View {
@@ -157,9 +169,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 return
             }
             let contentToProcess = content
-            let parsed = await Task.detached {
-                Self.parseContent(contentToProcess)
-            }.value
+            let parsed = Self.parseContent(contentToProcess)
             MarkdownRenderCache.shared.set(parsed, for: cacheKey)
             segments = parsed
         }
