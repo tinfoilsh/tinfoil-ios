@@ -440,6 +440,14 @@ class ChatViewModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
+            // Proactively refresh the session token and recreate the client
+            // if the token is expired or near expiry, so requests don't fail.
+            Task { @MainActor in
+                if SessionTokenManager.shared.needsRefresh {
+                    await self?.refreshClientForRetry()
+                }
+            }
+
             // Add a small delay to allow auth state to stabilize, then retry client setup if needed
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 self?.retryClientSetup()
@@ -3129,6 +3137,23 @@ extension ChatViewModel {
             )
             return transcription
         } catch {
+            // Retry once with a fresh token if the error is an auth failure
+            if ChatViewModel.isAuthenticationError(error) {
+                await refreshClientForRetry()
+                if let retryClient = self.client {
+                    do {
+                        let transcription = try await AudioRecordingService.shared.transcribe(
+                            fileURL: fileURL,
+                            client: retryClient,
+                            model: audioModel.modelName
+                        )
+                        return transcription
+                    } catch {
+                        audioError = error.localizedDescription
+                        return nil
+                    }
+                }
+            }
             audioError = error.localizedDescription
             return nil
         }
