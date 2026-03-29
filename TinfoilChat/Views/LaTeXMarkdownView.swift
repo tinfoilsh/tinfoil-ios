@@ -777,8 +777,13 @@ private enum TableAlignment: Sendable {
 private struct MarkdownTableView: View {
     let table: ParsedTable
     let isDarkMode: Bool
+    let columnWidths: [Int: CGFloat]
 
-    @State private var columnWidths: [Int: CGFloat] = [:]
+    init(table: ParsedTable, isDarkMode: Bool) {
+        self.table = table
+        self.isDarkMode = isDarkMode
+        self.columnWidths = Self.measureColumnWidths(for: table)
+    }
 
     private var borderColor: SwiftUI.Color {
         isDarkMode ? SwiftUI.Color.white.opacity(0.2) : SwiftUI.Color.black.opacity(0.2)
@@ -800,11 +805,6 @@ private struct MarkdownTableView: View {
             }
         }
         .padding(.vertical, 8)
-        .onAppear {
-            if columnWidths.isEmpty {
-                columnWidths = Self.measureColumnWidths(for: table)
-            }
-        }
     }
 
     /// Measure column widths using text measurement instead of rendering a hidden table.
@@ -893,7 +893,6 @@ private struct MarkdownTableRowView: View {
                     columnWidth: columnWidths[index],
                     background: background
                 )
-                .frame(maxHeight: .infinity, alignment: .top)
 
                 if index < cells.count - 1 {
                     Rectangle()
@@ -902,7 +901,6 @@ private struct MarkdownTableRowView: View {
                 }
             }
         }
-        .frame(minHeight: 0, maxHeight: .infinity)
     }
 }
 
@@ -923,15 +921,15 @@ private struct MarkdownTableCell: View {
         )
         .padding(.vertical, isHeader ? 6 : 5)
         .padding(.horizontal, Constants.UI.tableCellHorizontalPadding)
+        .fixedSize(horizontal: false, vertical: true)
 
         if let width = columnWidth {
             cellContent
                 .frame(width: width, alignment: alignment.viewAlignment)
-                .frame(maxHeight: .infinity)
                 .background(background)
         } else {
             cellContent
-                .frame(maxHeight: .infinity)
+                .frame(maxWidth: .infinity, alignment: alignment.viewAlignment)
                 .background(background)
         }
     }
