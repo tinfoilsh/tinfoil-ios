@@ -110,10 +110,10 @@ struct LaTeXMarkdownView: View, Equatable {
     @State private var segments: [ContentSegment]? = nil
 
     // Pre-compiled regex patterns (compiled once, reused across all renders)
-    private nonisolated(unsafe) static let codeBlockRegex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```", options: [])
-    private nonisolated(unsafe) static let inlineCodeRegex = try? NSRegularExpression(pattern: "`[^`]+`", options: [])
-    private nonisolated(unsafe) static let displayLatexRegex = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators])
-    private nonisolated(unsafe) static let inlineLatexRegex = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: [])
+    private static let codeBlockRegex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```", options: [])
+    private static let inlineCodeRegex = try? NSRegularExpression(pattern: "`[^`]+`", options: [])
+    private static let displayLatexRegex = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators])
+    private static let inlineLatexRegex = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: [])
     static func == (lhs: LaTeXMarkdownView, rhs: LaTeXMarkdownView) -> Bool {
         lhs.content == rhs.content &&
         lhs.isDarkMode == rhs.isDarkMode &&
@@ -216,9 +216,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 i += 1
                 continue
             }
-            let digitStart = j
             while j < count, chars[j] >= "0", chars[j] <= "9" { j += 1 }
-            let digitEnd = j
             guard j < count, chars[j] == "]" else {
                 result.append(chars[i])
                 i += 1
