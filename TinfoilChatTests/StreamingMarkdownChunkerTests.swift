@@ -142,6 +142,52 @@ struct StreamingMarkdownChunkerTests {
         #expect(completed[0].type == .table)
     }
 
+    @Test("Finalizes completed table before following paragraph")
+    func finalizesTableBeforeFollowingParagraph() {
+        let chunker = StreamingMarkdownChunker()
+        feedLines("| A | B |\n| --- | --- |\n| 1 | 2 |", to: chunker)
+        chunker.appendToken("\nN")
+
+        let chunks = chunker.getAllChunks()
+        let completedTables = chunks.filter { $0.isComplete && $0.type == .table }
+        let incompleteChunks = chunks.filter { !$0.isComplete }
+
+        #expect(completedTables.count == 1)
+        #expect(incompleteChunks.count == 1)
+        #expect(incompleteChunks[0].type == .paragraph)
+        #expect(incompleteChunks[0].content == "N")
+    }
+
+    @Test("Keeps rows without trailing pipes in same table")
+    func keepsRowsWithoutTrailingPipesInSameTable() {
+        let chunker = StreamingMarkdownChunker()
+        feedLines("| A | B\n| --- | ---\n| 1 | veryveryverylongcellcontentthathasnobarattheend\n| 2 | second row", to: chunker)
+        chunker.finalize()
+
+        let chunks = chunker.getAllChunks()
+        let completed = chunks.filter { $0.isComplete }
+
+        #expect(completed.count == 1)
+        #expect(completed[0].type == .table)
+        #expect(completed[0].content.contains("| 2 | second row"))
+    }
+
+    @Test("Splits intro text before table into its own paragraph chunk")
+    func splitsIntroTextBeforeTable() {
+        let chunker = StreamingMarkdownChunker()
+        feedLines("Intro text\n| A | B |\n| --- | --- |", to: chunker)
+
+        let chunks = chunker.getAllChunks()
+        let completed = chunks.filter { $0.isComplete }
+        let incomplete = chunks.filter { !$0.isComplete }
+
+        #expect(completed.count == 1)
+        #expect(completed[0].type == .paragraph)
+        #expect(completed[0].content.contains("Intro text"))
+        #expect(incomplete.count == 1)
+        #expect(incomplete[0].type == .table)
+    }
+
     // MARK: - Finalize
 
     @Test("Finalize completes working buffer as paragraph")
