@@ -243,6 +243,7 @@ class StreamingMarkdownChunker {
             }
 
             guard isPotentialTableRow(line.text) else {
+                guard !isIncompleteCurrentLine else { return nil }
                 let tableEnd = line.range.lowerBound
                 return (
                     table: String(workingBuffer[..<tableEnd]),
