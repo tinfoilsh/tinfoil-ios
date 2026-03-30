@@ -61,82 +61,44 @@ class StreamingMarkdownChunker {
     @discardableResult
     func appendToken(_ token: String) -> Bool {
         workingBuffer += token
+        var didFinalizeChunk = false
 
-        if isInCodeBlock {
-            if workingBuffer.hasSuffix("```") || workingBuffer.contains("\n```\n") || workingBuffer.contains("\n```") {
-                if let closingRange = workingBuffer.range(of: "```", options: .backwards) {
-                    let afterFence = String(workingBuffer[closingRange.upperBound...])
-                    if afterFence.trimmingCharacters(in: .whitespaces).isEmpty || afterFence.hasPrefix("\n") {
-                        finalizeCodeBlock(preserveAfterFence: afterFence)
-                        return true
-                    }
+        while true {
+            if isInCodeBlock {
+                if let trailingContent = extractTrailingContentAfterCodeBlock() {
+                    finalizeCodeBlock(preserveAfterFence: trailingContent)
+                    didFinalizeChunk = true
+                    continue
                 }
+                return didFinalizeChunk
             }
-            return false
-        }
 
-        if isInTable {
-            if workingBuffer.hasSuffix("\n\n") || (workingBuffer.hasSuffix("\n") && !workingBuffer.suffix(10).contains("|")) {
-                finalizeTable()
-                return true
-            }
-            return false
-        }
-
-        if workingBuffer.contains("```") {
-            if let fenceRange = workingBuffer.range(of: "```") {
-                let beforeFence = String(workingBuffer[..<fenceRange.lowerBound])
-
-                if !beforeFence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    let chunkId = "paragraph_\(beforeFence.hashValue)_\(Date().timeIntervalSince1970)"
-                    completedChunks.append(ContentChunk(
-                        id: chunkId,
-                        type: .paragraph,
-                        content: beforeFence,
-                        isComplete: true
-                    ))
+            if isInTable {
+                if let (tableContent, trailingContent) = splitCompletedTableBuffer() {
+                    finalizeTable(tableContent: tableContent, preserveTrailingContent: trailingContent)
+                    didFinalizeChunk = true
+                    continue
                 }
-
-                let afterFence = String(workingBuffer[fenceRange.upperBound...])
-                let langLine = afterFence.components(separatedBy: .newlines).first ?? ""
-                codeBlockLanguage = langLine.trimmingCharacters(in: .whitespacesAndNewlines)
-                if codeBlockLanguage?.isEmpty == true {
-                    codeBlockLanguage = nil
-                }
-
-                isInCodeBlock = true
-                workingBuffer = String(workingBuffer[fenceRange.lowerBound...])
-                return true
+                return didFinalizeChunk
             }
-        }
 
-        let lines = workingBuffer.components(separatedBy: .newlines)
-        if lines.count >= 2 {
-            let lastTwo = lines.suffix(2)
-            if lastTwo.allSatisfy({ $0.contains("|") }) {
-                if lastTwo.last?.contains("---") == true || lastTwo.last?.contains(":--") == true || lastTwo.last?.contains("--:") == true {
-                    isInTable = true
-                    return false
-                }
+            if detectCodeBlockStart() {
+                didFinalizeChunk = true
+                continue
             }
-        }
 
-        if workingBuffer.hasSuffix("\n\n") && workingBuffer.count > 2 {
-            let content = String(workingBuffer.dropLast(2))
-            if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let chunkId = "paragraph_\(content.hashValue)_\(Date().timeIntervalSince1970)"
-                completedChunks.append(ContentChunk(
-                    id: chunkId,
-                    type: .paragraph,
-                    content: content,
-                    isComplete: true
-                ))
-                workingBuffer = "\n\n"
-                return true
+            if detectTableStart() {
+                didFinalizeChunk = true
+                continue
             }
-        }
 
-        return false
+            if finalizeParagraphIfNeeded() {
+                didFinalizeChunk = true
+                continue
+            }
+
+            return didFinalizeChunk
+        }
     }
 
     private func finalizeCodeBlock(preserveAfterFence: String = "") {
@@ -153,8 +115,8 @@ class StreamingMarkdownChunker {
         workingBuffer = preserveAfterFence
     }
 
-    private func finalizeTable() {
-        let trimmed = workingBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func finalizeTable(tableContent: String? = nil, preserveTrailingContent: String = "") {
+        let trimmed = (tableContent ?? workingBuffer).trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
             let chunkId = "table_\(trimmed.hashValue)_\(Date().timeIntervalSince1970)"
             completedChunks.append(ContentChunk(
@@ -166,7 +128,7 @@ class StreamingMarkdownChunker {
         }
 
         isInTable = false
-        workingBuffer = ""
+        workingBuffer = preserveTrailingContent
     }
 
     func finalize() {
@@ -198,5 +160,192 @@ class StreamingMarkdownChunker {
         isInTable = false
         codeBlockLanguage = nil
         isFinalized = false
+    }
+
+    private func detectCodeBlockStart() -> Bool {
+        guard let fenceRange = workingBuffer.range(of: "```") else { return false }
+
+        let beforeFence = String(workingBuffer[..<fenceRange.lowerBound])
+        appendCompletedParagraph(beforeFence)
+
+        let afterFence = String(workingBuffer[fenceRange.upperBound...])
+        let langLine = afterFence.components(separatedBy: .newlines).first ?? ""
+        codeBlockLanguage = langLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        if codeBlockLanguage?.isEmpty == true {
+            codeBlockLanguage = nil
+        }
+
+        isInCodeBlock = true
+        workingBuffer = String(workingBuffer[fenceRange.lowerBound...])
+        return true
+    }
+
+    private func extractTrailingContentAfterCodeBlock() -> String? {
+        guard workingBuffer.hasSuffix("```") || workingBuffer.contains("\n```\n") || workingBuffer.contains("\n```") else {
+            return nil
+        }
+        guard let closingRange = workingBuffer.range(of: "```", options: .backwards) else {
+            return nil
+        }
+
+        let afterFence = String(workingBuffer[closingRange.upperBound...])
+        if afterFence.trimmingCharacters(in: .whitespaces).isEmpty || afterFence.hasPrefix("\n") {
+            return afterFence
+        }
+
+        return nil
+    }
+
+    private func detectTableStart() -> Bool {
+        let lines = workingBuffer.components(separatedBy: .newlines)
+        guard lines.count >= 2 else { return false }
+
+        let headerLine = lines[lines.count - 2]
+        let alignmentLine = lines[lines.count - 1]
+        let trimmedHeader = headerLine.trimmingCharacters(in: .whitespaces)
+
+        guard trimmedHeader.contains("|"),
+              isAlignmentLine(alignmentLine) else {
+            return false
+        }
+
+        let tablePrefix = "\(headerLine)\n\(alignmentLine)"
+        guard let tableStartRange = workingBuffer.range(of: tablePrefix, options: .backwards) else {
+            return false
+        }
+
+        let beforeTable = String(workingBuffer[..<tableStartRange.lowerBound])
+        appendCompletedParagraph(beforeTable)
+
+        workingBuffer = String(workingBuffer[tableStartRange.lowerBound...])
+        isInTable = true
+        return true
+    }
+
+    private func splitCompletedTableBuffer() -> (table: String, trailing: String)? {
+        let lines = bufferedLines()
+        guard lines.count >= 2 else { return nil }
+
+        for (index, line) in lines.enumerated() where index >= 2 {
+            let trimmed = line.text.trimmingCharacters(in: .whitespaces)
+            let isIncompleteCurrentLine = index == lines.count - 1 && !line.hasTerminatingNewline
+
+            if trimmed.isEmpty {
+                guard !isIncompleteCurrentLine else { return nil }
+                let tableEnd = line.range.lowerBound
+                return (
+                    table: String(workingBuffer[..<tableEnd]),
+                    trailing: String(workingBuffer[tableEnd...])
+                )
+            }
+
+            guard isPotentialTableRow(line.text) else {
+                let tableEnd = line.range.lowerBound
+                return (
+                    table: String(workingBuffer[..<tableEnd]),
+                    trailing: String(workingBuffer[tableEnd...])
+                )
+            }
+        }
+
+        return nil
+    }
+
+    private func finalizeParagraphIfNeeded() -> Bool {
+        guard workingBuffer.hasSuffix("\n\n"), workingBuffer.count > 2 else {
+            return false
+        }
+
+        let content = String(workingBuffer.dropLast(2))
+        if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            appendCompletedParagraph(content)
+            workingBuffer = "\n\n"
+            return true
+        }
+
+        return false
+    }
+
+    private func appendCompletedParagraph(_ content: String) {
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let chunkId = "paragraph_\(content.hashValue)_\(Date().timeIntervalSince1970)"
+        completedChunks.append(ContentChunk(
+            id: chunkId,
+            type: .paragraph,
+            content: content,
+            isComplete: true
+        ))
+    }
+
+    private func isAlignmentLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("|") else { return false }
+
+        let cells = parseTableCells(from: line)
+        guard !cells.isEmpty else { return false }
+
+        let allowedCharacters = CharacterSet(charactersIn: "-: ")
+        return cells.allSatisfy { cell in
+            let cellTrimmed = cell.trimmingCharacters(in: .whitespaces)
+            guard cellTrimmed.contains("-") else { return false }
+            return cellTrimmed.unicodeScalars.allSatisfy { allowedCharacters.contains($0) }
+        }
+    }
+
+    private func isPotentialTableRow(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed.contains("|")
+    }
+
+    private func parseTableCells(from line: String) -> [String] {
+        let placeholder = "__ESCAPED_PIPE__"
+        var working = line.trimmingCharacters(in: .whitespaces)
+
+        while working.hasPrefix("|") {
+            working.removeFirst()
+        }
+        while working.hasSuffix("|") {
+            working.removeLast()
+        }
+
+        working = working.replacingOccurrences(of: "\\|", with: placeholder)
+
+        let parts = working.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        return parts.map { part in
+            part.replacingOccurrences(of: placeholder, with: "|").trimmingCharacters(in: .whitespaces)
+        }
+    }
+
+    private func bufferedLines() -> [BufferedLine] {
+        var lines: [BufferedLine] = []
+        var lineStart = workingBuffer.startIndex
+        var index = workingBuffer.startIndex
+
+        while index < workingBuffer.endIndex {
+            if workingBuffer[index] == "\n" {
+                lines.append(BufferedLine(
+                    text: String(workingBuffer[lineStart..<index]),
+                    range: lineStart..<index,
+                    hasTerminatingNewline: true
+                ))
+                lineStart = workingBuffer.index(after: index)
+            }
+            index = workingBuffer.index(after: index)
+        }
+
+        lines.append(BufferedLine(
+            text: String(workingBuffer[lineStart..<workingBuffer.endIndex]),
+            range: lineStart..<workingBuffer.endIndex,
+            hasTerminatingNewline: false
+        ))
+
+        return lines
+    }
+
+    private struct BufferedLine {
+        let text: String
+        let range: Range<String.Index>
+        let hasTerminatingNewline: Bool
     }
 }
