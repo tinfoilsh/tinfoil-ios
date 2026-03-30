@@ -137,7 +137,14 @@ class StreamingMarkdownChunker {
         if isInCodeBlock {
             finalizeCodeBlock()
         } else if isInTable {
-            finalizeTable()
+            if let (tableContent, trailingContent) = splitCompletedTableBuffer(allowIncompleteTrailingContent: true) {
+                finalizeTable(tableContent: tableContent, preserveTrailingContent: trailingContent)
+                if !workingBuffer.isEmpty {
+                    finalize()
+                }
+            } else {
+                finalizeTable()
+            }
         } else if !workingBuffer.isEmpty {
             let trimmed = workingBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
@@ -225,7 +232,7 @@ class StreamingMarkdownChunker {
         return true
     }
 
-    private func splitCompletedTableBuffer() -> (table: String, trailing: String)? {
+    private func splitCompletedTableBuffer(allowIncompleteTrailingContent: Bool = false) -> (table: String, trailing: String)? {
         let lines = bufferedLines()
         guard lines.count >= 2 else { return nil }
 
@@ -243,7 +250,7 @@ class StreamingMarkdownChunker {
             }
 
             guard isPotentialTableRow(line.text) else {
-                guard !isIncompleteCurrentLine else { return nil }
+                guard !isIncompleteCurrentLine || allowIncompleteTrailingContent else { return nil }
                 let tableEnd = line.range.lowerBound
                 return (
                     table: String(workingBuffer[..<tableEnd]),
