@@ -204,6 +204,22 @@ struct StreamingMarkdownChunkerTests {
         #expect(incomplete[0].content.contains("partial row text"))
     }
 
+    @Test("Finalize splits trailing paragraph text after table without newline")
+    func finalizeSplitsTrailingParagraphWithoutNewline() {
+        let chunker = StreamingMarkdownChunker()
+        feedLines("| A | B |\n| --- | --- |\n", to: chunker)
+        chunker.appendToken("Trailing paragraph text")
+        chunker.finalize()
+
+        let chunks = chunker.getAllChunks()
+        let completed = chunks.filter { $0.isComplete }
+
+        #expect(completed.count == 2)
+        #expect(completed[0].type == .table)
+        #expect(completed[1].type == .paragraph)
+        #expect(completed[1].content == "Trailing paragraph text")
+    }
+
     @Test("Splits intro text before table into its own paragraph chunk")
     func splitsIntroTextBeforeTable() {
         let chunker = StreamingMarkdownChunker()
