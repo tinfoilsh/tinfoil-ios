@@ -188,6 +188,22 @@ struct StreamingMarkdownChunkerTests {
         #expect(completed[0].content.contains("| 2 | second row"))
     }
 
+    @Test("Does not finalize table while last row is still incomplete")
+    func doesNotFinalizeTableForIncompleteLastRow() {
+        let chunker = StreamingMarkdownChunker()
+        feedLines("| A | B |\n| --- | --- |\n", to: chunker)
+        chunker.appendToken("partial row text")
+
+        let chunks = chunker.getAllChunks()
+        let completed = chunks.filter { $0.isComplete }
+        let incomplete = chunks.filter { !$0.isComplete }
+
+        #expect(completed.isEmpty)
+        #expect(incomplete.count == 1)
+        #expect(incomplete[0].type == .table)
+        #expect(incomplete[0].content.contains("partial row text"))
+    }
+
     @Test("Splits intro text before table into its own paragraph chunk")
     func splitsIntroTextBeforeTable() {
         let chunker = StreamingMarkdownChunker()
