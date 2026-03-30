@@ -187,6 +187,9 @@ class StreamingMarkdownChunker {
         guard let closingRange = workingBuffer.range(of: "```", options: .backwards) else {
             return nil
         }
+        guard closingRange.lowerBound != workingBuffer.startIndex else {
+            return nil
+        }
 
         let afterFence = String(workingBuffer[closingRange.upperBound...])
         if afterFence.trimmingCharacters(in: .whitespaces).isEmpty || afterFence.hasPrefix("\n") {
@@ -302,14 +305,14 @@ class StreamingMarkdownChunker {
         let placeholder = "__ESCAPED_PIPE__"
         var working = line.trimmingCharacters(in: .whitespaces)
 
+        working = working.replacingOccurrences(of: "\\|", with: placeholder)
+
         while working.hasPrefix("|") {
             working.removeFirst()
         }
         while working.hasSuffix("|") {
             working.removeLast()
         }
-
-        working = working.replacingOccurrences(of: "\\|", with: placeholder)
 
         let parts = working.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
         return parts.map { part in

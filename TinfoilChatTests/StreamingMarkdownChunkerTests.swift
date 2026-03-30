@@ -115,6 +115,22 @@ struct StreamingMarkdownChunkerTests {
         #expect(completed[0].type == .codeBlock(language: "swift"))
     }
 
+    @Test("Bare opening code fence stays incomplete until closing fence arrives")
+    func bareOpeningCodeFenceDoesNotFinalizeImmediately() {
+        let chunker = StreamingMarkdownChunker()
+        chunker.appendToken("```")
+        chunker.appendToken("let x = 1")
+
+        let chunks = chunker.getAllChunks()
+        #expect(chunks.count == 1)
+        #expect(chunks[0].isComplete == false)
+        if case .codeBlock = chunks[0].type {
+            #expect(chunks[0].content == "```let x = 1")
+        } else {
+            Issue.record("Expected working chunk to remain a code block")
+        }
+    }
+
     @Test("Text before code block becomes separate paragraph")
     func textBeforeCodeBlock() {
         let chunker = StreamingMarkdownChunker()
@@ -186,6 +202,20 @@ struct StreamingMarkdownChunkerTests {
         #expect(completed[0].content.contains("Intro text"))
         #expect(incomplete.count == 1)
         #expect(incomplete[0].type == .table)
+    }
+
+    @Test("Preserves trailing escaped pipe inside table cell")
+    func preservesTrailingEscapedPipeInsideTableCell() {
+        let chunker = StreamingMarkdownChunker()
+        feedLines("| A |\n| --- |\n| foo \\|", to: chunker)
+        chunker.finalize()
+
+        let chunks = chunker.getAllChunks()
+        let completed = chunks.filter { $0.isComplete }
+
+        #expect(completed.count == 1)
+        #expect(completed[0].type == .table)
+        #expect(completed[0].content.contains("foo \\|"))
     }
 
     // MARK: - Finalize
