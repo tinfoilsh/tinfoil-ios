@@ -67,6 +67,7 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
         case "qwen": return "qwen-icon"
         case "mistral": return "mistral-icon"
         case "moonshot": return "moonshot-icon"
+        case "gemma": return "gemma-icon"
         case "nomic": return "default-model-icon" // Use default until we have nomic icon
         default: return "default-model-icon" // Default fallback
         }
