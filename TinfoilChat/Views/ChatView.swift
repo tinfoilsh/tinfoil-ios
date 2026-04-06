@@ -227,10 +227,8 @@ struct ChatContainer: View {
                 .animation(.easeInOut(duration: 0.2), value: isSidebarOpen)
                 .animation(.easeInOut(duration: 0.35), value: isVerificationBadgeExpanded)
             }
-            if authManager.isAuthenticated {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    VerificationStatusIndicator(viewModel: viewModel, isBadgeExpanded: $isVerificationBadgeExpanded)
-                }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                VerificationStatusIndicator(viewModel: viewModel, isBadgeExpanded: $isVerificationBadgeExpanded)
             }
             // Only show new chat button when chat has messages (not a new/blank chat)
             if authManager.isAuthenticated && !(viewModel.currentChat?.isBlankChat ?? true) {
