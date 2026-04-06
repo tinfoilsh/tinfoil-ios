@@ -31,6 +31,7 @@ class ChatViewModel: ObservableObject {
     @Published var thinkingSummary: String = ""
     @Published var webSearchSummary: String = ""
     @Published var showVerifierSheet: Bool = false
+    @Published var showAddSheet: Bool = false
     @Published var scrollTargetMessageId: String? = nil 
     @Published var scrollTargetOffset: CGFloat = 0 
     /// When set to true, the input field should become first responder (focus keyboard)

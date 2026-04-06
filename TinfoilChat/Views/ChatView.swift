@@ -32,6 +32,10 @@ struct ChatContainer: View {
     @State private var shouldCreateNewChatAfterSubscription = false
     @State private var showPremiumModal = false
     @State private var isVerificationBadgeExpanded = false
+
+    private var isAnySheetPresented: Bool {
+        viewModel.showVerifierSheet || viewModel.showAddSheet || viewModel.showRateLimitPaywall || showAuthView || showSettings || showPremiumModal
+    }
     
     // Sidebar constants
     private let sidebarWidth: CGFloat = 300
@@ -54,6 +58,16 @@ struct ChatContainer: View {
         NavigationView {
             mainContent
                 .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
+        }
+        .blur(radius: isAnySheetPresented ? 10 : 0)
+        .animation(.easeInOut(duration: 0.2), value: isAnySheetPresented)
+        .onChange(of: isAnySheetPresented) { _, presented in
+            if presented && isSidebarOpen {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    isSidebarOpen = false
+                    dragOffset = 0
+                }
+            }
         }
         .navigationViewStyle(.stack)
         .environmentObject(viewModel)
