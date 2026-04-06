@@ -196,6 +196,11 @@ struct ChatContainer: View {
                         if isSidebarOpen {
                             ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
                                 .frame(width: sidebarWidth)
+                                .overlay(alignment: .trailing) {
+                                    Rectangle()
+                                        .fill(Color.primary.opacity(0.15))
+                                        .frame(width: 1)
+                                }
                                 .transition(.move(edge: .leading))
                         }
                         
@@ -336,6 +341,11 @@ struct ChatContainer: View {
             HStack(spacing: 0) {
                 ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
                     .frame(width: sidebarWidth)
+                    .overlay(alignment: .trailing) {
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.15))
+                            .frame(width: 1)
+                    }
                     .offset(x: isSidebarOpen ?
                             (0 + dragOffset) : // When open, allow dragging left
                             (-(sidebarWidth + 1) + dragOffset)) // When closed, hide completely (extra 1pt for border)
