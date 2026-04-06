@@ -60,8 +60,8 @@ struct ChatContainer: View {
         .onAppear {
             setupNavigationBarAppearance()
 
-            // Ensure sidebar is closed on initial appearance
-            isSidebarOpen = false
+            // Open sidebar by default on iPad, closed on iPhone
+            isSidebarOpen = UIDevice.current.userInterfaceIdiom == .pad
             dragOffset = 0
         }
         .onChange(of: colorScheme) { _, _ in
@@ -79,9 +79,9 @@ struct ChatContainer: View {
             // App is coming to foreground, check if we should create a new chat
             checkAndCreateNewChatIfNeeded()
             
-            // Ensure sidebar is fully closed when returning from background
+            // Reset sidebar state when returning from background
             withAnimation(.easeOut(duration: 0.2)) {
-                isSidebarOpen = false
+                isSidebarOpen = UIDevice.current.userInterfaceIdiom == .pad
                 dragOffset = 0
             }
         }
