@@ -34,7 +34,7 @@ struct ChatContainer: View {
     @State private var isVerificationBadgeExpanded = false
 
     private var isAnySheetPresented: Bool {
-        viewModel.showVerifierSheet || viewModel.showAddSheet || viewModel.showRateLimitPaywall || showAuthView || showSettings || showPremiumModal
+        viewModel.showVerifierSheet || viewModel.showAddSheet || viewModel.showRateLimitPaywall || viewModel.showDocumentPicker || viewModel.showPhotoPicker || viewModel.showCamera || viewModel.showMessageSheet || viewModel.showImageViewer || viewModel.showSidebarSettings || showAuthView || showSettings || showPremiumModal
     }
     
     // Sidebar constants

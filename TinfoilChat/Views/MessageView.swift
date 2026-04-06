@@ -31,6 +31,10 @@ struct MessageView: View {
     @State private var showThoughtsSheet = false
     @State private var showURLFetchSheet = false
 
+    private var isAnyMessageSheetPresented: Bool {
+        showLongMessageSheet || showRawContentModal || showSelectableText || showSourcesSheet || showShareSheet || showThoughtsSheet || showURLFetchSheet
+    }
+
     var body: some View {
         HStack {
             if message.role == .user {
@@ -403,6 +407,9 @@ struct MessageView: View {
                 .presentationDetents([.medium, .large])
                 .iPadSheetSizing()
             }
+        }
+        .onChange(of: isAnyMessageSheetPresented) { _, value in
+            viewModel.showMessageSheet = value
         }
         .environment(\.openURL, OpenURLAction { url in
             if url.scheme == "cite" {
