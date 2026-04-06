@@ -22,7 +22,7 @@ struct ChatContainer: View {
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
     @StateObject private var settings = SettingsManager.shared
     
-    @State private var isSidebarOpen = UIDevice.current.userInterfaceIdiom == .pad
+    @State private var isSidebarOpen = false
     @State private var messageText = ""
     @State private var scrollProxy: ScrollViewProxy?
     @State private var dragOffset: CGFloat = 0
@@ -74,8 +74,6 @@ struct ChatContainer: View {
         .onAppear {
             setupNavigationBarAppearance()
 
-            // Open sidebar by default on iPad, closed on iPhone
-            isSidebarOpen = UIDevice.current.userInterfaceIdiom == .pad
             dragOffset = 0
         }
         .onChange(of: colorScheme) { _, _ in
@@ -95,7 +93,6 @@ struct ChatContainer: View {
             
             // Reset sidebar state when returning from background
             withAnimation(.easeOut(duration: 0.2)) {
-                isSidebarOpen = UIDevice.current.userInterfaceIdiom == .pad
                 dragOffset = 0
             }
         }
