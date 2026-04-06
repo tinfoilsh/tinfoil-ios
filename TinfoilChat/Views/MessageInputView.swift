@@ -43,9 +43,7 @@ struct MessageInputView: View {
 
     // Attachment picker state
 
-    @State private var showDocumentPicker = false
-    @State private var showPhotoPicker = false
-    @State private var showCamera = false
+
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var pendingPickerAction: PickerAction?
 
@@ -89,12 +87,12 @@ struct MessageInputView: View {
             } message: {
                 Text(viewModel.attachmentError ?? "An error occurred")
             }
-            .sheet(isPresented: $showDocumentPicker) {
+            .sheet(isPresented: $viewModel.showDocumentPicker) {
                 DocumentPickerView { url, fileName in
                     viewModel.addDocumentAttachment(url: url, fileName: fileName)
                 }
             }
-            .sheet(isPresented: $showPhotoPicker, onDismiss: processSelectedPhotos) {
+            .sheet(isPresented: $viewModel.showPhotoPicker, onDismiss: processSelectedPhotos) {
                 NavigationStack {
                     PhotosPicker(selection: $selectedPhotoItems, matching: .images) {
                         Text("Select Photos")
@@ -105,14 +103,14 @@ struct MessageInputView: View {
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
                             Button("Done") {
-                                showPhotoPicker = false
+                                viewModel.showPhotoPicker = false
                             }
                         }
                     }
                 }
                 .presentationDetents([.medium, .large])
             }
-            .fullScreenCover(isPresented: $showCamera) {
+            .fullScreenCover(isPresented: $viewModel.showCamera) {
                 CameraPickerView { image in
                     if let data = image.jpegData(compressionQuality: CGFloat(Constants.Attachments.imageCompressionQuality)) {
                         viewModel.addImageAttachment(data: data, fileName: "Camera Photo.jpg")
@@ -124,9 +122,9 @@ struct MessageInputView: View {
                 guard let action = pendingPickerAction else { return }
                 pendingPickerAction = nil
                 switch action {
-                case .camera: showCamera = true
-                case .photos: showPhotoPicker = true
-                case .files: showDocumentPicker = true
+                case .camera: viewModel.showCamera = true
+                case .photos: viewModel.showPhotoPicker = true
+                case .files: viewModel.showDocumentPicker = true
                 }
             }) {
                 AddToSheetView(

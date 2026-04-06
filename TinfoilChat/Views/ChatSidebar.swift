@@ -19,7 +19,7 @@ struct ChatSidebar: View {
     @State private var editingTitle: String = ""
     @State private var deletingChatId: String? = nil
     @State private var showDeleteAlert: Bool = false
-    @State private var showSettings: Bool = false
+
     @State private var showEncryptedChatAlert: Bool = false
     @State private var selectedEncryptedChat: Chat? = nil
     @State private var shouldOpenCloudSync: Bool = false
@@ -94,13 +94,13 @@ struct ChatSidebar: View {
                 deletingChatId = nil
             }
         }
-        .sheet(isPresented: $showSettings) {
+        .sheet(isPresented: $viewModel.showSidebarSettings) {
             SettingsView(shouldOpenCloudSync: shouldOpenCloudSync)
         }
         .alert("Encrypted Chat", isPresented: $showEncryptedChatAlert) {
             Button("Go to Settings") {
                 shouldOpenCloudSync = true
-                showSettings = true
+                viewModel.showSidebarSettings = true
             }
             Button("Cancel", role: .cancel) {
                 selectedEncryptedChat = nil
@@ -108,7 +108,7 @@ struct ChatSidebar: View {
         } message: {
             Text("This chat is encrypted with a different key. Go to Settings > Cloud Sync to update your encryption key.")
         }
-        .onChange(of: showSettings) { _, isShowing in
+        .onChange(of: viewModel.showSidebarSettings) { _, isShowing in
             // Reset the cloud sync flag when settings closes
             if !isShowing {
                 shouldOpenCloudSync = false
@@ -289,7 +289,7 @@ struct ChatSidebar: View {
             Group {
                 if #available(iOS 26, *) {
                     Button(action: {
-                        showSettings = true
+                        viewModel.showSidebarSettings = true
                     }) {
                         HStack {
                             Image(systemName: "gear")
@@ -302,7 +302,7 @@ struct ChatSidebar: View {
                     .buttonStyle(.glass)
                 } else {
                     Button(action: {
-                        showSettings = true
+                        viewModel.showSidebarSettings = true
                     }) {
                         HStack {
                             Image(systemName: "gear")
