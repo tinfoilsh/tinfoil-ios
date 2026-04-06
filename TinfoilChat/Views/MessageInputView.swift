@@ -42,7 +42,7 @@ struct MessageInputView: View {
     @State private var isPulsing = false
 
     // Attachment picker state
-    @State private var showAddSheet = false
+
     @State private var showDocumentPicker = false
     @State private var showPhotoPicker = false
     @State private var showCamera = false
@@ -120,7 +120,7 @@ struct MessageInputView: View {
                 }
                 .ignoresSafeArea()
             }
-            .sheet(isPresented: $showAddSheet, onDismiss: {
+            .sheet(isPresented: $viewModel.showAddSheet, onDismiss: {
                 guard let action = pendingPickerAction else { return }
                 pendingPickerAction = nil
                 switch action {
@@ -134,15 +134,15 @@ struct MessageInputView: View {
                     isDarkMode: isDarkMode,
                     onCamera: {
                         pendingPickerAction = .camera
-                        showAddSheet = false
+                        viewModel.showAddSheet = false
                     },
                     onPhotos: {
                         pendingPickerAction = .photos
-                        showAddSheet = false
+                        viewModel.showAddSheet = false
                     },
                     onFiles: {
                         pendingPickerAction = .files
-                        showAddSheet = false
+                        viewModel.showAddSheet = false
                     }
                 )
                 .environmentObject(authManager)
@@ -391,7 +391,7 @@ struct MessageInputView: View {
     @ViewBuilder
     private var attachButton: some View {
         Button {
-            showAddSheet = true
+            viewModel.showAddSheet = true
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 20))
