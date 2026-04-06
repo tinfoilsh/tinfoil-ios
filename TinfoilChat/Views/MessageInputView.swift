@@ -278,7 +278,7 @@ struct MessageInputView: View {
             .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 26))
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, isKeyboardVisible ? 12 : 0)
+            .padding(.bottom, inputBottomPadding)
         } else {
             // Older iOS with material effect
             VStack(spacing: 4) {
@@ -374,8 +374,18 @@ struct MessageInputView: View {
             }
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, isKeyboardVisible ? 12 : 0)
+            .padding(.bottom, inputBottomPadding)
         }
+    }
+
+    private var inputBottomPadding: CGFloat {
+        if isKeyboardVisible {
+            return 12
+        }
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            return Constants.UI.iPadInputBottomPadding
+        }
+        return 0
     }
 
     @ViewBuilder

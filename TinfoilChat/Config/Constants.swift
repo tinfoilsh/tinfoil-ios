@@ -33,6 +33,7 @@ enum Constants {
         static let tableFontSize: CGFloat = 16
         static let tableCellHorizontalPadding: CGFloat = 12
         static let actionButtonCornerRadius: CGFloat = 6
+        static let iPadInputBottomPadding: CGFloat = 16
     }
 
     enum Rendering {
