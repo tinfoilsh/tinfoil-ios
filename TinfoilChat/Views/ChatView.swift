@@ -224,6 +224,7 @@ struct ChatContainer: View {
                             .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
                     }
                 }
+                .offset(x: (isSidebarOpen && UIDevice.current.userInterfaceIdiom == .pad) ? sidebarWidth / 2 : 0)
                 .animation(.easeInOut(duration: 0.2), value: isSidebarOpen)
                 .animation(.easeInOut(duration: 0.35), value: isVerificationBadgeExpanded)
             }
