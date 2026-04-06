@@ -355,20 +355,24 @@ struct MessageView: View {
                 message: message
             )
             .presentationDetents([.medium, .large])
+            .iPadSheetSizing()
         }
         .sheet(isPresented: $showRawContentModal) {
             RawContentModalView(message: message)
                 .presentationDetents([.medium, .large])
+                .iPadSheetSizing()
                 .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
         }
         .sheet(isPresented: $showSelectableText) {
             UserMessageSelectView(content: message.content)
                 .presentationDetents([.medium, .large])
+                .iPadSheetSizing()
         }
         .sheet(isPresented: $showSourcesSheet) {
             if let sources = message.webSearchState?.sources {
                 SourcesSheetView(sources: sources, isDarkMode: isDarkMode)
                     .presentationDetents([.medium, .large])
+                    .iPadSheetSizing()
             }
         }
         .sheet(isPresented: $showThoughtsSheet) {
@@ -379,11 +383,13 @@ struct MessageView: View {
                 isDarkMode: isDarkMode
             )
             .presentationDetents([.medium, .large])
+            .iPadSheetSizing()
             .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
         }
         .sheet(isPresented: $showURLFetchSheet) {
             URLFetchSheetView(urlFetches: message.urlFetches, isDarkMode: isDarkMode)
                 .presentationDetents([.medium, .large])
+                .iPadSheetSizing()
                 .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
         }
         .sheet(isPresented: $showShareSheet) {
@@ -395,6 +401,7 @@ struct MessageView: View {
                     chatId: currentChat.id
                 )
                 .presentationDetents([.medium, .large])
+                .iPadSheetSizing()
             }
         }
         .environment(\.openURL, OpenURLAction { url in
