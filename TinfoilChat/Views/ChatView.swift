@@ -854,6 +854,15 @@ extension View {
             self
         }
     }
+
+    @ViewBuilder
+    func iPadSheetSizing() -> some View {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            self.presentationSizing(.page)
+        } else {
+            self
+        }
+    }
 }
 
 /// Verification status indicator for the navigation bar
