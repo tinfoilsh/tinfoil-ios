@@ -61,7 +61,7 @@ struct WebSearchBox: View {
         case .completed:
             HStack(spacing: 8) {
                 Image(systemName: "globe")
-                    .foregroundColor(.blue)
+                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
                     .font(.system(size: 14))
 
                 if webSearchState.sources.isEmpty {
