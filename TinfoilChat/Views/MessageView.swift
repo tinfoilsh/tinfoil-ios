@@ -35,6 +35,10 @@ struct MessageView: View {
         showLongMessageSheet || showRawContentModal || showSelectableText || showSourcesSheet || showShareSheet || showThoughtsSheet || showURLFetchSheet
     }
 
+    private var inlineAssistantTextSelectionEnabled: Bool {
+        !(isLoading && isLastMessage)
+    }
+
     var body: some View {
         HStack {
             if message.role == .user {
@@ -112,11 +116,21 @@ struct MessageView: View {
 
                         if !message.content.isEmpty {
                             if !message.contentChunks.isEmpty {
-                                ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
+                                ChunkedContentView(
+                                    chunks: message.contentChunks,
+                                    isDarkMode: isDarkMode,
+                                    isStreaming: isLoading && isLastMessage,
+                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled
+                                )
                                     .equatable()
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             } else {
-                                LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
+                                LaTeXMarkdownView(
+                                    content: message.content,
+                                    isDarkMode: isDarkMode,
+                                    isStreaming: isLoading && isLastMessage,
+                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled
+                                )
                                     .equatable()
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .transaction { transaction in
@@ -141,7 +155,12 @@ struct MessageView: View {
                         
                         // Remainder: text after </think> if present
                         if !parsed.remainderText.isEmpty {
-                            LaTeXMarkdownView(content: parsed.remainderText, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
+                            LaTeXMarkdownView(
+                                content: parsed.remainderText,
+                                isDarkMode: isDarkMode,
+                                isStreaming: isLoading && isLastMessage,
+                                textSelectionEnabled: inlineAssistantTextSelectionEnabled
+                            )
                                 .equatable()
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .transaction { transaction in
@@ -209,11 +228,21 @@ struct MessageView: View {
                             }
 
                             if !message.contentChunks.isEmpty {
-                                ChunkedContentView(chunks: message.contentChunks, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
+                                ChunkedContentView(
+                                    chunks: message.contentChunks,
+                                    isDarkMode: isDarkMode,
+                                    isStreaming: isLoading && isLastMessage,
+                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled
+                                )
                                     .equatable()
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             } else {
-                                LaTeXMarkdownView(content: message.content, isDarkMode: isDarkMode, isStreaming: isLoading && isLastMessage)
+                                LaTeXMarkdownView(
+                                    content: message.content,
+                                    isDarkMode: isDarkMode,
+                                    isStreaming: isLoading && isLastMessage,
+                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled
+                                )
                                     .equatable()
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -1108,17 +1137,24 @@ struct ChunkedContentView: View, Equatable {
     let chunks: [ContentChunk]
     let isDarkMode: Bool
     let isStreaming: Bool
+    let textSelectionEnabled: Bool
 
     static func == (lhs: ChunkedContentView, rhs: ChunkedContentView) -> Bool {
         lhs.chunks == rhs.chunks &&
         lhs.isDarkMode == rhs.isDarkMode &&
-        lhs.isStreaming == rhs.isStreaming
+        lhs.isStreaming == rhs.isStreaming &&
+        lhs.textSelectionEnabled == rhs.textSelectionEnabled
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(chunks) { chunk in
-                ChunkView(chunk: chunk, isDarkMode: isDarkMode, isStreaming: isStreaming)
+                ChunkView(
+                    chunk: chunk,
+                    isDarkMode: isDarkMode,
+                    isStreaming: isStreaming,
+                    textSelectionEnabled: textSelectionEnabled
+                )
             }
         }
     }
@@ -1128,16 +1164,20 @@ struct ChunkView: View, Equatable {
     let chunk: ContentChunk
     let isDarkMode: Bool
     let isStreaming: Bool
+    let textSelectionEnabled: Bool
 
     static func == (lhs: ChunkView, rhs: ChunkView) -> Bool {
         if lhs.chunk.isComplete && rhs.chunk.isComplete {
-            return lhs.chunk.id == rhs.chunk.id && lhs.isDarkMode == rhs.isDarkMode
+            return lhs.chunk.id == rhs.chunk.id &&
+                   lhs.isDarkMode == rhs.isDarkMode &&
+                   lhs.textSelectionEnabled == rhs.textSelectionEnabled
         }
         return lhs.chunk.id == rhs.chunk.id &&
                lhs.chunk.isComplete == rhs.chunk.isComplete &&
                lhs.chunk.content == rhs.chunk.content &&
                lhs.isDarkMode == rhs.isDarkMode &&
-               lhs.isStreaming == rhs.isStreaming
+               lhs.isStreaming == rhs.isStreaming &&
+               lhs.textSelectionEnabled == rhs.textSelectionEnabled
     }
 
     var body: some View {
@@ -1147,7 +1187,8 @@ struct ChunkView: View, Equatable {
             LaTeXMarkdownView(
                 content: chunk.content,
                 isDarkMode: isDarkMode,
-                isStreaming: chunk.isComplete ? false : isStreaming
+                isStreaming: chunk.isComplete ? false : isStreaming,
+                textSelectionEnabled: textSelectionEnabled
             )
             .equatable()
         }
