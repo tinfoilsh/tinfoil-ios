@@ -20,7 +20,7 @@ struct WebSearchBox: View {
             HStack {
                 headerContent
                 Spacer()
-                if webSearchState.status != .searching && !webSearchState.sources.isEmpty {
+                if effectiveStatus != .searching && !webSearchState.sources.isEmpty {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
@@ -30,15 +30,21 @@ struct WebSearchBox: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(NoHighlightButtonStyle())
-        .disabled(webSearchState.status == .searching || webSearchState.sources.isEmpty)
+        .disabled(effectiveStatus == .searching || webSearchState.sources.isEmpty)
+    }
+
+    private var effectiveStatus: WebSearchStatus {
+        if webSearchState.status == .completed && webSearchState.sources.isEmpty && isStreaming {
+            return .searching
+        }
+        return webSearchState.status
     }
 
     @ViewBuilder
     private var headerContent: some View {
-        switch webSearchState.status {
+        switch effectiveStatus {
         case .searching:
             HStack(spacing: 8) {
-                SearchingDotsView(isDarkMode: isDarkMode)
                 if let summary = webSearchSummary, !summary.isEmpty {
                     Text(summary)
                         .font(.subheadline)
@@ -46,16 +52,17 @@ struct WebSearchBox: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 } else if let query = webSearchState.query {
-                    Text("Searching: \(query)")
+                    Text("Searching the web: \(query)")
                         .font(.subheadline)
                         .foregroundColor(isDarkMode ? .white : .black.opacity(0.8))
                         .lineLimit(1)
                         .truncationMode(.tail)
                 } else {
-                    Text("Searching the web...")
+                    Text("Searching the web")
                         .font(.subheadline)
                         .foregroundColor(isDarkMode ? .white : .black.opacity(0.8))
                 }
+                SearchingDotsView(isDarkMode: isDarkMode)
             }
 
         case .completed:
@@ -131,7 +138,7 @@ struct SearchingDotsView: View {
                     .modifier(PulsingAnimation(delay: 0.15 * Double(index)))
             }
         }
-        .foregroundColor(.blue)
+        .foregroundColor(isDarkMode ? .white : .black.opacity(0.8))
     }
 }
 
