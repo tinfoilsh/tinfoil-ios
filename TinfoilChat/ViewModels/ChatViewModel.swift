@@ -37,6 +37,7 @@ class ChatViewModel: ObservableObject {
     @Published var showCamera: Bool = false
     @Published var showMessageSheet: Bool = false
     @Published var showSidebarSettings: Bool = false
+    @Published var shouldOpenCloudSync: Bool = false
     @Published var scrollTargetMessageId: String? = nil 
     @Published var scrollTargetOffset: CGFloat = 0 
     /// When set to true, the input field should become first responder (focus keyboard)

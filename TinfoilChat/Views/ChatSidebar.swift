@@ -22,7 +22,7 @@ struct ChatSidebar: View {
 
     @State private var showEncryptedChatAlert: Bool = false
     @State private var selectedEncryptedChat: Chat? = nil
-    @State private var shouldOpenCloudSync: Bool = false
+
     @State private var isTabSwitching: Bool = false
     @ObservedObject private var settings = SettingsManager.shared
 
@@ -94,12 +94,9 @@ struct ChatSidebar: View {
                 deletingChatId = nil
             }
         }
-        .sheet(isPresented: $viewModel.showSidebarSettings) {
-            SettingsView(shouldOpenCloudSync: shouldOpenCloudSync)
-        }
         .alert("Encrypted Chat", isPresented: $showEncryptedChatAlert) {
             Button("Go to Settings") {
-                shouldOpenCloudSync = true
+                viewModel.shouldOpenCloudSync = true
                 viewModel.showSidebarSettings = true
             }
             Button("Cancel", role: .cancel) {
@@ -107,12 +104,6 @@ struct ChatSidebar: View {
             }
         } message: {
             Text("This chat is encrypted with a different key. Go to Settings > Cloud Sync to update your encryption key.")
-        }
-        .onChange(of: viewModel.showSidebarSettings) { _, isShowing in
-            // Reset the cloud sync flag when settings closes
-            if !isShowing {
-                shouldOpenCloudSync = false
-            }
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
         }
