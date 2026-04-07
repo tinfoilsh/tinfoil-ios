@@ -1226,7 +1226,7 @@ class ChatViewModel: ObservableObject {
                                     status: .searching,
                                     sources: existingSources
                                 )
-                                self.webSearchSummary = event.action?.query.map { "Searching: \($0)" } ?? "Searching the web..."
+                                self.webSearchSummary = event.action?.query.map { "Searching the web: \($0)" } ?? "Searching the web"
                             case .completed:
                                 chat.messages[lastIndex].webSearchState?.status = .completed
                                 self.webSearchSummary = ""
