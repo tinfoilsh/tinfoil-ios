@@ -53,7 +53,8 @@ private struct SegmentView: View {
         case .table(let table):
             MarkdownTableView(
                 table: table,
-                isDarkMode: isDarkMode
+                isDarkMode: isDarkMode,
+                textSelectionEnabled: textSelectionEnabled
             )
         }
     }
@@ -788,11 +789,13 @@ private enum TableAlignment: Sendable {
 private struct MarkdownTableView: View {
     let table: ParsedTable
     let isDarkMode: Bool
+    let textSelectionEnabled: Bool
     let columnWidths: [Int: CGFloat]
 
-    init(table: ParsedTable, isDarkMode: Bool) {
+    init(table: ParsedTable, isDarkMode: Bool, textSelectionEnabled: Bool = true) {
         self.table = table
         self.isDarkMode = isDarkMode
+        self.textSelectionEnabled = textSelectionEnabled
         self.columnWidths = Self.measureColumnWidths(for: table)
     }
 
@@ -851,7 +854,8 @@ private struct MarkdownTableView: View {
                     isDarkMode: isDarkMode,
                     borderColor: borderColor,
                     background: headerBackground,
-                    columnWidths: columnWidths
+                    columnWidths: columnWidths,
+                    textSelectionEnabled: textSelectionEnabled
                 )
                 Rectangle()
                     .fill(borderColor)
@@ -866,7 +870,8 @@ private struct MarkdownTableView: View {
                     isDarkMode: isDarkMode,
                     borderColor: borderColor,
                     background: index.isMultiple(of: 2) ? alternatingRowBackground : SwiftUI.Color.clear,
-                    columnWidths: columnWidths
+                    columnWidths: columnWidths,
+                    textSelectionEnabled: textSelectionEnabled
                 )
 
                 if index < table.rows.count - 1 {
@@ -892,6 +897,7 @@ private struct MarkdownTableRowView: View {
     let borderColor: SwiftUI.Color
     let background: SwiftUI.Color
     let columnWidths: [Int: CGFloat]
+    let textSelectionEnabled: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -902,7 +908,8 @@ private struct MarkdownTableRowView: View {
                     isHeader: isHeader,
                     isDarkMode: isDarkMode,
                     columnWidth: columnWidths[index],
-                    background: background
+                    background: background,
+                    textSelectionEnabled: textSelectionEnabled
                 )
 
                 if index < cells.count - 1 {
@@ -922,13 +929,15 @@ private struct MarkdownTableCell: View {
     let isDarkMode: Bool
     let columnWidth: CGFloat?
     let background: SwiftUI.Color
+    let textSelectionEnabled: Bool
 
     var body: some View {
         let cellContent = LaTeXMarkdownView(
             content: content.isEmpty ? " " : content,
             isDarkMode: isDarkMode,
             horizontalPadding: 0,
-            maxWidthAlignment: alignment.viewAlignment
+            maxWidthAlignment: alignment.viewAlignment,
+            textSelectionEnabled: textSelectionEnabled
         )
         .padding(.vertical, isHeader ? 6 : 5)
         .padding(.horizontal, Constants.UI.tableCellHorizontalPadding)
