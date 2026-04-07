@@ -833,9 +833,8 @@ struct SettingsView: View {
         } message: {
             if settings.isLocalOnlyModeEnabled {
                 Text(passkeyManager.passkeyActive
-                    ? "All local data will be cleared. You can recover your chats by signing back in.\n"
-                    : "All local data will be cleared. You will need your encryption key to recover your chats.\n")
-                + Text("\n⚠️ Your local chats will be deleted forever.").bold()
+                    ? "All local data will be cleared. You can recover your chats by signing back in.\n\n⚠️ Your local chats will be deleted forever."
+                    : "All local data will be cleared. You will need your encryption key to recover your chats.\n\n⚠️ Your local chats will be deleted forever.")
             } else {
                 Text(passkeyManager.passkeyActive
                     ? "All local data will be cleared. You can recover your chats by signing back in."
