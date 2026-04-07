@@ -35,7 +35,7 @@ struct MessageInputView: View {
 
     // Check if audio input should be shown
     private var showAudioButton: Bool {
-        hasPremiumAccess && AppConfig.shared.audioModel != nil
+        AppConfig.shared.audioModel != nil
     }
 
     // State for pulsing animation
