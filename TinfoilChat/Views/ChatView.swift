@@ -116,11 +116,17 @@ struct ChatContainer: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
+                .environment(Clerk.shared)
+                .environmentObject(authManager)
+                .environmentObject(viewModel)
         }
         .sheet(isPresented: $viewModel.showSidebarSettings, onDismiss: {
             viewModel.shouldOpenCloudSync = false
         }) {
             SettingsView(shouldOpenCloudSync: viewModel.shouldOpenCloudSync)
+                .environment(Clerk.shared)
+                .environmentObject(authManager)
+                .environmentObject(viewModel)
         }
         .sheet(isPresented: $showPremiumModal) {
             PaywallView(displayCloseButton: true)
