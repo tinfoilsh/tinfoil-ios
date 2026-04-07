@@ -578,6 +578,8 @@ class ObservableMessageWrapper: ObservableObject {
                             self.message.isCollapsed != message.isCollapsed ||
                             self.message.generationTimeSeconds != message.generationTimeSeconds ||
                             self.message.streamError != message.streamError ||
+                            self.message.webSearchState != message.webSearchState ||
+                            self.message.urlFetches != message.urlFetches ||
                             self.isDarkMode != isDarkMode
 
         let metadataChanged = self.isLastMessage != isLastMessage ||
