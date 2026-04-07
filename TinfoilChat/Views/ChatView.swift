@@ -117,6 +117,11 @@ struct ChatContainer: View {
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
+        .sheet(isPresented: $viewModel.showSidebarSettings, onDismiss: {
+            viewModel.shouldOpenCloudSync = false
+        }) {
+            SettingsView(shouldOpenCloudSync: viewModel.shouldOpenCloudSync)
+        }
         .sheet(isPresented: $showPremiumModal) {
             PaywallView(displayCloseButton: true)
                 .onPurchaseCompleted { _ in
