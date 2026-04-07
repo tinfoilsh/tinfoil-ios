@@ -6,6 +6,78 @@
 
 import SwiftUI
 
+private enum Base64ImageDecoder {
+    static let cache = NSCache<NSString, UIImage>()
+
+    static func cachedImage(for cacheKey: String) -> UIImage? {
+        cache.object(forKey: cacheKey as NSString)
+    }
+
+    static func decode(base64: String, cacheKey: String) async -> UIImage? {
+        if let cached = cachedImage(for: cacheKey) {
+            return cached
+        }
+
+        let image = await Task.detached(priority: .utility) {
+            guard let data = Data(base64Encoded: base64) else { return nil }
+            return UIImage(data: data)
+        }.value
+
+        if let image {
+            cache.setObject(image, forKey: cacheKey as NSString)
+        }
+
+        return image
+    }
+}
+
+struct DecodedBase64ImageView<Placeholder: View>: View {
+    let base64: String?
+    let cacheKey: String
+    let contentMode: ContentMode
+    let placeholder: Placeholder
+
+    @State private var image: UIImage?
+
+    init(
+        base64: String?,
+        cacheKey: String,
+        contentMode: ContentMode = .fill,
+        @ViewBuilder placeholder: () -> Placeholder
+    ) {
+        self.base64 = base64
+        self.cacheKey = cacheKey
+        self.contentMode = contentMode
+        self.placeholder = placeholder()
+        _image = State(initialValue: Base64ImageDecoder.cachedImage(for: cacheKey))
+    }
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+            } else {
+                placeholder
+            }
+        }
+        .task(id: cacheKey) {
+            guard let base64 else {
+                image = nil
+                return
+            }
+
+            if let cached = Base64ImageDecoder.cachedImage(for: cacheKey) {
+                image = cached
+                return
+            }
+
+            image = await Base64ImageDecoder.decode(base64: base64, cacheKey: cacheKey)
+        }
+    }
+}
+
 struct MessageAttachmentIndicator: View {
     let attachments: [Attachment]
     let isDarkMode: Bool
@@ -98,24 +170,25 @@ private struct ImageThumbnail: View {
     let attachment: Attachment
     let size: CGFloat
 
+    private var thumbnailBase64: String? {
+        attachment.thumbnailBase64 ?? attachment.base64
+    }
+
+    private var cacheKey: String {
+        "attachment-thumbnail-\(attachment.id)-\(thumbnailBase64?.hashValue ?? 0)"
+    }
+
     var body: some View {
-        if let base64 = attachment.base64 ?? attachment.thumbnailBase64,
-           let data = Data(base64Encoded: base64),
-           let uiImage = UIImage(data: data) {
-            Image(uiImage: uiImage)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-        } else {
+        DecodedBase64ImageView(base64: thumbnailBase64, cacheKey: cacheKey) {
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color.gray.opacity(0.3))
-                .frame(width: size, height: size)
                 .overlay {
                     Image(systemName: "photo")
                         .foregroundColor(.gray)
                 }
         }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -249,6 +322,14 @@ struct ZoomableImagePage: View {
     @State private var lastScale: CGFloat = 1.0
     @State private var decodedImage: UIImage?
 
+    private var fullSizeBase64: String? {
+        attachment.base64 ?? attachment.thumbnailBase64
+    }
+
+    private var cacheKey: String {
+        "attachment-full-\(attachment.id)-\(fullSizeBase64?.hashValue ?? 0)"
+    }
+
     var body: some View {
         Group {
             if let decodedImage {
@@ -283,10 +364,18 @@ struct ZoomableImagePage: View {
                 }
             }
         }
-        .onAppear {
-            let base64 = attachment.base64 ?? attachment.thumbnailBase64
-            guard let base64, let data = Data(base64Encoded: base64) else { return }
-            decodedImage = UIImage(data: data)
+        .task(id: cacheKey) {
+            guard let fullSizeBase64 else {
+                decodedImage = nil
+                return
+            }
+
+            if let cached = Base64ImageDecoder.cachedImage(for: cacheKey) {
+                decodedImage = cached
+                return
+            }
+
+            decodedImage = await Base64ImageDecoder.decode(base64: fullSizeBase64, cacheKey: cacheKey)
         }
     }
 }

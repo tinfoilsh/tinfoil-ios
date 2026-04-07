@@ -34,6 +34,14 @@ private struct AttachmentPreviewChip: View {
     @Environment(\.colorScheme) private var colorScheme
     private var isDarkMode: Bool { colorScheme == .dark }
 
+    private var previewBase64: String? {
+        thumbnailBase64 ?? attachment.thumbnailBase64 ?? attachment.base64
+    }
+
+    private var cacheKey: String {
+        "attachment-preview-\(attachment.id)-\(previewBase64?.hashValue ?? 0)"
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             thumbnailOrIcon
@@ -89,12 +97,16 @@ private struct AttachmentPreviewChip: View {
 
     @ViewBuilder
     private var thumbnailOrIcon: some View {
-        if attachment.type == .image, let base64 = thumbnailBase64,
-           let data = Data(base64Encoded: base64),
-           let uiImage = UIImage(data: data) {
-            Image(uiImage: uiImage)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
+        if attachment.type == .image {
+            DecodedBase64ImageView(base64: previewBase64, cacheKey: cacheKey) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isDarkMode ? Color.white.opacity(0.08) : Color.black.opacity(0.06))
+                    Image(systemName: iconName)
+                        .font(.system(size: 22))
+                        .foregroundColor(.secondary)
+                }
+            }
         } else {
             ZStack {
                 RoundedRectangle(cornerRadius: 6)
