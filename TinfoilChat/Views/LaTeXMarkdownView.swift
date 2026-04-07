@@ -28,6 +28,7 @@ private struct SegmentView: View {
     let segment: ContentSegment
     let isDarkMode: Bool
     let isStreaming: Bool
+    let textSelectionEnabled: Bool
 
     var body: some View {
         switch segment.kind {
@@ -38,7 +39,9 @@ private struct SegmentView: View {
             StructuredText(markdown: strippedText)
                 .textual.structuredTextStyle(.gitHub)
                 .textual.highlighterTheme(isStreaming ? .plain : .default)
-                .textual.textSelection(.enabled)
+                .if(textSelectionEnabled) { view in
+                    view.textual.textSelection(.enabled)
+                }
                 .fixedSize(horizontal: false, vertical: true)
                 .environment(\.colorScheme, isDarkMode ? .dark : .light)
         case .latex(let latex, let isDisplay):
@@ -106,6 +109,7 @@ struct LaTeXMarkdownView: View, Equatable {
     let horizontalPadding: CGFloat
     let maxWidthAlignment: Alignment
     let isStreaming: Bool
+    let textSelectionEnabled: Bool
 
     @State private var segments: [ContentSegment]? = nil
 
@@ -119,15 +123,17 @@ struct LaTeXMarkdownView: View, Equatable {
         lhs.isDarkMode == rhs.isDarkMode &&
         lhs.horizontalPadding == rhs.horizontalPadding &&
         lhs.maxWidthAlignment == rhs.maxWidthAlignment &&
-        lhs.isStreaming == rhs.isStreaming
+        lhs.isStreaming == rhs.isStreaming &&
+        lhs.textSelectionEnabled == rhs.textSelectionEnabled
     }
 
-    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0, maxWidthAlignment: Alignment = .leading, isStreaming: Bool = false) {
+    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0, maxWidthAlignment: Alignment = .leading, isStreaming: Bool = false, textSelectionEnabled: Bool = true) {
         self.content = content
         self.isDarkMode = isDarkMode
         self.horizontalPadding = horizontalPadding
         self.maxWidthAlignment = maxWidthAlignment
         self.isStreaming = isStreaming
+        self.textSelectionEnabled = textSelectionEnabled
 
         // Resolve segments synchronously from cache when available so the
         // first render already has the final view tree. This prevents
@@ -148,7 +154,12 @@ struct LaTeXMarkdownView: View, Equatable {
                 markdownFallback(content: content)
             } else if let segments = segments {
                 ForEach(segments, id: \.id) { segment in
-                    SegmentView(segment: segment, isDarkMode: isDarkMode, isStreaming: false)
+                    SegmentView(
+                        segment: segment,
+                        isDarkMode: isDarkMode,
+                        isStreaming: false,
+                        textSelectionEnabled: textSelectionEnabled
+                    )
                         .id(segment.id)
                 }
             } else {
@@ -180,7 +191,9 @@ struct LaTeXMarkdownView: View, Equatable {
         return StructuredText(markdown: strippedText)
             .textual.structuredTextStyle(.gitHub)
             .textual.highlighterTheme(isStreaming ? .plain : .default)
-            .textual.textSelection(.enabled)
+            .if(textSelectionEnabled) { view in
+                view.textual.textSelection(.enabled)
+            }
             .fixedSize(horizontal: false, vertical: true)
             .environment(\.colorScheme, isDarkMode ? .dark : .light)
     }
