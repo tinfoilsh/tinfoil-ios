@@ -163,9 +163,9 @@ struct FaviconView: View {
         }
         .frame(width: 16, height: 16)
         .background(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .clipShape(Circle())
         .overlay(
-            RoundedRectangle(cornerRadius: 4)
+            Circle()
                 .stroke(isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.1), lineWidth: 0.5)
         )
     }
