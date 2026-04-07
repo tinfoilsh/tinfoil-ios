@@ -58,9 +58,9 @@ struct ChatContainer: View {
         NavigationView {
             mainContent
                 .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
+                .blur(radius: isAnySheetPresented ? 10 : 0)
+                .animation(.easeInOut(duration: 0.2), value: isAnySheetPresented)
         }
-        .blur(radius: isAnySheetPresented ? 10 : 0)
-        .animation(.easeInOut(duration: 0.2), value: isAnySheetPresented)
         .onChange(of: isAnySheetPresented) { _, presented in
             if presented && isSidebarOpen {
                 withAnimation(.easeInOut(duration: 0.3)) {
