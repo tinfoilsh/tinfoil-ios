@@ -18,7 +18,7 @@ private enum Base64ImageDecoder {
             return cached
         }
 
-        let image = await Task.detached(priority: .utility) {
+        let image = await Task.detached(priority: .utility) { () -> UIImage? in
             guard let data = Data(base64Encoded: base64) else { return nil }
             return UIImage(data: data)
         }.value
