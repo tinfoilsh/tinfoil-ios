@@ -73,6 +73,7 @@ struct DecodedBase64ImageView<Placeholder: View>: View {
                 return
             }
 
+            guard !Task.isCancelled else { return }
             image = await Base64ImageDecoder.decode(base64: base64, cacheKey: cacheKey)
         }
     }
@@ -375,6 +376,7 @@ struct ZoomableImagePage: View {
                 return
             }
 
+            guard !Task.isCancelled else { return }
             decodedImage = await Base64ImageDecoder.decode(base64: fullSizeBase64, cacheKey: cacheKey)
         }
     }
