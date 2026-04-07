@@ -78,8 +78,8 @@ struct MessageView: View {
                             )
                         }
 
-                        // Show loading dots if no web search or search is complete
-                        if message.webSearchState == nil || message.webSearchState?.status != .searching {
+                        // Show loading dots only when there's no web search state at all
+                        if message.webSearchState == nil {
                             LoadingDotsView(isDarkMode: isDarkMode)
                                 .padding(.horizontal)
                         }
