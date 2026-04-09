@@ -32,6 +32,7 @@ class ChatViewModel: ObservableObject {
     @Published var webSearchSummary: String = ""
     @Published var showVerifierSheet: Bool = false
     @Published var showAddSheet: Bool = false
+    @Published var showModelSelectorSheet: Bool = false
     @Published var showDocumentPicker: Bool = false
     @Published var showPhotoPicker: Bool = false
     @Published var showCamera: Bool = false
