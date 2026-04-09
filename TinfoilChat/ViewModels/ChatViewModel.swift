@@ -38,6 +38,7 @@ class ChatViewModel: ObservableObject {
     @Published var showCamera: Bool = false
     @Published var showMessageSheet: Bool = false
     @Published var showSidebarSettings: Bool = false
+    @Published var showCloudSyncOnboarding: Bool = false
     @Published var shouldOpenCloudSync: Bool = false
     @Published var scrollTargetMessageId: String? = nil 
     @Published var scrollTargetOffset: CGFloat = 0 
@@ -1949,6 +1950,49 @@ class ChatViewModel: ObservableObject {
         self.showVerifierSheet = false
         self.verifierView = nil
     }
+
+    /// Resume the sign-in flow after the user completes manual key setup via CloudSyncOnboardingView.
+    func resumeAfterManualKeySetup() {
+        Task {
+            do {
+                let key = try await EncryptionService.shared.initialize()
+                self.encryptionKey = key
+
+                await self.passkeyManager.checkPasskeyStateForExistingKey()
+
+                let decryptedCount = await cloudSync.retryDecryptionWithNewKey(onProgress: nil)
+                if decryptedCount > 0 {
+                    let result = await loadFirstPageOfChats(userId: self.currentUserId, filter: \.isCloudDisplayable)
+                    await MainActor.run {
+                        self.chats = result.chats
+                        if let currentId = self.currentChat?.id,
+                           let refreshed = result.chats.first(where: { $0.id == currentId }) {
+                            self.currentChat = refreshed
+                        }
+                        normalizeChatsArray()
+                    }
+                }
+
+                if SettingsManager.shared.isCloudSyncEnabled {
+                    await initializeCloudSync()
+                    await ProfileManager.shared.performFullSync()
+                }
+
+                await MainActor.run {
+                    let activeList = SettingsManager.shared.isCloudSyncEnabled ? self.chats : self.localChats
+                    if activeList.isEmpty {
+                        self.createNewChat()
+                    } else {
+                        self.ensureBlankChatAtTop()
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.showEncryptionSetup = true
+                }
+            }
+        }
+    }
     
     // MARK: - Private Methods
 
@@ -2392,7 +2436,14 @@ class ChatViewModel: ObservableObject {
                         switch passkeyResult {
                         case .success, .newUserSetupDone:
                             break
-                        case .newUserSetupCancelled, .recoveryFailed:
+                        case .newUserSetupCancelled:
+                            // Passkey not available — show manual key setup and continue sign-in
+                            await MainActor.run {
+                                self.showCloudSyncOnboarding = true
+                                self.isSignInInProgress = false
+                            }
+                            return
+                        case .recoveryFailed:
                             await MainActor.run {
                                 self.isSignInInProgress = false
                             }

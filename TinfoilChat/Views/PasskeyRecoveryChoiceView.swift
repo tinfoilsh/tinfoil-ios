@@ -17,6 +17,8 @@ struct PasskeyRecoveryChoiceView: View {
     var onStartFresh: () async -> Bool
     /// Cloud sync OFF, dismiss. User can retry from Settings later.
     var onSkip: () -> Void
+    /// Enter encryption key manually without passkey.
+    var onManualKeyEntry: () -> Void
 
     @State private var isLoading = false
     @State private var loadingAction: LoadingAction?
@@ -98,6 +100,21 @@ struct PasskeyRecoveryChoiceView: View {
                 }
                 .disabled(isLoading)
 
+                // Manual key entry — bypass passkey entirely
+                Button(action: handleManualKeyEntry) {
+                    Label("Enter Key Manually", systemImage: "keyboard")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
+                        )
+                }
+                .disabled(isLoading)
+
                 // Skip — cloud sync off
                 Button(action: handleSkip) {
                     Text("Skip for Now")
@@ -141,6 +158,11 @@ struct PasskeyRecoveryChoiceView: View {
                 if success { dismiss() }
             }
         }
+    }
+
+    private func handleManualKeyEntry() {
+        onManualKeyEntry()
+        dismiss()
     }
 
     private func handleSkip() {

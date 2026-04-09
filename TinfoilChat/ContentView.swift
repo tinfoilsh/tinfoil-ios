@@ -109,6 +109,21 @@ struct ContentView: View {
                 },
                 onSkip: {
                     passkeyManager.showPasskeyRecoveryChoice = false
+                },
+                onManualKeyEntry: {
+                    passkeyManager.showPasskeyRecoveryChoice = false
+                    chatViewModel.showCloudSyncOnboarding = true
+                }
+            )
+        }
+        .sheet(isPresented: $chatViewModel.showCloudSyncOnboarding) {
+            CloudSyncOnboardingView(
+                onSetupComplete: { _ in
+                    chatViewModel.showCloudSyncOnboarding = false
+                    chatViewModel.resumeAfterManualKeySetup()
+                },
+                onDismissWithoutSetup: {
+                    chatViewModel.showCloudSyncOnboarding = false
                 }
             )
         }
