@@ -138,7 +138,7 @@ class SettingsManager: ObservableObject {
         self.customSystemPrompt = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt) ?? ""
 
         // Initialize web search setting
-        self.webSearchEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.webSearchEnabled) as? Bool ?? false
+        self.webSearchEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.webSearchEnabled) as? Bool ?? true
 
         // Initialize cloud sync setting
         // If no explicit value has been stored, auto-enable for existing users who already have an encryption key
