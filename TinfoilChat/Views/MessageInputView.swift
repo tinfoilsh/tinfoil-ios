@@ -143,7 +143,7 @@ struct MessageInputView: View {
                     }
                 )
                 .environmentObject(authManager)
-                .presentationDetents([.height(400)])
+                .presentationDetents([.height(280)])
                 .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
             }
             .sheet(isPresented: $viewModel.showRateLimitPaywall) {
@@ -156,6 +156,11 @@ struct MessageInputView: View {
                             await authManager.fetchSubscriptionStatus()
                         }
                     }
+            }
+            .sheet(isPresented: $viewModel.showModelSelectorSheet) {
+                ModelSelectorSheetView(viewModel: viewModel, isDarkMode: isDarkMode)
+                    .presentationDetents([.medium, .large])
+                    .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
             }
     }
 
@@ -214,6 +219,8 @@ struct MessageInputView: View {
                 // Bottom row with action buttons
                 HStack {
                     attachButton
+
+                    modelSelectorButton
 
                     Spacer()
 
@@ -306,6 +313,8 @@ struct MessageInputView: View {
                 HStack {
                     attachButton
 
+                    modelSelectorButton
+
                     Spacer()
 
                     // Microphone button
@@ -395,6 +404,27 @@ struct MessageInputView: View {
         .padding(.leading, 8)
     }
 
+    @ViewBuilder
+    private var modelSelectorButton: some View {
+        Button {
+            viewModel.showModelSelectorSheet = true
+        } label: {
+            HStack(spacing: 4) {
+                Text(viewModel.currentModel.displayName)
+                    .font(.system(size: 12, weight: .semibold))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.secondary.opacity(0.12))
+            .clipShape(Capsule())
+        }
+        .disabled(viewModel.isLoading)
+        .padding(.leading, 4)
+    }
+
     private func sendOrCancelMessage() {
         if viewModel.isLoading {
             viewModel.cancelGeneration()
@@ -441,7 +471,7 @@ struct MessageInputView: View {
     }
 }
 
-/// Bottom sheet presented from the "+" button with attachment options and model selector
+/// Bottom sheet presented from the "+" button with attachment options and web search toggle
 struct AddToSheetView: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @EnvironmentObject private var authManager: AuthManager
@@ -451,9 +481,6 @@ struct AddToSheetView: View {
     let onPhotos: () -> Void
     let onFiles: () -> Void
     @Environment(\.dismiss) private var dismiss
-    private var availableModels: [ModelType] {
-        AppConfig.shared.filteredModelTypes()
-    }
 
     var body: some View {
         NavigationStack {
@@ -486,44 +513,6 @@ struct AddToSheetView: View {
                     settings.webSearchEnabled = newValue
                 }
                 .padding(.horizontal, 20)
-
-                Divider()
-                    .padding(.horizontal, 20)
-
-                // Model selector
-                Text("Select a Model")
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, -12)
-
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
-                            ForEach(availableModels) { model in
-                                ModelTab(
-                                    model: model,
-                                    isSelected: viewModel.currentModel.id == model.id,
-                                    isDarkMode: isDarkMode,
-                                    isEnabled: true,
-                                    showPricingLabel: false,
-                                    style: .regular
-                                ) {
-                                    viewModel.changeModel(to: model)
-                                }
-                                .id(model.id)
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                    }
-                    .onAppear {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            withAnimation {
-                                proxy.scrollTo(viewModel.currentModel.id, anchor: .center)
-                            }
-                        }
-                    }
-                }
             }
             .padding(.top, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -559,6 +548,67 @@ struct AddToSheetView: View {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color(.secondarySystemGroupedBackground))
             )
+        }
+    }
+}
+
+/// Bottom sheet for selecting a model from the input bar
+struct ModelSelectorSheetView: View {
+    @ObservedObject var viewModel: TinfoilChat.ChatViewModel
+    let isDarkMode: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    private var availableModels: [ModelType] {
+        AppConfig.shared.filteredModelTypes()
+    }
+
+    var body: some View {
+        NavigationStack {
+            List(availableModels) { model in
+                Button {
+                    viewModel.changeModel(to: model)
+                    dismiss()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(model.iconName)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 28, height: 28)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(model.displayName)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(.primary)
+                            Text(model.description)
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                        }
+
+                        Spacer()
+
+                        if viewModel.currentModel.id == model.id {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .listStyle(.plain)
+            .navigationTitle("Select Model")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 18, weight: .medium))
+                    }
+                }
+            }
         }
     }
 }
