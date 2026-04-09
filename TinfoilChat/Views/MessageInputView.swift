@@ -18,7 +18,6 @@ struct MessageInputView: View {
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject private var authManager: AuthManager
     @State private var textHeight: CGFloat = Layout.defaultHeight
-    @ObservedObject private var settings = SettingsManager.shared
     var isKeyboardVisible: Bool = false
 
     private var isDarkMode: Bool { colorScheme == .dark }
@@ -144,7 +143,7 @@ struct MessageInputView: View {
                     }
                 )
                 .environmentObject(authManager)
-                .presentationDetents([.height(340)])
+                .presentationDetents([.height(400)])
                 .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
             }
             .sheet(isPresented: $viewModel.showRateLimitPaywall) {
@@ -215,8 +214,6 @@ struct MessageInputView: View {
                 // Bottom row with action buttons
                 HStack {
                     attachButton
-
-                    webSearchButton
 
                     Spacer()
 
@@ -309,8 +306,6 @@ struct MessageInputView: View {
                 HStack {
                     attachButton
 
-                    webSearchButton
-
                     Spacer()
 
                     // Microphone button
@@ -400,36 +395,6 @@ struct MessageInputView: View {
         .padding(.leading, 8)
     }
 
-    @ViewBuilder
-    private var webSearchButton: some View {
-        Button(action: {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                viewModel.isWebSearchEnabled.toggle()
-                settings.webSearchEnabled = viewModel.isWebSearchEnabled
-            }
-        }) {
-            if viewModel.isWebSearchEnabled {
-                HStack(spacing: 6) {
-                    Image(systemName: "globe")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text("Web Search")
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.secondary.opacity(0.15))
-                .clipShape(Capsule())
-                .foregroundColor(.blue)
-            } else {
-                Image(systemName: "globe")
-                    .font(.system(size: 20))
-                    .foregroundColor(.secondary)
-                    .frame(width: 24, height: 24)
-            }
-        }
-        .padding(.leading, 8)
-    }
-
     private func sendOrCancelMessage() {
         if viewModel.isLoading {
             viewModel.cancelGeneration()
@@ -480,6 +445,7 @@ struct MessageInputView: View {
 struct AddToSheetView: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @EnvironmentObject private var authManager: AuthManager
+    @ObservedObject private var settings = SettingsManager.shared
     let isDarkMode: Bool
     let onCamera: () -> Void
     let onPhotos: () -> Void
@@ -507,6 +473,17 @@ struct AddToSheetView: View {
                     attachmentButton(icon: "doc.badge.arrow.up", label: "Files") {
                         onFiles()
                     }
+                }
+                .padding(.horizontal, 20)
+
+                Divider()
+                    .padding(.horizontal, 20)
+
+                Toggle(isOn: $viewModel.isWebSearchEnabled) {
+                    Label("Web Search", systemImage: "globe")
+                }
+                .onChange(of: viewModel.isWebSearchEnabled) { _, newValue in
+                    settings.webSearchEnabled = newValue
                 }
                 .padding(.horizontal, 20)
 
