@@ -6,569 +6,660 @@
 //
 
 import SwiftUI
-import TinfoilAI 
+import TinfoilAI
 
-/// Pure SwiftUI implementation of the Verifier view
+// MARK: - Tab Model
+
+private enum VerificationTab: String, CaseIterable, Identifiable {
+    case encryption
+    case code
+    case runtime
+
+    var id: String { rawValue }
+
+    var prefix: String {
+        switch self {
+        case .encryption: return "Data is"
+        case .code: return "Code is"
+        case .runtime: return "Runtime is"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .encryption: return "Encrypted"
+        case .code: return "Auditable"
+        case .runtime: return "Isolated"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .encryption: return "lock.fill"
+        case .code: return "terminal.fill"
+        case .runtime: return "cpu.fill"
+        }
+    }
+}
+
+// MARK: - VerifierView
+
 struct VerifierView: View {
-
     @EnvironmentObject var chatViewModel: ChatViewModel
     @Environment(\.colorScheme) private var colorScheme
+    @State private var selectedTab: VerificationTab = .encryption
+
+    private var isDarkMode: Bool { colorScheme == .dark }
+
+    private var measurementType: String {
+        chatViewModel.verificationDocument?.enclaveMeasurement.measurement.type.lowercased() ?? ""
+    }
 
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(spacing: 0) {
-                    if let doc = chatViewModel.verificationDocument {
-                        VerificationStatusView(document: doc)
-                            .padding(.top, 16)
+            VStack(spacing: 16) {
+                if let doc = chatViewModel.verificationDocument {
+                    statusBanner(for: doc)
+                    tabCards(for: doc)
 
-                        expandedContent(for: doc)
-                    } else {
-                        LoadingPlaceholderView()
-                            .padding(.top, 16)
+                    tabHeader(for: doc)
+
+                    ScrollView {
+                        tabCards(for: doc, tab: selectedTab)
+                            .padding(.bottom, 32)
                     }
+                } else {
+                    loadingState
+                    Spacer()
                 }
             }
-            .background(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
             .navigationTitle("Verification Center")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        chatViewModel.dismissVerifier()
-                    }) {
+                    Button(action: { chatViewModel.dismissVerifier() }) {
                         Image(systemName: "xmark")
                             .font(.system(size: 18, weight: .medium))
                     }
                     .accessibilityLabel("Close verification screen")
                 }
             }
-            .onAppear {
-                setupNavigationBarAppearance()
-            }
+            .onAppear { setupNavigationBarAppearance() }
         }
     }
 
     private func setupNavigationBarAppearance() {
         let appearance = UINavigationBarAppearance()
-        if #available(iOS 26, *) {
-            appearance.configureWithTransparentBackground()
-        } else {
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = colorScheme == .dark ? UIColor(Color.backgroundPrimary) : .white
-        }
+        appearance.configureWithDefaultBackground()
         appearance.shadowColor = .clear
-
-        let tintColor: UIColor = colorScheme == .dark ? .white : .black
-
         UINavigationBar.appearance().standardAppearance = appearance
         UINavigationBar.appearance().compactAppearance = appearance
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
-        UINavigationBar.appearance().tintColor = tintColor
     }
 
-    // MARK: - Subviews
+    // MARK: - Loading State
 
-    /// The main panel when expanded, including instructions, steps, etc.
-    private func expandedContent(for doc: VerificationDocument) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ProcessStepView(
-                title: "Runtime Verified",
-                document: doc,
-                stepType: .remoteAttestation
-            )
-
-            ProcessStepView(
-                title: "Source Code Verified",
-                document: doc,
-                stepType: .sourceCode
-            )
-
-            ProcessStepView(
-                title: "Fingerprints Verified",
-                document: doc,
-                stepType: .fingerprints
-            )
-
-            ProcessStepView(
-                title: "About In-App Verification",
-                document: doc,
-                stepType: .about
-            )
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 16)
-    }
-    
-    
-}
-
-// MARK: - LoadingPlaceholderView
-
-struct LoadingPlaceholderView: View {
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 8) {
+    private var loadingState: some View {
+        VStack(spacing: 16) {
+            HStack(spacing: 10) {
                 ProgressView()
                     .scaleEffect(0.9)
-                    .frame(width: 24, height: 24)
-
-                Text("Security verification in progress...")
+                Text("Verifying secure enclave...")
                     .font(.subheadline)
                     .foregroundColor(.primary)
-
                 Spacer()
             }
-            .padding()
+            .padding(16)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(colorScheme == .dark ?
-                          Color(.systemGray6).opacity(0.5) :
-                          Color(.systemGray6))
+                    .fill(isDarkMode ? Color(.systemGray6).opacity(0.5) : Color(.systemGray6))
             )
-            .padding(.horizontal, 16)
-            .padding(.bottom, 16)
 
-            VStack(spacing: 16) {
-                LoadingStepView(title: "Runtime Verified")
-                LoadingStepView(title: "Source Code Verified")
-                LoadingStepView(title: "Fingerprints Verified")
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-        }
-    }
-}
-
-struct LoadingStepView: View {
-    let title: String
-    var isAbout: Bool = false
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        HStack(spacing: 12) {
-            if isAbout {
-                Image(systemName: "info.circle")
-                    .foregroundColor(.secondary)
-                    .font(.system(size: 18, weight: .medium))
-                    .frame(width: 24, height: 24)
-            } else {
-                ProgressView()
-                    .scaleEffect(0.8)
-                    .frame(width: 24, height: 24)
-            }
-
-            Text(title)
-                .font(.headline)
-                .foregroundColor(colorScheme == .dark ? .white : .primary)
-
-            Spacer()
-        }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(colorScheme == .dark ?
-                      Color(.systemGray6) :
-                      Color(.systemGroupedBackground))
-                .shadow(color: colorScheme == .dark ?
-                        Color.black.opacity(0.3) :
-                        Color.gray.opacity(0.2),
-                        radius: 3, x: 0, y: 2)
-        )
-    }
-}
-
-// MARK: - VerificationStatusView
-
-struct VerificationStatusView: View {
-    let document: VerificationDocument
-
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Enclave security verified")
-                .font(.headline)
-                .foregroundColor(.green)
-
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "checkmark")
-                    .foregroundColor(.green)
-                    .font(.system(size: 14))
-                Text("The AI model is running in a secure enclave.")
-                    .font(.subheadline)
-                    .foregroundColor(.primary)
-            }
-
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "checkmark")
-                    .foregroundColor(.green)
-                    .font(.system(size: 14))
-                Text("The code is open source on GitHub.")
-                    .font(.subheadline)
-                    .foregroundColor(.primary)
-            }
-
-            HStack(alignment: .center, spacing: 4) {
-                Text("Attested by")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                HStack(spacing: 16) {
-                    Image("nvidia-icon")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 10)
-
-                    if document.enclaveMeasurement.measurement.type.lowercased().contains("tdx") {
-                        Image("intel-icon")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: 10)
-                    } else if document.enclaveMeasurement.measurement.type.lowercased().contains("sev") {
-                        Image("amd-icon")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: 10)
+            HStack(spacing: 0) {
+                ForEach(VerificationTab.allCases) { tab in
+                    tabCard(tab: tab, status: .pending, isSelected: false)
+                    if tab != .runtime {
+                        Spacer(minLength: 12)
                     }
                 }
             }
-            .padding(.top, 4)
         }
+    }
+
+    // MARK: - Status Banner
+
+    private func statusBanner(for doc: VerificationDocument) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if doc.securityVerified {
+                Text("Your data is encrypted end-to-end to a server running inside a secure hardware enclave.")
+                    .font(.system(size: 15))
+                    .foregroundColor(Color.tinfoilAccentLight)
+
+                HStack(spacing: 6) {
+                    Text("Hardware attested by")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+
+                    Image("amd-icon")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 12)
+
+                    Text("and")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+
+                    Image("nvidia-icon")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 12)
+                }
+            } else if let error = doc.getFirstError() {
+                Text("Verification failed")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.red)
+                Text(error)
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+            } else {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .scaleEffect(0.9)
+                    Text("Verifying secure enclave...")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color.green.opacity(colorScheme == .dark ? 0.15 : 0.1))
+                .fill(doc.securityVerified
+                      ? Color.tinfoilAccentLight.opacity(isDarkMode ? 0.1 : 0.08)
+                      : (isDarkMode ? Color(.systemGray6).opacity(0.5) : Color(.systemGray6)))
         )
-        .padding(.horizontal, 8)
-        .padding(.bottom, 16)
-    }
-}
-
-// MARK: - ProcessStepView
-
-enum StepType {
-    case remoteAttestation
-    case sourceCode
-    case fingerprints
-    case about
-}
-
-struct ProcessStepView: View {
-    let title: String
-    let document: VerificationDocument
-    let stepType: StepType
-
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var isOpen: Bool = false
-
-    var status: VerifierStatus {
-        switch stepType {
-        case .remoteAttestation:
-            return document.steps.verifyEnclave.status.uiStatus
-        case .sourceCode:
-            return document.steps.verifyCode.status.uiStatus
-        case .fingerprints:
-            return document.steps.compareMeasurements.status.uiStatus
-        case .about:
-            return .success
-        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(doc.securityVerified
+                        ? Color.tinfoilAccentLight.opacity(0.3)
+                        : Color.clear,
+                        lineWidth: 1)
+        )
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
-                    isOpen.toggle()
+    // MARK: - Tab Cards
+
+    private func tabCards(for doc: VerificationDocument) -> some View {
+        HStack(spacing: 0) {
+            ForEach(VerificationTab.allCases) { tab in
+                let status = tabStatus(tab, doc: doc)
+                tabCard(tab: tab, status: status, isSelected: selectedTab == tab)
+                    .onTapGesture { selectedTab = tab }
+                if tab != .runtime {
+                    Spacer(minLength: 12)
                 }
-            } label: {
-                HStack(spacing: 12) {
-                    if stepType == .about {
-                        Image(systemName: "info.circle")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 18, weight: .medium))
-                            .frame(width: 24, height: 24)
-                    } else {
-                        StatusIcon(status: status)
-                            .frame(width: 24, height: 24)
-                    }
-
-                    Text(title)
-                        .font(.headline)
-                        .foregroundColor(colorScheme == .dark ? .white : .primary)
-
-                    Spacer()
-
-                    Image(systemName: isOpen ? "chevron.up" : "chevron.down")
-                        .foregroundColor(.secondary)
-                        .font(.system(size: 14, weight: .medium))
-                }
-                .padding()
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(colorScheme == .dark ?
-                              Color(.systemGray6) :
-                              Color(.systemGroupedBackground))
-                        .shadow(color: colorScheme == .dark ?
-                                Color.black.opacity(0.3) :
-                                Color.gray.opacity(0.2),
-                                radius: 3, x: 0, y: 2)
-                )
-            }
-            .buttonStyle(PlainButtonStyle())
-
-            if isOpen {
-                expandedContent
-                    .transition(.opacity)
             }
         }
-        .animation(.spring(response: 0.5, dampingFraction: 0.7), value: isOpen)
     }
-    
-    /// The expanded details, broken out for clarity.
-    private var expandedContent: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            switch stepType {
-            case .remoteAttestation:
-                remoteAttestationContent
-            case .sourceCode:
-                sourceCodeContent
-            case .fingerprints:
-                fingerprintsContent
-            case .about:
-                aboutContent
-            }
+
+    private func tabCard(tab: VerificationTab, status: VerifierStatus, isSelected: Bool) -> some View {
+        VStack(spacing: 6) {
+            Text(tab.prefix)
+                .font(.system(size: 11))
+                .foregroundColor(isSelected ? Color.tinfoilAccentLight : .secondary)
+            Text(tab.label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(isSelected ? Color.tinfoilAccentLight : .primary)
+            Image(systemName: tab.iconName)
+                .font(.system(size: 14))
+                .foregroundColor(isSelected ? Color.tinfoilAccentLight : .secondary)
         }
-        .padding()
+        .frame(maxWidth: .infinity)
+        .frame(height: 80)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(colorScheme == .dark ?
-                      Color(.systemGray5).opacity(0.5) :
-                      Color(.systemBackground))
-                .shadow(color: colorScheme == .dark ?
-                        Color.black.opacity(0.2) :
-                        Color.gray.opacity(0.1),
-                        radius: 2, x: 0, y: 1)
+                .fill(isDarkMode ? Color(.systemGray6).opacity(0.5) : Color(.systemGray6))
         )
-        .padding(.top, 4)
-    }
-
-    private var remoteAttestationContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Enclave Fingerprint")
-                .font(.headline)
-
-            Text("Fingerprint of the binary running in the secure enclave.")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-
-            FingerprintBox(text: document.enclaveFingerprint)
-
-            HStack(alignment: .center, spacing: 4) {
-                Text("Runtime attested by")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                HStack(spacing: 16) {
-                    Image("nvidia-icon")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 10)
-
-                    if document.enclaveMeasurement.measurement.type.lowercased().contains("tdx") {
-                        Image("intel-icon")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: 10)
-                    } else if document.enclaveMeasurement.measurement.type.lowercased().contains("sev") {
-                        Image("amd-icon")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: 10)
-                    }
-                }
-            }
-
-            Text("This step verifies the secure hardware environment. The verifier receives a signed measurement from a combination of NVIDIA, AMD, and Intel certifying the enclave environment and the digest of the binary (i.e., code) actively running inside it.")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var sourceCodeContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Source Fingerprint")
-                .font(.headline)
-
-            Text("Fingerprint of the source binary built from the open source code published on GitHub and Sigstore.")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-
-            FingerprintBox(text: document.codeFingerprint)
-
-            HStack(alignment: .center, spacing: 4) {
-                Text("Code attested by")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                HStack(spacing: 16) {
-                    Image("github-icon")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 14)
-
-                    Image("sigstore-icon")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 14)
-                }
-            }
-
-            Text("This step verifies that the source code published publicly by Tinfoil on GitHub was correctly built through GitHub Actions and that the resulting binary is available on the Sigstore transparency log.")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var fingerprintsContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-                Text("Measurement verification passed")
-                    .foregroundColor(.green)
-                    .font(.subheadline)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.green.opacity(colorScheme == .dark ? 0.15 : 0.1))
-            )
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Runtime Fingerprint")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                Text("Received from the enclave.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                FingerprintBox(text: document.enclaveFingerprint)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Source Fingerprint")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                Text("Received from GitHub and Sigstore.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                FingerprintBox(text: document.codeFingerprint)
-            }
-
-            Text("This step verifies that the binary built from the source code matches the binary running in the secure enclave by comparing the fingerprints from the enclave and the expected fingerprints from the transparency log.")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var aboutContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("The client-side verification tool independently confirms that the models are running in secure enclaves, ensuring your conversations remain completely private.")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Link(destination: URL(string: "https://docs.tinfoil.sh/verification/attestation-architecture")!) {
-                    HStack {
-                        Image(systemName: "arrow.up.right.square")
-                            .font(.system(size: 14))
-                            .foregroundColor(.green)
-                        Text("Attestation architecture")
-                            .foregroundColor(.green)
-                            .font(.subheadline)
-                        Spacer()
-                    }
-                }
-
-                Link(destination: URL(string: "https://github.com/\(document.configRepo)")!) {
-                    HStack {
-                        Image(systemName: "arrow.up.right.square")
-                            .font(.system(size: 14))
-                            .foregroundColor(.green)
-                        Text("Server Code")
-                            .foregroundColor(.green)
-                            .font(.subheadline)
-                        Spacer()
-                    }
-                }
-
-                Link(destination: URL(string: "https://tinfoilsh.github.io/verifier/")!) {
-                    HStack {
-                        Image(systemName: "arrow.up.right.square")
-                            .font(.system(size: 14))
-                            .foregroundColor(.green)
-                        Text("Verifier Code")
-                            .foregroundColor(.green)
-                            .font(.subheadline)
-                        Spacer()
-                    }
-                }
-            }
-        }
-    }
-}
-
-// MARK: - FingerprintBox
-
-struct FingerprintBox: View {
-    let text: String
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            Text(text)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundColor(.primary)
-                .padding(12)
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(colorScheme == .dark ?
-                      Color(.systemGray6) :
-                      Color(.systemGray6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(isSelected ? Color.tinfoilAccentLight : Color.clear, lineWidth: 1.5)
         )
+        .overlay(alignment: .topTrailing) {
+            statusBadge(status)
+                .offset(x: 6, y: -6)
+        }
     }
-}
 
-// MARK: - StatusIcon
-
-struct StatusIcon: View {
-    let status: VerifierStatus
-
-    var body: some View {
+    @ViewBuilder
+    private func statusBadge(_ status: VerifierStatus) -> some View {
         switch status {
-        case .error:
-            Image(systemName: "xmark.circle.fill")
-                .foregroundColor(.red)
-                .font(.system(size: 18, weight: .bold))
-        case .loading:
-            ProgressView()
-                .scaleEffect(1.0)
         case .success:
             Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
-                .font(.system(size: 18, weight: .bold))
+                .font(.system(size: 18))
+                .foregroundColor(Color.tinfoilAccentLight)
+                .background(Circle().fill(isDarkMode ? Color.backgroundPrimary : .white).padding(2))
+        case .error:
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 18))
+                .foregroundColor(.red)
+                .background(Circle().fill(isDarkMode ? Color.backgroundPrimary : .white).padding(2))
+        case .loading:
+            ZStack {
+                Circle()
+                    .fill(isDarkMode ? Color.backgroundPrimary : .white)
+                    .frame(width: 20, height: 20)
+                ProgressView()
+                    .scaleEffect(0.6)
+            }
         case .pending:
-            Image(systemName: "circle")
-                .foregroundColor(.gray)
-                .font(.system(size: 18, weight: .medium))
+            Circle()
+                .fill(Color.gray.opacity(0.3))
+                .frame(width: 18, height: 18)
         }
     }
-} 
+
+    private func tabStatus(_ tab: VerificationTab, doc: VerificationDocument) -> VerifierStatus {
+        switch tab {
+        case .encryption:
+            if let verifyHPKE = doc.steps.verifyHPKEKey {
+                return verifyHPKE.status.uiStatus
+            }
+            return doc.securityVerified ? .success : .loading
+        case .code:
+            return doc.steps.verifyCode.status.uiStatus
+        case .runtime:
+            return doc.steps.verifyEnclave.status.uiStatus
+        }
+    }
+
+    // MARK: - Tab Header (fixed)
+
+    @ViewBuilder
+    private func tabHeader(for doc: VerificationDocument) -> some View {
+        switch selectedTab {
+        case .encryption:
+            EncryptionTabHeader()
+        case .code:
+            CodeTabHeader()
+        case .runtime:
+            RuntimeTabHeader()
+        }
+    }
+
+    // MARK: - Tab Cards (scrollable)
+
+    @ViewBuilder
+    private func tabCards(for doc: VerificationDocument, tab: VerificationTab) -> some View {
+        switch tab {
+        case .encryption:
+            EncryptionTabCards(document: doc, isDarkMode: isDarkMode)
+        case .code:
+            CodeTabCards(document: doc, isDarkMode: isDarkMode)
+        case .runtime:
+            RuntimeTabCards(document: doc, isDarkMode: isDarkMode)
+        }
+    }
+}
+
+// MARK: - Tab Headers (fixed)
+
+private struct EncryptionTabHeader: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Data is encrypted")
+                .font(.system(size: 18, weight: .bold))
+            Text("Your data is encrypted using a unique key generated inside the secure hardware enclave and verified on your device.")
+                .font(.system(size: 14))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+private struct CodeTabHeader: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Code is auditable")
+                .font(.system(size: 18, weight: .bold))
+            Text("All the code that is processing your data comes from a trusted open-source repository and is auditable through the Sigstore transparency log.")
+                .font(.system(size: 14))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+private struct RuntimeTabHeader: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Runtime is isolated")
+                .font(.system(size: 18, weight: .bold))
+            Text("The secure hardware enclave that processes your data has been attested and is verified. The code it is running matches the auditable open-source repository.")
+                .font(.system(size: 14))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+// MARK: - Tab Cards (scrollable)
+
+private struct EncryptionTabCards: View {
+    let document: VerificationDocument
+    let isDarkMode: Bool
+
+    var body: some View {
+        VStack(spacing: 12) {
+            FingerprintCard(
+                icon: "key.fill",
+                label: "Your unique encryption key",
+                value: document.hpkePublicKey,
+                badgeText: "Attested",
+                badgeSuccess: true,
+                isDarkMode: isDarkMode
+            )
+
+            InfoCard(isDarkMode: isDarkMode) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Encryption Protocol")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Color.tinfoilAccentLight)
+                    Text("EHBP (Encrypted HTTP Body Protocol) encrypts HTTP message bodies end-to-end using HPKE, ensuring only the intended recipient can decrypt the payload.")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ExternalLink(text: "Learn more about EHBP", url: "https://docs.tinfoil.sh/resources/ehbp")
+                }
+            }
+
+            InfoCard(isDarkMode: isDarkMode) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Full HPKE Public Key")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Color.tinfoilAccentLight)
+                    Text(document.hpkePublicKey)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+}
+
+private struct CodeTabCards: View {
+    let document: VerificationDocument
+    let isDarkMode: Bool
+
+    var body: some View {
+        VStack(spacing: 12) {
+            FingerprintCard(
+                icon: "touchid",
+                label: "Source code fingerprint",
+                value: document.codeFingerprint,
+                badgeText: "Verified",
+                badgeSuccess: true,
+                isDarkMode: isDarkMode
+            )
+
+            InfoCard(isDarkMode: isDarkMode) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Full Code Fingerprint")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Color.tinfoilAccentLight)
+                    Text(document.codeFingerprint)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+
+            InfoCard(isDarkMode: isDarkMode) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Configuration Repository")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color.tinfoilAccentLight)
+                            Text("The configuration repository specifies exactly what code is running inside the secure enclave, including dependencies and build instructions.")
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        Image("github-icon")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 24, height: 24)
+                    }
+                    ExternalLink(
+                        text: document.configRepo,
+                        url: "https://github.com/\(document.configRepo)"
+                    )
+                }
+            }
+
+            InfoCard(isDarkMode: isDarkMode) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Sigstore Transparency Log")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color.tinfoilAccentLight)
+                            Text("Verifies that the source code published on GitHub was correctly built through GitHub Actions and that the resulting binary is available on the Sigstore transparency log.")
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        Image("sigstore-icon")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 24, height: 24)
+                    }
+                    ExternalLink(
+                        text: "View on Sigstore",
+                        url: document.releaseDigest.isEmpty
+                            ? "https://search.sigstore.dev"
+                            : "https://search.sigstore.dev/?hash=sha256:\(document.releaseDigest)"
+                    )
+                }
+            }
+        }
+    }
+}
+
+private struct RuntimeTabCards: View {
+    let document: VerificationDocument
+    let isDarkMode: Bool
+
+    private var isSEV: Bool {
+        document.enclaveMeasurement.measurement.type.lowercased().contains("sev")
+    }
+
+    private var isTDX: Bool {
+        document.enclaveMeasurement.measurement.type.lowercased().contains("tdx")
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            FingerprintCard(
+                icon: "touchid",
+                label: "Enclave code fingerprint",
+                value: document.enclaveFingerprint,
+                badgeText: "Attested",
+                badgeSuccess: true,
+                isDarkMode: isDarkMode
+            )
+
+            InfoCard(isDarkMode: isDarkMode) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Hardware Attestation")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Color.tinfoilAccentLight)
+                    Text("The verifier receives a signed measurement from NVIDIA\(isSEV ? ", AMD" : "")\(isTDX ? ", Intel" : "") certifying the enclave environment and the digest of the binary actively running inside it.")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 16) {
+                        ExternalLink(text: "NVIDIA Attestation", url: "https://docs.nvidia.com/attestation/index.html")
+                        if isSEV {
+                            ExternalLink(text: "AMD SEV", url: "https://www.amd.com/en/developer/sev.html")
+                        }
+                        if isTDX {
+                            ExternalLink(text: "Intel TDX", url: "https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html")
+                        }
+                    }
+                }
+            }
+
+            if let tlsFingerprint = document.enclaveMeasurement.tlsPublicKeyFingerprint, !tlsFingerprint.isEmpty {
+                InfoCard(isDarkMode: isDarkMode) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("TLS Public Key Fingerprint")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(Color.tinfoilAccentLight)
+                        Text(tlsFingerprint)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+
+            InfoCard(isDarkMode: isDarkMode) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Hardware Measurements")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Color.tinfoilAccentLight)
+
+                    MeasurementField(
+                        label: "Type",
+                        value: document.enclaveMeasurement.measurement.type
+                    )
+
+                    ForEach(Array(document.enclaveMeasurement.measurement.registers.enumerated()), id: \.offset) { index, register in
+                        MeasurementField(
+                            label: "Register \(index)",
+                            value: register
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Shared Components
+
+private struct FingerprintCard: View {
+    let icon: String
+    let label: String
+    let value: String
+    let badgeText: String
+    let badgeSuccess: Bool
+    let isDarkMode: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 16))
+                    .foregroundColor(.secondary)
+                Text(label)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+
+                Spacer()
+
+                HStack(spacing: 4) {
+                    Text(badgeText)
+                        .font(.system(size: 13, weight: .medium))
+                    Image(systemName: badgeSuccess ? "checkmark" : "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .foregroundColor(badgeSuccess ? Color.tinfoilAccentLight : .red)
+            }
+
+            Text(value.isEmpty ? "Not available" : value)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundColor(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(isDarkMode ? Color(.systemGray5).opacity(0.5) : Color(.systemGray6))
+        )
+    }
+}
+
+private struct InfoCard<Content: View>: View {
+    let isDarkMode: Bool
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isDarkMode ? Color(.systemGray5).opacity(0.4) : Color(.systemGray6).opacity(0.7))
+            )
+    }
+}
+
+private struct ExternalLink: View {
+    let text: String
+    let url: String
+
+    var body: some View {
+        if let linkURL = URL(string: url) {
+            Link(destination: linkURL) {
+                HStack(spacing: 4) {
+                    Text(text)
+                        .font(.system(size: 13, weight: .medium))
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundColor(Color.tinfoilAccentLight)
+            }
+        }
+    }
+}
+
+private struct MeasurementField: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+            Text(value)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+// MARK: - Helpers
+
+private func tabContentBackground(isDarkMode: Bool) -> some View {
+    RoundedRectangle(cornerRadius: 14)
+        .fill(isDarkMode ? Color(.systemGray6).opacity(0.3) : Color(.systemGray6).opacity(0.5))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(isDarkMode ? Color(.systemGray4).opacity(0.3) : Color(.systemGray4).opacity(0.2), lineWidth: 0.5)
+        )
+}
