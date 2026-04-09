@@ -160,7 +160,6 @@ struct MessageInputView: View {
             .sheet(isPresented: $viewModel.showModelSelectorSheet) {
                 ModelSelectorSheetView(viewModel: viewModel, isDarkMode: isDarkMode)
                     .presentationDetents([.medium, .large])
-                    .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
             }
     }
 
@@ -506,9 +505,16 @@ struct AddToSheetView: View {
                 Divider()
                     .padding(.horizontal, 20)
 
+                Text("Chat Features")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+
                 Toggle(isOn: $viewModel.isWebSearchEnabled) {
                     Label("Web Search", systemImage: "globe")
                 }
+                .tint(.green)
                 .onChange(of: viewModel.isWebSearchEnabled) { _, newValue in
                     settings.webSearchEnabled = newValue
                 }
@@ -565,6 +571,7 @@ struct ModelSelectorSheetView: View {
     var body: some View {
         NavigationStack {
             List(availableModels) { model in
+                let isSelected = viewModel.currentModel.id == model.id
                 Button {
                     viewModel.changeModel(to: model)
                     dismiss()
@@ -587,7 +594,7 @@ struct ModelSelectorSheetView: View {
 
                         Spacer()
 
-                        if viewModel.currentModel.id == model.id {
+                        if isSelected {
                             Image(systemName: "checkmark")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.blue)
@@ -595,6 +602,7 @@ struct ModelSelectorSheetView: View {
                     }
                     .padding(.vertical, 4)
                 }
+                .listRowBackground(Color.clear)
             }
             .listStyle(.plain)
             .navigationTitle("Select Model")
