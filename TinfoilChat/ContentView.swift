@@ -63,30 +63,14 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showKeyInputModal) {
             EncryptionKeyInputView(isPresented: $showKeyInputModal) { importedKey in
-                Task {
-                    do {
-                        // Use ChatViewModel API so it retries decryption of failed chats immediately
-                        try await chatViewModel.setEncryptionKey(importedKey)
-                        
-                        // After setting key and decrypting, continue sign-in/sync flow
-                        await MainActor.run {
-                            chatViewModel.handleSignIn()
-                        }
-                    } catch {
-                        await MainActor.run {
-                            let alert = UIAlertController(
-                                title: "Invalid Key",
-                                message: "The encryption key format is invalid.",
-                                preferredStyle: .alert
-                            )
-                            alert.addAction(UIAlertAction(title: "OK", style: .default))
-                            
-                            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                               let rootViewController = windowScene.windows.first?.rootViewController {
-                                rootViewController.present(alert, animated: true)
-                            }
-                        }
+                do {
+                    try await chatViewModel.setEncryptionKey(importedKey, mode: .recoverExisting)
+                    await MainActor.run {
+                        chatViewModel.handleSignIn()
                     }
+                    return nil
+                } catch {
+                    return error.localizedDescription
                 }
             }
         }
@@ -112,15 +96,25 @@ struct ContentView: View {
                 },
                 onManualKeyEntry: {
                     passkeyManager.showPasskeyRecoveryChoice = false
+                    chatViewModel.cloudSyncOnboardingMode = .recovery
                     chatViewModel.showCloudSyncOnboarding = true
                 }
             )
         }
         .sheet(isPresented: $chatViewModel.showCloudSyncOnboarding) {
             CloudSyncOnboardingView(
-                onSetupComplete: { _ in
-                    chatViewModel.showCloudSyncOnboarding = false
-                    chatViewModel.resumeAfterManualKeySetup()
+                mode: chatViewModel.cloudSyncOnboardingMode,
+                onSetupComplete: { key, activationMode in
+                    do {
+                        try await chatViewModel.setEncryptionKey(key, mode: activationMode)
+                        await MainActor.run {
+                            chatViewModel.showCloudSyncOnboarding = false
+                        }
+                        chatViewModel.resumeAfterManualKeySetup()
+                        return nil
+                    } catch {
+                        return error.localizedDescription
+                    }
                 },
                 onDismissWithoutSetup: {
                     chatViewModel.showCloudSyncOnboarding = false

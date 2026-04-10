@@ -444,7 +444,21 @@ struct SettingsView: View {
                                     }
                                 } else {
                                     Task {
-                                        await passkeyManager.retryPasskeySetup()
+                                        let result = await passkeyManager.retryPasskeySetup()
+                                        switch result {
+                                        case .manualSetupRequired:
+                                            await MainActor.run {
+                                                chatViewModel.cloudSyncOnboardingMode = .setup
+                                                chatViewModel.showCloudSyncOnboarding = true
+                                            }
+                                        case .manualRecoveryRequired:
+                                            await MainActor.run {
+                                                chatViewModel.cloudSyncOnboardingMode = .recovery
+                                                chatViewModel.showCloudSyncOnboarding = true
+                                            }
+                                        default:
+                                            break
+                                        }
                                     }
                                 }
                             } else {
@@ -520,7 +534,21 @@ struct SettingsView: View {
                 } else if passkeyManager.passkeySetupAvailable && !EncryptionService.shared.hasEncryptionKey() {
                     Button(action: {
                         Task {
-                            await passkeyManager.retryPasskeySetup()
+                            let result = await passkeyManager.retryPasskeySetup()
+                            switch result {
+                            case .manualSetupRequired:
+                                await MainActor.run {
+                                    chatViewModel.cloudSyncOnboardingMode = .setup
+                                    chatViewModel.showCloudSyncOnboarding = true
+                                }
+                            case .manualRecoveryRequired:
+                                await MainActor.run {
+                                    chatViewModel.cloudSyncOnboardingMode = .recovery
+                                    chatViewModel.showCloudSyncOnboarding = true
+                                }
+                            default:
+                                break
+                            }
                         }
                     }) {
                         VStack(alignment: .leading, spacing: 6) {

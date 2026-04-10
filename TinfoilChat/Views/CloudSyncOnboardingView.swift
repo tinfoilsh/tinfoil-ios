@@ -53,12 +53,14 @@ struct CloudSyncOnboardingView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
-    var onSetupComplete: ((String) -> Void)?
+    var mode: CloudSyncOnboardingMode = .setup
+    var onSetupComplete: ((String, CloudKeyActivationMode) async -> String?)?
     var onDismissWithoutSetup: (() -> Void)?
 
     @State private var currentStep: CloudSyncOnboardingStep = .intro
     @State private var cloudSyncToggle: Bool = true
     @State private var generatedKey: String? = nil
+    @State private var generatedKeyMode: CloudKeyActivationMode = .recoverExisting
     @State private var inputKey: String = ""
     @State private var isProcessing: Bool = false
     @State private var isCopied: Bool = false
@@ -94,7 +96,7 @@ struct CloudSyncOnboardingView: View {
                 }
             }
         }
-        .interactiveDismissDisabled(currentStep == .keyDisplay)
+        .interactiveDismissDisabled(currentStep == .keyDisplay && keyError == nil)
         .fileImporter(
             isPresented: $showFilePicker,
             allowedContentTypes: [UTType(filenameExtension: "pem") ?? .plainText],
@@ -232,7 +234,11 @@ struct CloudSyncOnboardingView: View {
                     .fontWeight(.bold)
 
                 // Description
-                Text("Generate a new personal encryption key or restore an existing one. Your chats will be encrypted and synced with this personal key.")
+                Text(
+                    mode == .recovery
+                        ? "Restore your existing encryption key to unlock cloud data, or explicitly start fresh with a new key."
+                        : "Generate a new personal encryption key or restore an existing one. Your chats will be encrypted and synced with this personal key."
+                )
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -262,7 +268,7 @@ struct CloudSyncOnboardingView: View {
                                 ProgressView()
                                     .tint(.white)
                             } else {
-                                Text("Generate Key")
+                                Text(mode == .recovery ? "Start Fresh with New Key" : "Generate Key")
                             }
                         }
                         .onboardingPrimaryButton()
@@ -300,7 +306,11 @@ struct CloudSyncOnboardingView: View {
                     .fontWeight(.bold)
 
                 // Description
-                Text("Save this key securely. You'll need it to access your chats on other devices.")
+                Text(
+                    generatedKeyMode == .explicitStartFresh
+                        ? "Save this key securely. Using it will start a new encrypted cloud history on this device."
+                        : "Save this key securely. You'll need it to access your chats on other devices."
+                )
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -345,6 +355,14 @@ struct CloudSyncOnboardingView: View {
                 }
 
                 // Done button
+                if let keyError {
+                    Text(keyError)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+
                 Button(action: { handleComplete() }) {
                     Text("Done")
                         .onboardingPrimaryButton()
@@ -520,7 +538,7 @@ struct CloudSyncOnboardingView: View {
     }
 
     private func handleClose() {
-        if currentStep == .keyDisplay {
+        if currentStep == .keyDisplay && keyError == nil {
             handleComplete()
         } else {
             onDismissWithoutSetup?()
@@ -531,20 +549,14 @@ struct CloudSyncOnboardingView: View {
     private func handleGenerateKey() {
         isProcessing = true
         Task {
-            do {
-                let newKey = EncryptionService.shared.generateKey()
-                try await EncryptionService.shared.setKey(newKey)
+            let newKey = EncryptionService.shared.generateKey()
 
-                await MainActor.run {
-                    generatedKey = newKey
-                    isProcessing = false
-                    withAnimation { currentStep = .keyDisplay }
-                }
-            } catch {
-                await MainActor.run {
-                    isProcessing = false
-                    keyError = "Failed to generate encryption key"
-                }
+            await MainActor.run {
+                generatedKey = newKey
+                generatedKeyMode = mode == .recovery ? .explicitStartFresh : .recoverExisting
+                keyError = nil
+                isProcessing = false
+                withAnimation { currentStep = .keyDisplay }
             }
         }
     }
@@ -555,30 +567,31 @@ struct CloudSyncOnboardingView: View {
 
         isProcessing = true
         Task {
-            do {
-                try await EncryptionService.shared.setKey(trimmedKey)
-
-                await MainActor.run {
-                    SettingsManager.shared.isCloudSyncEnabled = true
-                    isProcessing = false
-                    onSetupComplete?(trimmedKey)
-                    dismiss()
-                }
-            } catch {
-                await MainActor.run {
-                    isProcessing = false
-                    keyError = "The encryption key you entered is invalid"
-                }
-            }
+            await completeSetup(with: trimmedKey, activationMode: .recoverExisting)
         }
     }
 
     private func handleComplete() {
-        SettingsManager.shared.isCloudSyncEnabled = true
-        if let key = generatedKey {
-            onSetupComplete?(key)
+        guard let key = generatedKey else { return }
+        isProcessing = true
+        Task {
+            await completeSetup(with: key, activationMode: generatedKeyMode)
         }
-        dismiss()
+    }
+
+    private func completeSetup(with key: String, activationMode: CloudKeyActivationMode) async {
+        let errorMessage = await onSetupComplete?(key, activationMode) ?? nil
+
+        await MainActor.run {
+            isProcessing = false
+            if let errorMessage {
+                keyError = errorMessage
+                return
+            }
+
+            SettingsManager.shared.isCloudSyncEnabled = true
+            dismiss()
+        }
     }
 
     private func copyKeyToClipboard() {
