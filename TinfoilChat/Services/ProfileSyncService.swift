@@ -83,51 +83,58 @@ class ProfileSyncService: ObservableObject {
     }
     
     // MARK: - Profile Operations
-    
-    /// Fetch profile from cloud
-    func fetchProfile() async throws -> ProfileData? {
+
+    func fetchEncryptedProfilePayload() async throws -> String? {
         guard await isAuthenticated() else {
             return nil
         }
-        
-        
+
         guard let url = URL(string: "\(apiBaseURL)/api/profile/") else {
             throw ProfileSyncError.invalidURL
         }
+
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.allHTTPHeaderFields = try await getHeaders()
-        
+
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
             throw ProfileSyncError.fetchFailed(underlying: error)
         }
-        
+
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ProfileSyncError.invalidResponse
         }
-        
+
         if httpResponse.statusCode == 404 {
             return nil
         }
-        
+
         guard (200...299).contains(httpResponse.statusCode) else {
             let error = URLError(.badServerResponse, userInfo: [NSURLErrorFailingURLErrorKey: url, "statusCode": httpResponse.statusCode])
             throw ProfileSyncError.fetchFailed(underlying: error)
         }
-        
+
         let profileResponse = try JSONDecoder().decode(ProfileResponse.self, from: data)
-        
-        
+        return profileResponse.data
+    }
+    
+    /// Fetch profile from cloud
+    func fetchProfile() async throws -> ProfileData? {
+        guard let payload = try await fetchEncryptedProfilePayload() else {
+            failedDecryptionData = nil
+            return nil
+        }
+
         // Initialize encryption service
         _ = try await EncryptionService.shared.initialize()
         
         // Try to decrypt the profile data
         do {
             // Parse the encrypted data (JSON string format)
-            guard let encryptedData = profileResponse.data.data(using: .utf8) else {
+            guard let encryptedData = payload.data(using: .utf8) else {
                 throw ProfileSyncError.invalidDataFormat
             }
             
@@ -144,7 +151,7 @@ class ProfileSyncService: ObservableObject {
             return decrypted
         } catch {
             // Failed to decrypt - store for later retry
-            self.failedDecryptionData = profileResponse.data
+            self.failedDecryptionData = payload
             self.cachedProfile = nil
             
             
@@ -246,6 +253,10 @@ class ProfileSyncService: ObservableObject {
     /// Get cached profile (for quick access)
     func getCachedProfile() -> ProfileData? {
         return cachedProfile
+    }
+
+    func hasFailedRemoteDecryption() -> Bool {
+        failedDecryptionData != nil
     }
     
     /// Clear cache
