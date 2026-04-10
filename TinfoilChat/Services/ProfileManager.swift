@@ -338,6 +338,16 @@ class ProfileManager: ObservableObject {
             return
         }
 
+        let authorizationMode = CloudKeyAuthorizationStore.shared.currentMode()
+        guard authorizationMode != nil else {
+            return
+        }
+
+        if profileSync.hasFailedRemoteDecryption(),
+           authorizationMode != .explicitStartFresh {
+            return
+        }
+
         // Avoid overlapping uploads
         guard !isPushing else { return }
         

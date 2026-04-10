@@ -95,6 +95,7 @@ enum Constants {
         static let backgroundTaskName = "CompleteStreamingResponse"
         static let maxReverseTimestamp: Int = 9999999999999
         static let reverseTimestampDigits: Int = String(maxReverseTimestamp).count
+        static let keyValidationProbeCount: Int = 3
 
         static let createdAtFallbackThresholdSeconds: TimeInterval = 5.0
         static let uploadBaseDelaySeconds: TimeInterval = 1.0
@@ -219,6 +220,10 @@ enum Constants {
             static let encryptionKeySetUp = "tinfoil-secret-encryption-key-set-up"
             static let passkeyBackedUp = "tinfoil-secret-passkey-backed-up"
             static let passkeySyncVersion = "tinfoil-secret-passkey-sync-version"
+
+            static func cloudKeyAuthorization(userId: String) -> String {
+                "tinfoil-secret-cloud-key-authorization-\(userId)"
+            }
         }
     }
 

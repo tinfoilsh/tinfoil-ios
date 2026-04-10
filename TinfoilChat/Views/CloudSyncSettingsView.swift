@@ -9,6 +9,11 @@ import SwiftUI
 import AVFoundation
 
 struct CloudSyncSettingsView: View {
+    private enum KeyInputMode {
+        case replacePrimary
+        case addRecovery
+    }
+
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
     @ObservedObject var viewModel: ChatViewModel
@@ -16,6 +21,7 @@ struct CloudSyncSettingsView: View {
     @ObservedObject private var settings = SettingsManager.shared
     
     @State private var showKeyInput: Bool = false
+    @State private var keyInputMode: KeyInputMode = .replacePrimary
     @State private var copiedToClipboard: Bool = false
     
     var body: some View {
@@ -64,6 +70,13 @@ struct CloudSyncSettingsView: View {
                                     .foregroundColor(.red)
                             }
                         }
+                    }
+
+                    if settings.isCloudSyncEnabled &&
+                        CloudKeyAuthorizationStore.shared.currentMode() == nil {
+                        Text("Cloud sync writes are paused until this device verifies the current encryption key.")
+                            .font(.caption)
+                            .foregroundColor(.orange)
                     }
                     
                     Button(action: {
@@ -115,15 +128,24 @@ struct CloudSyncSettingsView: View {
                     }
                     
                     Button(action: {
+                        keyInputMode = .replacePrimary
                         showKeyInput = true
                     }) {
-                        Label("Change Encryption Key", systemImage: "key.fill")
+                        Label("Replace Primary Key", systemImage: "key.fill")
+                            .foregroundColor(.primary)
+                    }
+
+                    Button(action: {
+                        keyInputMode = .addRecovery
+                        showKeyInput = true
+                    }) {
+                        Label("Add Recovery Key", systemImage: "key.badge.plus")
                             .foregroundColor(.primary)
                     }
             } header: {
                 Text("Encryption")
             } footer: {
-                    Text("Your encryption key is used to secure all your chat data. Keep it safe and never share it with anyone.")
+                    Text("Recovery keys can decrypt older data without changing your current primary key. Replacing the primary key starts a new encrypted cloud history for future uploads.")
                         .font(.caption)
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
@@ -185,15 +207,23 @@ struct CloudSyncSettingsView: View {
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
             .sheet(isPresented: $showKeyInput) {
-                EncryptionKeyInputView(isPresented: $showKeyInput) { importedKey in
-                    Task {
-                        do {
-                            try await viewModel.setEncryptionKey(importedKey)
-                        } catch {
-                            #if DEBUG
-                            print("Failed to change encryption key: \(error)")
-                            #endif
+                EncryptionKeyInputView(
+                    isPresented: $showKeyInput,
+                    title: keyInputMode == .addRecovery ? "Add Recovery Key" : "Replace Primary Key",
+                    description: keyInputMode == .addRecovery
+                        ? "Add a fallback key that can decrypt older cloud data without changing your current primary key."
+                        : "Replacing the primary key will use this key for future cloud writes on this device.",
+                    submitLabel: keyInputMode == .addRecovery ? "Add Recovery Key" : "Replace Primary Key"
+                ) { importedKey in
+                    do {
+                        if keyInputMode == .addRecovery {
+                            try await viewModel.addRecoveryKey(importedKey)
+                        } else {
+                            try await viewModel.setEncryptionKey(importedKey, mode: .explicitStartFresh)
                         }
+                        return nil
+                    } catch {
+                        return error.localizedDescription
                     }
                 }
             }
