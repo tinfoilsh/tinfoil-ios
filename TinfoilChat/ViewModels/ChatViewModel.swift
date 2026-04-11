@@ -3014,12 +3014,13 @@ class ChatViewModel: ObservableObject {
             switch mode {
             case .addRecoveryKey:
                 try EncryptionService.shared.addDecryptionKey(key)
-            case .recoverExisting, .explicitStartFresh:
-                if mode == .recoverExisting {
-                    _ = try await CloudKeyAuthorizationStore.shared.applyPrimaryKeyWithValidation(key)
-                } else {
-                    try await EncryptionService.shared.setKey(key)
-                    CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh)
+            case .recoverExisting:
+                _ = try await CloudKeyAuthorizationStore.shared.applyPrimaryKeyWithValidation(key)
+            case .explicitStartFresh:
+                try await EncryptionService.shared.setKey(key)
+                guard CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh) else {
+                    EncryptionService.shared.clearKey()
+                    throw CloudKeyAuthorizationError.authorizationUnavailable
                 }
             }
 

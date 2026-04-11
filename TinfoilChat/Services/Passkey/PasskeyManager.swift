@@ -145,7 +145,10 @@ final class PasskeyManager: ObservableObject {
 
             // Passkey created and stored — persist the key
             try await EncryptionService.shared.setKey(newKey)
-            CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: authorizationMode)
+            guard CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: authorizationMode) else {
+                EncryptionService.shared.clearKey()
+                throw CloudKeyAuthorizationError.authorizationUnavailable
+            }
             activatePasskey()
             return true
 
@@ -366,8 +369,7 @@ final class PasskeyManager: ObservableObject {
         let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
         guard validation.canWrite else { return false }
 
-        CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated)
-        return true
+        return CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated)
     }
 
     /// Authenticate with a passkey, derive the KEK, and decrypt the stored key bundle.
