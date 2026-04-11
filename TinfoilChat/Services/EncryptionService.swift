@@ -165,7 +165,10 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
                 return try? normalizeKeyInput(key).0
             }
 
-            let deduplicatedAlternatives = Array(NSOrderedSet(array: normalizedAlternatives)) as? [String] ?? normalizedAlternatives
+            var seenAlternatives = Set<String>()
+            let deduplicatedAlternatives = normalizedAlternatives.filter {
+                seenAlternatives.insert($0).inserted
+            }
             try saveKeyHistory(deduplicatedAlternatives)
             return
         }

@@ -1,5 +1,13 @@
 import Foundation
 
+private enum CloudKeyValidationMessages {
+    static let noEncryptionKey = "No encryption key is currently loaded."
+    static let unknownRemoteState = "We couldn't verify whether encrypted cloud data already exists."
+    static let unknownProfile = "We couldn't verify your existing cloud profile."
+    static let unknownChats = "We couldn't verify your existing cloud chats."
+    static let keyMismatch = "This key doesn't match your existing cloud data."
+}
+
 enum CloudRemoteState {
     case empty
     case exists
@@ -22,6 +30,7 @@ struct CloudKeyValidationResult {
 @MainActor
 final class CloudKeyPreflightValidator {
     static let shared = CloudKeyPreflightValidator()
+    static let mismatchMessage = CloudKeyValidationMessages.keyMismatch
 
     private let profileSync = ProfileSyncService.shared
     private let cloudStorage = CloudStorageService.shared
@@ -48,21 +57,11 @@ final class CloudKeyPreflightValidator {
 
     func validateCurrentPrimaryKey() async -> CloudKeyValidationResult {
         guard encryptionService.getKey() != nil else {
-            return CloudKeyValidationResult(
-                remoteState: .unknown,
-                canWrite: false,
-                probe: .none,
-                message: "No encryption key is currently loaded."
-            )
+            return unknownResult(probe: .none, message: CloudKeyValidationMessages.noEncryptionKey)
         }
 
         guard let profileStatus = await profileSync.getSyncStatus() else {
-            return CloudKeyValidationResult(
-                remoteState: .unknown,
-                canWrite: false,
-                probe: .none,
-                message: "We couldn't verify whether encrypted cloud data already exists."
-            )
+            return unknownResult(probe: .none, message: CloudKeyValidationMessages.unknownRemoteState)
         }
 
         if profileStatus.exists {
@@ -75,12 +74,7 @@ final class CloudKeyPreflightValidator {
                 return await validateChatProbe()
             }
         } catch {
-            return CloudKeyValidationResult(
-                remoteState: .unknown,
-                canWrite: false,
-                probe: .none,
-                message: "We couldn't verify whether encrypted cloud data already exists."
-            )
+            return unknownResult(probe: .none, message: CloudKeyValidationMessages.unknownRemoteState)
         }
 
         return CloudKeyValidationResult(
@@ -92,61 +86,33 @@ final class CloudKeyPreflightValidator {
     }
 
     private func validateProfileProbe() async -> CloudKeyValidationResult {
+        let mismatchResult = blockedResult(probe: .profile)
+
         let payload: String
         do {
             guard let fetchedPayload = try await profileSync.fetchEncryptedProfilePayload() else {
-                return CloudKeyValidationResult(
-                    remoteState: .unknown,
-                    canWrite: false,
-                    probe: .profile,
-                    message: "We couldn't verify your existing cloud profile."
-                )
+                return unknownResult(probe: .profile, message: CloudKeyValidationMessages.unknownProfile)
             }
             payload = fetchedPayload
         } catch {
-            return CloudKeyValidationResult(
-                remoteState: .unknown,
-                canWrite: false,
-                probe: .profile,
-                message: "We couldn't verify your existing cloud profile."
-            )
+            return unknownResult(probe: .profile, message: CloudKeyValidationMessages.unknownProfile)
         }
 
         do {
             guard let data = payload.data(using: .utf8) else {
-                return CloudKeyValidationResult(
-                    remoteState: .exists,
-                    canWrite: false,
-                    probe: .profile,
-                    message: "This key doesn't match your existing cloud data."
-                )
+                return mismatchResult
             }
 
             let encrypted = try JSONDecoder().decode(EncryptedData.self, from: data)
             let result = try await encryptionService.decrypt(encrypted, as: ProfileData.self)
 
             guard !result.usedFallbackKey else {
-                return CloudKeyValidationResult(
-                    remoteState: .exists,
-                    canWrite: false,
-                    probe: .profile,
-                    message: "This key doesn't match your existing cloud data."
-                )
+                return mismatchResult
             }
 
-            return CloudKeyValidationResult(
-                remoteState: .exists,
-                canWrite: true,
-                probe: .profile,
-                message: nil
-            )
+            return validResult(probe: .profile)
         } catch {
-            return CloudKeyValidationResult(
-                remoteState: .exists,
-                canWrite: false,
-                probe: .profile,
-                message: "This key doesn't match your existing cloud data."
-            )
+            return mismatchResult
         }
     }
 
@@ -158,12 +124,7 @@ final class CloudKeyPreflightValidator {
             )
 
             guard !response.conversations.isEmpty else {
-                return CloudKeyValidationResult(
-                    remoteState: .unknown,
-                    canWrite: false,
-                    probe: .chat,
-                    message: "We couldn't verify your existing cloud chats."
-                )
+                return unknownResult(probe: .chat, message: CloudKeyValidationMessages.unknownChats)
             }
 
             var sawMismatch = false
@@ -180,12 +141,7 @@ final class CloudKeyPreflightValidator {
                     do {
                         let result: DecryptionResult<Chat> = try encryptionService.decryptV1(binary, as: Chat.self)
                         if !result.usedFallbackKey {
-                            return CloudKeyValidationResult(
-                                remoteState: .exists,
-                                canWrite: true,
-                                probe: .chat,
-                                message: nil
-                            )
+                            return validResult(probe: .chat)
                         }
                         sawMismatch = true
                     } catch {
@@ -202,12 +158,7 @@ final class CloudKeyPreflightValidator {
                     )
                     let result = try await encryptionService.decrypt(encryptedData, as: Chat.self)
                     if !result.usedFallbackKey {
-                        return CloudKeyValidationResult(
-                            remoteState: .exists,
-                            canWrite: true,
-                            probe: .chat,
-                            message: nil
-                        )
+                        return validResult(probe: .chat)
                     }
                     sawMismatch = true
                 } catch {
@@ -220,16 +171,41 @@ final class CloudKeyPreflightValidator {
                 canWrite: false,
                 probe: .chat,
                 message: sawMismatch
-                    ? "This key doesn't match your existing cloud data."
-                    : "We couldn't verify your existing cloud chats."
+                    ? CloudKeyValidationMessages.keyMismatch
+                    : CloudKeyValidationMessages.unknownChats
             )
         } catch {
-            return CloudKeyValidationResult(
-                remoteState: .unknown,
-                canWrite: false,
-                probe: .chat,
-                message: "We couldn't verify your existing cloud chats."
-            )
+            return unknownResult(probe: .chat, message: CloudKeyValidationMessages.unknownChats)
         }
+    }
+
+    private func unknownResult(
+        probe: CloudKeyValidationProbe,
+        message: String
+    ) -> CloudKeyValidationResult {
+        CloudKeyValidationResult(
+            remoteState: .unknown,
+            canWrite: false,
+            probe: probe,
+            message: message
+        )
+    }
+
+    private func validResult(probe: CloudKeyValidationProbe) -> CloudKeyValidationResult {
+        CloudKeyValidationResult(
+            remoteState: .exists,
+            canWrite: true,
+            probe: probe,
+            message: nil
+        )
+    }
+
+    private func blockedResult(probe: CloudKeyValidationProbe) -> CloudKeyValidationResult {
+        CloudKeyValidationResult(
+            remoteState: .exists,
+            canWrite: false,
+            probe: probe,
+            message: CloudKeyValidationMessages.keyMismatch
+        )
     }
 }
