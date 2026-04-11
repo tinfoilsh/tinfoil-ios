@@ -3010,6 +3010,7 @@ class ChatViewModel: ObservableObject {
     ) async throws {
         do {
             let oldKey = EncryptionService.shared.getKey()
+            let previousKeys = EncryptionService.shared.getAllKeys()
 
             switch mode {
             case .addRecoveryKey:
@@ -3019,7 +3020,14 @@ class ChatViewModel: ObservableObject {
             case .explicitStartFresh:
                 try await EncryptionService.shared.setKey(key)
                 guard CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh) else {
-                    EncryptionService.shared.clearKey()
+                    do {
+                        try await EncryptionService.shared.replaceKeyBundle(
+                            primary: previousKeys.primary,
+                            alternatives: previousKeys.alternatives
+                        )
+                    } catch {
+                        EncryptionService.shared.clearKey()
+                    }
                     throw CloudKeyAuthorizationError.authorizationUnavailable
                 }
             }
