@@ -1961,18 +1961,7 @@ class ChatViewModel: ObservableObject {
 
                 await self.passkeyManager.checkPasskeyStateForExistingKey()
 
-                let decryptedCount = await cloudSync.retryDecryptionWithNewKey(onProgress: nil)
-                if decryptedCount > 0 {
-                    let result = await loadFirstPageOfChats(userId: self.currentUserId, filter: \.isCloudDisplayable)
-                    await MainActor.run {
-                        self.chats = result.chats
-                        if let currentId = self.currentChat?.id,
-                           let refreshed = result.chats.first(where: { $0.id == currentId }) {
-                            self.currentChat = refreshed
-                        }
-                        normalizeChatsArray()
-                    }
-                }
+                await retryDecryptionAndReloadChats()
 
                 if SettingsManager.shared.isCloudSyncEnabled {
                     await initializeCloudSync()
@@ -1996,6 +1985,21 @@ class ChatViewModel: ObservableObject {
     }
     
     // MARK: - Private Methods
+
+    private func retryDecryptionAndReloadChats() async {
+        let decryptedCount = await cloudSync.retryDecryptionWithNewKey(onProgress: nil)
+        guard decryptedCount > 0 else { return }
+
+        let result = await loadFirstPageOfChats(userId: self.currentUserId, filter: \.isCloudDisplayable)
+        await MainActor.run {
+            self.chats = result.chats
+            if let currentId = self.currentChat?.id,
+               let refreshed = result.chats.first(where: { $0.id == currentId }) {
+                self.currentChat = refreshed
+            }
+            normalizeChatsArray()
+        }
+    }
 
     private func endStreamingAndBackup(chatId: String) {
         guard authManager?.isAuthenticated == true else { return }
@@ -3005,33 +3009,16 @@ class ChatViewModel: ObservableObject {
         mode: CloudKeyActivationMode = .explicitStartFresh
     ) async throws {
         do {
-            let previousKeys = EncryptionService.shared.getAllKeys()
-            let oldKey = previousKeys.primary
+            let oldKey = EncryptionService.shared.getKey()
 
             switch mode {
             case .addRecoveryKey:
                 try EncryptionService.shared.addDecryptionKey(key)
             case .recoverExisting, .explicitStartFresh:
-                try await EncryptionService.shared.setKey(key)
-
                 if mode == .recoverExisting {
-                    let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
-                    guard validation.canWrite else {
-                        try? await EncryptionService.shared.replaceKeyBundle(
-                            primary: previousKeys.primary,
-                            alternatives: previousKeys.alternatives
-                        )
-                        throw NSError(
-                            domain: "CloudSync",
-                            code: 1,
-                            userInfo: [
-                                NSLocalizedDescriptionKey: validation.message
-                                    ?? "This key doesn't match your existing cloud data."
-                            ]
-                        )
-                    }
-                    CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated)
+                    _ = try await CloudKeyAuthorizationStore.shared.applyPrimaryKeyWithValidation(key)
                 } else {
+                    try await EncryptionService.shared.setKey(key)
                     CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh)
                 }
             }
@@ -3042,18 +3029,7 @@ class ChatViewModel: ObservableObject {
             }
 
             await ProfileManager.shared.retryDecryptionWithNewKey()
-
-            // Retry decryption with new key
-            let decryptedCount = await cloudSync.retryDecryptionWithNewKey { _, _ in }
-
-            // Reload chats immediately after decryption to show decrypted chats
-            if decryptedCount > 0 {
-                let result = await loadFirstPageOfChats(userId: self.currentUserId, filter: \.isCloudDisplayable)
-                await MainActor.run {
-                    self.chats = result.chats
-                    normalizeChatsArray()
-                }
-            }
+            await retryDecryptionAndReloadChats()
 
             // If key changed, handle re-encryption
             if mode != .addRecoveryKey && oldKey != key {
