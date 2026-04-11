@@ -12,6 +12,7 @@ enum CloudKeyAuthorizationMode: String, Codable {
 enum CloudKeyAuthorizationError: LocalizedError {
     case validationFailed(String)
     case rollbackFailed
+    case authorizationUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -19,6 +20,8 @@ enum CloudKeyAuthorizationError: LocalizedError {
             return message
         case .rollbackFailed:
             return "Failed to restore the previous encryption key."
+        case .authorizationUnavailable:
+            return "Failed to authorize the current encryption key."
         }
     }
 }
@@ -52,10 +55,10 @@ final class CloudKeyAuthorizationStore {
     func authorizeCurrentPrimaryKey(
         mode: CloudKeyAuthorizationMode,
         userId: String? = nil
-    ) {
+    ) -> Bool {
         guard let resolvedUserId = resolveUserId(userId),
               let currentFingerprint = currentPrimaryKeyFingerprint() else {
-            return
+            return false
         }
 
         let record = CloudKeyAuthorizationRecord(
@@ -66,8 +69,10 @@ final class CloudKeyAuthorizationStore {
         do {
             let data = try JSONEncoder().encode(record)
             UserDefaults.standard.set(data, forKey: storageKey(userId: resolvedUserId))
+            return true
         } catch {
             UserDefaults.standard.removeObject(forKey: storageKey(userId: resolvedUserId))
+            return false
         }
     }
 
@@ -113,7 +118,10 @@ final class CloudKeyAuthorizationStore {
         let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
         guard validation.canWrite else {
             if let failureMode {
-                authorizeCurrentPrimaryKey(mode: failureMode)
+                guard authorizeCurrentPrimaryKey(mode: failureMode) else {
+                    try await rollbackToPreviousKeys(previousKeys)
+                    throw CloudKeyAuthorizationError.authorizationUnavailable
+                }
                 return failureMode
             }
 
@@ -123,7 +131,10 @@ final class CloudKeyAuthorizationStore {
             )
         }
 
-        authorizeCurrentPrimaryKey(mode: successMode)
+        guard authorizeCurrentPrimaryKey(mode: successMode) else {
+            try await rollbackToPreviousKeys(previousKeys)
+            throw CloudKeyAuthorizationError.authorizationUnavailable
+        }
         return successMode
     }
 
