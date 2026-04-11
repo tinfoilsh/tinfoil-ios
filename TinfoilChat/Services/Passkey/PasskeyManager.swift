@@ -100,29 +100,16 @@ final class PasskeyManager: ObservableObject {
                 return .recoveryFailed
             }
 
-            let previousKeys = EncryptionService.shared.getAllKeys()
-
-            try await EncryptionService.shared.setAllKeys(
+            try await CloudKeyAuthorizationStore.shared.applyKeyBundleWithValidation(
                 primary: recovery.bundle.primary,
                 alternatives: recovery.bundle.alternatives
             )
-
-            let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
-            guard validation.canWrite else {
-                try? await EncryptionService.shared.replaceKeyBundle(
-                    primary: previousKeys.primary,
-                    alternatives: previousKeys.alternatives
-                )
-                showPasskeyRecoveryChoice = true
-                return .recoveryFailed
-            }
 
             // Record sync_version so the periodic check has a baseline
             if let entry = credentials.first(where: { $0.id == recovery.credentialId }) {
                 setLocalSyncVersion(credentialId: recovery.credentialId, version: entry.sync_version)
             }
 
-            CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated)
             activatePasskey()
             return .success
 
@@ -185,27 +172,15 @@ final class PasskeyManager: ObservableObject {
                 return false
             }
 
-            let previousKeys = EncryptionService.shared.getAllKeys()
-
-            try await EncryptionService.shared.setAllKeys(
+            try await CloudKeyAuthorizationStore.shared.applyKeyBundleWithValidation(
                 primary: recovery.bundle.primary,
                 alternatives: recovery.bundle.alternatives
             )
-
-            let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
-            guard validation.canWrite else {
-                try? await EncryptionService.shared.replaceKeyBundle(
-                    primary: previousKeys.primary,
-                    alternatives: previousKeys.alternatives
-                )
-                return false
-            }
 
             if let entry = entries.first(where: { $0.id == recovery.credentialId }) {
                 setLocalSyncVersion(credentialId: recovery.credentialId, version: entry.sync_version)
             }
 
-            CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated)
             activatePasskey()
             showPasskeyRecoveryChoice = false
 
@@ -477,6 +452,8 @@ final class PasskeyManager: ObservableObject {
     /// Uses the cached PRF to avoid biometric prompts. If no cached PRF
     /// is available, the check is skipped silently.
     private func refreshKeyFromPasskeyBackup() async {
+        var pendingSyncVersion: (credentialId: String, version: Int)?
+
         do {
             guard let cached = passkeyService.getCachedPrfResult() else { return }
 
@@ -501,36 +478,30 @@ final class PasskeyManager: ObservableObject {
                 return
             }
 
-            let previousKeys = EncryptionService.shared.getAllKeys()
+            pendingSyncVersion = (credentialId: cached.credentialId, version: entry.sync_version)
             let previousMode = CloudKeyAuthorizationStore.shared.currentMode()
 
-            // Key differs — apply the recovered key bundle
-            try await EncryptionService.shared.setAllKeys(
+            let appliedMode = try await CloudKeyAuthorizationStore.shared.applyKeyBundleWithValidation(
                 primary: bundle.primary,
-                alternatives: bundle.alternatives
+                alternatives: bundle.alternatives,
+                failureMode: previousMode == .explicitStartFresh ? .explicitStartFresh : nil
             )
-
-            let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
-            if validation.canWrite {
-                CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated)
-            } else if previousMode == .explicitStartFresh {
-                CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh)
-            } else {
-                try? await EncryptionService.shared.replaceKeyBundle(
-                    primary: previousKeys.primary,
-                    alternatives: previousKeys.alternatives
-                )
-                return
-            }
 
             setLocalSyncVersion(credentialId: cached.credentialId, version: entry.sync_version)
 
             #if DEBUG
-            print("[PasskeyManager] Refreshed encryption key from passkey backup (sync_version: \(entry.sync_version))")
+            print("[PasskeyManager] Refreshed encryption key from passkey backup (sync_version: \(entry.sync_version), mode: \(appliedMode.rawValue))")
             #endif
 
             onKeyRefreshedFromBackup?()
         } catch {
+            if error is CloudKeyAuthorizationError,
+               let pendingSyncVersion {
+                setLocalSyncVersion(
+                    credentialId: pendingSyncVersion.credentialId,
+                    version: pendingSyncVersion.version
+                )
+            }
             // Non-fatal — will retry on next interval
         }
     }
