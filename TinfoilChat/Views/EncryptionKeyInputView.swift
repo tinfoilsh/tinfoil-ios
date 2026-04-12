@@ -248,6 +248,7 @@ struct EncryptionKeyInputView: View {
     }
     
     private func importKey() {
+        guard !isImporting else { return }
         keyError = nil
         isImporting = true
 
