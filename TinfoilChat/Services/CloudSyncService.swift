@@ -1116,10 +1116,6 @@ class CloudSyncService: ObservableObject {
         guard await cloudStorage.isAuthenticated() else {
             return
         }
-
-        guard canWriteToCloud() else {
-            return
-        }
         
         do {
             try await cloudStorage.deleteChat(chatId)
