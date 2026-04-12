@@ -100,10 +100,7 @@ final class PasskeyManager: ObservableObject {
                 return .recoveryFailed
             }
 
-            try await CloudKeyAuthorizationStore.shared.applyKeyBundleWithValidation(
-                primary: recovery.bundle.primary,
-                alternatives: recovery.bundle.alternatives
-            )
+            _ = try await applyRecoveredKeyBundle(recovery.bundle)
 
             // Record sync_version so the periodic check has a baseline
             if let entry = credentials.first(where: { $0.id == recovery.credentialId }) {
@@ -134,7 +131,11 @@ final class PasskeyManager: ObservableObject {
 
         do {
             let (credentialId, kek) = try await createPasskeyAndDeriveKEK(for: user)
-            let bundle = KeyBundle(primary: newKey, alternatives: [])
+            let bundle = KeyBundle(
+                primary: newKey,
+                alternatives: [],
+                authorizationMode: authorizationMode
+            )
 
             let syncVersion = try await keyStorage.storeEncryptedKeys(
                 credentialId: credentialId,
@@ -175,10 +176,7 @@ final class PasskeyManager: ObservableObject {
                 return false
             }
 
-            try await CloudKeyAuthorizationStore.shared.applyKeyBundleWithValidation(
-                primary: recovery.bundle.primary,
-                alternatives: recovery.bundle.alternatives
-            )
+            _ = try await applyRecoveredKeyBundle(recovery.bundle)
 
             if let entry = entries.first(where: { $0.id == recovery.credentialId }) {
                 setLocalSyncVersion(credentialId: recovery.credentialId, version: entry.sync_version)
@@ -273,7 +271,11 @@ final class PasskeyManager: ObservableObject {
             guard let primary = keys.primary else { return }
 
             let (credentialId, kek) = try await createPasskeyAndDeriveKEK(for: user)
-            let bundle = KeyBundle(primary: primary, alternatives: keys.alternatives)
+            let bundle = KeyBundle(
+                primary: primary,
+                alternatives: keys.alternatives,
+                authorizationMode: CloudKeyAuthorizationStore.shared.currentMode() ?? .validated
+            )
 
             let syncVersion = try await keyStorage.storeEncryptedKeys(
                 credentialId: credentialId,
@@ -330,7 +332,11 @@ final class PasskeyManager: ObservableObject {
             }
             let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
 
-            let bundle = KeyBundle(primary: primary, alternatives: keys.alternatives)
+            let bundle = KeyBundle(
+                primary: primary,
+                alternatives: keys.alternatives,
+                authorizationMode: CloudKeyAuthorizationStore.shared.currentMode()
+            )
 
             let syncVersion = try await keyStorage.storeEncryptedKeys(
                 credentialId: result.credentialId,
@@ -359,6 +365,17 @@ final class PasskeyManager: ObservableObject {
         SettingsManager.shared.isCloudSyncEnabled = true
         passkeyActive = true
         startSyncCheck()
+    }
+
+    private func applyRecoveredKeyBundle(_ bundle: KeyBundle) async throws -> CloudKeyAuthorizationMode {
+        let authorizationMode = bundle.authorizationMode ?? .validated
+
+        return try await CloudKeyAuthorizationStore.shared.applyKeyBundleWithValidation(
+            primary: bundle.primary,
+            alternatives: bundle.alternatives,
+            successMode: authorizationMode,
+            failureMode: authorizationMode == .explicitStartFresh ? .explicitStartFresh : nil
+        )
     }
 
     private func ensureCurrentPrimaryKeyAuthorized() async -> Bool {
@@ -481,13 +498,7 @@ final class PasskeyManager: ObservableObject {
             }
 
             pendingSyncVersion = (credentialId: cached.credentialId, version: entry.sync_version)
-            let previousMode = CloudKeyAuthorizationStore.shared.currentMode()
-
-            let appliedMode = try await CloudKeyAuthorizationStore.shared.applyKeyBundleWithValidation(
-                primary: bundle.primary,
-                alternatives: bundle.alternatives,
-                failureMode: previousMode == .explicitStartFresh ? .explicitStartFresh : nil
-            )
+            let appliedMode = try await applyRecoveredKeyBundle(bundle)
 
             setLocalSyncVersion(credentialId: cached.credentialId, version: entry.sync_version)
 
