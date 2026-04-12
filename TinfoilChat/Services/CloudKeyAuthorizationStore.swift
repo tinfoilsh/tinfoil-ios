@@ -11,15 +11,15 @@ enum CloudKeyAuthorizationMode: String, Codable {
 
 enum CloudKeyAuthorizationError: LocalizedError {
     case validationFailed(String)
-    case rollbackFailed
+    case rollbackFailed(underlying: Error)
     case authorizationUnavailable
 
     var errorDescription: String? {
         switch self {
         case .validationFailed(let message):
             return message
-        case .rollbackFailed:
-            return "Failed to restore the previous encryption key."
+        case .rollbackFailed(let underlying):
+            return "Failed to restore the previous encryption key: \(underlying.localizedDescription)"
         case .authorizationUnavailable:
             return "Failed to authorize the current encryption key."
         }
@@ -116,7 +116,17 @@ final class CloudKeyAuthorizationStore {
         failureMode: CloudKeyAuthorizationMode?
     ) async throws -> CloudKeyAuthorizationMode {
         let previousKeys = EncryptionService.shared.getAllKeys()
-        try await setKeys()
+        do {
+            try await setKeys()
+        } catch let setKeysError {
+            do {
+                try rollbackToPreviousKeys(previousKeys)
+            } catch let rollbackError {
+                throw rollbackError
+            }
+            throw setKeysError
+        }
+
         return try await authorizeCurrentPrimaryKeyAfterValidation(
             rollbackTo: previousKeys,
             successMode: successMode,
@@ -180,10 +190,10 @@ final class CloudKeyAuthorizationStore {
                 primary: previousKeys.primary,
                 alternatives: previousKeys.alternatives
             )
-        } catch {
+        } catch let rollbackError {
             EncryptionService.shared.clearKey()
             clearAuthorization()
-            throw CloudKeyAuthorizationError.rollbackFailed
+            throw CloudKeyAuthorizationError.rollbackFailed(underlying: rollbackError)
         }
     }
 }

@@ -335,7 +335,7 @@ final class PasskeyManager: ObservableObject {
             let bundle = KeyBundle(
                 primary: primary,
                 alternatives: keys.alternatives,
-                authorizationMode: CloudKeyAuthorizationStore.shared.currentMode()
+                authorizationMode: CloudKeyAuthorizationStore.shared.currentMode() ?? .validated
             )
 
             let syncVersion = try await keyStorage.storeEncryptedKeys(
