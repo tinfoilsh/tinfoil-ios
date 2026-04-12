@@ -87,10 +87,10 @@ final class CloudKeyAuthorizationStore {
         successMode: CloudKeyAuthorizationMode = .validated,
         failureMode: CloudKeyAuthorizationMode? = nil
     ) async throws -> CloudKeyAuthorizationMode {
-        let previousKeys = EncryptionService.shared.getAllKeys()
-        try await EncryptionService.shared.setAllKeys(primary: primary, alternatives: alternatives)
-        return try await authorizeCurrentPrimaryKeyAfterValidation(
-            rollbackTo: previousKeys,
+        return try await applyAndValidate(
+            setKeys: {
+                try await EncryptionService.shared.setAllKeys(primary: primary, alternatives: alternatives)
+            },
             successMode: successMode,
             failureMode: failureMode
         )
@@ -101,8 +101,22 @@ final class CloudKeyAuthorizationStore {
         successMode: CloudKeyAuthorizationMode = .validated,
         failureMode: CloudKeyAuthorizationMode? = nil
     ) async throws -> CloudKeyAuthorizationMode {
+        return try await applyAndValidate(
+            setKeys: {
+                try await EncryptionService.shared.setKey(key)
+            },
+            successMode: successMode,
+            failureMode: failureMode
+        )
+    }
+
+    private func applyAndValidate(
+        setKeys: () async throws -> Void,
+        successMode: CloudKeyAuthorizationMode,
+        failureMode: CloudKeyAuthorizationMode?
+    ) async throws -> CloudKeyAuthorizationMode {
         let previousKeys = EncryptionService.shared.getAllKeys()
-        try await EncryptionService.shared.setKey(key)
+        try await setKeys()
         return try await authorizeCurrentPrimaryKeyAfterValidation(
             rollbackTo: previousKeys,
             successMode: successMode,
@@ -119,20 +133,20 @@ final class CloudKeyAuthorizationStore {
         guard validation.canWrite else {
             if let failureMode {
                 guard authorizeCurrentPrimaryKey(mode: failureMode) else {
-                    try await rollbackToPreviousKeys(previousKeys)
+                    try rollbackToPreviousKeys(previousKeys)
                     throw CloudKeyAuthorizationError.authorizationUnavailable
                 }
                 return failureMode
             }
 
-            try await rollbackToPreviousKeys(previousKeys)
+            try rollbackToPreviousKeys(previousKeys)
             throw CloudKeyAuthorizationError.validationFailed(
                 validation.message ?? CloudKeyPreflightValidator.mismatchMessage
             )
         }
 
         guard authorizeCurrentPrimaryKey(mode: successMode) else {
-            try await rollbackToPreviousKeys(previousKeys)
+            try rollbackToPreviousKeys(previousKeys)
             throw CloudKeyAuthorizationError.authorizationUnavailable
         }
         return successMode
@@ -160,9 +174,9 @@ final class CloudKeyAuthorizationStore {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    private func rollbackToPreviousKeys(_ previousKeys: CloudKeySnapshot) async throws {
+    private func rollbackToPreviousKeys(_ previousKeys: CloudKeySnapshot) throws {
         do {
-            try await EncryptionService.shared.replaceKeyBundle(
+            try EncryptionService.shared.replaceKeyBundle(
                 primary: previousKeys.primary,
                 alternatives: previousKeys.alternatives
             )

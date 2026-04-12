@@ -14,16 +14,9 @@ enum CloudRemoteState {
     case unknown
 }
 
-enum CloudKeyValidationProbe {
-    case none
-    case profile
-    case chat
-}
-
 struct CloudKeyValidationResult {
     let remoteState: CloudRemoteState
     let canWrite: Bool
-    let probe: CloudKeyValidationProbe
     let message: String?
 }
 
@@ -57,11 +50,11 @@ final class CloudKeyPreflightValidator {
 
     func validateCurrentPrimaryKey() async -> CloudKeyValidationResult {
         guard encryptionService.getKey() != nil else {
-            return unknownResult(probe: .none, message: CloudKeyValidationMessages.noEncryptionKey)
+            return unknownResult(message: CloudKeyValidationMessages.noEncryptionKey)
         }
 
         guard let profileStatus = await profileSync.getSyncStatus() else {
-            return unknownResult(probe: .none, message: CloudKeyValidationMessages.unknownRemoteState)
+            return unknownResult(message: CloudKeyValidationMessages.unknownRemoteState)
         }
 
         if profileStatus.exists {
@@ -74,28 +67,27 @@ final class CloudKeyPreflightValidator {
                 return await validateChatProbe()
             }
         } catch {
-            return unknownResult(probe: .none, message: CloudKeyValidationMessages.unknownRemoteState)
+            return unknownResult(message: CloudKeyValidationMessages.unknownRemoteState)
         }
 
         return CloudKeyValidationResult(
             remoteState: .empty,
             canWrite: true,
-            probe: .none,
             message: nil
         )
     }
 
     private func validateProfileProbe() async -> CloudKeyValidationResult {
-        let mismatchResult = blockedResult(probe: .profile)
+        let mismatchResult = blockedResult()
 
         let payload: String
         do {
             guard let fetchedPayload = try await profileSync.fetchEncryptedProfilePayload() else {
-                return unknownResult(probe: .profile, message: CloudKeyValidationMessages.unknownProfile)
+                return unknownResult(message: CloudKeyValidationMessages.unknownProfile)
             }
             payload = fetchedPayload
         } catch {
-            return unknownResult(probe: .profile, message: CloudKeyValidationMessages.unknownProfile)
+            return unknownResult(message: CloudKeyValidationMessages.unknownProfile)
         }
 
         do {
@@ -110,7 +102,7 @@ final class CloudKeyPreflightValidator {
                 return mismatchResult
             }
 
-            return validResult(probe: .profile)
+            return validResult()
         } catch {
             return mismatchResult
         }
@@ -124,7 +116,7 @@ final class CloudKeyPreflightValidator {
             )
 
             guard !response.conversations.isEmpty else {
-                return unknownResult(probe: .chat, message: CloudKeyValidationMessages.unknownChats)
+                return unknownResult(message: CloudKeyValidationMessages.unknownChats)
             }
 
             var sawMismatch = false
@@ -139,9 +131,12 @@ final class CloudKeyPreflightValidator {
                     }
 
                     do {
-                        let result: DecryptionResult<Chat> = try encryptionService.decryptV1(binary, as: Chat.self)
+                        let result: DecryptionResult<StoredChat> = try encryptionService.decryptV1(
+                            binary,
+                            as: StoredChat.self
+                        )
                         if !result.usedFallbackKey {
-                            return validResult(probe: .chat)
+                            return validResult()
                         }
                         sawMismatch = true
                     } catch {
@@ -156,9 +151,9 @@ final class CloudKeyPreflightValidator {
                         EncryptedData.self,
                         from: Data(content.utf8)
                     )
-                    let result = try await encryptionService.decrypt(encryptedData, as: Chat.self)
+                    let result = try await encryptionService.decrypt(encryptedData, as: StoredChat.self)
                     if !result.usedFallbackKey {
-                        return validResult(probe: .chat)
+                        return validResult()
                     }
                     sawMismatch = true
                 } catch {
@@ -169,42 +164,35 @@ final class CloudKeyPreflightValidator {
             return CloudKeyValidationResult(
                 remoteState: sawMismatch ? .exists : .unknown,
                 canWrite: false,
-                probe: .chat,
                 message: sawMismatch
                     ? CloudKeyValidationMessages.keyMismatch
                     : CloudKeyValidationMessages.unknownChats
             )
         } catch {
-            return unknownResult(probe: .chat, message: CloudKeyValidationMessages.unknownChats)
+            return unknownResult(message: CloudKeyValidationMessages.unknownChats)
         }
     }
 
-    private func unknownResult(
-        probe: CloudKeyValidationProbe,
-        message: String
-    ) -> CloudKeyValidationResult {
+    private func unknownResult(message: String) -> CloudKeyValidationResult {
         CloudKeyValidationResult(
             remoteState: .unknown,
             canWrite: false,
-            probe: probe,
             message: message
         )
     }
 
-    private func validResult(probe: CloudKeyValidationProbe) -> CloudKeyValidationResult {
+    private func validResult() -> CloudKeyValidationResult {
         CloudKeyValidationResult(
             remoteState: .exists,
             canWrite: true,
-            probe: probe,
             message: nil
         )
     }
 
-    private func blockedResult(probe: CloudKeyValidationProbe) -> CloudKeyValidationResult {
+    private func blockedResult() -> CloudKeyValidationResult {
         CloudKeyValidationResult(
             remoteState: .exists,
             canWrite: false,
-            probe: probe,
             message: CloudKeyValidationMessages.keyMismatch
         )
     }

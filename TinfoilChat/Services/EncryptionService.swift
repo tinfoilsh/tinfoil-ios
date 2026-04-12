@@ -154,7 +154,7 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     }
 
     /// Replace the full key bundle exactly, preserving only the provided primary and fallback keys.
-    func replaceKeyBundle(primary: String?, alternatives: [String]) async throws {
+    func replaceKeyBundle(primary: String?, alternatives: [String]) throws {
         if let primary {
             let (normalizedPrimary, keyData) = try normalizeKeyInput(primary)
             encryptionKey = SymmetricKey(data: keyData)

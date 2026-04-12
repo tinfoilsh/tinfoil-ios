@@ -3020,7 +3020,7 @@ class ChatViewModel: ObservableObject {
                 try await EncryptionService.shared.setKey(key)
                 guard CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh) else {
                     do {
-                        try await EncryptionService.shared.replaceKeyBundle(
+                        try EncryptionService.shared.replaceKeyBundle(
                             primary: previousKeys.primary,
                             alternatives: previousKeys.alternatives
                         )
