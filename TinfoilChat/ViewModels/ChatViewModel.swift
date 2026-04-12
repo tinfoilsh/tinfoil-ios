@@ -3009,7 +3009,6 @@ class ChatViewModel: ObservableObject {
         mode: CloudKeyActivationMode = .explicitStartFresh
     ) async throws {
         do {
-            let oldKey = EncryptionService.shared.getKey()
             let previousKeys = EncryptionService.shared.getAllKeys()
 
             switch mode {
@@ -3040,21 +3039,6 @@ class ChatViewModel: ObservableObject {
             await ProfileManager.shared.retryDecryptionWithNewKey()
             await retryDecryptionAndReloadChats()
 
-            // If key changed, handle re-encryption
-            if mode != .addRecoveryKey && oldKey != key {
-                await MainActor.run {
-                    self.isSyncing = true
-                }
-
-                let _ = await cloudSync.reencryptAndUploadChats()
-                await performFullSync()
-
-                await MainActor.run {
-                    self.isSyncing = false
-                    self.lastSyncDate = Date()
-                }
-            }
-            
             // If this was first-time setup, initialize cloud sync and load chats
             if isFirstTimeUser {
                 await MainActor.run {

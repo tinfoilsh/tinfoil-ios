@@ -19,6 +19,17 @@ import Foundation
 struct KeyBundle: Codable {
     let primary: String
     let alternatives: [String]
+    let authorizationMode: CloudKeyAuthorizationMode?
+
+    init(
+        primary: String,
+        alternatives: [String],
+        authorizationMode: CloudKeyAuthorizationMode? = nil
+    ) {
+        self.primary = primary
+        self.alternatives = alternatives
+        self.authorizationMode = authorizationMode
+    }
 }
 
 /// A single passkey credential entry as stored in the backend JSONB array.
