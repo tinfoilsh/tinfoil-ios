@@ -124,7 +124,9 @@ class ProfileSyncService: ObservableObject {
     /// Fetch profile from cloud
     func fetchProfile() async throws -> ProfileData? {
         guard let payload = try await fetchEncryptedProfilePayload() else {
-            failedDecryptionData = nil
+            if await isAuthenticated() {
+                failedDecryptionData = nil
+            }
             return nil
         }
 
