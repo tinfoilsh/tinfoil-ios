@@ -566,9 +566,7 @@ final class PasskeyManager: ObservableObject {
 
             if await doesCurrentStateMatchBundle(bundle) {
                 setLocalSyncVersion(credentialId: cached.credentialId, version: entry.sync_version)
-                if let bundleVersion = entry.bundle_version {
-                    setLocalBundleVersion(bundleVersion)
-                }
+                setLocalBundleVersion(entry.bundle_version ?? 0)
                 return
             }
 
@@ -580,9 +578,7 @@ final class PasskeyManager: ObservableObject {
             let appliedMode = try await applyRecoveredKeyBundle(bundle)
 
             setLocalSyncVersion(credentialId: cached.credentialId, version: entry.sync_version)
-            if let bundleVersion = entry.bundle_version {
-                setLocalBundleVersion(bundleVersion)
-            }
+            setLocalBundleVersion(entry.bundle_version ?? 0)
 
             #if DEBUG
             print("[PasskeyManager] Refreshed encryption key from passkey backup (sync_version: \(entry.sync_version), mode: \(appliedMode.rawValue))")
