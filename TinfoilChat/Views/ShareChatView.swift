@@ -25,7 +25,7 @@ struct ShareChatView: View {
     private var isDark: Bool { colorScheme == .dark }
 
     private var sheetBackground: Color {
-        isDark ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground)
+        Color.sheetBackground(isDarkMode: isDark)
     }
 
     var body: some View {

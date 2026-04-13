@@ -26,14 +26,16 @@ extension Color {
     static let sidebarButtonBackgroundLight = Color.white
     static let cardSurfaceDark = Color(hex: "1C1C1E")
     static let cardSurfaceLight = Color.white
-    static let chatBackgroundDark = Color(hex: "121212")
+    static let chatBackgroundDark = backgroundPrimary
     static let chatBackgroundLight = Color.white
     static let actionButtonBackgroundDark = Color.white.opacity(0.08)
     static let actionButtonBackgroundLight = Color.black.opacity(0.05)
-    static let sidebarBackgroundDark = Color(hex: "121212")
+    static let sidebarBackgroundDark = backgroundPrimary
     static let sidebarBackgroundLight = Color.white
-    static let settingsBackgroundDark = Color(hex: "121212")
+    static let settingsBackgroundDark = backgroundPrimary
     static let settingsBackgroundLight = Color(UIColor.systemGroupedBackground)
+    static let sheetBackgroundDark = Color(hex: "161616")
+    static let sheetBackgroundLight = Color(UIColor.systemGroupedBackground)
     static let sendButtonBackgroundDark = Color.tinfoilDark
     static let sendButtonBackgroundLight = Color.white
     static let sendButtonForegroundDark = Color.white
@@ -82,6 +84,10 @@ extension Color {
 
     static func settingsBackground(for colorScheme: ColorScheme) -> Color {
         colorScheme == .dark ? settingsBackgroundDark : settingsBackgroundLight
+    }
+
+    static func sheetBackground(isDarkMode: Bool) -> Color {
+        isDarkMode ? sheetBackgroundDark : sheetBackgroundLight
     }
 
     static func thinkingBackground(isDarkMode: Bool) -> Color {

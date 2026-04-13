@@ -394,7 +394,7 @@ struct MessageView: View {
             RawContentModalView(message: message)
                 .presentationDetents([.medium, .large])
                 .iPadSheetSizing()
-                .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
+                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
         }
         .sheet(isPresented: $showSelectableText) {
             UserMessageSelectView(content: message.content)
@@ -417,13 +417,13 @@ struct MessageView: View {
             )
             .presentationDetents([.medium, .large])
             .iPadSheetSizing()
-            .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
+            .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
         }
         .sheet(isPresented: $showURLFetchSheet) {
             URLFetchSheetView(urlFetches: message.urlFetches, isDarkMode: isDarkMode)
                 .presentationDetents([.medium, .large])
                 .iPadSheetSizing()
-                .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
+                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
         }
         .sheet(isPresented: $showShareSheet) {
             if let currentChat = viewModel.currentChat {
@@ -743,7 +743,7 @@ private struct RawContentModalView: View {
     }
 
     private var sheetBackground: Color {
-        isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground)
+        Color.sheetBackground(isDarkMode: isDarkMode)
     }
 
     var body: some View {
