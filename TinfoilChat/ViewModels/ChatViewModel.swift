@@ -2468,6 +2468,16 @@ class ChatViewModel: ObservableObject {
                     let key = try await EncryptionService.shared.initialize()
                     self.encryptionKey = key
 
+                    // Ensure the current key is authorized for cloud writes.
+                    // Existing users upgrading may have a valid key but no
+                    // authorization record yet.
+                    if !CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey() {
+                        let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
+                        if validation.canWrite {
+                            _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated)
+                        }
+                    }
+
                     // Check passkey state for users who already have keys
                     await self.passkeyManager.checkPasskeyStateForExistingKey()
 
