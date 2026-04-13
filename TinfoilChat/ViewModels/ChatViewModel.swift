@@ -3006,7 +3006,7 @@ class ChatViewModel: ObservableObject {
     /// Set encryption key (for key rotation)
     func setEncryptionKey(
         _ key: String,
-        mode: CloudKeyActivationMode = .explicitStartFresh
+        mode: CloudKeyActivationMode = .recoverExisting
     ) async throws {
         do {
             let previousKeys = EncryptionService.shared.getAllKeys()
