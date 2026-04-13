@@ -112,6 +112,21 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         return (primary: loadKeyFromKeychain(), alternatives: loadKeyHistory())
     }
 
+    /// Add a decryption-only fallback key without changing the primary key.
+    func addDecryptionKey(_ keyString: String) throws {
+        let (normalizedKey, _) = try normalizeKeyInput(keyString)
+
+        if normalizedKey == loadKeyFromKeychain() {
+            return
+        }
+
+        var history = loadKeyHistory()
+        guard !history.contains(normalizedKey) else { return }
+
+        history.append(normalizedKey)
+        try saveKeyHistory(history)
+    }
+
     /// Bulk-load primary + alternative keys from an external source (e.g. passkey recovery).
     /// Sets the primary key and merges validated alternatives into key history.
     func setAllKeys(primary: String, alternatives: [String]) async throws {
@@ -136,6 +151,29 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         if addedNew {
             try saveKeyHistory(existingHistory)
         }
+    }
+
+    /// Replace the full key bundle exactly, preserving only the provided primary and fallback keys.
+    func replaceKeyBundle(primary: String?, alternatives: [String]) throws {
+        if let primary {
+            let (normalizedPrimary, keyData) = try normalizeKeyInput(primary)
+            encryptionKey = SymmetricKey(data: keyData)
+            try saveKeyToKeychain(normalizedPrimary)
+
+            let normalizedAlternatives = alternatives.compactMap { key -> String? in
+                guard key != normalizedPrimary else { return nil }
+                return try? normalizeKeyInput(key).0
+            }
+
+            var seenAlternatives = Set<String>()
+            let deduplicatedAlternatives = normalizedAlternatives.filter {
+                seenAlternatives.insert($0).inserted
+            }
+            try saveKeyHistory(deduplicatedAlternatives)
+            return
+        }
+
+        clearKey()
     }
 
     /// Remove encryption key

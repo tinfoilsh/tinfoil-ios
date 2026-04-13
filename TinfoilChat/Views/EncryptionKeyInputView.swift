@@ -10,11 +10,15 @@ import AVFoundation
 
 struct EncryptionKeyInputView: View {
     @Binding var isPresented: Bool
-    let onKeyImported: ((String) -> Void)?
+    var title: String = "Import Encryption Key"
+    var description: String = "Your encryption key secures all your chat data. You can enter it manually or scan the QR code from your other device."
+    var submitLabel: String = "Import Key"
+    let onKeyImported: ((String) async -> String?)?
     
     @State private var keyInput: String = ""
     @State private var keyError: String? = nil
     @State private var isKeyVisible: Bool = false
+    @State private var isImporting: Bool = false
     @State private var showQRScanner = false
     @FocusState private var isKeyFieldFocused: Bool
     @Environment(\.dismiss) var dismiss
@@ -26,12 +30,12 @@ struct EncryptionKeyInputView: View {
                 VStack(spacing: 20) {
                     // Title and description
                     VStack(spacing: 8) {
-                        Text(isKeyFieldFocused ? "Enter your encryption key" : "Encryption Key")
+                        Text(isKeyFieldFocused ? "Enter your encryption key" : title)
                             .font(isKeyFieldFocused ? .headline : .title2)
                             .fontWeight(.semibold)
                         
                         if !isKeyFieldFocused {
-                            Text("Your encryption key secures all your chat data. You can enter it manually or scan the QR code from your other device.")
+                            Text(description)
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -145,11 +149,19 @@ struct EncryptionKeyInputView: View {
                     
                     // Import button - always visible but repositioned when focused
                     Button(action: {
-                        if keyError == nil && !keyInput.isEmpty {
+                        if keyError == nil && !keyInput.isEmpty && !isImporting {
                             importKey()
                         }
                     }) {
-                        Text("Import Key")
+                        Group {
+                            if isImporting {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                                    .tint(.white)
+                            } else {
+                                Text(submitLabel)
+                            }
+                        }
                             .fontWeight(.semibold)
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
@@ -160,7 +172,7 @@ struct EncryptionKeyInputView: View {
                                           Color.gray.opacity(0.5) : Color.accentPrimary)
                             )
                     }
-                    .disabled(keyInput.isEmpty || keyError != nil)
+                    .disabled(keyInput.isEmpty || keyError != nil || isImporting)
                     .padding(.top, isKeyFieldFocused ? 8 : 0)
                 }
                 .padding(.horizontal, 20)
@@ -177,7 +189,7 @@ struct EncryptionKeyInputView: View {
                 }
             }
             .background(Color(UIColor.systemBackground))
-            .navigationTitle("Import Encryption Key")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -236,8 +248,21 @@ struct EncryptionKeyInputView: View {
     }
     
     private func importKey() {
-        onKeyImported?(keyInput)
-        isPresented = false
+        guard !isImporting else { return }
+        keyError = nil
+        isImporting = true
+
+        Task {
+            let errorMessage = await onKeyImported?(keyInput) ?? nil
+            await MainActor.run {
+                isImporting = false
+                if let errorMessage {
+                    keyError = errorMessage
+                } else {
+                    isPresented = false
+                }
+            }
+        }
     }
     
     private func requestCameraPermission(completion: @escaping (Bool) -> Void) {

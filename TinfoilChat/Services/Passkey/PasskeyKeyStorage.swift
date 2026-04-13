@@ -19,6 +19,17 @@ import Foundation
 struct KeyBundle: Codable {
     let primary: String
     let alternatives: [String]
+    let authorizationMode: CloudKeyAuthorizationMode?
+
+    init(
+        primary: String,
+        alternatives: [String],
+        authorizationMode: CloudKeyAuthorizationMode? = nil
+    ) {
+        self.primary = primary
+        self.alternatives = alternatives
+        self.authorizationMode = authorizationMode
+    }
 }
 
 /// A single passkey credential entry as stored in the backend JSONB array.
@@ -29,6 +40,31 @@ struct PasskeyCredentialEntry: Codable {
     let created_at: String
     let version: Int  // schema version (1 = AES-256-GCM + HKDF-SHA256 KEK)
     let sync_version: Int  // monotonic counter, incremented each time the key bundle is re-encrypted
+    let bundle_version: Int?  // logical key-bundle version shared across credential updates
+}
+
+struct PasskeyCredentialWriteOptions {
+    let expectedSyncVersion: Int?
+    let knownBundleVersion: Int?
+    let incrementBundleVersion: Bool
+    let enforceRemoteBundleVersion: Bool
+
+    init(
+        expectedSyncVersion: Int? = nil,
+        knownBundleVersion: Int? = nil,
+        incrementBundleVersion: Bool = false,
+        enforceRemoteBundleVersion: Bool = false
+    ) {
+        self.expectedSyncVersion = expectedSyncVersion
+        self.knownBundleVersion = knownBundleVersion
+        self.incrementBundleVersion = incrementBundleVersion
+        self.enforceRemoteBundleVersion = enforceRemoteBundleVersion
+    }
+}
+
+struct PasskeyCredentialSaveResult {
+    let syncVersion: Int
+    let bundleVersion: Int
 }
 
 private let currentCredentialVersion = 1
@@ -155,39 +191,68 @@ final class PasskeyKeyStorage {
 
     /// Encrypt the key bundle and upsert a credential entry, then save to backend.
     /// If a credential with the same ID already exists, it is replaced.
-    /// Returns the new sync_version of the stored entry.
+    /// Returns the stored sync and bundle versions after the save is verified.
     @discardableResult
     func storeEncryptedKeys(
         credentialId: String,
         kek: SymmetricKey,
-        keys: KeyBundle
-    ) async throws -> Int {
+        keys: KeyBundle,
+        options: PasskeyCredentialWriteOptions = PasskeyCredentialWriteOptions()
+    ) async throws -> PasskeyCredentialSaveResult {
         let encrypted = try encryptKeyBundle(kek: kek, keys: keys)
 
-        let existing = try await loadCredentials()
-        let previous = existing.first { $0.id == credentialId }
+        for _ in 0..<Constants.Passkey.credentialSaveMaxAttempts {
+            let existing = try await loadCredentials()
+            let previous = existing.first { $0.id == credentialId }
+            let remoteBundleVersion = highestBundleVersion(in: existing)
 
-        let nextSyncVersion: Int
-        if let previous {
-            nextSyncVersion = previous.sync_version + 1
-        } else {
-            nextSyncVersion = 1
+            if let expectedSyncVersion = options.expectedSyncVersion,
+               previous == nil || (previous?.sync_version ?? 0) > expectedSyncVersion {
+                throw PasskeyKeyStorageError.conflictDetected
+            }
+
+            if options.enforceRemoteBundleVersion {
+                if let knownBundleVersion = options.knownBundleVersion {
+                    if remoteBundleVersion > knownBundleVersion {
+                        throw PasskeyKeyStorageError.conflictDetected
+                    }
+                } else if remoteBundleVersion > 0 {
+                    throw PasskeyKeyStorageError.conflictDetected
+                }
+            }
+
+            let nextSyncVersion = (previous?.sync_version ?? 0) + 1
+            let baseBundleVersion = max(remoteBundleVersion, options.knownBundleVersion ?? 0)
+            let nextBundleVersion = options.incrementBundleVersion
+                ? max(baseBundleVersion + 1, 1)
+                : max(baseBundleVersion, 1)
+
+            let entry = PasskeyCredentialEntry(
+                id: credentialId,
+                encrypted_keys: encrypted.data,
+                iv: encrypted.iv,
+                created_at: previous?.created_at ?? ISO8601DateFormatter().string(from: Date()),
+                version: currentCredentialVersion,
+                sync_version: nextSyncVersion,
+                bundle_version: nextBundleVersion
+            )
+
+            var updated = existing.filter { $0.id != credentialId }
+            updated.append(entry)
+
+            try await saveCredentials(updated)
+
+            let verifiedEntries = try await loadCredentials()
+            if let verifiedEntry = verifiedEntries.first(where: { $0.id == credentialId }),
+               storedEntryMatches(verifiedEntry, expected: entry) {
+                return PasskeyCredentialSaveResult(
+                    syncVersion: nextSyncVersion,
+                    bundleVersion: nextBundleVersion
+                )
+            }
         }
 
-        let entry = PasskeyCredentialEntry(
-            id: credentialId,
-            encrypted_keys: encrypted.data,
-            iv: encrypted.iv,
-            created_at: previous?.created_at ?? ISO8601DateFormatter().string(from: Date()),
-            version: currentCredentialVersion,
-            sync_version: nextSyncVersion
-        )
-
-        var updated = existing.filter { $0.id != credentialId }
-        updated.append(entry)
-
-        try await saveCredentials(updated)
-        return nextSyncVersion
+        throw PasskeyKeyStorageError.verificationFailed
     }
 
     /// Decrypt the key bundle for a specific credential entry.
@@ -243,6 +308,22 @@ final class PasskeyKeyStorage {
             "Content-Type": "application/json"
         ]
     }
+
+    private func highestBundleVersion(in entries: [PasskeyCredentialEntry]) -> Int {
+        entries.reduce(0) { partialResult, entry in
+            max(partialResult, entry.bundle_version ?? 0)
+        }
+    }
+
+    private func storedEntryMatches(
+        _ entry: PasskeyCredentialEntry,
+        expected: PasskeyCredentialEntry
+    ) -> Bool {
+        entry.sync_version == expected.sync_version &&
+            (entry.bundle_version ?? 0) == (expected.bundle_version ?? 0) &&
+            entry.iv == expected.iv &&
+            entry.encrypted_keys == expected.encrypted_keys
+    }
 }
 
 // MARK: - Response Model
@@ -261,6 +342,8 @@ enum PasskeyKeyStorageError: LocalizedError {
     case networkError
     case apiError(statusCode: Int)
     case saveFailed
+    case verificationFailed
+    case conflictDetected
     case authenticationRequired
 
     var errorDescription: String? {
@@ -277,6 +360,10 @@ enum PasskeyKeyStorageError: LocalizedError {
             return "Backend API error (status \(statusCode))"
         case .saveFailed:
             return "Failed to save passkey credentials"
+        case .verificationFailed:
+            return "Failed to confirm that the latest passkey backup was saved."
+        case .conflictDetected:
+            return "A newer passkey backup already exists. Recover the latest backup before updating it."
         case .authenticationRequired:
             return "Authentication required for passkey operations"
         }

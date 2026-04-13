@@ -153,6 +153,10 @@ class CloudSyncService: ObservableObject {
     private let allChatsSyncStatusKey = Constants.StorageKeys.Sync.allChatsStatus
 
     private init() {}
+
+    private func canWriteToCloud() -> Bool {
+        CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey()
+    }
     
     // MARK: - Initialization
     
@@ -207,6 +211,10 @@ class CloudSyncService: ObservableObject {
             return
         }
 
+        guard canWriteToCloud() else {
+            return
+        }
+
         await uploadCoalescer.enqueue(chatId)
 
         if ensureLatestUpload {
@@ -215,6 +223,8 @@ class CloudSyncService: ObservableObject {
     }
     
     private func doBackupChat(_ chatId: String) async throws {
+        guard canWriteToCloud() else { return }
+
         // Check if chat is currently streaming
         if streamingTracker.isStreaming(chatId) {
             // Check if we already have a callback registered for this chat
@@ -266,6 +276,10 @@ class CloudSyncService: ObservableObject {
     /// Backup all unsynced chats
     func backupUnsyncedChats() async -> SyncResult {
         var result = SyncResult()
+
+        guard canWriteToCloud() else {
+            return result
+        }
         
         let unsyncedChats = await getUnsyncedChats()
         
@@ -1333,6 +1347,10 @@ class CloudSyncService: ObservableObject {
     /// Re-encrypt all local chats with new key and upload to cloud
     func reencryptAndUploadChats() async -> (reencrypted: Int, uploaded: Int, errors: [String]) {
         var result = (reencrypted: 0, uploaded: 0, errors: [String]())
+
+        guard canWriteToCloud() else {
+            return result
+        }
         
         // Get all local chats
         let allChats = await getAllChatsFromStorage()

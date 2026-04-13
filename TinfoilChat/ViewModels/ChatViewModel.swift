@@ -38,6 +38,8 @@ class ChatViewModel: ObservableObject {
     @Published var showCamera: Bool = false
     @Published var showMessageSheet: Bool = false
     @Published var showSidebarSettings: Bool = false
+    @Published var showCloudSyncOnboarding: Bool = false
+    @Published var cloudSyncOnboardingMode: CloudSyncOnboardingMode = .setup
     @Published var shouldOpenCloudSync: Bool = false
     @Published var scrollTargetMessageId: String? = nil 
     @Published var scrollTargetOffset: CGFloat = 0 
@@ -1949,8 +1951,55 @@ class ChatViewModel: ObservableObject {
         self.showVerifierSheet = false
         self.verifierView = nil
     }
+
+    /// Resume the sign-in flow after the user completes manual key setup via CloudSyncOnboardingView.
+    func resumeAfterManualKeySetup() {
+        Task {
+            do {
+                let key = try await EncryptionService.shared.initialize()
+                self.encryptionKey = key
+
+                await self.passkeyManager.checkPasskeyStateForExistingKey()
+
+                await retryDecryptionAndReloadChats()
+
+                if SettingsManager.shared.isCloudSyncEnabled {
+                    await initializeCloudSync()
+                    await ProfileManager.shared.performFullSync()
+                }
+
+                await MainActor.run {
+                    let activeList = SettingsManager.shared.isCloudSyncEnabled ? self.chats : self.localChats
+                    if activeList.isEmpty {
+                        self.createNewChat()
+                    } else {
+                        self.ensureBlankChatAtTop()
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.showEncryptionSetup = true
+                }
+            }
+        }
+    }
     
     // MARK: - Private Methods
+
+    private func retryDecryptionAndReloadChats() async {
+        let decryptedCount = await cloudSync.retryDecryptionWithNewKey(onProgress: nil)
+        guard decryptedCount > 0 else { return }
+
+        let result = await loadFirstPageOfChats(userId: self.currentUserId, filter: \.isCloudDisplayable)
+        await MainActor.run {
+            self.chats = result.chats
+            if let currentId = self.currentChat?.id,
+               let refreshed = result.chats.first(where: { $0.id == currentId }) {
+                self.currentChat = refreshed
+            }
+            normalizeChatsArray()
+        }
+    }
 
     private func endStreamingAndBackup(chatId: String) {
         guard authManager?.isAuthenticated == true else { return }
@@ -2238,6 +2287,7 @@ class ChatViewModel: ObservableObject {
         // Clear sync caches so stale state doesn't leak into the next session
         cloudSync.clearSyncStatus()
         DeletedChatsTracker.shared.clear()
+        CloudKeyAuthorizationStore.shared.clearAuthorization(userId: currentUserId)
 
         // Reset to the default model when signing out
         let allModels = AppConfig.shared.filteredModelTypes()
@@ -2392,7 +2442,21 @@ class ChatViewModel: ObservableObject {
                         switch passkeyResult {
                         case .success, .newUserSetupDone:
                             break
-                        case .newUserSetupCancelled, .recoveryFailed:
+                        case .manualSetupRequired:
+                            await MainActor.run {
+                                self.cloudSyncOnboardingMode = .setup
+                                self.showCloudSyncOnboarding = true
+                                self.isSignInInProgress = false
+                            }
+                            return
+                        case .manualRecoveryRequired:
+                            await MainActor.run {
+                                self.cloudSyncOnboardingMode = .recovery
+                                self.showCloudSyncOnboarding = true
+                                self.isSignInInProgress = false
+                            }
+                            return
+                        case .recoveryFailed:
                             await MainActor.run {
                                 self.isSignInInProgress = false
                             }
@@ -2940,53 +3004,41 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Set encryption key (for key rotation)
-    func setEncryptionKey(_ key: String) async throws {
+    func setEncryptionKey(
+        _ key: String,
+        mode: CloudKeyActivationMode = .recoverExisting
+    ) async throws {
         do {
-            let oldKey = EncryptionService.shared.getKey()
-            try await EncryptionService.shared.setKey(key)
-            
+            let previousKeys = EncryptionService.shared.getAllKeys()
+
+            switch mode {
+            case .addRecoveryKey:
+                try EncryptionService.shared.addDecryptionKey(key)
+            case .recoverExisting:
+                _ = try await CloudKeyAuthorizationStore.shared.applyPrimaryKeyWithValidation(key)
+            case .explicitStartFresh:
+                try await EncryptionService.shared.setKey(key)
+                guard CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh) else {
+                    do {
+                        try EncryptionService.shared.replaceKeyBundle(
+                            primary: previousKeys.primary,
+                            alternatives: previousKeys.alternatives
+                        )
+                    } catch {
+                        EncryptionService.shared.clearKey()
+                    }
+                    throw CloudKeyAuthorizationError.authorizationUnavailable
+                }
+            }
+
             await MainActor.run {
-                self.encryptionKey = key
+                self.encryptionKey = EncryptionService.shared.getKey()
                 self.showEncryptionSetup = false
             }
-            
-            // If key changed, handle re-encryption
-            if oldKey != key {
-                
-                // Show syncing indicator while processing
-                await MainActor.run {
-                    self.isSyncing = true
-                }
-                
-                // Retry decryption with new key
-                let decryptedCount = await cloudSync.retryDecryptionWithNewKey { current, total in
-                    Task { @MainActor in
-                        // Could add progress tracking here if needed
-                    }
-                }
-                
-                // Reload chats immediately after decryption to show decrypted chats
-                if decryptedCount > 0 {
-                    let result = await loadFirstPageOfChats(userId: self.currentUserId, filter: \.isCloudDisplayable)
-                    await MainActor.run {
-                        self.chats = result.chats
-                        normalizeChatsArray()
-                    }
-                }
-                
-                // Re-encrypt and upload all chats in background
-                let _ = await cloudSync.reencryptAndUploadChats()
-                
-                // Perform full sync
-                await performFullSync()
-                
-                // Hide syncing indicator
-                await MainActor.run {
-                    self.isSyncing = false
-                    self.lastSyncDate = Date()
-                }
-            }
-            
+
+            await ProfileManager.shared.retryDecryptionWithNewKey()
+            await retryDecryptionAndReloadChats()
+
             // If this was first-time setup, initialize cloud sync and load chats
             if isFirstTimeUser {
                 await MainActor.run {
@@ -3018,6 +3070,10 @@ class ChatViewModel: ObservableObject {
             }
             throw error  // Re-throw to let caller handle it
         }
+    }
+
+    func addRecoveryKey(_ key: String) async throws {
+        try await setEncryptionKey(key, mode: .addRecoveryKey)
     }
     
     /// Retry decryption of failed chats with the current key
