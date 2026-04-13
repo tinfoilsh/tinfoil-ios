@@ -178,6 +178,8 @@ enum Constants {
             static let localOnlyModeEnabled = "tinfoil-settings-local-only-mode-enabled"
             static let hasLaunchedBefore = "tinfoil-settings-has-launched-before"
             static let hasSeenPasskeyIntro = "tinfoil-settings-has-seen-passkey-intro"
+            static let appLaunchCount = "tinfoil-settings-app-launch-count"
+            static let hasSeenReviewPrompt = "tinfoil-settings-has-seen-review-prompt"
         }
 
         // MARK: - User Personalization Preferences
@@ -227,6 +229,10 @@ enum Constants {
                 "tinfoil-secret-cloud-key-authorization-\(userId)"
             }
         }
+    }
+
+    enum AppReview {
+        static let minimumLaunchCount = 5
     }
 
     enum RateLimit {

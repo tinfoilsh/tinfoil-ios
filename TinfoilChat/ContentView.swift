@@ -7,6 +7,7 @@
 
 
 import SwiftUI
+import StoreKit
 import ClerkKit
 import AVFoundation
 
@@ -17,6 +18,7 @@ struct ContentView: View {
     @ObservedObject private var passkeyManager = PasskeyManager.shared
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.scenePhase) var scenePhase
+    @Environment(\.requestReview) private var requestReview
     @State private var showKeyInputModal = false
     @State private var lastSyncTime: Date?
     
@@ -46,6 +48,7 @@ struct ContentView: View {
         .onAppear {
             chatViewModel.authManager = authManager
             authManager.setChatViewModel(chatViewModel)
+            requestAppReviewIfEligible()
 
             // Initialize encryption with existing key only (no auto-creation)
             Task {
@@ -174,6 +177,17 @@ struct ContentView: View {
         }
     }
 
+    private func requestAppReviewIfEligible() {
+        let defaults = UserDefaults.standard
+        let launchCount = defaults.integer(forKey: Constants.StorageKeys.Settings.appLaunchCount) + 1
+        defaults.set(launchCount, forKey: Constants.StorageKeys.Settings.appLaunchCount)
+
+        guard launchCount > Constants.AppReview.minimumLaunchCount else { return }
+        guard !defaults.bool(forKey: Constants.StorageKeys.Settings.hasSeenReviewPrompt) else { return }
+
+        defaults.set(true, forKey: Constants.StorageKeys.Settings.hasSeenReviewPrompt)
+        requestReview()
+    }
 }
 
 #Preview {
