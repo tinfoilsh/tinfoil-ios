@@ -134,18 +134,32 @@ struct VerifierView: View {
                     .foregroundColor(Color.tinfoilAccentLight)
 
                 HStack(spacing: 6) {
+                    let isSEV = doc.enclaveMeasurement.measurement.type.lowercased().contains("sev")
+                    let isTDX = doc.enclaveMeasurement.measurement.type.lowercased().contains("tdx")
+
                     Text("Hardware attested by")
                         .font(.system(size: 14))
                         .foregroundColor(.secondary)
 
-                    Image("amd-icon")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 12)
+                    if isSEV {
+                        Image("amd-icon")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 12)
+                    }
 
-                    Text("and")
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
+                    if isTDX {
+                        Image("intel-icon")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 12)
+                    }
+
+                    if isSEV || isTDX {
+                        Text("and")
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                    }
 
                     Image("nvidia-icon")
                         .resizable()
