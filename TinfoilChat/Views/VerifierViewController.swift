@@ -56,12 +56,12 @@ struct VerifierView: View {
             VStack(spacing: 16) {
                 if let doc = chatViewModel.verificationDocument {
                     statusBanner(for: doc)
-                    tabCards(for: doc)
+                    tabSelector(for: doc)
 
                     tabHeader(for: doc)
 
                     ScrollView {
-                        tabCards(for: doc, tab: selectedTab)
+                        tabContent(for: doc, tab: selectedTab)
                             .padding(.bottom, 32)
                     }
                 } else {
@@ -186,9 +186,9 @@ struct VerifierView: View {
         )
     }
 
-    // MARK: - Tab Cards
+    // MARK: - Tab Selector
 
-    private func tabCards(for doc: VerificationDocument) -> some View {
+    private func tabSelector(for doc: VerificationDocument) -> some View {
         HStack(spacing: 0) {
             ForEach(VerificationTab.allCases) { tab in
                 let status = tabStatus(tab, doc: doc)
@@ -285,10 +285,10 @@ struct VerifierView: View {
         }
     }
 
-    // MARK: - Tab Cards (scrollable)
+    // MARK: - Tab Content
 
     @ViewBuilder
-    private func tabCards(for doc: VerificationDocument, tab: VerificationTab) -> some View {
+    private func tabContent(for doc: VerificationDocument, tab: VerificationTab) -> some View {
         switch tab {
         case .encryption:
             EncryptionTabCards(document: doc, isDarkMode: isDarkMode)
