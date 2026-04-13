@@ -51,10 +51,6 @@ struct VerifierView: View {
 
     private var isDarkMode: Bool { colorScheme == .dark }
 
-    private var measurementType: String {
-        chatViewModel.verificationDocument?.enclaveMeasurement.measurement.type.lowercased() ?? ""
-    }
-
     var body: some View {
         NavigationView {
             VStack(spacing: 16) {
@@ -653,13 +649,4 @@ private struct MeasurementField: View {
     }
 }
 
-// MARK: - Helpers
 
-private func tabContentBackground(isDarkMode: Bool) -> some View {
-    RoundedRectangle(cornerRadius: 14)
-        .fill(isDarkMode ? Color(.systemGray6).opacity(0.3) : Color(.systemGray6).opacity(0.5))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(isDarkMode ? Color(.systemGray4).opacity(0.3) : Color(.systemGray4).opacity(0.2), lineWidth: 0.5)
-        )
-}
