@@ -9,6 +9,11 @@ import Foundation
 
 /// Application-wide constants
 enum Constants {
+    enum Avatar {
+        static let primaryColorHex = "004444"
+        static let secondaryColorHex = "F9F8F6"
+    }
+
     enum Clerk {
         static let publishableKey = "pk_live_Y2xlcmsudGluZm9pbC5zaCQ"
     }

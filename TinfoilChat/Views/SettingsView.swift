@@ -284,29 +284,24 @@ struct SettingsView: View {
     
     @ViewBuilder
     private var userAvatar: some View {
-        if let user = clerk.user, !user.imageUrl.isEmpty {
+        if let user = clerk.user, user.hasImage, !user.imageUrl.isEmpty {
             AsyncImage(url: URL(string: user.imageUrl)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
-                Image(systemName: "person.circle.fill")
-                    .resizable()
-                    .foregroundColor(.secondary)
+                PixelAvatarView(name: user.id, size: 40)
             }
         } else if let userData = authManager.localUserData,
+                  (userData["hasImage"] as? Bool) == true,
                   let imageUrlString = userData["imageUrl"] as? String,
                   !imageUrlString.isEmpty,
                   let url = URL(string: imageUrlString) {
             AsyncImage(url: url) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
-                Image(systemName: "person.circle.fill")
-                    .resizable()
-                    .foregroundColor(.secondary)
+                PixelAvatarView(name: (userData["id"] as? String) ?? "user", size: 40)
             }
         } else {
-            Image(systemName: "person.circle.fill")
-                .resizable()
-                .foregroundColor(.secondary)
+            PixelAvatarView(name: clerk.user?.id ?? (authManager.localUserData?["id"] as? String) ?? "user", size: 40)
         }
     }
     
