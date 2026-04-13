@@ -39,25 +39,21 @@ func authButton(icon: String? = nil, systemIcon: String? = nil, text: String, ac
   .shadow(color: Color.black.opacity(0.15), radius: 6, x: 0, y: 3)
 }
 
-/// User profile image view with fallback to system icon
+/// User profile image view with fallback to pixel avatar
 @ViewBuilder
-func userProfileImage(imageURL: URL?) -> some View {
-  if let url = imageURL, !url.absoluteString.isEmpty {
+func userProfileImage(imageURL: URL?, userId: String? = nil, hasImage: Bool = true) -> some View {
+  if hasImage, let url = imageURL, !url.absoluteString.isEmpty {
     AsyncImage(url: url) { image in
       image
         .resizable()
         .aspectRatio(contentMode: .fill)
     } placeholder: {
-      Image(systemName: "person.circle.fill")
-        .resizable()
+      PixelAvatarView(name: userId ?? "user", size: 80)
     }
     .frame(width: 80, height: 80)
     .clipShape(Circle())
   } else {
-    Image(systemName: "person.circle.fill")
-      .resizable()
-      .frame(width: 80, height: 80)
-      .foregroundColor(.white)
+    PixelAvatarView(name: userId ?? "user", size: 80)
   }
 }
 

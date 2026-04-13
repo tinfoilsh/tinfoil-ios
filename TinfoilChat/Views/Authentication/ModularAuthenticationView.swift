@@ -140,7 +140,7 @@ struct ModularAuthenticationView: View {
     VStack(spacing: 24) {
       // User profile information at the top
       VStack(spacing: 16) {
-        userProfileImage(imageURL: URL(string: clerk.user!.imageUrl))
+        userProfileImage(imageURL: URL(string: clerk.user!.imageUrl), userId: clerk.user!.id, hasImage: clerk.user!.hasImage)
           .frame(width: 80, height: 80)
         
         Text("\(clerk.user!.firstName ?? "") \(clerk.user!.lastName ?? "")")
@@ -288,7 +288,7 @@ struct ModularAuthenticationView: View {
   @ViewBuilder
   private func accountInfoView(user: User) -> some View {
     VStack(spacing: 16) {
-      userProfileImage(imageURL: URL(string: user.imageUrl))
+      userProfileImage(imageURL: URL(string: user.imageUrl), userId: user.id, hasImage: user.hasImage)
       
       Text("\(user.firstName ?? "") \(user.lastName ?? "")")
         .font(.title2)
@@ -306,7 +306,7 @@ struct ModularAuthenticationView: View {
     VStack(spacing: 16) {
       if let userData = authManager.localUserData {
         // User profile information at the top
-        userProfileImage(imageURL: (userData["imageUrl"] as? String).flatMap { URL(string: $0) })
+        userProfileImage(imageURL: (userData["imageUrl"] as? String).flatMap { URL(string: $0) }, userId: userData["id"] as? String, hasImage: (userData["hasImage"] as? Bool) ?? false)
         
         Text((userData["fullName"] as? String) ?? (userData["name"] as? String) ?? "User")
           .font(.title2)

@@ -119,7 +119,8 @@ class AuthManager: ObservableObject {
             "email": user.primaryEmailAddress?.emailAddress ?? "",
             "name": user.firstName ?? "",
             "fullName": "\(user.firstName ?? "") \(user.lastName ?? "")",
-            "imageUrl": user.imageUrl
+            "imageUrl": user.imageUrl,
+            "hasImage": user.hasImage
         ]
         
         // Store subscription status if it exists
