@@ -30,7 +30,7 @@ struct PasskeyRecoveryChoiceView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Spacer().frame(height: 24)
+            Spacer().frame(height: 8)
 
             ZStack {
                 Circle()
@@ -127,7 +127,7 @@ struct PasskeyRecoveryChoiceView: View {
 
             Spacer().frame(height: 24)
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.height(520)])
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(isLoading)
     }
