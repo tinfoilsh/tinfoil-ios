@@ -3012,6 +3012,11 @@ class ChatViewModel: ObservableObject {
     func getCurrentEncryptionKey() -> String? {
         return encryptionKey
     }
+
+    /// Reload the cached encryption key reference from the keychain.
+    func reloadEncryptionKey() {
+        encryptionKey = EncryptionService.shared.getKey()
+    }
     
     /// Set encryption key (for key rotation)
     func setEncryptionKey(
