@@ -21,7 +21,9 @@ struct CloudSyncSettingsView: View {
     @ObservedObject private var settings = SettingsManager.shared
     
     @State private var showKeyInput: Bool = false
+    @State private var showReplacePrimaryOptions: Bool = false
     @State private var keyInputMode: KeyInputMode = .replacePrimary
+    @State private var replacePrimaryMode: CloudKeyActivationMode = .recoverExisting
     @State private var copiedToClipboard: Bool = false
     
     var body: some View {
@@ -128,8 +130,7 @@ struct CloudSyncSettingsView: View {
                     }
                     
                     Button(action: {
-                        keyInputMode = .replacePrimary
-                        showKeyInput = true
+                        showReplacePrimaryOptions = true
                     }) {
                         Label("Replace Primary Key", systemImage: "key.fill")
                             .foregroundColor(.primary)
@@ -145,7 +146,7 @@ struct CloudSyncSettingsView: View {
             } header: {
                 Text("Encryption")
             } footer: {
-                    Text("Recovery keys can decrypt older data without changing your current primary key. Replacing the primary key starts a new encrypted cloud history for future uploads.")
+                    Text("Recovery keys can decrypt older data without changing your current primary key. Use Recover Existing to verify a replacement key against your cloud data, or Start Fresh to only use it for future uploads on this device.")
                         .font(.caption)
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
@@ -206,20 +207,37 @@ struct CloudSyncSettingsView: View {
             UINavigationBar.appearance().compactAppearance = appearance
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
+        .alert("Replace Primary Key", isPresented: $showReplacePrimaryOptions) {
+            Button("Recover Existing Data") {
+                replacePrimaryMode = .recoverExisting
+                keyInputMode = .replacePrimary
+                DispatchQueue.main.async {
+                    showKeyInput = true
+                }
+            }
+            Button("Start Fresh") {
+                replacePrimaryMode = .explicitStartFresh
+                keyInputMode = .replacePrimary
+                DispatchQueue.main.async {
+                    showKeyInput = true
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Choose how this key should behave. Recover Existing verifies it against your existing cloud data. Start Fresh only uses it for future cloud writes on this device.")
+        }
             .sheet(isPresented: $showKeyInput) {
                 EncryptionKeyInputView(
                     isPresented: $showKeyInput,
-                    title: keyInputMode == .addRecovery ? "Add Recovery Key" : "Replace Primary Key",
-                    description: keyInputMode == .addRecovery
-                        ? "Add a fallback key that can decrypt older cloud data without changing your current primary key."
-                        : "Replacing the primary key will use this key for future cloud writes on this device.",
-                    submitLabel: keyInputMode == .addRecovery ? "Add Recovery Key" : "Replace Primary Key"
+                    title: keyInputTitle,
+                    description: keyInputDescription,
+                    submitLabel: keyInputSubmitLabel
                 ) { importedKey in
                     do {
                         if keyInputMode == .addRecovery {
                             try await viewModel.addRecoveryKey(importedKey)
                         } else {
-                            try await viewModel.setEncryptionKey(importedKey, mode: .explicitStartFresh)
+                            try await viewModel.setEncryptionKey(importedKey, mode: replacePrimaryMode)
                         }
                         return nil
                     } catch {
@@ -235,5 +253,38 @@ struct CloudSyncSettingsView: View {
         let prefix = String(key.prefix(visibleChars))
         let masked = String(repeating: "•", count: key.count - visibleChars)
         return "\(prefix)\(masked)"
+    }
+
+    private var keyInputTitle: String {
+        switch keyInputMode {
+        case .addRecovery:
+            return "Add Recovery Key"
+        case .replacePrimary:
+            return replacePrimaryMode == .recoverExisting
+                ? "Recover Existing Key"
+                : "Start Fresh with New Primary"
+        }
+    }
+
+    private var keyInputDescription: String {
+        switch keyInputMode {
+        case .addRecovery:
+            return "Add a fallback key that can decrypt older cloud data without changing your current primary key."
+        case .replacePrimary:
+            return replacePrimaryMode == .recoverExisting
+                ? "Verify this key against your existing cloud data before future cloud writes resume on this device."
+                : "Use this key for future cloud writes on this device without validating it against older cloud data."
+        }
+    }
+
+    private var keyInputSubmitLabel: String {
+        switch keyInputMode {
+        case .addRecovery:
+            return "Add Recovery Key"
+        case .replacePrimary:
+            return replacePrimaryMode == .recoverExisting
+                ? "Recover Existing Data"
+                : "Start Fresh"
+        }
     }
 }
