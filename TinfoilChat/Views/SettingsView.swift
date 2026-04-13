@@ -194,7 +194,7 @@ class SettingsManager: ObservableObject {
         maxMessages = Constants.Context.defaultMaxMessages
         isUsingCustomPrompt = false
         customSystemPrompt = ""
-        webSearchEnabled = false
+        webSearchEnabled = true
         isCloudSyncEnabled = false
         isLocalOnlyModeEnabled = false
     }
