@@ -144,7 +144,7 @@ struct MessageInputView: View {
                 )
                 .environmentObject(authManager)
                 .presentationDetents([.height(280)])
-                .presentationBackground(isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground))
+                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
             }
             .sheet(isPresented: $viewModel.showRateLimitPaywall) {
                 PaywallView(displayCloseButton: true)
@@ -522,7 +522,7 @@ struct AddToSheetView: View {
             }
             .padding(.top, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background((isDarkMode ? Color(hex: "161616") : Color(UIColor.systemGroupedBackground)).ignoresSafeArea())
+            .background(Color.sheetBackground(isDarkMode: isDarkMode).ignoresSafeArea())
             .navigationTitle("Add to Chat")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
