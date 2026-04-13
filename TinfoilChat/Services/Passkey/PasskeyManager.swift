@@ -66,6 +66,7 @@ final class PasskeyManager: ObservableObject {
         syncCheckTask = nil
         passkeyService.clearCachedPrfResult()
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Secret.passkeySyncVersion)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Secret.passkeyBundleVersion)
     }
 
     // MARK: - Recovery Flow
@@ -105,6 +106,7 @@ final class PasskeyManager: ObservableObject {
             // Record sync_version so the periodic check has a baseline
             if let entry = credentials.first(where: { $0.id == recovery.credentialId }) {
                 setLocalSyncVersion(credentialId: recovery.credentialId, version: entry.sync_version)
+                setLocalBundleVersion(entry.bundle_version ?? 0)
             }
 
             activatePasskey()
@@ -137,12 +139,18 @@ final class PasskeyManager: ObservableObject {
                 authorizationMode: authorizationMode
             )
 
-            let syncVersion = try await keyStorage.storeEncryptedKeys(
+            let saveResult = try await keyStorage.storeEncryptedKeys(
                 credentialId: credentialId,
                 kek: kek,
-                keys: bundle
+                keys: bundle,
+                options: PasskeyCredentialWriteOptions(
+                    knownBundleVersion: getLocalBundleVersion(),
+                    incrementBundleVersion: authorizationMode == .explicitStartFresh,
+                    enforceRemoteBundleVersion: authorizationMode != .explicitStartFresh
+                )
             )
-            setLocalSyncVersion(credentialId: credentialId, version: syncVersion)
+            setLocalSyncVersion(credentialId: credentialId, version: saveResult.syncVersion)
+            setLocalBundleVersion(saveResult.bundleVersion)
 
             // Passkey created and stored — persist the key
             try await EncryptionService.shared.setKey(newKey)
@@ -180,6 +188,7 @@ final class PasskeyManager: ObservableObject {
 
             if let entry = entries.first(where: { $0.id == recovery.credentialId }) {
                 setLocalSyncVersion(credentialId: recovery.credentialId, version: entry.sync_version)
+                setLocalBundleVersion(entry.bundle_version ?? 0)
             }
 
             activatePasskey()
@@ -277,12 +286,18 @@ final class PasskeyManager: ObservableObject {
                 authorizationMode: CloudKeyAuthorizationStore.shared.currentMode() ?? .validated
             )
 
-            let syncVersion = try await keyStorage.storeEncryptedKeys(
+            let saveResult = try await keyStorage.storeEncryptedKeys(
                 credentialId: credentialId,
                 kek: kek,
-                keys: bundle
+                keys: bundle,
+                options: PasskeyCredentialWriteOptions(
+                    knownBundleVersion: getLocalBundleVersion(),
+                    incrementBundleVersion: false,
+                    enforceRemoteBundleVersion: true
+                )
             )
-            setLocalSyncVersion(credentialId: credentialId, version: syncVersion)
+            setLocalSyncVersion(credentialId: credentialId, version: saveResult.syncVersion)
+            setLocalBundleVersion(saveResult.bundleVersion)
 
             // Mark intro as seen in Clerk unsafeMetadata
             await markPasskeyIntroSeen()
@@ -338,12 +353,40 @@ final class PasskeyManager: ObservableObject {
                 authorizationMode: CloudKeyAuthorizationStore.shared.currentMode() ?? .validated
             )
 
-            let syncVersion = try await keyStorage.storeEncryptedKeys(
+            var localSyncVersion = getLocalSyncVersion(credentialId: result.credentialId)
+            var localBundleVersion = getLocalBundleVersion()
+
+            if (localSyncVersion == nil || localBundleVersion == nil),
+               let currentEntry = entries.first(where: { $0.id == result.credentialId }) {
+                let currentRemoteBundle = try keyStorage.decryptKeyBundle(
+                    kek: kek,
+                    iv: currentEntry.iv,
+                    data: currentEntry.encrypted_keys
+                )
+
+                if await doesCurrentStateMatchBundle(currentRemoteBundle) {
+                    if localSyncVersion == nil {
+                        localSyncVersion = currentEntry.sync_version
+                    }
+                    if localBundleVersion == nil {
+                        localBundleVersion = currentEntry.bundle_version ?? 0
+                    }
+                }
+            }
+
+            let saveResult = try await keyStorage.storeEncryptedKeys(
                 credentialId: result.credentialId,
                 kek: kek,
-                keys: bundle
+                keys: bundle,
+                options: PasskeyCredentialWriteOptions(
+                    expectedSyncVersion: localSyncVersion,
+                    knownBundleVersion: localBundleVersion,
+                    incrementBundleVersion: true,
+                    enforceRemoteBundleVersion: true
+                )
             )
-            setLocalSyncVersion(credentialId: result.credentialId, version: syncVersion)
+            setLocalSyncVersion(credentialId: result.credentialId, version: saveResult.syncVersion)
+            setLocalBundleVersion(saveResult.bundleVersion)
         } catch {
             // Non-fatal — passkey backup is stale but user can re-backup from Settings
         }
@@ -451,6 +494,37 @@ final class PasskeyManager: ObservableObject {
         UserDefaults.standard.set(dict, forKey: Constants.StorageKeys.Secret.passkeySyncVersion)
     }
 
+    private func getLocalBundleVersion() -> Int? {
+        let value = UserDefaults.standard.object(forKey: Constants.StorageKeys.Secret.passkeyBundleVersion)
+        return value as? Int
+    }
+
+    private func setLocalBundleVersion(_ version: Int) {
+        UserDefaults.standard.set(version, forKey: Constants.StorageKeys.Secret.passkeyBundleVersion)
+    }
+
+    private func doesCurrentStateMatchBundle(_ bundle: KeyBundle) async -> Bool {
+        let currentKeys = EncryptionService.shared.getAllKeys()
+        guard currentKeys.primary == bundle.primary else {
+            return false
+        }
+
+        let normalizeAlternatives: (String, [String]) -> [String] = { primary, alternatives in
+            alternatives
+                .filter { $0 != primary }
+                .sorted()
+        }
+
+        let currentAlternatives = normalizeAlternatives(bundle.primary, currentKeys.alternatives)
+        let bundleAlternatives = normalizeAlternatives(bundle.primary, bundle.alternatives)
+        guard currentAlternatives == bundleAlternatives else {
+            return false
+        }
+
+        return CloudKeyAuthorizationStore.shared.currentMode() ==
+            (bundle.authorizationMode ?? .validated)
+    }
+
     // MARK: - Periodic Sync Check
 
     /// Start a repeating timer that checks whether another device has updated
@@ -471,7 +545,7 @@ final class PasskeyManager: ObservableObject {
     /// Uses the cached PRF to avoid biometric prompts. If no cached PRF
     /// is available, the check is skipped silently.
     private func refreshKeyFromPasskeyBackup() async {
-        var pendingSyncVersion: (credentialId: String, version: Int)?
+        var pendingRemoteVersion: (credentialId: String, syncVersion: Int, bundleVersion: Int)?
 
         do {
             guard let cached = passkeyService.getCachedPrfResult() else { return }
@@ -490,17 +564,25 @@ final class PasskeyManager: ObservableObject {
                 data: entry.encrypted_keys
             )
 
-            let localKey = EncryptionService.shared.getAllKeys().primary
-            if bundle.primary == localKey {
-                // Key matches — just record the version
+            if await doesCurrentStateMatchBundle(bundle) {
                 setLocalSyncVersion(credentialId: cached.credentialId, version: entry.sync_version)
+                if let bundleVersion = entry.bundle_version {
+                    setLocalBundleVersion(bundleVersion)
+                }
                 return
             }
 
-            pendingSyncVersion = (credentialId: cached.credentialId, version: entry.sync_version)
+            pendingRemoteVersion = (
+                credentialId: cached.credentialId,
+                syncVersion: entry.sync_version,
+                bundleVersion: entry.bundle_version ?? 0
+            )
             let appliedMode = try await applyRecoveredKeyBundle(bundle)
 
             setLocalSyncVersion(credentialId: cached.credentialId, version: entry.sync_version)
+            if let bundleVersion = entry.bundle_version {
+                setLocalBundleVersion(bundleVersion)
+            }
 
             #if DEBUG
             print("[PasskeyManager] Refreshed encryption key from passkey backup (sync_version: \(entry.sync_version), mode: \(appliedMode.rawValue))")
@@ -509,11 +591,12 @@ final class PasskeyManager: ObservableObject {
             onKeyRefreshedFromBackup?()
         } catch {
             if error is CloudKeyAuthorizationError,
-               let pendingSyncVersion {
+               let pendingRemoteVersion {
                 setLocalSyncVersion(
-                    credentialId: pendingSyncVersion.credentialId,
-                    version: pendingSyncVersion.version
+                    credentialId: pendingRemoteVersion.credentialId,
+                    version: pendingRemoteVersion.syncVersion
                 )
+                setLocalBundleVersion(pendingRemoteVersion.bundleVersion)
             }
             // Non-fatal — will retry on next interval
         }

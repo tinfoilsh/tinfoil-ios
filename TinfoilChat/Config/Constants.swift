@@ -151,6 +151,7 @@ enum Constants {
         static let kekByteCount = 32
         static let prfCacheKeychainAccount = "sh.tinfoil.passkey-prf-cache"
         static let syncCheckIntervalSeconds: TimeInterval = 30
+        static let credentialSaveMaxAttempts = 3
     }
 
     // MARK: - Centralized UserDefaults Storage Keys
@@ -220,6 +221,7 @@ enum Constants {
             static let encryptionKeySetUp = "tinfoil-secret-encryption-key-set-up"
             static let passkeyBackedUp = "tinfoil-secret-passkey-backed-up"
             static let passkeySyncVersion = "tinfoil-secret-passkey-sync-version"
+            static let passkeyBundleVersion = "tinfoil-secret-passkey-bundle-version"
 
             static func cloudKeyAuthorization(userId: String) -> String {
                 "tinfoil-secret-cloud-key-authorization-\(userId)"
