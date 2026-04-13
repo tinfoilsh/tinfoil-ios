@@ -439,6 +439,7 @@ struct SettingsView: View {
                             if newValue {
                                 if EncryptionService.shared.hasEncryptionKey() {
                                     settings.isCloudSyncEnabled = true
+                                    chatViewModel.reloadEncryptionKey()
                                     Task {
                                         await chatViewModel.performFullSync()
                                     }
