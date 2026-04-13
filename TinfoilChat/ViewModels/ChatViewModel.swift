@@ -2471,10 +2471,10 @@ class ChatViewModel: ObservableObject {
                     // Ensure the current key is authorized for cloud writes.
                     // Existing users upgrading may have a valid key but no
                     // authorization record yet.
-                    if !CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey() {
+                    if !CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey(userId: userId) {
                         let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
                         if validation.canWrite {
-                            _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated)
+                            _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated, userId: userId)
                         }
                     }
 
