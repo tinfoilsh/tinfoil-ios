@@ -185,6 +185,7 @@ enum Constants {
             static let hasSeenPasskeyIntro = "tinfoil-settings-has-seen-passkey-intro"
             static let appLaunchCount = "tinfoil-settings-app-launch-count"
             static let hasSeenReviewPrompt = "tinfoil-settings-has-seen-review-prompt"
+            static let hasCompletedOnboarding = "tinfoil-settings-has-completed-onboarding"
         }
 
         // MARK: - User Personalization Preferences
