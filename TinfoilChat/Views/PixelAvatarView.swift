@@ -68,6 +68,6 @@ struct PixelAvatarView: View {
         for char in name.unicodeScalars {
             hash = ((hash &<< 5) &- hash) &+ Int32(char.value)
         }
-        return Int(abs(hash))
+        return Int(hash.magnitude)
     }
 }
