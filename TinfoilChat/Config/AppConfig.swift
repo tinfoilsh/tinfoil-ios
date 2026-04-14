@@ -11,16 +11,12 @@ import Foundation
 struct AppModelConfig: Codable {
     let modelName: String
     let image: String
-    let repo: String
-    let endpoint: String
     let name: String
     let nameShort: String
     let description: String
     let details: String
     let parameters: String
     let contextWindow: String
-    let recommendedUse: String
-    let supportedLanguages: String
     let type: String
     let chat: Bool?
     let paid: Bool
@@ -93,6 +89,7 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
     var type: String { appConfig.type }
     var isMultimodal: Bool { appConfig.multimodal }
     var isChat: Bool { appConfig.chat ?? (appConfig.type == "chat") }
+
 
     // For Hashable conformance
     func hash(into hasher: inout Hasher) {
