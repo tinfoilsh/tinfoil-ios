@@ -171,14 +171,14 @@ private struct OnboardingPrivacyPage: View {
                 VStack(spacing: 12) {
                     explanationRow(
                         icon: "eye.slash.fill",
-                        title: "Zero Access",
-                        description: "Your messages are encrypted directly to AI models inside secure hardware. Tinfoil cannot read them."
+                        title: "Sealed Processing",
+                        description: "Your messages are end-to-end encrypted to AI models running inside secure hardware. Tinfoil cannot read them."
                     )
 
                     explanationRow(
                         icon: "checkmark.shield.fill",
                         title: "Verifiable Privacy",
-                        description: "Our infrastructure runs on confidential computing GPUs with hardware attestation you can verify."
+                        description: "Our infrastructure runs on confidential computing GPUs with hardware attestation and automatic client-side verification."
                     )
 
                     explanationRow(
@@ -408,7 +408,7 @@ private struct OnboardingEncryptionPage: View {
                         .font(.title)
                         .fontWeight(.bold)
 
-                    Text("Every chat is encrypted with a key that only exists on your device. Nobody else can read your messages.")
+                    Text("Every chat is encrypted with a key that only exists on your device. Nobody but you can read your conversations.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
@@ -420,7 +420,7 @@ private struct OnboardingEncryptionPage: View {
                         encryptionDetailRow(
                             icon: "key.fill",
                             title: "Device-Only Key",
-                            description: "Your encryption key never leaves your device. It's the only way to decrypt your conversations.",
+                            description: "Your encryption key never leaves your device. It's the only way to decrypt your conversations - don't lose it!",
                             isLast: true
                         )
                     }
