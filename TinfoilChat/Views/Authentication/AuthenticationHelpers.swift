@@ -57,6 +57,36 @@ func userProfileImage(imageURL: URL?, userId: String? = nil, hasImage: Bool = tr
   }
 }
 
+// MARK: - Error Banner
+
+struct AuthErrorBanner: View {
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 14))
+                .foregroundColor(.red)
+
+            Text(message)
+                .font(.caption)
+                .foregroundColor(.primary)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.red.opacity(0.1))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.red.opacity(0.2), lineWidth: 1)
+        )
+    }
+}
+
 // MARK: - Helper Functions
 
 /// Handle authentication errors and provide user-friendly messages

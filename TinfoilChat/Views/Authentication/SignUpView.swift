@@ -111,18 +111,13 @@ struct SignUpView: View {
                         }
                     }
                     .font(.subheadline)
-                    .foregroundColor(.blue)
+                    .foregroundColor(.secondary)
                     .padding(.top, 8)
                     .disabled(isVerifyingCode || isLoading)
                     
-                    // Error message moved to the bottom of verification view
                     if let errorMessage = errorMessage {
-                        Text(errorMessage)
-                            .foregroundColor(.red)
-                            .font(.caption)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 12)
+                        AuthErrorBanner(message: errorMessage)
+                            .padding(.top, 8)
                     }
                     
                     if isLoading && !isVerifyingCode {
@@ -185,12 +180,8 @@ struct SignUpView: View {
                 }
                 
                 if let errorMessage = errorMessage {
-                    Text(errorMessage)
-                        .foregroundColor(.red)
-                        .font(.caption)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 12)
+                    AuthErrorBanner(message: errorMessage)
+                        .padding(.top, 8)
                 }
             }
         }

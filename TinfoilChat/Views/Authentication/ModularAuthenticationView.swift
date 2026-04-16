@@ -21,8 +21,6 @@ struct ModularAuthenticationView: View {
   @State private var authCheckTask: Task<Void, Never>? = nil
   @State private var isInVerificationMode = false
   @State private var isKeyboardVisible = false
-  @State private var showDeleteConfirmation = false
-  @State private var deleteError: String? = nil
   
   var body: some View {
     NavigationView {
@@ -41,7 +39,6 @@ struct ModularAuthenticationView: View {
                     .padding(.horizontal)
                 }
               }
-              .scrollDisabled(clerk.user != nil || authManager.localUserData != nil)
 
               // Third-party authentication options at the bottom
               if shouldShowThirdPartyAuth && !isKeyboardVisible {
@@ -126,93 +123,11 @@ struct ModularAuthenticationView: View {
   
   private var authenticationContent: some View {
     VStack(spacing: 16) {
-      if clerk.user != nil {
-        authenticatedUserView
-      } else if authManager.localUserData != nil {
-        storedUserInfoView()
-      } else {
-        authenticationForms
-      }
+      authenticationForms
     }
-  }
-  
-  private var authenticatedUserView: some View {
-    VStack(spacing: 24) {
-      // User profile information at the top
-      VStack(spacing: 16) {
-        userProfileImage(imageURL: URL(string: clerk.user!.imageUrl), userId: clerk.user!.id, hasImage: clerk.user!.hasImage)
-          .frame(width: 80, height: 80)
-        
-        Text("\(clerk.user!.firstName ?? "") \(clerk.user!.lastName ?? "")")
-          .font(.title2)
-          .fontWeight(.semibold)
-      }
-      .padding(.top, 20)
-      
-      // Action buttons
-      VStack(spacing: 12) {
-        signOutButton
-          
-        Button(action: {
-          showDeleteConfirmation = true
-        }) {
-          HStack {
-            Spacer()
-            Text("Delete Account")
-              .font(.headline)
-              .foregroundColor(.red)
-            Spacer()
-          }
-          .frame(height: 50)
-          .background(Color(UIColor.systemBackground).opacity(0.2))
-          .cornerRadius(8)
-          .overlay(
-            RoundedRectangle(cornerRadius: 8)
-              .stroke(Color.red.opacity(0.5), lineWidth: 1)
-          )
-        }
-      }
-      .padding(.horizontal)
-      
-      // Subscription management text
-      VStack(spacing: 8) { 
-        Link("Go to www.tinfoil.sh to manage your account settings and subscriptions.", destination: URL(string: "https://www.tinfoil.sh")!)
-          .font(.body)
-          .multilineTextAlignment(.center)
-          .foregroundColor(.secondary)
-      }
-      .padding(.top, 12)
-      
-      Spacer()
-    }
-    .padding(.horizontal)
-    .alert("Delete Account", isPresented: $showDeleteConfirmation) {
-      Button("Cancel", role: .cancel) {
-        showDeleteConfirmation = false
-      }
-      Button("Delete", role: .destructive) {
-        Task {
-          do {
-            try await authManager.deleteAccount()
-            dismiss()
-          } catch {
-            deleteError = error.localizedDescription
-          }
-        }
-      }
-    } message: {
-      Text("Are you sure you want to delete your account? This action cannot be undone.")
-    }
-    .alert("Error", isPresented: .init(
-      get: { deleteError != nil },
-      set: { if !$0 { deleteError = nil } }
-    )) {
-      Button("OK", role: .cancel) {
-        deleteError = nil
-      }
-    } message: {
-      if let error = deleteError {
-        Text(error)
+    .onChange(of: clerk.user != nil) { _, isSignedIn in
+      if isSignedIn {
+        dismiss()
       }
     }
   }
@@ -234,7 +149,7 @@ struct ModularAuthenticationView: View {
           Button("Already have an account? Sign In") {
             isSignUp = false
           }
-          .font(.footnote)
+          .font(.subheadline)
           .foregroundColor(.secondary)
           .padding(.top, 4)
         }
@@ -253,7 +168,7 @@ struct ModularAuthenticationView: View {
           Button("Don't have an account? Sign Up") {
             isSignUp = true
           }
-          .font(.footnote)
+          .font(.subheadline)
           .foregroundColor(.secondary)
           .padding(.top, 4)
         }
@@ -285,83 +200,6 @@ struct ModularAuthenticationView: View {
     UINavigationBar.appearance().compactAppearance = appearance
     UINavigationBar.appearance().scrollEdgeAppearance = appearance
     UINavigationBar.appearance().tintColor = tintColor
-  }
-  
-  // MARK: - User Profile Components
-  
-  @ViewBuilder
-  private func accountInfoView(user: User) -> some View {
-    VStack(spacing: 16) {
-      userProfileImage(imageURL: URL(string: user.imageUrl), userId: user.id, hasImage: user.hasImage)
-      
-      Text("\(user.firstName ?? "") \(user.lastName ?? "")")
-        .font(.title2)
-        .fontWeight(.semibold)
-        .foregroundColor(.white)
-      
-      Text(user.emailAddresses.first?.emailAddress ?? "")
-        .font(.body)
-        .foregroundColor(.gray)
-    }
-  }
-  
-  @ViewBuilder
-  private func storedUserInfoView() -> some View {
-    VStack(spacing: 16) {
-      if let userData = authManager.localUserData {
-        // User profile information at the top
-        userProfileImage(imageURL: (userData["imageUrl"] as? String).flatMap { URL(string: $0) }, userId: userData["id"] as? String, hasImage: (userData["hasImage"] as? Bool) ?? false)
-        
-        Text((userData["fullName"] as? String) ?? (userData["name"] as? String) ?? "User")
-          .font(.title2)
-          .fontWeight(.semibold)
-          .foregroundColor(.white)
-        
-        if let email = userData["email"] as? String, !email.isEmpty {
-          Text(email)
-            .font(.body)
-            .foregroundColor(.gray)
-        }
-        
-        Spacer().frame(height: 20)
-        
-        // Subscription management in the middle
-        VStack(spacing: 8) {
-          Text("Manage your account settings.")
-            .font(.body)
-            .multilineTextAlignment(.center)
-            .foregroundColor(.secondary)
-          
-          Link("Go to www.tinfoil.sh to manage your subscriptions.", destination: URL(string: "https://www.tinfoil.sh")!)
-            .font(.body)
-            .multilineTextAlignment(.center)
-            .foregroundColor(.secondary)
-        }
-        
-        Spacer().frame(height: 20)
-        
-        // Sign out button at the bottom
-        signOutButton
-      }
-    }
-    .padding(.horizontal)
-  }
-  
-  private var signOutButton: some View {
-    Button {
-      Task { await authManager.signOut() }
-    } label: {
-      HStack {
-        Spacer()
-        Text("Sign Out")
-          .font(.headline)
-          .foregroundColor(.white)
-        Spacer()
-      }
-      .frame(height: 50)
-      .background(Color.red.opacity(0.8))
-      .cornerRadius(8)
-    }
   }
   
   // MARK: - Authentication Components

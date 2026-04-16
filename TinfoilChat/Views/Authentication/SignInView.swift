@@ -125,7 +125,7 @@ struct SignInView: View {
         showForgotPassword = true
       }) {
         Text("Forgot Password?")
-          .font(.system(size: 15, weight: .medium))
+          .font(.subheadline)
           .foregroundColor(.secondary)
       }
       .padding(.top, 8)
@@ -137,12 +137,8 @@ struct SignInView: View {
       }
       
       if let errorMessage = errorMessage {
-        Text(errorMessage)
-          .foregroundColor(.red)
-          .font(.caption)
-          .multilineTextAlignment(.center)
-          .fixedSize(horizontal: false, vertical: true)
-          .padding(.top, 12)
+        AuthErrorBanner(message: errorMessage)
+          .padding(.top, 8)
       }
     }
   }
@@ -208,7 +204,7 @@ struct SignInView: View {
           switchToAlternativeMfaMethod()
         }
         .font(.subheadline)
-        .foregroundColor(.blue)
+        .foregroundColor(.secondary)
         .padding(.top, 8)
         .disabled(isVerifyingMfa)
       }
@@ -218,18 +214,14 @@ struct SignInView: View {
         mfaCode = ""
         errorMessage = nil
       }
-      .font(.system(size: 15, weight: .medium))
+      .font(.subheadline)
       .foregroundColor(.secondary)
       .padding(.top, hasAlternativeMfaMethod ? 0 : 8)
       .disabled(isVerifyingMfa)
       
       if let errorMessage = errorMessage {
-        Text(errorMessage)
-          .foregroundColor(.red)
-          .font(.caption)
-          .multilineTextAlignment(.center)
-          .fixedSize(horizontal: false, vertical: true)
-          .padding(.top, 12)
+        AuthErrorBanner(message: errorMessage)
+          .padding(.top, 8)
       }
     }
   }
