@@ -243,7 +243,11 @@ struct ModularAuthenticationView: View {
           errorMessage: $errorMessage,
           isLoading: $isLoading,
           onDismiss: { DispatchQueue.main.async { self.dismiss() } }
-        ).padding(.top, 20)
+        )
+        .onPreferenceChange(VerificationModePreferenceKey.self) { inVerificationMode in
+          isInVerificationMode = inVerificationMode
+        }
+        .padding(.top, 20)
         
         if !isInVerificationMode {
           Button("Don't have an account? Sign Up") {
