@@ -181,7 +181,7 @@ struct ModularAuthenticationView: View {
   }
   
   private var shouldShowThirdPartyAuth: Bool {
-    clerk.user == nil && !isInVerificationMode && authManager.localUserData == nil
+    clerk.user == nil && !isInVerificationMode
   }
 
   private func setupNavigationBarAppearance() {
