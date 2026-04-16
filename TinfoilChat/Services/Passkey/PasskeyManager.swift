@@ -271,9 +271,6 @@ final class PasskeyManager: ObservableObject {
             setLocalSyncVersion(credentialId: credentialId, version: saveResult.syncVersion)
             setLocalBundleVersion(saveResult.bundleVersion)
 
-            // Mark intro as seen in Clerk unsafeMetadata
-            await markPasskeyIntroSeen()
-
             passkeyActive = true
             passkeySetupAvailable = false
             startSyncCheck()
@@ -425,20 +422,6 @@ final class PasskeyManager: ObservableObject {
 
         let kek = PasskeyService.deriveKeyEncryptionKey(from: result.prfOutput)
         return (credentialId: result.credentialId, kek: kek)
-    }
-
-    /// Mark the passkey intro as seen in Clerk unsafeMetadata.
-    private func markPasskeyIntroSeen() async {
-        guard let user = Clerk.shared.user else { return }
-
-        var existingMetadata: [String: JSON] = [:]
-        if case .object(let dict) = user.unsafeMetadata {
-            existingMetadata = dict
-        }
-        existingMetadata[Constants.StorageKeys.Settings.hasSeenPasskeyIntro] = .bool(true)
-
-        let params = User.UpdateParams(unsafeMetadata: .object(existingMetadata))
-        _ = try? await user.update(params)
     }
 
     // MARK: - Sync Version Tracking
