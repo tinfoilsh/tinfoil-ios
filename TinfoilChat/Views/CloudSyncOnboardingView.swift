@@ -19,33 +19,49 @@ enum CloudSyncOnboardingStep {
 // MARK: - Onboarding Button Styles
 
 private struct OnboardingButtonModifier: ViewModifier {
-    let foreground: Color
-    let background: Color
+    @Environment(\.colorScheme) private var colorScheme
+    let isDisabled: Bool
 
     func body(content: Content) -> some View {
         content
             .font(.subheadline)
-            .fontWeight(.medium)
-            .foregroundColor(foreground)
+            .fontWeight(.semibold)
+            .foregroundColor(isDisabled
+                ? .secondary
+                : (colorScheme == .dark ? .black : .white))
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
+            .padding(.vertical, 16)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(background)
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(isDisabled
+                        ? Color.secondary.opacity(0.2)
+                        : (colorScheme == .dark ? Color.white : Color.black))
+            )
+    }
+}
+
+private struct OnboardingSecondaryButtonModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .foregroundColor(.primary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(UIColor.secondarySystemBackground))
             )
     }
 }
 
 private extension View {
-    func onboardingPrimaryButton(fill: Color = .accentPrimary) -> some View {
-        modifier(OnboardingButtonModifier(foreground: .white, background: fill))
+    func onboardingPrimaryButton(isDisabled: Bool = false) -> some View {
+        modifier(OnboardingButtonModifier(isDisabled: isDisabled))
     }
 
     func onboardingSecondaryButton() -> some View {
-        modifier(OnboardingButtonModifier(
-            foreground: .primary,
-            background: Color(UIColor.secondarySystemBackground)
-        ))
+        modifier(OnboardingSecondaryButtonModifier())
     }
 }
 
@@ -67,34 +83,83 @@ struct CloudSyncOnboardingView: View {
     @State private var keyError: String? = nil
     @State private var showFilePicker: Bool = false
     @State private var showQRScanner: Bool = false
+    @State private var direction: Edge = .trailing
+    @State private var showFeatures: Bool = false
+    @State private var animateIcon: Bool = false
+
+    private var currentPageIndex: Int {
+        switch currentStep {
+        case .intro: return 0
+        case .generateOrRestore: return 1
+        case .keyDisplay, .restoreKey: return 2
+        }
+    }
+
+    private let totalPages = 3
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                switch currentStep {
-                case .intro:
-                    introStepView
-                case .generateOrRestore:
-                    generateOrRestoreStepView
-                case .keyDisplay:
-                    keyDisplayStepView
-                case .restoreKey:
-                    restoreKeyStepView
+                // Close button
+                HStack {
+                    Button(action: { handleClose() }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.secondary)
+                            .frame(width: 30, height: 30)
+                            .background(
+                                Circle()
+                                    .fill(Color(UIColor.secondarySystemBackground))
+                            )
+                    }
+                    Spacer()
                 }
-            }
-            .background(Color(UIColor.systemBackground))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                if currentStep != .intro {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(action: { handleClose() }) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundColor(.secondary)
-                        }
+                .padding(.horizontal, 24)
+                .padding(.top, 16)
+
+                // Page dot indicators
+                HStack(spacing: 8) {
+                    ForEach(0..<totalPages, id: \.self) { index in
+                        Capsule()
+                            .fill(index == currentPageIndex ? Color.accentPrimary : Color.secondary.opacity(0.3))
+                            .frame(width: index == currentPageIndex ? 24 : 8, height: 8)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: currentPageIndex)
+                    }
+                }
+                .padding(.top, 16)
+                .padding(.bottom, 8)
+
+                ZStack {
+                    switch currentStep {
+                    case .intro:
+                        introStepView
+                            .transition(.asymmetric(
+                                insertion: .move(edge: direction).combined(with: .opacity),
+                                removal: .move(edge: direction == .trailing ? .leading : .trailing).combined(with: .opacity)
+                            ))
+                    case .generateOrRestore:
+                        generateOrRestoreStepView
+                            .transition(.asymmetric(
+                                insertion: .move(edge: direction).combined(with: .opacity),
+                                removal: .move(edge: direction == .trailing ? .leading : .trailing).combined(with: .opacity)
+                            ))
+                    case .keyDisplay:
+                        keyDisplayStepView
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .trailing).combined(with: .opacity),
+                                removal: .move(edge: .leading).combined(with: .opacity)
+                            ))
+                    case .restoreKey:
+                        restoreKeyStepView
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .trailing).combined(with: .opacity),
+                                removal: .move(edge: .leading).combined(with: .opacity)
+                            ))
                     }
                 }
             }
+            .background(backgroundGradient)
+            .navigationBarHidden(true)
         }
         .interactiveDismissDisabled(currentStep == .keyDisplay && keyError == nil)
         .fileImporter(
@@ -117,30 +182,37 @@ struct CloudSyncOnboardingView: View {
 
     private var introStepView: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 24) {
                 Spacer().frame(height: 20)
 
                 // Cloud icon
                 ZStack {
                     Circle()
-                        .fill(Color.secondary.opacity(0.15))
-                        .frame(width: 64, height: 64)
-                    Image(systemName: "icloud.and.arrow.up")
-                        .font(.system(size: 28))
-                        .foregroundColor(.secondary)
-                }
+                        .strokeBorder(Color.primary.opacity(0.2), lineWidth: 2)
+                        .frame(width: 120, height: 120)
+                        .scaleEffect(animateIcon ? 1.0 : 0.8)
+                        .opacity(animateIcon ? 1.0 : 0)
 
-                // Step label
-                Text("Step 1")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .textCase(.uppercase)
-                    .tracking(1)
-                    .foregroundColor(.secondary)
+                    Circle()
+                        .fill(Color.primary.opacity(0.1))
+                        .frame(width: 88, height: 88)
+
+                    Image(systemName: "icloud.and.arrow.up")
+                        .font(.system(size: 36))
+                        .foregroundColor(.primary)
+                }
+                .onAppear {
+                    withAnimation(.spring(response: 0.6, dampingFraction: 0.7).delay(0.2)) {
+                        animateIcon = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        showFeatures = true
+                    }
+                }
 
                 // Title
                 Text("Enable Cloud Sync?")
-                    .font(.title2)
+                    .font(.title)
                     .fontWeight(.bold)
 
                 // Description
@@ -148,23 +220,29 @@ struct CloudSyncOnboardingView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                    .padding(.horizontal, 32)
 
                 // Feature highlights
-                VStack(spacing: 16) {
-                    featureRow(
-                        icon: "lock.fill",
-                        title: "End-to-End Encrypted",
-                        description: "All chats are encrypted before leaving your device"
-                    )
-
-                    featureRow(
-                        icon: "key.fill",
-                        title: "You Control Your Key",
-                        description: "Only you have access to your encryption key"
-                    )
+                VStack(spacing: 12) {
+                    ForEach(Array([
+                        ("lock.fill", "End-to-End Encrypted", "All chats are encrypted before leaving your device"),
+                        ("key.fill", "You Control Your Key", "Only you have access to your encryption key"),
+                    ].enumerated()), id: \.offset) { index, feature in
+                        featureRow(
+                            icon: feature.0,
+                            title: feature.1,
+                            description: feature.2
+                        )
+                        .opacity(showFeatures ? 1 : 0)
+                        .offset(y: showFeatures ? 0 : 20)
+                        .animation(
+                            .spring(response: 0.4, dampingFraction: 0.8)
+                                .delay(Double(index) * 0.1),
+                            value: showFeatures
+                        )
+                    }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 24)
 
                 // Toggle row
                 HStack {
@@ -178,10 +256,10 @@ struct CloudSyncOnboardingView: View {
                 }
                 .padding()
                 .background(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: 14)
                         .fill(Color(UIColor.secondarySystemBackground))
                 )
-                .padding(.horizontal)
+                .padding(.horizontal, 24)
 
                 // Buttons
                 HStack(spacing: 12) {
@@ -195,7 +273,7 @@ struct CloudSyncOnboardingView: View {
                             .onboardingPrimaryButton()
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 24)
                 .padding(.top, 8)
 
                 Spacer().frame(height: 20)
@@ -207,30 +285,27 @@ struct CloudSyncOnboardingView: View {
 
     private var generateOrRestoreStepView: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 24) {
                 Spacer().frame(height: 20)
 
                 // Key icon
                 ZStack {
                     Circle()
-                        .fill(Color.secondary.opacity(0.15))
-                        .frame(width: 64, height: 64)
-                    Image(systemName: "key.fill")
-                        .font(.system(size: 28))
-                        .foregroundColor(.secondary)
-                }
+                        .strokeBorder(Color.primary.opacity(0.2), lineWidth: 2)
+                        .frame(width: 120, height: 120)
 
-                // Step label
-                Text("Step 2")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .textCase(.uppercase)
-                    .tracking(1)
-                    .foregroundColor(.secondary)
+                    Circle()
+                        .fill(Color.primary.opacity(0.1))
+                        .frame(width: 88, height: 88)
+
+                    Image(systemName: "key.fill")
+                        .font(.system(size: 36))
+                        .foregroundColor(.primary)
+                }
 
                 // Title
                 Text("Encryption Key")
-                    .font(.title2)
+                    .font(.title)
                     .fontWeight(.bold)
 
                 // Description
@@ -242,21 +317,27 @@ struct CloudSyncOnboardingView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                    .padding(.horizontal, 32)
 
                 // Restore button
                 Button(action: {
-                    withAnimation { currentStep = .restoreKey }
+                    direction = .trailing
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                        currentStep = .restoreKey
+                    }
                 }) {
                     Text("Restore Encryption Key")
                         .onboardingSecondaryButton()
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 24)
 
                 // Back / Generate Key buttons
                 HStack(spacing: 12) {
                     Button(action: {
-                        withAnimation { currentStep = .intro }
+                        direction = .leading
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                            currentStep = .intro
+                        }
                     }) {
                         Text("Back")
                             .onboardingSecondaryButton()
@@ -266,16 +347,16 @@ struct CloudSyncOnboardingView: View {
                         Group {
                             if isProcessing {
                                 ProgressView()
-                                    .tint(.white)
+                                    .tint(colorScheme == .dark ? .black : .white)
                             } else {
-                                Text(mode == .recovery ? "Start Fresh with New Key" : "Generate Key")
+                                Text(mode == .recovery ? "Start Fresh" : "Generate Key")
                             }
                         }
                         .onboardingPrimaryButton()
                     }
                     .disabled(isProcessing)
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 24)
                 .padding(.top, 8)
 
                 Spacer().frame(height: 20)
@@ -287,22 +368,27 @@ struct CloudSyncOnboardingView: View {
 
     private var keyDisplayStepView: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 24) {
                 Spacer().frame(height: 30)
 
                 // Success icon
                 ZStack {
                     Circle()
-                        .fill(Color.green.opacity(0.15))
-                        .frame(width: 64, height: 64)
+                        .strokeBorder(Color.green.opacity(0.2), lineWidth: 2)
+                        .frame(width: 120, height: 120)
+
+                    Circle()
+                        .fill(Color.green.opacity(0.1))
+                        .frame(width: 88, height: 88)
+
                     Image(systemName: "checkmark")
-                        .font(.system(size: 28, weight: .bold))
+                        .font(.system(size: 36, weight: .bold))
                         .foregroundColor(.green)
                 }
 
                 // Title
                 Text("Success!")
-                    .font(.title2)
+                    .font(.title)
                     .fontWeight(.bold)
 
                 // Description
@@ -314,14 +400,14 @@ struct CloudSyncOnboardingView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                    .padding(.horizontal, 32)
 
                 // Key display
                 if let key = generatedKey {
                     HStack {
                         Text(truncateKey(key))
                             .font(.system(.caption, design: .monospaced))
-                            .foregroundColor(.blue)
+                            .foregroundColor(.primary)
                             .lineLimit(1)
 
                         Spacer()
@@ -348,10 +434,10 @@ struct CloudSyncOnboardingView: View {
                     }
                     .padding()
                     .background(
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: 14)
                             .fill(Color(UIColor.secondarySystemBackground))
                     )
-                    .padding(.horizontal)
+                    .padding(.horizontal, 24)
                 }
 
                 // Done button
@@ -360,14 +446,14 @@ struct CloudSyncOnboardingView: View {
                         .font(.caption)
                         .foregroundColor(.red)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal)
+                        .padding(.horizontal, 24)
                 }
 
                 Button(action: { handleComplete() }) {
                     Text("Done")
                         .onboardingPrimaryButton()
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 24)
                 .padding(.top, 8)
 
                 Spacer().frame(height: 20)
@@ -379,12 +465,12 @@ struct CloudSyncOnboardingView: View {
 
     private var restoreKeyStepView: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 24) {
                 Spacer().frame(height: 30)
 
                 // Title
                 Text("Restore Encryption Key")
-                    .font(.title2)
+                    .font(.title)
                     .fontWeight(.bold)
 
                 // Description
@@ -392,7 +478,7 @@ struct CloudSyncOnboardingView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                    .padding(.horizontal, 32)
 
                 // Key input + file import
                 HStack(spacing: 8) {
@@ -403,13 +489,13 @@ struct CloudSyncOnboardingView: View {
                         .font(.system(.body, design: .monospaced))
                         .padding()
                         .background(
-                            RoundedRectangle(cornerRadius: 12)
+                            RoundedRectangle(cornerRadius: 14)
                                 .fill(Color(UIColor.secondarySystemBackground))
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: 12)
+                            RoundedRectangle(cornerRadius: 14)
                                 .strokeBorder(
-                                    keyError != nil ? Color.red.opacity(0.5) : Color.blue.opacity(0.5),
+                                    keyError != nil ? Color.red.opacity(0.5) : Color.primary.opacity(0.15),
                                     lineWidth: 1
                                 )
                         )
@@ -423,16 +509,16 @@ struct CloudSyncOnboardingView: View {
                             .foregroundColor(.primary)
                             .frame(width: 48, height: 48)
                             .background(Color(UIColor.secondarySystemBackground))
-                            .cornerRadius(12)
+                            .cornerRadius(14)
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 24)
 
                 if let error = keyError {
                     Text(error)
                         .font(.caption)
                         .foregroundColor(.red)
-                        .padding(.horizontal)
+                        .padding(.horizontal, 24)
                 }
 
                 // OR divider
@@ -447,7 +533,7 @@ struct CloudSyncOnboardingView: View {
                         .fill(Color.secondary.opacity(0.3))
                         .frame(height: 1)
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 24)
 
                 // Scan QR Code button
                 Button(action: {
@@ -461,16 +547,20 @@ struct CloudSyncOnboardingView: View {
                         Image(systemName: "qrcode.viewfinder")
                             .font(.title3)
                         Text("Scan QR Code")
-                            .fontWeight(.medium)
+                            .fontWeight(.semibold)
                     }
-                    .onboardingPrimaryButton()
+                    .onboardingSecondaryButton()
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 24)
 
                 // Back / Restore Key buttons
+                let isRestoreDisabled = inputKey.trimmingCharacters(in: .whitespaces).isEmpty || isProcessing
                 HStack(spacing: 12) {
                     Button(action: {
-                        withAnimation { currentStep = .generateOrRestore }
+                        direction = .leading
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                            currentStep = .generateOrRestore
+                        }
                     }) {
                         Text("Back")
                             .onboardingSecondaryButton()
@@ -480,20 +570,16 @@ struct CloudSyncOnboardingView: View {
                         Group {
                             if isProcessing {
                                 ProgressView()
-                                    .tint(.white)
+                                    .tint(colorScheme == .dark ? .black : .white)
                             } else {
                                 Text("Restore Key")
                             }
                         }
-                        .onboardingPrimaryButton(
-                            fill: inputKey.trimmingCharacters(in: .whitespaces).isEmpty || isProcessing
-                                ? Color.gray.opacity(0.5)
-                                : Color.blue
-                        )
+                        .onboardingPrimaryButton(isDisabled: isRestoreDisabled)
                     }
-                    .disabled(inputKey.trimmingCharacters(in: .whitespaces).isEmpty || isProcessing)
+                    .disabled(isRestoreDisabled)
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 24)
                 .padding(.top, 8)
 
                 Spacer().frame(height: 20)
@@ -503,20 +589,35 @@ struct CloudSyncOnboardingView: View {
 
     // MARK: - Shared Components
 
-    private func featureRow(icon: String, title: String, description: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon)
-                .font(.body)
-                .foregroundColor(.secondary)
-                .frame(width: 24)
+    private var backgroundGradient: some View {
+        Group {
+            if colorScheme == .dark {
+                Color.backgroundPrimary
+            } else {
+                Color.white
+            }
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 2) {
+    private func featureRow(icon: String, title: String, description: String) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 18))
+                .foregroundColor(.primary)
+                .frame(width: 32, height: 32)
+                .background(
+                    Circle()
+                        .fill(Color.primary.opacity(0.1))
+                )
+
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.subheadline)
-                    .fontWeight(.medium)
+                    .fontWeight(.semibold)
                 Text(description)
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer()
@@ -534,7 +635,10 @@ struct CloudSyncOnboardingView: View {
         if !cloudSyncToggle {
             cloudSyncToggle = true
         }
-        withAnimation { currentStep = .generateOrRestore }
+        direction = .trailing
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+            currentStep = .generateOrRestore
+        }
     }
 
     private func handleClose() {
@@ -556,7 +660,10 @@ struct CloudSyncOnboardingView: View {
                 generatedKeyMode = mode == .recovery ? .explicitStartFresh : .recoverExisting
                 keyError = nil
                 isProcessing = false
-                withAnimation { currentStep = .keyDisplay }
+                direction = .trailing
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                    currentStep = .keyDisplay
+                }
             }
         }
     }
