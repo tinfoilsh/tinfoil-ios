@@ -231,7 +231,9 @@ struct SignInView: View {
   }
   
   private func switchToAlternativeMfaMethod() {
-    guard let nextType = availableMfaTypes.first(where: { $0 != mfaType }) else { return }
+    guard let currentIndex = availableMfaTypes.firstIndex(where: { $0 == mfaType }) else { return }
+    let nextIndex = (currentIndex + 1) % availableMfaTypes.count
+    let nextType = availableMfaTypes[nextIndex]
     mfaCode = ""
     errorMessage = nil
     mfaType = nextType
