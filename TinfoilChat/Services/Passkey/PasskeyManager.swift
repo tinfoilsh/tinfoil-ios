@@ -30,7 +30,6 @@ final class PasskeyManager: ObservableObject {
 
     @Published var passkeyActive: Bool = false
     @Published var passkeySetupAvailable: Bool = false
-    @Published var showPasskeyIntro: Bool = false
     @Published var showPasskeyRecoveryChoice: Bool = false
 
     // MARK: - Callbacks
@@ -44,7 +43,6 @@ final class PasskeyManager: ObservableObject {
 
     // MARK: - Private
 
-    private var introTask: Task<Void, Never>?
     private var syncCheckTask: Task<Void, Never>?
     private let passkeyService = PasskeyService.shared
     private let keyStorage = PasskeyKeyStorage.shared
@@ -56,12 +54,9 @@ final class PasskeyManager: ObservableObject {
     func reset() {
         passkeyActive = false
         passkeySetupAvailable = false
-        showPasskeyIntro = false
         showPasskeyRecoveryChoice = false
         onRecoveryComplete = nil
         onKeyRefreshedFromBackup = nil
-        introTask?.cancel()
-        introTask = nil
         syncCheckTask?.cancel()
         syncCheckTask = nil
         passkeyService.clearCachedPrfResult()
@@ -236,7 +231,6 @@ final class PasskeyManager: ObservableObject {
     }
 
     /// Check passkey state for users who already have keys loaded.
-    /// Shows the intro modal if they haven't seen it and have no passkey backup.
     func checkPasskeyStateForExistingKey() async {
         let hasCredentials = await keyStorage.hasCredentials()
         if hasCredentials {
@@ -245,32 +239,10 @@ final class PasskeyManager: ObservableObject {
             return
         }
 
-        // No passkey credentials — check if user has seen the intro
-        let hasSeenIntro: Bool
-        if let metadata = Clerk.shared.user?.unsafeMetadata,
-           case .object(let dict) = metadata,
-           case .bool(let seen) = dict[Constants.StorageKeys.Settings.hasSeenPasskeyIntro] {
-            hasSeenIntro = seen
-        } else {
-            hasSeenIntro = false
-        }
-
         passkeySetupAvailable = true
-        if !hasSeenIntro {
-            // Show intro after a short delay to not interrupt sign-in
-            introTask?.cancel()
-            introTask = Task { @MainActor in
-                try? await Task.sleep(for: .seconds(Constants.Passkey.introDelaySeconds))
-                guard !Task.isCancelled else { return }
-                if self.passkeySetupAvailable && !self.passkeyActive {
-                    self.showPasskeyIntro = true
-                }
-            }
-        }
     }
 
     /// Create a passkey backup for the user's existing keys.
-    /// Called from PasskeyIntroView's onAccept and Settings backup button.
     func createPasskeyBackup() async {
         guard let user = Clerk.shared.user else { return }
         guard await ensureCurrentPrimaryKeyAuthorized() else { return }
@@ -304,11 +276,9 @@ final class PasskeyManager: ObservableObject {
 
             passkeyActive = true
             passkeySetupAvailable = false
-            showPasskeyIntro = false
             startSyncCheck()
         } catch {
             // Passkey creation failed or cancelled — leave state unchanged
-            showPasskeyIntro = false
         }
     }
 
@@ -389,16 +359,6 @@ final class PasskeyManager: ObservableObject {
             setLocalBundleVersion(saveResult.bundleVersion)
         } catch {
             // Non-fatal — passkey backup is stale but user can re-backup from Settings
-        }
-    }
-
-    // MARK: - Intro Dismissal
-
-    /// Called when the PasskeyIntroView sheet is dismissed (either after accept or swipe-down).
-    /// Marks the intro as seen so it won't re-appear.
-    func handlePasskeyIntroDismissed() async {
-        if !passkeyActive {
-            await markPasskeyIntroSeen()
         }
     }
 

@@ -77,15 +77,6 @@ struct ContentView: View {
                 }
             }
         }
-        .sheet(isPresented: $passkeyManager.showPasskeyIntro, onDismiss: {
-            Task {
-                await passkeyManager.handlePasskeyIntroDismissed()
-            }
-        }) {
-            PasskeyIntroView {
-                await passkeyManager.createPasskeyBackup()
-            }
-        }
         .sheet(isPresented: $passkeyManager.showPasskeyRecoveryChoice) {
             PasskeyRecoveryChoiceView(
                 onTryAgain: {

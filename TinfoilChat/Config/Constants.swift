@@ -150,7 +150,6 @@ enum Constants {
         static let rpName = "Tinfoil Chat"
         static let prfSalt = Data("tinfoil-chat-key-encryption".utf8)
         static let hkdfInfo = Data("tinfoil-chat-kek-v1".utf8)
-        static let introDelaySeconds: TimeInterval = 2.0
         static let credentialsEndpoint = "/api/passkey-credentials/"
         static let challengeByteCount = 32
         static let kekByteCount = 32
