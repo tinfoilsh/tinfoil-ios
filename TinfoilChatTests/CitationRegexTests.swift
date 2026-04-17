@@ -148,44 +148,81 @@ struct CitationRegexTests {
         }
     }
 
-    // MARK: - citationMarkerRegex (【1】 format used in ChatViewModel)
+    // MARK: - rewriteAnnotatedLinks: markdown citation links from the new backend format
 
-    @Test("Citation marker regex matches simple markers")
-    func citationMarkerMatchesSimple() {
-        let regex = try! NSRegularExpression(pattern: "【(\\d+)[^】]*】", options: [])
-        let input = "Some text【1】more text"
-        let nsInput = input as NSString
-        let matches = regex.matches(in: input, options: [], range: NSRange(location: 0, length: nsInput.length))
-        #expect(matches.count == 1)
+    @Test("Rewrites annotated link text to the host domain")
+    func rewriteAnnotatedLinkToDomain() {
+        let input = "See [some title](https://example.com/page) for details"
+        let result = LaTeXMarkdownView.rewriteAnnotatedLinks(
+            in: input,
+            citationUrls: ["https://example.com/page"]
+        )
+        #expect(result == "See [example.com](https://example.com/page) for details")
     }
 
-    @Test("Citation marker regex matches multiple markers")
-    func citationMarkerMatchesMultiple() {
-        let regex = try! NSRegularExpression(pattern: "【(\\d+)[^】]*】", options: [])
-        let input = "First【1】second【2】third【3】"
-        let nsInput = input as NSString
-        let matches = regex.matches(in: input, options: [], range: NSRange(location: 0, length: nsInput.length))
-        #expect(matches.count == 3)
+    @Test("Strips www. prefix from the host domain")
+    func rewriteAnnotatedLinkStripsWWW() {
+        let input = "[title](https://www.example.com/path)"
+        let result = LaTeXMarkdownView.rewriteAnnotatedLinks(
+            in: input,
+            citationUrls: ["https://www.example.com/path"]
+        )
+        #expect(result == "[example.com](https://www.example.com/path)")
     }
 
-    @Test("Citation marker regex captures the number")
-    func citationMarkerCapturesNumber() {
-        let regex = try! NSRegularExpression(pattern: "【(\\d+)[^】]*】", options: [])
-        let input = "text【42】end"
-        let nsInput = input as NSString
-        let matches = regex.matches(in: input, options: [], range: NSRange(location: 0, length: nsInput.length))
-        #expect(matches.count == 1)
-        if let match = matches.first, let numRange = Range(match.range(at: 1), in: input) {
-            #expect(String(input[numRange]) == "42")
-        }
+    @Test("Leaves non-annotated links unchanged")
+    func rewriteLeavesNonAnnotatedLinks() {
+        let input = "See [this article](https://unrelated.com) and [another](https://example.com/page)"
+        let result = LaTeXMarkdownView.rewriteAnnotatedLinks(
+            in: input,
+            citationUrls: ["https://example.com/page"]
+        )
+        #expect(result == "See [this article](https://unrelated.com) and [example.com](https://example.com/page)")
     }
 
-    @Test("Citation marker regex ignores text without markers")
-    func citationMarkerNoMatch() {
-        let regex = try! NSRegularExpression(pattern: "【(\\d+)[^】]*】", options: [])
-        let input = "Regular text with [1] brackets"
-        let nsInput = input as NSString
-        let matches = regex.matches(in: input, options: [], range: NSRange(location: 0, length: nsInput.length))
-        #expect(matches.count == 0)
+    @Test("Rewrites multiple annotated links in one pass")
+    func rewriteMultipleAnnotatedLinks() {
+        let input = "[a](https://one.com) and [b](https://two.org/path)"
+        let result = LaTeXMarkdownView.rewriteAnnotatedLinks(
+            in: input,
+            citationUrls: ["https://one.com", "https://two.org/path"]
+        )
+        #expect(result == "[one.com](https://one.com) and [two.org](https://two.org/path)")
+    }
+
+    @Test("Returns input unchanged when citation set is nil")
+    func rewriteNilCitationsNoOp() {
+        let input = "See [some title](https://example.com/page) for details"
+        let result = LaTeXMarkdownView.rewriteAnnotatedLinks(in: input, citationUrls: nil)
+        #expect(result == input)
+    }
+
+    @Test("Returns input unchanged when citation set is empty")
+    func rewriteEmptyCitationsNoOp() {
+        let input = "See [some title](https://example.com/page) for details"
+        let result = LaTeXMarkdownView.rewriteAnnotatedLinks(in: input, citationUrls: [])
+        #expect(result == input)
+    }
+
+    @Test("Handles parentheses inside annotated URL")
+    func rewriteAnnotatedLinkWithParensInURL() {
+        let input = "[title](https://en.wikipedia.org/wiki/Foo_(bar))"
+        let result = LaTeXMarkdownView.rewriteAnnotatedLinks(
+            in: input,
+            citationUrls: ["https://en.wikipedia.org/wiki/Foo_(bar)"]
+        )
+        #expect(result == "[en.wikipedia.org](https://en.wikipedia.org/wiki/Foo_(bar))")
+    }
+
+    @Test("Leaves legacy #cite- style links to stripCitations")
+    func rewriteLeavesLegacyCiteLinks() {
+        let input = "text [1](#cite-1~https://example.com~Title) end"
+        let result = LaTeXMarkdownView.rewriteAnnotatedLinks(
+            in: input,
+            citationUrls: ["https://example.com"]
+        )
+        // The href starts with `#cite-`, not the annotated URL, so this helper
+        // leaves it untouched; stripCitations handles the legacy format.
+        #expect(result == input)
     }
 }
