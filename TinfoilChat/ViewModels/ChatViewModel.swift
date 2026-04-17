@@ -20,8 +20,6 @@ enum ChatStorageTab: String {
 
 @MainActor
 class ChatViewModel: ObservableObject {
-    private static let citationMarkerRegex = try? NSRegularExpression(pattern: "【(\\d+)[^】]*】", options: [])
-
     // Published properties for UI updates
     @Published var chats: [Chat] = []
     @Published var localChats: [Chat] = []
@@ -1516,16 +1514,14 @@ class ChatViewModel: ObservableObject {
                                 return
                             }
 
-                            // Process citations during streaming if we have sources
-                            let processedContent = self.processCitationMarkers(content, sources: currentSources)
-                            let processedChunks = self.processChunksWithCitations(currentChunks, sources: currentSources)
-
-                            chat.messages[lastIndex].content = processedContent
+                            // The router delivers citations as standard markdown links in the
+                            // assistant content, so the UI can render the message as-is.
+                            chat.messages[lastIndex].content = content
                             chat.messages[lastIndex].thoughts = thoughts
                             chat.messages[lastIndex].thinkingChunks = currentThinkingChunks
                             chat.messages[lastIndex].isThinking = thinking
                             chat.messages[lastIndex].generationTimeSeconds = genTime
-                            chat.messages[lastIndex].contentChunks = processedChunks
+                            chat.messages[lastIndex].contentChunks = currentChunks
 
                             // Merge collected sources into the message's current webSearchState (set by the callback)
                             if !currentSources.isEmpty {
@@ -1593,17 +1589,14 @@ class ChatViewModel: ObservableObject {
                     if !chat.messages.isEmpty, let lastIndex = chat.messages.indices.last {
                         chunker.finalize()
                         thinkingChunker.finalize()
-                        let processedContent = self.processCitationMarkers(responseContent, sources: collectedSources)
-                        chat.messages[lastIndex].content = processedContent
+                        chat.messages[lastIndex].content = responseContent
                         chat.messages[lastIndex].thoughts = currentThoughts
                         chat.messages[lastIndex].thinkingChunks = thinkingChunker.getAllChunks()
                         chat.messages[lastIndex].isThinking = false
                         chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
                         chat.messages[lastIndex].thinkingDuration = generationTimeSeconds
                         chat.messages[lastIndex].webSearchBeforeThinking = webSearchBeforeThinking
-                        // Process citation markers in chunks too since UI renders from chunks
-                        let processedChunks = self.processChunksWithCitations(chunker.getAllChunks(), sources: collectedSources)
-                        chat.messages[lastIndex].contentChunks = processedChunks
+                        chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
                         // Merge final collected sources into the message's webSearchState
                         if !collectedSources.isEmpty {
                             var searchState = chat.messages[lastIndex].webSearchState ?? WebSearchState(status: .searching)
@@ -3244,57 +3237,4 @@ extension ChatViewModel {
         AudioRecordingService.shared.cancelRecording()
     }
 
-    private func processChunksWithCitations(_ chunks: [ContentChunk], sources: [WebSearchSource]) -> [ContentChunk] {
-        chunks.map { chunk in
-            ContentChunk(
-                id: chunk.id,
-                type: chunk.type,
-                content: processCitationMarkers(chunk.content, sources: sources),
-                isComplete: chunk.isComplete
-            )
-        }
-    }
-
-    /// Process citation markers (e.g. 【1】) into markdown links.
-    /// Called at stream end to store processed content.
-    private func processCitationMarkers(_ content: String, sources: [WebSearchSource]) -> String {
-        guard !sources.isEmpty else { return content }
-        guard let regex = Self.citationMarkerRegex else { return content }
-
-        let nsContent = content as NSString
-        let matches = regex.matches(in: content, options: [], range: NSRange(location: 0, length: nsContent.length))
-        guard !matches.isEmpty else { return content }
-
-        var result = ""
-        var lastEnd = content.startIndex
-
-        for match in matches {
-            guard let matchRange = Range(match.range, in: content),
-                  let numRange = Range(match.range(at: 1), in: content),
-                  let num = Int(content[numRange]) else { continue }
-
-            let index = num - 1
-            guard index >= 0, index < sources.count else { continue }
-
-            let source = sources[index]
-
-            let encodedUrl = source.url
-                .replacingOccurrences(of: "(", with: "%28")
-                .replacingOccurrences(of: ")", with: "%29")
-                .replacingOccurrences(of: "|", with: "%7C")
-                .replacingOccurrences(of: "~", with: "%7E")
-            let encodedTitle = (source.title
-                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? source.title)
-                .replacingOccurrences(of: "(", with: "%28")
-                .replacingOccurrences(of: ")", with: "%29")
-                .replacingOccurrences(of: "~", with: "%7E")
-
-            result += content[lastEnd..<matchRange.lowerBound]
-            result += "[\(num)](#cite-\(num)~\(encodedUrl)~\(encodedTitle))"
-            lastEnd = matchRange.upperBound
-        }
-
-        result += content[lastEnd...]
-        return result
-    }
 }
