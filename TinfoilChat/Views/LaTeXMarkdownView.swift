@@ -29,13 +29,19 @@ private struct SegmentView: View {
     let isDarkMode: Bool
     let isStreaming: Bool
     let textSelectionEnabled: Bool
+    let citationUrls: Set<String>?
 
     var body: some View {
         switch segment.kind {
         case .markdown(let text):
             // Strip citation markers from text - sources shown separately at message level
             // Skip during streaming to avoid catastrophic regex backtracking on incomplete citations
-            let strippedText = isStreaming ? text : LaTeXMarkdownView.stripCitations(from: text)
+            let strippedText = isStreaming
+                ? text
+                : LaTeXMarkdownView.rewriteAnnotatedLinks(
+                    in: LaTeXMarkdownView.stripCitations(from: text),
+                    citationUrls: citationUrls
+                )
             StructuredText(markdown: strippedText)
                 .textual.structuredTextStyle(.gitHub)
                 .textual.highlighterTheme(isStreaming ? .plain : .default)
@@ -111,6 +117,10 @@ struct LaTeXMarkdownView: View, Equatable {
     let maxWidthAlignment: Alignment
     let isStreaming: Bool
     let textSelectionEnabled: Bool
+    // URLs the router annotated as web-search citations for the current message.
+    // Any standard markdown link whose href matches one of these URLs is rewritten
+    // to [domain](url) so it matches the visual style of legacy #cite- citations.
+    let citationUrls: Set<String>?
 
     @State private var segments: [ContentSegment]? = nil
 
@@ -125,16 +135,18 @@ struct LaTeXMarkdownView: View, Equatable {
         lhs.horizontalPadding == rhs.horizontalPadding &&
         lhs.maxWidthAlignment == rhs.maxWidthAlignment &&
         lhs.isStreaming == rhs.isStreaming &&
-        lhs.textSelectionEnabled == rhs.textSelectionEnabled
+        lhs.textSelectionEnabled == rhs.textSelectionEnabled &&
+        lhs.citationUrls == rhs.citationUrls
     }
 
-    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0, maxWidthAlignment: Alignment = .leading, isStreaming: Bool = false, textSelectionEnabled: Bool = true) {
+    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0, maxWidthAlignment: Alignment = .leading, isStreaming: Bool = false, textSelectionEnabled: Bool = true, citationUrls: Set<String>? = nil) {
         self.content = content
         self.isDarkMode = isDarkMode
         self.horizontalPadding = horizontalPadding
         self.maxWidthAlignment = maxWidthAlignment
         self.isStreaming = isStreaming
         self.textSelectionEnabled = textSelectionEnabled
+        self.citationUrls = citationUrls
 
         // Resolve segments synchronously from cache when available so the
         // first render already has the final view tree. This prevents
@@ -159,7 +171,8 @@ struct LaTeXMarkdownView: View, Equatable {
                         segment: segment,
                         isDarkMode: isDarkMode,
                         isStreaming: false,
-                        textSelectionEnabled: textSelectionEnabled
+                        textSelectionEnabled: textSelectionEnabled,
+                        citationUrls: citationUrls
                     )
                         .id(segment.id)
                 }
@@ -188,7 +201,12 @@ struct LaTeXMarkdownView: View, Equatable {
     }
 
     private func markdownFallback(content: String) -> some View {
-        let strippedText = LaTeXMarkdownView.stripCitations(from: content)
+        let strippedText = isStreaming
+            ? LaTeXMarkdownView.stripCitations(from: content)
+            : LaTeXMarkdownView.rewriteAnnotatedLinks(
+                in: LaTeXMarkdownView.stripCitations(from: content),
+                citationUrls: citationUrls
+            )
         return StructuredText(markdown: strippedText)
             .textual.structuredTextStyle(.gitHub)
             .textual.highlighterTheme(isStreaming ? .plain : .default)
@@ -197,6 +215,98 @@ struct LaTeXMarkdownView: View, Equatable {
             }
             .fixedSize(horizontal: false, vertical: true)
             .environment(\.colorScheme, isDarkMode ? .dark : .light)
+    }
+
+    /// Rewrite standard markdown links whose URL matches an annotated web-search
+    /// citation so the link text becomes the host domain. Mirrors the visual
+    /// treatment legacy `#cite-` citations get via `stripCitations`, keeping
+    /// inline citations consistent when the backend emits citations as plain
+    /// markdown links.
+    static func rewriteAnnotatedLinks(in text: String, citationUrls: Set<String>?) -> String {
+        guard let citationUrls, !citationUrls.isEmpty, !text.isEmpty else { return text }
+        let chars = Array(text.unicodeScalars)
+        let count = chars.count
+        var result = String.UnicodeScalarView()
+        result.reserveCapacity(count)
+        var i = 0
+
+        while i < count {
+            guard chars[i] == "[" else {
+                result.append(chars[i])
+                i += 1
+                continue
+            }
+
+            // Scan link text up to a matching `]` (allowing nested `[`/`]`).
+            var j = i + 1
+            var textDepth = 1
+            while j < count && textDepth > 0 {
+                let c = chars[j]
+                if c == "\\" && j + 1 < count {
+                    j += 2
+                    continue
+                }
+                if c == "[" { textDepth += 1 }
+                else if c == "]" { textDepth -= 1; if textDepth == 0 { break } }
+                else if c == "\n" { break }
+                j += 1
+            }
+            guard j < count, chars[j] == "]", j + 1 < count, chars[j + 1] == "(" else {
+                result.append(chars[i])
+                i += 1
+                continue
+            }
+
+            // Scan href up to a matching `)` (allowing one level of nested parens).
+            var k = j + 2
+            var hrefDepth = 1
+            while k < count && hrefDepth > 0 {
+                let c = chars[k]
+                if c == "\\" && k + 1 < count {
+                    k += 2
+                    continue
+                }
+                if c == "(" { hrefDepth += 1 }
+                else if c == ")" { hrefDepth -= 1; if hrefDepth == 0 { break } }
+                else if c == "\n" { break }
+                k += 1
+            }
+            guard k < count, chars[k] == ")" else {
+                result.append(chars[i])
+                i += 1
+                continue
+            }
+
+            var hrefView = String.UnicodeScalarView()
+            for idx in (j + 2)..<k { hrefView.append(chars[idx]) }
+            let href = String(hrefView).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Skip angle-bracketed autolinks: <https://...>
+            let bareHref: String
+            if href.hasPrefix("<") && href.hasSuffix(">") && href.count >= 2 {
+                bareHref = String(href.dropFirst().dropLast())
+            } else {
+                bareHref = href
+            }
+
+            if citationUrls.contains(bareHref) {
+                let domain: String
+                if let parsed = URL(string: bareHref), let host = parsed.host {
+                    domain = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+                } else {
+                    domain = bareHref
+                }
+                for c in "[\(domain)](\(bareHref))".unicodeScalars {
+                    result.append(c)
+                }
+                i = k + 1
+            } else {
+                for idx in i...k { result.append(chars[idx]) }
+                i = k + 1
+            }
+        }
+
+        return String(result)
     }
 
     /// Strip citation markers from markdown text.

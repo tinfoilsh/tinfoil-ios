@@ -39,6 +39,25 @@ struct MessageView: View {
         !(isLoading && isLastMessage)
     }
 
+    /// URLs the router annotated as web-search citations on this message.
+    /// Used by the markdown renderer to rewrite plain markdown citation links
+    /// to use the host domain as their display text.
+    private var citationUrls: Set<String>? {
+        var urls: Set<String> = []
+        if let annotations = message.annotations {
+            for annotation in annotations where annotation.type == "url_citation" {
+                let url = annotation.url_citation.url
+                if !url.isEmpty { urls.insert(url) }
+            }
+        }
+        if let sources = message.webSearchState?.sources {
+            for source in sources where !source.url.isEmpty {
+                urls.insert(source.url)
+            }
+        }
+        return urls.isEmpty ? nil : urls
+    }
+
     var body: some View {
         HStack {
             if message.role == .user {
@@ -120,7 +139,8 @@ struct MessageView: View {
                                     chunks: message.contentChunks,
                                     isDarkMode: isDarkMode,
                                     isStreaming: isLoading && isLastMessage,
-                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled
+                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled,
+                                    citationUrls: citationUrls
                                 )
                                     .equatable()
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -129,7 +149,8 @@ struct MessageView: View {
                                     content: message.content,
                                     isDarkMode: isDarkMode,
                                     isStreaming: isLoading && isLastMessage,
-                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled
+                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled,
+                                    citationUrls: citationUrls
                                 )
                                     .equatable()
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -159,7 +180,8 @@ struct MessageView: View {
                                 content: parsed.remainderText,
                                 isDarkMode: isDarkMode,
                                 isStreaming: isLoading && isLastMessage,
-                                textSelectionEnabled: inlineAssistantTextSelectionEnabled
+                                textSelectionEnabled: inlineAssistantTextSelectionEnabled,
+                                citationUrls: citationUrls
                             )
                                 .equatable()
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -232,7 +254,8 @@ struct MessageView: View {
                                     chunks: message.contentChunks,
                                     isDarkMode: isDarkMode,
                                     isStreaming: isLoading && isLastMessage,
-                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled
+                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled,
+                                    citationUrls: citationUrls
                                 )
                                     .equatable()
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -241,7 +264,8 @@ struct MessageView: View {
                                     content: message.content,
                                     isDarkMode: isDarkMode,
                                     isStreaming: isLoading && isLastMessage,
-                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled
+                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled,
+                                    citationUrls: citationUrls
                                 )
                                     .equatable()
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1138,12 +1162,28 @@ struct ChunkedContentView: View, Equatable {
     let isDarkMode: Bool
     let isStreaming: Bool
     let textSelectionEnabled: Bool
+    let citationUrls: Set<String>?
+
+    init(
+        chunks: [ContentChunk],
+        isDarkMode: Bool,
+        isStreaming: Bool,
+        textSelectionEnabled: Bool,
+        citationUrls: Set<String>? = nil
+    ) {
+        self.chunks = chunks
+        self.isDarkMode = isDarkMode
+        self.isStreaming = isStreaming
+        self.textSelectionEnabled = textSelectionEnabled
+        self.citationUrls = citationUrls
+    }
 
     static func == (lhs: ChunkedContentView, rhs: ChunkedContentView) -> Bool {
         lhs.chunks == rhs.chunks &&
         lhs.isDarkMode == rhs.isDarkMode &&
         lhs.isStreaming == rhs.isStreaming &&
-        lhs.textSelectionEnabled == rhs.textSelectionEnabled
+        lhs.textSelectionEnabled == rhs.textSelectionEnabled &&
+        lhs.citationUrls == rhs.citationUrls
     }
 
     var body: some View {
@@ -1153,7 +1193,8 @@ struct ChunkedContentView: View, Equatable {
                     chunk: chunk,
                     isDarkMode: isDarkMode,
                     isStreaming: isStreaming,
-                    textSelectionEnabled: textSelectionEnabled
+                    textSelectionEnabled: textSelectionEnabled,
+                    citationUrls: citationUrls
                 )
             }
         }
@@ -1165,19 +1206,22 @@ struct ChunkView: View, Equatable {
     let isDarkMode: Bool
     let isStreaming: Bool
     let textSelectionEnabled: Bool
+    let citationUrls: Set<String>?
 
     static func == (lhs: ChunkView, rhs: ChunkView) -> Bool {
         if lhs.chunk.isComplete && rhs.chunk.isComplete {
             return lhs.chunk.id == rhs.chunk.id &&
                    lhs.isDarkMode == rhs.isDarkMode &&
-                   lhs.textSelectionEnabled == rhs.textSelectionEnabled
+                   lhs.textSelectionEnabled == rhs.textSelectionEnabled &&
+                   lhs.citationUrls == rhs.citationUrls
         }
         return lhs.chunk.id == rhs.chunk.id &&
                lhs.chunk.isComplete == rhs.chunk.isComplete &&
                lhs.chunk.content == rhs.chunk.content &&
                lhs.isDarkMode == rhs.isDarkMode &&
                lhs.isStreaming == rhs.isStreaming &&
-               lhs.textSelectionEnabled == rhs.textSelectionEnabled
+               lhs.textSelectionEnabled == rhs.textSelectionEnabled &&
+               lhs.citationUrls == rhs.citationUrls
     }
 
     var body: some View {
@@ -1188,7 +1232,8 @@ struct ChunkView: View, Equatable {
                 content: chunk.content,
                 isDarkMode: isDarkMode,
                 isStreaming: chunk.isComplete ? false : isStreaming,
-                textSelectionEnabled: textSelectionEnabled
+                textSelectionEnabled: textSelectionEnabled,
+                citationUrls: citationUrls
             )
             .equatable()
         }
