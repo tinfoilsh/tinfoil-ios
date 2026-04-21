@@ -59,9 +59,16 @@ struct TinfoilEventParser {
     /// Holds bytes the parser has not yet classified: either a potential
     /// prefix of the opening tag (held back in case the next chunk
     /// completes the match) or the inside of a marker whose closing
-    /// tag has not yet landed.
+    /// tag has not yet landed. When outside a marker, a trailing `\n`
+    /// is ALSO held back so we can silently drop it if the next chunk
+    /// turns out to start with `<tinfoil-event>` (router leading pad).
     private var buffer: String = ""
     private var insideMarker: Bool = false
+    /// True when the most recently-consumed close tag landed at the
+    /// end of a chunk. The router's trailing pad `\n` is then in the
+    /// next chunk; we strip its first byte below instead of checking
+    /// `buffer.first` synchronously.
+    private var pendingStripLeadingNewline: Bool = false
 
     /// One `consume` result: the visible text for this chunk (with
     /// completed markers removed) plus zero or more decoded events.
@@ -77,6 +84,16 @@ struct TinfoilEventParser {
         buffer += chunk
         var text = ""
         var events: [TinfoilWebSearchCallEvent] = []
+
+        // Drain a deferred trailing-pad `\n` left over from the previous
+        // `consume` call. Only applies to the very first byte so we do
+        // not accidentally eat model-emitted newlines further downstream.
+        if pendingStripLeadingNewline {
+            pendingStripLeadingNewline = false
+            if let first = buffer.first, first == "\n" {
+                buffer = String(buffer.dropFirst())
+            }
+        }
 
         while !buffer.isEmpty {
             if !insideMarker {
@@ -101,8 +118,17 @@ struct TinfoilEventParser {
                 }
                 // No full open tag yet. Emit everything except any
                 // trailing bytes that could still grow into a real
-                // `<tinfoil-event>` opener on the next chunk.
-                let hold = openTagPrefixSuffixLength(buffer)
+                // `<tinfoil-event>` opener on the next chunk. Also
+                // hold back a trailing `\n` because the next chunk
+                // might start with `<tinfoil-event>` (router leading
+                // pad spanning the chunk boundary). If the following
+                // chunk does not start a marker, the held `\n` is
+                // emitted on the next call via the same code path.
+                let openHold = openTagPrefixSuffixLength(buffer)
+                var hold = openHold
+                if hold == 0, let last = buffer.last, last == "\n" {
+                    hold = 1
+                }
                 let split = buffer.index(buffer.endIndex, offsetBy: -hold)
                 text += buffer[..<split]
                 buffer = String(buffer[split...])
@@ -116,8 +142,13 @@ struct TinfoilEventParser {
             let payload = String(buffer[..<closeRange.lowerBound])
             buffer = String(buffer[closeRange.upperBound...])
             // Match the leading-newline strip on the trailing side so a
-            // `\n<marker>\n` pad collapses to nothing, not to `\n`.
-            if let first = buffer.first, first == "\n" {
+            // `\n<marker>\n` pad collapses to nothing, not to `\n`. The
+            // pad may already have arrived (same chunk) or still be
+            // pending (close tag at the chunk boundary) — defer the
+            // strip to the next call if the buffer is empty.
+            if buffer.isEmpty {
+                pendingStripLeadingNewline = true
+            } else if let first = buffer.first, first == "\n" {
                 buffer = String(buffer.dropFirst())
             }
             insideMarker = false
@@ -139,6 +170,7 @@ struct TinfoilEventParser {
         let tail = buffer
         buffer = ""
         insideMarker = false
+        pendingStripLeadingNewline = false
         return tail
     }
 
