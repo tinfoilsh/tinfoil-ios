@@ -81,7 +81,20 @@ struct TinfoilEventParser {
         while !buffer.isEmpty {
             if !insideMarker {
                 if let openRange = buffer.range(of: Self.openTag) {
-                    text += buffer[..<openRange.lowerBound]
+                    // The router pads each marker with a leading
+                    // newline so raw SSE captures stay readable. Drop
+                    // a single `\n` directly abutting the open tag so
+                    // the marker round-trips invisibly in the rendered
+                    // text instead of producing an empty line where
+                    // the marker used to be.
+                    var preTagEnd = openRange.lowerBound
+                    if preTagEnd > buffer.startIndex {
+                        let charBefore = buffer.index(before: preTagEnd)
+                        if buffer[charBefore] == "\n" {
+                            preTagEnd = charBefore
+                        }
+                    }
+                    text += buffer[..<preTagEnd]
                     buffer = String(buffer[openRange.upperBound...])
                     insideMarker = true
                     continue
@@ -102,6 +115,11 @@ struct TinfoilEventParser {
             }
             let payload = String(buffer[..<closeRange.lowerBound])
             buffer = String(buffer[closeRange.upperBound...])
+            // Match the leading-newline strip on the trailing side so a
+            // `\n<marker>\n` pad collapses to nothing, not to `\n`.
+            if let first = buffer.first, first == "\n" {
+                buffer = String(buffer.dropFirst())
+            }
             insideMarker = false
             if let decoded = Self.decode(payload) {
                 events.append(decoded)
