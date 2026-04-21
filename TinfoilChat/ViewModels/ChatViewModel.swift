@@ -1335,16 +1335,14 @@ class ChatViewModel: ObservableObject {
                     // Strip router-emitted `<tinfoil-event>` markers
                     // from the delta before any downstream logic sees
                     // it, and dispatch the decoded events so the same
-                    // UI surfaces the legacy callback populated.
+                    // UI surfaces the legacy callback populated. The
+                    // enclosing class is @MainActor and Task inherits
+                    // that isolation, so applyWebSearchCallEvent runs
+                    // synchronously on the main actor here.
                     if !content.isEmpty {
                         let parsed = tinfoilEventParser.consume(content)
-                        if !parsed.events.isEmpty {
-                            let events = parsed.events
-                            await MainActor.run {
-                                for event in events {
-                                    applyWebSearchCallEvent(event)
-                                }
-                            }
+                        for event in parsed.events {
+                            applyWebSearchCallEvent(event)
                         }
                         content = parsed.text
                     }
