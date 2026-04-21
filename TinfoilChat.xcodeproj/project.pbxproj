@@ -613,8 +613,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tinfoilsh/tinfoil-swift";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = exactVersion;
+				version = 0.0.5;
 			};
 		};
 		99F1547A2F4F614400E9174E /* XCRemoteSwiftPackageReference "GzipSwift" */ = {
