@@ -542,6 +542,12 @@ class ChatViewModel: ObservableObject {
 
                 client = try await TinfoilAI.create(
                     apiKey: sessionToken,
+                    // Opt into the router's inline progress markers so
+                    // live web search and URL-fetch status drives the
+                    // same WebSearchState / URLFetchState UI the app
+                    // already renders, without requiring a separate
+                    // auxiliary stream.
+                    tinfoilEvents: [.webSearch],
                     onVerification: { [weak self] verificationDoc in
                         DispatchQueue.main.async {
                             guard let self = self else { return }
@@ -1177,78 +1183,85 @@ class ChatViewModel: ObservableObject {
                 // Track whether web search started before thinking (shared across callback and streaming loop)
                 let webSearchStartedFlag = OSAllocatedUnfairLock(initialState: false)
 
-                // Create stream with web search callback if enabled
-                let stream: AsyncThrowingStream<ChatStreamResult, Error>
-                if isWebSearchEnabled {
-                    stream = client.chatsStream(query: chatQuery) { [weak self] event in
-                        Task { @MainActor in
-                            guard let self = self else { return }
-                            guard var chat = self.currentChat,
-                                  !chat.messages.isEmpty,
-                                  let lastIndex = chat.messages.indices.last else { return }
+                // Web search progress now rides inline with the model's
+                // content as `<tinfoil-event>` markers (opted into via
+                // the `tinfoilEvents: [.webSearch]` flag on create).
+                // Decoding happens inside the chunk loop below via
+                // TinfoilEventParser; the SDK-level callback variant is
+                // no longer needed because the router emits nothing
+                // auxiliary on the chat stream.
+                let stream: AsyncThrowingStream<ChatStreamResult, Error> = client.chatsStream(query: chatQuery)
 
-                            // Handle URL fetch events (open_page actions)
-                            if event.action?.type == "open_page", let url = event.action?.url {
-                                let fetchId = event.itemId ?? url
-                                switch event.status {
-                                case .inProgress, .searching:
-                                    if !chat.messages[lastIndex].urlFetches.contains(where: { $0.id == fetchId }) {
-                                        chat.messages[lastIndex].urlFetches.append(
-                                            URLFetchState(id: fetchId, url: url, status: .fetching)
-                                        )
-                                    }
-                                case .completed:
-                                    if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
-                                        chat.messages[lastIndex].urlFetches[idx].status = .completed
-                                    }
-                                case .failed:
-                                    if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
-                                        chat.messages[lastIndex].urlFetches[idx].status = .failed
-                                    }
-                                case .blocked:
-                                    if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
-                                        chat.messages[lastIndex].urlFetches[idx].status = .blocked
-                                    }
-                                }
+                // Applies one decoded marker event to the current chat.
+                // Mirrors the behavior the legacy SDK onWebSearchEvent
+                // callback used to provide, but driven off the inline
+                // marker stream so the app stays in sync with router
+                // progress without a second SSE channel.
+                let applyWebSearchCallEvent: @MainActor (TinfoilWebSearchCallEvent) -> Void = { [weak self] event in
+                    guard let self = self else { return }
+                    guard var chat = self.currentChat,
+                          !chat.messages.isEmpty,
+                          let lastIndex = chat.messages.indices.last else { return }
 
-                                self.updateChat(chat, throttleForStreaming: true)
-                                return
-                            }
-
-                            // Read current state from the message to preserve sources added by the streaming loop
-                            let existingSources = chat.messages[lastIndex].webSearchState?.sources ?? []
-
-                            // Update web search state based on event
-                            switch event.status {
-                            case .inProgress, .searching:
-                                webSearchStartedFlag.withLock { $0 = true }
-                                chat.messages[lastIndex].webSearchState = WebSearchState(
-                                    query: event.action?.query,
-                                    status: .searching,
-                                    sources: existingSources
+                    if event.action?.type == "open_page", let url = event.action?.url {
+                        let fetchId = event.itemId ?? url
+                        switch event.status {
+                        case .inProgress, .searching:
+                            if !chat.messages[lastIndex].urlFetches.contains(where: { $0.id == fetchId }) {
+                                chat.messages[lastIndex].urlFetches.append(
+                                    URLFetchState(id: fetchId, url: url, status: .fetching)
                                 )
-                                self.webSearchSummary = event.action?.query.map { "Searching the web: \($0)" } ?? "Searching the web"
-                            case .completed:
-                                chat.messages[lastIndex].webSearchState?.status = .completed
-                                self.webSearchSummary = ""
-                            case .failed:
-                                chat.messages[lastIndex].webSearchState?.status = .failed
-                                self.webSearchSummary = ""
-                            case .blocked:
-                                chat.messages[lastIndex].webSearchState = WebSearchState(
-                                    query: event.action?.query,
-                                    status: .blocked,
-                                    reason: event.reason
-                                )
-                                self.webSearchSummary = ""
                             }
-
-                            self.updateChat(chat, throttleForStreaming: true)
+                        case .completed:
+                            if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
+                                chat.messages[lastIndex].urlFetches[idx].status = .completed
+                            }
+                        case .failed:
+                            if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
+                                chat.messages[lastIndex].urlFetches[idx].status = .failed
+                            }
+                        case .blocked:
+                            if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
+                                chat.messages[lastIndex].urlFetches[idx].status = .blocked
+                            }
                         }
+                        self.updateChat(chat, throttleForStreaming: true)
+                        return
                     }
-                } else {
-                    stream = client.chatsStream(query: chatQuery)
+
+                    let existingSources = chat.messages[lastIndex].webSearchState?.sources ?? []
+                    switch event.status {
+                    case .inProgress, .searching:
+                        webSearchStartedFlag.withLock { $0 = true }
+                        chat.messages[lastIndex].webSearchState = WebSearchState(
+                            query: event.action?.query,
+                            status: .searching,
+                            sources: existingSources
+                        )
+                        self.webSearchSummary = event.action?.query.map { "Searching the web: \($0)" } ?? "Searching the web"
+                    case .completed:
+                        chat.messages[lastIndex].webSearchState?.status = .completed
+                        self.webSearchSummary = ""
+                    case .failed:
+                        chat.messages[lastIndex].webSearchState?.status = .failed
+                        self.webSearchSummary = ""
+                    case .blocked:
+                        chat.messages[lastIndex].webSearchState = WebSearchState(
+                            query: event.action?.query,
+                            status: .blocked,
+                            reason: event.error?.code
+                        )
+                        self.webSearchSummary = ""
+                    }
+                    self.updateChat(chat, throttleForStreaming: true)
                 }
+
+                // Stateful parser for `<tinfoil-event>` markers embedded
+                // in the content stream. `isWebSearchEnabled` has no
+                // effect on parsing: when the router isn't asked to
+                // emit markers it sends none, so the parser is a pure
+                // pass-through.
+                var tinfoilEventParser = TinfoilEventParser()
 
                 var thinkStartTime: Date? = nil
                 var hasThinkTag = false
@@ -1318,7 +1331,23 @@ class ChatViewModel: ObservableObject {
                         }
                     }
 
-                    let content = chunk.choices.first?.delta.content ?? ""
+                    var content = chunk.choices.first?.delta.content ?? ""
+                    // Strip router-emitted `<tinfoil-event>` markers
+                    // from the delta before any downstream logic sees
+                    // it, and dispatch the decoded events so the same
+                    // UI surfaces the legacy callback populated.
+                    if !content.isEmpty {
+                        let parsed = tinfoilEventParser.consume(content)
+                        if !parsed.events.isEmpty {
+                            let events = parsed.events
+                            await MainActor.run {
+                                for event in events {
+                                    applyWebSearchCallEvent(event)
+                                }
+                            }
+                        }
+                        content = parsed.text
+                    }
                     let hasReasoningContent = chunk.choices.first?.delta.reasoning != nil
                     let reasoningContent = chunk.choices.first?.delta.reasoning ?? ""
                     var didMutateState = false
@@ -1532,6 +1561,27 @@ class ChatViewModel: ObservableObject {
 
                             self.updateChat(chat, throttleForStreaming: true)
                         }
+                    }
+                }
+
+                // Drain any bytes the tinfoil-event parser is still
+                // holding back at the stream boundary. Anything in the
+                // tail is either an unterminated marker body (router
+                // bug) or a trailing open-tag prefix; surface it as
+                // plain assistant content minus any stray tag bytes so
+                // no characters the model emitted are silently lost.
+                let tinfoilEventTail = tinfoilEventParser.flush()
+                if !tinfoilEventTail.isEmpty {
+                    let sanitizedTail = tinfoilEventTail
+                        .replacingOccurrences(of: "<tinfoil-event>", with: "")
+                        .replacingOccurrences(of: "</tinfoil-event>", with: "")
+                    if !sanitizedTail.isEmpty {
+                        if responseContent.isEmpty {
+                            responseContent = sanitizedTail
+                        } else {
+                            responseContent += sanitizedTail
+                        }
+                        _ = chunker.appendToken(sanitizedTail)
                     }
                 }
 
