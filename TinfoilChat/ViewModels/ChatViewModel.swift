@@ -1179,6 +1179,7 @@ class ChatViewModel: ObservableObject {
 
                 // Web search state tracking
                 var collectedSources: [WebSearchSource] = []
+                var collectedAnnotations: [Annotation] = []
                 let isWebSearchEnabled = self.isWebSearchEnabled
                 // Track whether web search started before thinking (shared across callback and streaming loop)
                 let webSearchStartedFlag = OSAllocatedUnfairLock(initialState: false)
@@ -1471,6 +1472,17 @@ class ChatViewModel: ObservableObject {
                                     url: citation.url
                                 )
                                 collectedSources.append(source)
+                                collectedAnnotations.append(
+                                    Annotation(
+                                        type: "url_citation",
+                                        url_citation: URLCitation(
+                                            title: citation.title ?? citation.url,
+                                            url: citation.url,
+                                            start_index: nil,
+                                            end_index: nil
+                                        )
+                                    )
+                                )
                                 didCollectNewSource = true
                                 didMutateState = true
                             }
@@ -1685,6 +1697,9 @@ class ChatViewModel: ObservableObject {
                             searchState.sources = collectedSources
                             chat.messages[lastIndex].webSearchState = searchState
                         }
+                        if !collectedAnnotations.isEmpty {
+                            chat.messages[lastIndex].annotations = collectedAnnotations
+                        }
 
                         self.updateChat(chat, throttleForStreaming: true)
                     }
@@ -1804,6 +1819,9 @@ class ChatViewModel: ObservableObject {
                                 searchState.status = .completed
                             }
                             chat.messages[lastIndex].webSearchState = searchState
+                        }
+                        if !collectedAnnotations.isEmpty {
+                            chat.messages[lastIndex].annotations = collectedAnnotations
                         }
                     }
 
