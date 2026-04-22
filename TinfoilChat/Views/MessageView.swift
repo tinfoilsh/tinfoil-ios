@@ -74,11 +74,6 @@ struct MessageView: View {
                     }
                 case .webSearch(let searchId):
                     if let instance = message.webSearches?.first(where: { $0.id == searchId }) {
-                        // `isStreaming` on WebSearchBox indicates whether THIS
-                        // search is still in flight, not whether the overall
-                        // message is still streaming. Otherwise the box's
-                        // effectiveStatus gate would keep the pill in the
-                        // searching state while sources trickle in later.
                         let isSearchInFlight = instance.status == .searching
                             && isLoading
                             && isLastMessage
@@ -90,7 +85,6 @@ struct MessageView: View {
                                 reason: instance.reason
                             ),
                             isDarkMode: isDarkMode,
-                            isStreaming: isSearchInFlight,
                             webSearchSummary: isSearchInFlight ? viewModel.webSearchSummary : nil,
                             onTap: { showSourcesSheet = true }
                         )
@@ -160,7 +154,6 @@ struct MessageView: View {
                             WebSearchBox(
                                 webSearchState: webSearchState,
                                 isDarkMode: isDarkMode,
-                                isStreaming: true,
                                 webSearchSummary: viewModel.webSearchSummary,
                                 onTap: { showSourcesSheet = true }
                             )
@@ -198,7 +191,6 @@ struct MessageView: View {
                                 WebSearchBox(
                                     webSearchState: webSearchState,
                                     isDarkMode: isDarkMode,
-                                    isStreaming: isLoading && isLastMessage,
                                     webSearchSummary: isLastMessage ? viewModel.webSearchSummary : nil,
                                     onTap: { showSourcesSheet = true }
                                 )
@@ -318,7 +310,6 @@ struct MessageView: View {
                                 WebSearchBox(
                                     webSearchState: webSearchState,
                                     isDarkMode: isDarkMode,
-                                    isStreaming: isLoading && isLastMessage,
                                     webSearchSummary: isLastMessage ? viewModel.webSearchSummary : nil,
                                     onTap: { showSourcesSheet = true }
                                 )

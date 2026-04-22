@@ -11,7 +11,6 @@ import SwiftUI
 struct WebSearchBox: View {
     let webSearchState: WebSearchState
     let isDarkMode: Bool
-    let isStreaming: Bool
     let webSearchSummary: String?
     let onTap: () -> Void
 
@@ -20,7 +19,7 @@ struct WebSearchBox: View {
             HStack {
                 headerContent
                 Spacer()
-                if effectiveStatus != .searching && !webSearchState.sources.isEmpty {
+                if webSearchState.status != .searching && !webSearchState.sources.isEmpty {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
@@ -30,19 +29,12 @@ struct WebSearchBox: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(NoHighlightButtonStyle())
-        .disabled(effectiveStatus == .searching || webSearchState.sources.isEmpty)
-    }
-
-    private var effectiveStatus: WebSearchStatus {
-        if webSearchState.status == .completed && webSearchState.sources.isEmpty && isStreaming {
-            return .searching
-        }
-        return webSearchState.status
+        .disabled(webSearchState.status == .searching || webSearchState.sources.isEmpty)
     }
 
     @ViewBuilder
     private var headerContent: some View {
-        switch effectiveStatus {
+        switch webSearchState.status {
         case .searching:
             HStack(spacing: 8) {
                 if let summary = webSearchSummary, !summary.isEmpty {
