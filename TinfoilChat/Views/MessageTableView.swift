@@ -580,6 +580,8 @@ class ObservableMessageWrapper: ObservableObject {
                             self.message.streamError != message.streamError ||
                             self.message.webSearchState != message.webSearchState ||
                             self.message.urlFetches != message.urlFetches ||
+                            self.message.segments != message.segments ||
+                            self.message.webSearches != message.webSearches ||
                             self.isDarkMode != isDarkMode
 
         let metadataChanged = self.isLastMessage != isLastMessage ||

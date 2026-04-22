@@ -39,6 +39,67 @@ struct MessageView: View {
         !(isLoading && isLastMessage)
     }
 
+    /// Renders ordered message segments (text and inline event refs) in the
+    /// order they streamed. Each text segment is rendered via the same
+    /// markdown pipeline as the non-segmented path; event segments resolve
+    /// through the message's `webSearches` / `urlFetches` maps.
+    @ViewBuilder
+    private func inlineSegmentsView(segments: [MessageSegment]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            let lastTextIndex: Int? = {
+                for i in segments.indices.reversed() {
+                    if case .text = segments[i] { return i }
+                }
+                return nil
+            }()
+
+            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+                switch segment {
+                case .text(let text):
+                    if !text.isEmpty {
+                        let isTrailingText = index == lastTextIndex
+                        let isStreamingText = isTrailingText && isLoading && isLastMessage
+                        LaTeXMarkdownView(
+                            content: text,
+                            isDarkMode: isDarkMode,
+                            isStreaming: isStreamingText,
+                            textSelectionEnabled: inlineAssistantTextSelectionEnabled,
+                            citationUrls: citationUrls
+                        )
+                            .equatable()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .transaction { transaction in
+                                transaction.animation = nil
+                            }
+                    }
+                case .webSearch(let searchId):
+                    if let instance = message.webSearches?.first(where: { $0.id == searchId }) {
+                        WebSearchBox(
+                            webSearchState: WebSearchState(
+                                query: instance.query,
+                                status: instance.status,
+                                sources: instance.sources ?? [],
+                                reason: instance.reason
+                            ),
+                            isDarkMode: isDarkMode,
+                            isStreaming: isLoading && isLastMessage,
+                            webSearchSummary: isLastMessage ? viewModel.webSearchSummary : nil,
+                            onTap: { showSourcesSheet = true }
+                        )
+                    }
+                case .urlFetch(let fetchId):
+                    if let fetch = message.urlFetches.first(where: { $0.id == fetchId }) {
+                        URLFetchBox(
+                            urlFetches: [fetch],
+                            isDarkMode: isDarkMode,
+                            onTap: { showURLFetchSheet = true }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     /// URLs the router annotated as web-search citations on this message.
     /// Used by the markdown renderer to rewrite plain markdown citation links
     /// to use the host domain as their display text.
@@ -109,21 +170,6 @@ struct MessageView: View {
                 // If the message is thinking or has thoughts, display them in a thinking box
                 else if message.isThinking || message.thoughts != nil {
                     VStack(alignment: .leading, spacing: 4) {
-                        if !message.urlFetches.isEmpty {
-                            URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode, onTap: { showURLFetchSheet = true })
-                        }
-
-                        // Web search box (if applicable) - shown before thoughts since search happens first
-                        if let webSearchState = message.webSearchState {
-                            WebSearchBox(
-                                webSearchState: webSearchState,
-                                isDarkMode: isDarkMode,
-                                isStreaming: isLoading && isLastMessage,
-                                webSearchSummary: isLastMessage ? viewModel.webSearchSummary : nil,
-                                onTap: { showSourcesSheet = true }
-                            )
-                        }
-
                         CollapsibleThinkingBox(
                             thinkingText: message.thoughts ?? "",
                             isDarkMode: isDarkMode,
@@ -133,30 +179,48 @@ struct MessageView: View {
                             onTap: { showThoughtsSheet = true }
                         )
 
-                        if !message.content.isEmpty {
-                            if !message.contentChunks.isEmpty {
-                                ChunkedContentView(
-                                    chunks: message.contentChunks,
+                        if let segments = message.segments, !segments.isEmpty {
+                            inlineSegmentsView(segments: segments)
+                        } else {
+                            if !message.urlFetches.isEmpty {
+                                URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode, onTap: { showURLFetchSheet = true })
+                            }
+
+                            if let webSearchState = message.webSearchState {
+                                WebSearchBox(
+                                    webSearchState: webSearchState,
                                     isDarkMode: isDarkMode,
                                     isStreaming: isLoading && isLastMessage,
-                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled,
-                                    citationUrls: citationUrls
+                                    webSearchSummary: isLastMessage ? viewModel.webSearchSummary : nil,
+                                    onTap: { showSourcesSheet = true }
                                 )
-                                    .equatable()
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            } else {
-                                LaTeXMarkdownView(
-                                    content: message.content,
-                                    isDarkMode: isDarkMode,
-                                    isStreaming: isLoading && isLastMessage,
-                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled,
-                                    citationUrls: citationUrls
-                                )
-                                    .equatable()
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .transaction { transaction in
-                                        transaction.animation = nil
-                                    }
+                            }
+
+                            if !message.content.isEmpty {
+                                if !message.contentChunks.isEmpty {
+                                    ChunkedContentView(
+                                        chunks: message.contentChunks,
+                                        isDarkMode: isDarkMode,
+                                        isStreaming: isLoading && isLastMessage,
+                                        textSelectionEnabled: inlineAssistantTextSelectionEnabled,
+                                        citationUrls: citationUrls
+                                    )
+                                        .equatable()
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                } else {
+                                    LaTeXMarkdownView(
+                                        content: message.content,
+                                        isDarkMode: isDarkMode,
+                                        isStreaming: isLoading && isLastMessage,
+                                        textSelectionEnabled: inlineAssistantTextSelectionEnabled,
+                                        citationUrls: citationUrls
+                                    )
+                                        .equatable()
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .transaction { transaction in
+                                            transaction.animation = nil
+                                        }
+                                }
                             }
                         }
                     }
@@ -232,6 +296,9 @@ struct MessageView: View {
                         } else {
                             AdaptiveMarkdownText(content: message.content, isDarkMode: isDarkMode)
                         }
+                    } else if let segments = message.segments, !segments.isEmpty {
+                        // Render events inline in the order they streamed.
+                        inlineSegmentsView(segments: segments)
                     } else {
                         VStack(alignment: .leading, spacing: 4) {
                             if !message.urlFetches.isEmpty {
