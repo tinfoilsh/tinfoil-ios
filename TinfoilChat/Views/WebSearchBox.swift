@@ -272,19 +272,14 @@ struct WebSearchQueriesSheetView: View {
     let instances: [WebSearchInstance]
     let isDarkMode: Bool
     @Environment(\.dismiss) private var dismiss
-    @State private var expandedIds: Set<String> = []
 
     var body: some View {
         NavigationStack {
             List {
                 ForEach(instances) { instance in
-                    WebSearchQueryRow(
-                        instance: instance,
-                        isDarkMode: isDarkMode,
-                        isExpanded: expandedIds.contains(instance.id),
-                        onToggle: { toggle(instance.id) }
-                    )
-                    .listRowBackground(Color.clear)
+                    WebSearchQueryRow(instance: instance, isDarkMode: isDarkMode)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
             }
             .listStyle(.plain)
@@ -298,54 +293,39 @@ struct WebSearchQueriesSheetView: View {
         }
         .preferredColorScheme(isDarkMode ? .dark : .light)
     }
-
-    private func toggle(_ id: String) {
-        if expandedIds.contains(id) {
-            expandedIds.remove(id)
-        } else {
-            expandedIds.insert(id)
-        }
-    }
 }
 
+/// Flat row for a single search inside the grouped queries sheet: the
+/// query stands as the heading with its sources listed directly beneath
+/// (when attributed). Mirrors the webapp's grouped-search expansion.
 private struct WebSearchQueryRow: View {
     let instance: WebSearchInstance
     let isDarkMode: Bool
-    let isExpanded: Bool
-    let onToggle: () -> Void
 
-    private var canExpand: Bool { !(instance.sources?.isEmpty ?? true) }
+    private var sources: [WebSearchSource] {
+        instance.sources ?? []
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button(action: { if canExpand { onToggle() } }) {
-                HStack(spacing: 10) {
-                    statusIcon
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(instance.query ?? "Web search")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(isDarkMode ? .white : .black.opacity(0.85))
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                        Text(statusLabel)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                statusIcon
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(instance.query ?? "Web search")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(isDarkMode ? .white : .black.opacity(0.85))
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let subtitle = statusSubtitle {
+                        Text(subtitle)
                             .font(.system(size: 12))
                             .foregroundColor(statusColor)
                     }
-                    Spacer()
-                    if canExpand {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    }
                 }
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
+                Spacer(minLength: 0)
             }
-            .buttonStyle(PlainButtonStyle())
-            .disabled(!canExpand)
 
-            if isExpanded, let sources = instance.sources, !sources.isEmpty {
+            if !sources.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(sources) { source in
                         SourceRowView(source: source, isDarkMode: isDarkMode)
@@ -354,6 +334,7 @@ private struct WebSearchQueryRow: View {
                 .padding(.leading, 26)
             }
         }
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder
@@ -381,12 +362,12 @@ private struct WebSearchQueryRow: View {
         }
     }
 
-    private var statusLabel: String {
+    private var statusSubtitle: String? {
         switch instance.status {
-        case .searching: return "Searching..."
+        case .searching: return "Searching…"
         case .completed:
-            let count = instance.sources?.count ?? 0
-            return count == 0 ? "Completed" : "\(count) source\(count == 1 ? "" : "s")"
+            let count = sources.count
+            return count > 0 ? "\(count) source\(count == 1 ? "" : "s")" : nil
         case .failed: return "Failed"
         case .blocked: return instance.reason ?? "Blocked"
         }
