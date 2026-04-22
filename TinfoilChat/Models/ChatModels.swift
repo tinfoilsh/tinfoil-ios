@@ -386,7 +386,6 @@ struct URLFetchState: Codable, Equatable, Identifiable {
 }
 
 /// A single web search instance referenced by an inline message segment.
-/// Mirrors React's `WebSearchInstance`.
 struct WebSearchInstance: Codable, Equatable, Identifiable {
     let id: String
     var query: String?
@@ -487,9 +486,9 @@ struct Message: Identifiable, Codable, Equatable {
     var webSearchBeforeThinking: Bool? = nil
     var annotations: [Annotation]? = nil
     var searchReasoning: String? = nil
-    // React's ordered content segments and per-search instances. iOS does not
-    // render from these yet but preserves them so messages authored on web
-    // round-trip through iOS without losing inline ordering.
+    // Ordered content segments and per-search instances so web-search and
+    // URL-fetch events render inline with the assistant text in the exact
+    // order they streamed.
     var segments: [MessageSegment]? = nil
     var webSearches: [WebSearchInstance]? = nil
 
