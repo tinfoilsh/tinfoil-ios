@@ -111,20 +111,12 @@ struct TinfoilChatApp: App {
                             }
                         }
                     } else {
-                        VStack {
-                            Text("Failed to Initialize")
-                                .font(.title)
-                                .padding()
-                            Text(error.localizedDescription)
-                                .multilineTextAlignment(.center)
-                                .padding()
-                            Button("Retry") {
-                                Task {
-                                    await appConfig.loadRemoteConfig()
-                                }
+                        InitializationFailedView(
+                            errorMessage: error.localizedDescription
+                        ) {
+                            Task {
+                                await appConfig.loadRemoteConfig()
                             }
-                        }
-                        .onAppear {
                         }
                     }
                 } else {
