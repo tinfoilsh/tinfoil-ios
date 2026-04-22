@@ -1291,31 +1291,19 @@ class ChatViewModel: ObservableObject {
                         )
                         self.webSearchSummary = event.action?.query.map { "Searching the web: \($0)" } ?? "Searching the web"
                     case .completed:
-                        // Only promote to `.completed` once at least one source
-                        // has landed; otherwise the UI would briefly show a
-                        // "Searched the web" pill with zero sources while
-                        // annotations are still in flight. Leaving the status
-                        // as `.searching` here is harmless: the annotation
-                        // path below promotes the state the moment the first
-                        // source arrives, and the final save always upgrades
-                        // whatever is set.
-                        let hasSources = !(chat.messages[lastIndex].webSearchState?.sources.isEmpty ?? true)
-                        let completedStatus: WebSearchStatus = hasSources ? .completed : .searching
                         if let existing = findLatestSearchInstance(event.itemId) {
                             upsertWebSearch(
                                 WebSearchInstance(
                                     id: existing.id,
                                     query: existing.query,
-                                    status: completedStatus,
+                                    status: .completed,
                                     sources: existing.sources,
                                     reason: existing.reason
                                 )
                             )
                         }
-                        chat.messages[lastIndex].webSearchState?.status = completedStatus
-                        if hasSources {
-                            self.webSearchSummary = ""
-                        }
+                        chat.messages[lastIndex].webSearchState?.status = .completed
+                        self.webSearchSummary = ""
                     case .failed:
                         if let existing = findLatestSearchInstance(event.itemId) {
                             upsertWebSearch(
