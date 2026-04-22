@@ -435,6 +435,19 @@ struct MessageView: View {
                     }
                 }
 
+                // Persistent streaming indicator at the bottom of the
+                // currently rendered assistant content. Only shown once
+                // initial content has started arriving so we don't double up
+                // with the initial `LoadingDotsView` placeholder above.
+                if message.role == .assistant &&
+                   isLoading &&
+                   isLastMessage &&
+                   (!message.content.isEmpty || message.thoughts != nil || message.isThinking) {
+                    StreamingIndicatorDot(isDarkMode: isDarkMode)
+                        .padding(.top, 4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 // Show error box with regenerate button if stream failed
                 if message.streamError != nil && message.role == .assistant {
                     ErrorMessageView(

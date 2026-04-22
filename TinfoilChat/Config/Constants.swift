@@ -37,6 +37,8 @@ enum Constants {
         static let tableMaxColumnWidth: CGFloat = 300
         static let tableFontSize: CGFloat = 16
         static let tableCellHorizontalPadding: CGFloat = 12
+        static let streamingIndicatorDotSize: CGFloat = 10
+        static let streamingIndicatorIconColumnWidth: CGFloat = 16
         static let actionButtonCornerRadius: CGFloat = 6
         static let iPadInputBottomPadding: CGFloat = 16
     }

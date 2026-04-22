@@ -1156,6 +1156,37 @@ private struct UnsupportedLaTeXView: View {
     }
 }
 
+/// A pulsating dot shown at the bottom of streaming text to indicate
+/// that more content is on the way.
+struct StreamingIndicatorDot: View {
+    let isDarkMode: Bool
+    @State private var isPulsing = false
+
+    var body: some View {
+        Circle()
+            .fill(isDarkMode ? Color.white : Color.black)
+            .frame(
+                width: Constants.UI.streamingIndicatorDotSize,
+                height: Constants.UI.streamingIndicatorDotSize
+            )
+            .scaleEffect(isPulsing ? 1.0 : 0.6)
+            .opacity(isPulsing ? 1.0 : 0.4)
+            .animation(
+                .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
+                value: isPulsing
+            )
+            .frame(
+                width: Constants.UI.streamingIndicatorIconColumnWidth,
+                alignment: .center
+            )
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    isPulsing = true
+                }
+            }
+    }
+}
+
 /// Bridge to SwiftMath's MTMathUILabel
 struct MathView: UIViewRepresentable {
     let latex: String
