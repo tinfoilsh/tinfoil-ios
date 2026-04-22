@@ -1183,6 +1183,45 @@ class ChatViewModel: ObservableObject {
                 // Track whether web search started before thinking (shared across callback and streaming loop)
                 let webSearchStartedFlag = OSAllocatedUnfairLock(initialState: false)
 
+                // Ordered content segments (text + inline event refs) that preserve
+                // the exact order in which events arrived relative to streamed text.
+                // Accessed only on the main actor (this Task and the
+                // applyWebSearchCallEvent closure both run MainActor-isolated).
+                var segments: [MessageSegment] = []
+                var webSearches: [WebSearchInstance] = []
+                var nextSearchId = 0
+
+                let allocateSearchId = { () -> String in
+                    defer { nextSearchId += 1 }
+                    return "ws-\(nextSearchId)"
+                }
+
+                let appendText: (String) -> Void = { text in
+                    guard !text.isEmpty else { return }
+                    if case .text(let existing) = segments.last {
+                        segments[segments.count - 1] = .text(existing + text)
+                    } else {
+                        segments.append(.text(text))
+                    }
+                }
+
+                let upsertWebSearch: (WebSearchInstance) -> Void = { instance in
+                    if let idx = webSearches.firstIndex(where: { $0.id == instance.id }) {
+                        webSearches[idx] = instance
+                    } else {
+                        webSearches.append(instance)
+                        segments.append(.webSearch(searchId: instance.id))
+                    }
+                }
+
+                let findLatestSearchInstance = { (eventId: String?) -> WebSearchInstance? in
+                    if let eventId = eventId,
+                       let hit = webSearches.first(where: { $0.id == eventId }) {
+                        return hit
+                    }
+                    return webSearches.last
+                }
+
                 // Web search progress now rides inline with the model's
                 // content as `<tinfoil-event>` markers (opted into via
                 // the `tinfoilEvents: [.webSearch]` flag on create).
@@ -1211,6 +1250,7 @@ class ChatViewModel: ObservableObject {
                                 chat.messages[lastIndex].urlFetches.append(
                                     URLFetchState(id: fetchId, url: url, status: .fetching)
                                 )
+                                segments.append(.urlFetch(fetchId: fetchId))
                             }
                         case .completed:
                             if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
@@ -1225,6 +1265,7 @@ class ChatViewModel: ObservableObject {
                                 chat.messages[lastIndex].urlFetches[idx].status = .blocked
                             }
                         }
+                        chat.messages[lastIndex].segments = segments
                         self.updateChat(chat, throttleForStreaming: true)
                         return
                     }
@@ -1233,6 +1274,16 @@ class ChatViewModel: ObservableObject {
                     switch event.status {
                     case .inProgress, .searching:
                         webSearchStartedFlag.withLock { $0 = true }
+                        let id = event.itemId ?? allocateSearchId()
+                        upsertWebSearch(
+                            WebSearchInstance(
+                                id: id,
+                                query: event.action?.query,
+                                status: .searching,
+                                sources: existingSources,
+                                reason: nil
+                            )
+                        )
                         chat.messages[lastIndex].webSearchState = WebSearchState(
                             query: event.action?.query,
                             status: .searching,
@@ -1240,12 +1291,45 @@ class ChatViewModel: ObservableObject {
                         )
                         self.webSearchSummary = event.action?.query.map { "Searching the web: \($0)" } ?? "Searching the web"
                     case .completed:
+                        if let existing = findLatestSearchInstance(event.itemId) {
+                            upsertWebSearch(
+                                WebSearchInstance(
+                                    id: existing.id,
+                                    query: existing.query,
+                                    status: .completed,
+                                    sources: existing.sources,
+                                    reason: existing.reason
+                                )
+                            )
+                        }
                         chat.messages[lastIndex].webSearchState?.status = .completed
                         self.webSearchSummary = ""
                     case .failed:
+                        if let existing = findLatestSearchInstance(event.itemId) {
+                            upsertWebSearch(
+                                WebSearchInstance(
+                                    id: existing.id,
+                                    query: existing.query,
+                                    status: .failed,
+                                    sources: [],
+                                    reason: existing.reason
+                                )
+                            )
+                        }
                         chat.messages[lastIndex].webSearchState?.status = .failed
                         self.webSearchSummary = ""
                     case .blocked:
+                        let existing = findLatestSearchInstance(event.itemId)
+                        let id = existing?.id ?? event.itemId ?? allocateSearchId()
+                        upsertWebSearch(
+                            WebSearchInstance(
+                                id: id,
+                                query: event.action?.query ?? existing?.query,
+                                status: .blocked,
+                                sources: nil,
+                                reason: event.error?.code
+                            )
+                        )
                         chat.messages[lastIndex].webSearchState = WebSearchState(
                             query: event.action?.query,
                             status: .blocked,
@@ -1253,6 +1337,8 @@ class ChatViewModel: ObservableObject {
                         )
                         self.webSearchSummary = ""
                     }
+                    chat.messages[lastIndex].segments = segments
+                    chat.messages[lastIndex].webSearches = webSearches
                     self.updateChat(chat, throttleForStreaming: true)
                 }
 
@@ -1352,6 +1438,7 @@ class ChatViewModel: ObservableObject {
 
                     // Collect sources from annotations (no deduplication to preserve citation index mapping)
                     if isWebSearchEnabled, let annotations = chunk.choices.first?.delta.annotations {
+                        var didCollectNewSource = false
                         for annotation in annotations where annotation.type == "url_citation" {
                             if let citation = annotation.urlCitation {
                                 let source = WebSearchSource(
@@ -1359,8 +1446,21 @@ class ChatViewModel: ObservableObject {
                                     url: citation.url
                                 )
                                 collectedSources.append(source)
+                                didCollectNewSource = true
                                 didMutateState = true
                             }
+                        }
+                        // Mirror the running sources onto the most recent WebSearchInstance
+                        // so inline rendering reflects the same state as the aggregate.
+                        if didCollectNewSource, let idx = webSearches.indices.last {
+                            let lastSearch = webSearches[idx]
+                            webSearches[idx] = WebSearchInstance(
+                                id: lastSearch.id,
+                                query: lastSearch.query,
+                                status: lastSearch.status,
+                                sources: collectedSources,
+                                reason: lastSearch.reason
+                            )
                         }
                     }
 
@@ -1417,6 +1517,7 @@ class ChatViewModel: ObservableObject {
                                 responseContent += content
                             }
                             chunker.appendToken(content)
+                            appendText(content)
                             didMutateState = true
                         } else if !content.isEmpty {
                             if responseContent.isEmpty {
@@ -1425,6 +1526,7 @@ class ChatViewModel: ObservableObject {
                                 responseContent += content
                             }
                             chunker.appendToken(content)
+                            appendText(content)
                             isInThinkingMode = false
                             didMutateState = true
                         }
@@ -1461,6 +1563,7 @@ class ChatViewModel: ObservableObject {
                                         responseContent += processContent
                                     }
                                     chunker.appendToken(processContent)
+                                    appendText(processContent)
                                     didMutateState = true
                                 }
                             }
@@ -1485,6 +1588,7 @@ class ChatViewModel: ObservableObject {
                                     responseContent += afterEnd
                                 }
                                 chunker.appendToken(afterEnd)
+                                appendText(afterEnd)
 
                                 if let startTime = thinkStartTime {
                                     generationTimeSeconds = Date().timeIntervalSince(startTime)
@@ -1515,6 +1619,7 @@ class ChatViewModel: ObservableObject {
                                 responseContent += content
                             }
                             chunker.appendToken(content)
+                            appendText(content)
                             didMutateState = true
                         }
                     }
@@ -1530,6 +1635,8 @@ class ChatViewModel: ObservableObject {
                         let thinking = isInThinkingMode
                         let genTime = generationTimeSeconds
                         let currentSources = collectedSources
+                        let currentSegments = segments
+                        let currentWebSearches = webSearches
 
                         Task { @MainActor [weak self] in
                             guard let self = self else { return }
@@ -1549,6 +1656,8 @@ class ChatViewModel: ObservableObject {
                             chat.messages[lastIndex].isThinking = thinking
                             chat.messages[lastIndex].generationTimeSeconds = genTime
                             chat.messages[lastIndex].contentChunks = currentChunks
+                            chat.messages[lastIndex].segments = currentSegments.isEmpty ? nil : currentSegments
+                            chat.messages[lastIndex].webSearches = currentWebSearches.isEmpty ? nil : currentWebSearches
 
                             // Merge collected sources into the message's current webSearchState (set by the callback)
                             if !currentSources.isEmpty {
@@ -1580,6 +1689,7 @@ class ChatViewModel: ObservableObject {
                             responseContent += sanitizedTail
                         }
                         _ = chunker.appendToken(sanitizedTail)
+                        appendText(sanitizedTail)
                     }
                 }
 
@@ -1592,6 +1702,7 @@ class ChatViewModel: ObservableObject {
                         if responseContent.isEmpty {
                             responseContent = thoughtsBuffer
                             currentThoughts = nil
+                            appendText(thoughtsBuffer)
                         }
                     }
                     if let startTime = thinkStartTime {
@@ -1605,6 +1716,7 @@ class ChatViewModel: ObservableObject {
                         responseContent += initialContentBuffer
                     }
                     _ = chunker.appendToken(initialContentBuffer)
+                    appendText(initialContentBuffer)
                     isInThinkingMode = false
                     currentThoughts = nil
                 }
@@ -1645,6 +1757,21 @@ class ChatViewModel: ObservableObject {
                         chat.messages[lastIndex].thinkingDuration = generationTimeSeconds
                         chat.messages[lastIndex].webSearchBeforeThinking = webSearchBeforeThinking
                         chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
+                        chat.messages[lastIndex].segments = segments.isEmpty ? nil : segments
+                        // Mirror the final sources onto the most recent WebSearchInstance so
+                        // the inline segmented pill matches the aggregate webSearchState.
+                        if !collectedSources.isEmpty,
+                           let idx = webSearches.indices.last {
+                            let lastSearch = webSearches[idx]
+                            webSearches[idx] = WebSearchInstance(
+                                id: lastSearch.id,
+                                query: lastSearch.query,
+                                status: lastSearch.status,
+                                sources: collectedSources,
+                                reason: lastSearch.reason
+                            )
+                        }
+                        chat.messages[lastIndex].webSearches = webSearches.isEmpty ? nil : webSearches
                         // Merge final collected sources into the message's webSearchState
                         if !collectedSources.isEmpty {
                             var searchState = chat.messages[lastIndex].webSearchState ?? WebSearchState(status: .searching)
