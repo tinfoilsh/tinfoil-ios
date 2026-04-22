@@ -1291,27 +1291,44 @@ class ChatViewModel: ObservableObject {
                         )
                         self.webSearchSummary = event.action?.query.map { "Searching the web: \($0)" } ?? "Searching the web"
                     case .completed:
+                        let eventSources = event.sources?.compactMap { source -> WebSearchSource? in
+                            guard let url = source.url, !url.isEmpty else { return nil }
+                            return WebSearchSource(title: source.title ?? url, url: url)
+                        }
                         if let existing = findLatestSearchInstance(event.itemId) {
+                            let mergedSources = eventSources ?? existing.sources
                             upsertWebSearch(
                                 WebSearchInstance(
                                     id: existing.id,
                                     query: existing.query,
                                     status: .completed,
-                                    sources: existing.sources,
+                                    sources: mergedSources,
                                     reason: existing.reason
                                 )
                             )
                         }
+                        if let eventSources, !eventSources.isEmpty {
+                            var merged = chat.messages[lastIndex].webSearchState?.sources ?? []
+                            var seen = Set(merged.map(\.url))
+                            for source in eventSources where seen.insert(source.url).inserted {
+                                merged.append(source)
+                            }
+                            chat.messages[lastIndex].webSearchState?.sources = merged
+                        }
                         chat.messages[lastIndex].webSearchState?.status = .completed
                         self.webSearchSummary = ""
                     case .failed:
+                        let eventSources = event.sources?.compactMap { source -> WebSearchSource? in
+                            guard let url = source.url, !url.isEmpty else { return nil }
+                            return WebSearchSource(title: source.title ?? url, url: url)
+                        } ?? []
                         if let existing = findLatestSearchInstance(event.itemId) {
                             upsertWebSearch(
                                 WebSearchInstance(
                                     id: existing.id,
                                     query: existing.query,
                                     status: .failed,
-                                    sources: [],
+                                    sources: eventSources,
                                     reason: existing.reason
                                 )
                             )
