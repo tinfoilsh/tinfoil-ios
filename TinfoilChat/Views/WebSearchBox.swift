@@ -97,30 +97,35 @@ struct WebSearchBox: View {
             }
 
         case .completed:
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: "globe")
-                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
-                    .font(.system(size: 14))
-                    .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 5 }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "globe")
+                        .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
+                        .font(.system(size: 14))
+                        .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 5 }
 
-                if isGroup {
-                    Text("Searched the web on \(groupSize) quer\(groupSize == 1 ? "y" : "ies")")
-                        .font(.subheadline)
-                        .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
-                } else if let query = webSearchState.query, !query.isEmpty {
-                    Text("Searched the web for \"\(query)\"")
-                        .font(.subheadline)
-                        .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
-                        .lineLimit(3)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text("Searched the web")
-                        .font(.subheadline)
-                        .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
+                    if isGroup {
+                        Text("Searched the web on \(groupSize) quer\(groupSize == 1 ? "y" : "ies")")
+                            .font(.subheadline)
+                            .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
+                    } else if let query = webSearchState.query, !query.isEmpty {
+                        Text("Searched the web for \"\(query)\"")
+                            .font(.subheadline)
+                            .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
+                            .lineLimit(3)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("Searched the web")
+                            .font(.subheadline)
+                            .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
+                    }
                 }
-                if !webSearchState.sources.isEmpty {
+                if !isGroup && !webSearchState.sources.isEmpty {
+                    // Indent favicons under the query text so they visually
+                    // group with the query rather than the leading globe icon.
                     sourceFavicons
+                        .padding(.leading, 22)
                 }
             }
 
