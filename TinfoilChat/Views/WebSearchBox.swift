@@ -66,7 +66,11 @@ struct WebSearchBox: View {
     private var headerContent: some View {
         switch webSearchState.status {
         case .searching:
-            HStack(spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                ProgressView()
+                    .scaleEffect(0.6)
+                    .frame(width: 14, height: 14)
+                    .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 5 }
                 if isGroup {
                     Text("Searching the web on \(groupSize) queries")
                         .font(.subheadline)
@@ -90,7 +94,6 @@ struct WebSearchBox: View {
                         .font(.subheadline)
                         .foregroundColor(isDarkMode ? .white : .black.opacity(0.8))
                 }
-                SearchingDotsView(isDarkMode: isDarkMode)
             }
 
         case .completed:
