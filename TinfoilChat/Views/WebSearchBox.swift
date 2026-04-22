@@ -41,14 +41,16 @@ struct WebSearchBox: View {
                     Text(summary)
                         .font(.subheadline)
                         .foregroundColor(isDarkMode ? .white : .black.opacity(0.8))
-                        .lineLimit(1)
+                        .lineLimit(2)
                         .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else if let query = webSearchState.query {
                     Text("Searching the web: \(query)")
                         .font(.subheadline)
                         .foregroundColor(isDarkMode ? .white : .black.opacity(0.8))
-                        .lineLimit(1)
+                        .lineLimit(2)
                         .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text("Searching the web")
                         .font(.subheadline)
