@@ -385,6 +385,68 @@ struct URLFetchState: Codable, Equatable, Identifiable {
     }
 }
 
+/// A single web search instance referenced by an inline message segment.
+/// Mirrors React's `WebSearchInstance`.
+struct WebSearchInstance: Codable, Equatable, Identifiable {
+    let id: String
+    var query: String?
+    var status: WebSearchStatus
+    var sources: [WebSearchSource]?
+    var reason: String?
+}
+
+/// An ordered segment of assistant content. Preserves the exact order in which
+/// text and inline events (web search, URL fetch) streamed.
+enum MessageSegment: Codable, Equatable {
+    case text(String)
+    case webSearch(searchId: String)
+    case urlFetch(fetchId: String)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case text
+        case searchId
+        case fetchId
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "text":
+            let text = try container.decode(String.self, forKey: .text)
+            self = .text(text)
+        case "web_search":
+            let searchId = try container.decode(String.self, forKey: .searchId)
+            self = .webSearch(searchId: searchId)
+        case "url_fetch":
+            let fetchId = try container.decode(String.self, forKey: .fetchId)
+            self = .urlFetch(fetchId: fetchId)
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type,
+                in: container,
+                debugDescription: "Unknown segment type: \(type)"
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .text(let text):
+            try container.encode("text", forKey: .type)
+            try container.encode(text, forKey: .text)
+        case .webSearch(let searchId):
+            try container.encode("web_search", forKey: .type)
+            try container.encode(searchId, forKey: .searchId)
+        case .urlFetch(let fetchId):
+            try container.encode("url_fetch", forKey: .type)
+            try container.encode(fetchId, forKey: .fetchId)
+        }
+    }
+}
+
 /// URL citation from web search results, matching React's Annotation type
 struct URLCitation: Codable, Equatable {
     let title: String
@@ -425,6 +487,11 @@ struct Message: Identifiable, Codable, Equatable {
     var webSearchBeforeThinking: Bool? = nil
     var annotations: [Annotation]? = nil
     var searchReasoning: String? = nil
+    // React's ordered content segments and per-search instances. iOS does not
+    // render from these yet but preserves them so messages authored on web
+    // round-trip through iOS without losing inline ordering.
+    var segments: [MessageSegment]? = nil
+    var webSearches: [WebSearchInstance]? = nil
 
     static let longMessageAttachmentThreshold = 1200
     var shouldDisplayAsAttachment: Bool {
@@ -467,6 +534,7 @@ struct Message: Identifiable, Codable, Equatable {
         case attachments
         case thinkingDuration, isError
         case webSearchBeforeThinking, annotations, searchReasoning
+        case segments, webSearches
         // Legacy keys for decoding React messages that use the old format
         case documentContent, imageData, imageBase64, multimodalText, documents
     }
@@ -521,6 +589,8 @@ struct Message: Identifiable, Codable, Equatable {
         webSearchBeforeThinking = try container.decodeIfPresent(Bool.self, forKey: .webSearchBeforeThinking)
         annotations = try container.decodeIfPresent([Annotation].self, forKey: .annotations)
         searchReasoning = try container.decodeIfPresent(String.self, forKey: .searchReasoning)
+        segments = try container.decodeIfPresent([MessageSegment].self, forKey: .segments)
+        webSearches = try container.decodeIfPresent([WebSearchInstance].self, forKey: .webSearches)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -555,6 +625,8 @@ struct Message: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(webSearchBeforeThinking, forKey: .webSearchBeforeThinking)
         try container.encodeIfPresent(annotations, forKey: .annotations)
         try container.encodeIfPresent(searchReasoning, forKey: .searchReasoning)
+        try container.encodeIfPresent(segments, forKey: .segments)
+        try container.encodeIfPresent(webSearches, forKey: .webSearches)
     }
 
     // MARK: - Legacy Format Reconstruction
