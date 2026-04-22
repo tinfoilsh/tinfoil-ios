@@ -1291,19 +1291,31 @@ class ChatViewModel: ObservableObject {
                         )
                         self.webSearchSummary = event.action?.query.map { "Searching the web: \($0)" } ?? "Searching the web"
                     case .completed:
+                        // Only promote to `.completed` once at least one source
+                        // has landed; otherwise the UI would briefly show a
+                        // "Searched the web" pill with zero sources while
+                        // annotations are still in flight. Leaving the status
+                        // as `.searching` here is harmless: the annotation
+                        // path below promotes the state the moment the first
+                        // source arrives, and the final save always upgrades
+                        // whatever is set.
+                        let hasSources = !(chat.messages[lastIndex].webSearchState?.sources.isEmpty ?? true)
+                        let completedStatus: WebSearchStatus = hasSources ? .completed : .searching
                         if let existing = findLatestSearchInstance(event.itemId) {
                             upsertWebSearch(
                                 WebSearchInstance(
                                     id: existing.id,
                                     query: existing.query,
-                                    status: .completed,
+                                    status: completedStatus,
                                     sources: existing.sources,
                                     reason: existing.reason
                                 )
                             )
                         }
-                        chat.messages[lastIndex].webSearchState?.status = .completed
-                        self.webSearchSummary = ""
+                        chat.messages[lastIndex].webSearchState?.status = completedStatus
+                        if hasSources {
+                            self.webSearchSummary = ""
+                        }
                     case .failed:
                         if let existing = findLatestSearchInstance(event.itemId) {
                             upsertWebSearch(
@@ -1450,14 +1462,19 @@ class ChatViewModel: ObservableObject {
                                 didMutateState = true
                             }
                         }
-                        // Mirror the running sources onto the most recent WebSearchInstance
-                        // so inline rendering reflects the same state as the aggregate.
+                        // Mirror the running sources onto the most recent WebSearchInstance.
+                        // When the router sent `.completed` before any sources, we held the
+                        // instance at `.searching` to avoid a zero-source completed pill;
+                        // promote it now that a source has arrived.
                         if didCollectNewSource, let idx = webSearches.indices.last {
                             let lastSearch = webSearches[idx]
+                            let promotedStatus: WebSearchStatus = lastSearch.status == .searching
+                                ? .completed
+                                : lastSearch.status
                             webSearches[idx] = WebSearchInstance(
                                 id: lastSearch.id,
                                 query: lastSearch.query,
-                                status: lastSearch.status,
+                                status: promotedStatus,
                                 sources: collectedSources,
                                 reason: lastSearch.reason
                             )
@@ -1659,10 +1676,18 @@ class ChatViewModel: ObservableObject {
                             chat.messages[lastIndex].segments = currentSegments.isEmpty ? nil : currentSegments
                             chat.messages[lastIndex].webSearches = currentWebSearches.isEmpty ? nil : currentWebSearches
 
-                            // Merge collected sources into the message's current webSearchState (set by the callback)
+                            // Merge collected sources into the message's current webSearchState (set by the callback).
+                            // If the router already sent `.completed` but no sources were attached at the time,
+                            // the aggregate state was parked at `.searching` — promote it now.
                             if !currentSources.isEmpty {
                                 var searchState = chat.messages[lastIndex].webSearchState ?? WebSearchState(status: .searching)
                                 searchState.sources = currentSources
+                                if searchState.status == .searching,
+                                   let latest = currentWebSearches.last,
+                                   latest.status == .completed {
+                                    searchState.status = .completed
+                                    self.webSearchSummary = ""
+                                }
                                 chat.messages[lastIndex].webSearchState = searchState
                             }
 
@@ -1758,24 +1783,32 @@ class ChatViewModel: ObservableObject {
                         chat.messages[lastIndex].webSearchBeforeThinking = webSearchBeforeThinking
                         chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
                         chat.messages[lastIndex].segments = segments.isEmpty ? nil : segments
-                        // Mirror the final sources onto the most recent WebSearchInstance so
-                        // the inline segmented pill matches the aggregate webSearchState.
+                        // Mirror the final sources onto the most recent WebSearchInstance,
+                        // promoting it out of the `.searching` holding state if the router
+                        // sent `.completed` before any sources landed.
                         if !collectedSources.isEmpty,
                            let idx = webSearches.indices.last {
                             let lastSearch = webSearches[idx]
+                            let finalStatus: WebSearchStatus = lastSearch.status == .searching
+                                ? .completed
+                                : lastSearch.status
                             webSearches[idx] = WebSearchInstance(
                                 id: lastSearch.id,
                                 query: lastSearch.query,
-                                status: lastSearch.status,
+                                status: finalStatus,
                                 sources: collectedSources,
                                 reason: lastSearch.reason
                             )
                         }
                         chat.messages[lastIndex].webSearches = webSearches.isEmpty ? nil : webSearches
-                        // Merge final collected sources into the message's webSearchState
+                        // Merge final collected sources into the aggregate webSearchState,
+                        // promoting the same way.
                         if !collectedSources.isEmpty {
                             var searchState = chat.messages[lastIndex].webSearchState ?? WebSearchState(status: .searching)
                             searchState.sources = collectedSources
+                            if searchState.status == .searching {
+                                searchState.status = .completed
+                            }
                             chat.messages[lastIndex].webSearchState = searchState
                         }
                     }
