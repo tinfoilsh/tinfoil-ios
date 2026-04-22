@@ -40,9 +40,10 @@ struct MessageView: View {
     @State private var showURLFetchSheet = false
     @State private var activeWebSearchGroup: IdentifiedGroup<WebSearchInstance>? = nil
     @State private var activeURLFetchGroup: IdentifiedGroup<URLFetchState>? = nil
+    @State private var activeSearchInstanceSources: IdentifiedGroup<WebSearchSource>? = nil
 
     private var isAnyMessageSheetPresented: Bool {
-        showLongMessageSheet || showRawContentModal || showSelectableText || showSourcesSheet || showShareSheet || showThoughtsSheet || showURLFetchSheet || activeWebSearchGroup != nil || activeURLFetchGroup != nil
+        showLongMessageSheet || showRawContentModal || showSelectableText || showSourcesSheet || showShareSheet || showThoughtsSheet || showURLFetchSheet || activeWebSearchGroup != nil || activeURLFetchGroup != nil || activeSearchInstanceSources != nil
     }
 
     private var inlineAssistantTextSelectionEnabled: Bool {
@@ -177,8 +178,9 @@ struct MessageView: View {
                         onTap: {
                             if group.count > 1 {
                                 activeWebSearchGroup = IdentifiedGroup(items: group)
-                            } else if !aggregate.sources.isEmpty {
-                                showSourcesSheet = true
+                            } else if let first = group.first,
+                                      !(first.sources ?? []).isEmpty {
+                                activeSearchInstanceSources = IdentifiedGroup(items: first.sources ?? [])
                             }
                         }
                     )
@@ -616,6 +618,12 @@ struct MessageView: View {
         }
         .sheet(item: $activeURLFetchGroup) { group in
             URLFetchSheetView(urlFetches: group.items, isDarkMode: isDarkMode)
+                .presentationDetents([.medium, .large])
+                .iPadSheetSizing()
+                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
+        }
+        .sheet(item: $activeSearchInstanceSources) { group in
+            SourcesSheetView(sources: group.items, isDarkMode: isDarkMode)
                 .presentationDetents([.medium, .large])
                 .iPadSheetSizing()
                 .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
