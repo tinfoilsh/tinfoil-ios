@@ -1296,7 +1296,15 @@ class ChatViewModel: ObservableObject {
                             return WebSearchSource(title: source.title ?? url, url: url)
                         }
                         if let existing = findLatestSearchInstance(event.itemId) {
-                            let mergedSources = eventSources ?? existing.sources
+                            // Preserve any sources already collected for this
+                            // instance when the completion payload doesn't
+                            // carry a non-empty sources list of its own.
+                            let mergedSources: [WebSearchSource]?
+                            if let eventSources, !eventSources.isEmpty {
+                                mergedSources = eventSources
+                            } else {
+                                mergedSources = existing.sources
+                            }
                             upsertWebSearch(
                                 WebSearchInstance(
                                     id: existing.id,
