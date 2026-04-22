@@ -28,11 +28,17 @@ struct TinfoilWebSearchCallEvent: Decodable, Sendable {
         let code: String?
     }
 
+    struct Source: Decodable, Sendable {
+        let title: String?
+        let url: String?
+    }
+
     let type: String
     let itemId: String?
     let status: Status
     let action: Action?
     let error: ErrorInfo?
+    let sources: [Source]?
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -40,6 +46,7 @@ struct TinfoilWebSearchCallEvent: Decodable, Sendable {
         case status
         case action
         case error
+        case sources
     }
 }
 
