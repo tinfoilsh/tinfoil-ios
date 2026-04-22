@@ -1633,54 +1633,35 @@ class ChatViewModel: ObservableObject {
                     let now = Date()
                     if didMutateState && now.timeIntervalSince(lastUIUpdateTime) >= uiUpdateInterval {
                         lastUIUpdateTime = now
-                        let currentChunks = chunker.getAllChunks()
-                        let currentThinkingChunks = thinkingChunker.getAllChunks()
-                        let content = responseContent
-                        let thoughts = currentThoughts
-                        let thinking = isInThinkingMode
-                        let genTime = generationTimeSeconds
-                        let currentSources = collectedSources
-                        let currentSegments = segments
-                        let currentWebSearches = webSearches
-
-                        Task { @MainActor [weak self] in
-                            guard let self = self else { return }
-                            guard self.currentChat?.id == streamChatId else { return }
-                            guard var chat = self.currentChat,
-                                  chat.hasActiveStream,
-                                  !chat.messages.isEmpty,
-                                  let lastIndex = chat.messages.indices.last else {
-                                return
-                            }
-
-                            // The router delivers citations as standard markdown links in the
-                            // assistant content, so the UI can render the message as-is.
-                            chat.messages[lastIndex].content = content
-                            chat.messages[lastIndex].thoughts = thoughts
-                            chat.messages[lastIndex].thinkingChunks = currentThinkingChunks
-                            chat.messages[lastIndex].isThinking = thinking
-                            chat.messages[lastIndex].generationTimeSeconds = genTime
-                            chat.messages[lastIndex].contentChunks = currentChunks
-                            chat.messages[lastIndex].segments = currentSegments.isEmpty ? nil : currentSegments
-                            chat.messages[lastIndex].webSearches = currentWebSearches.isEmpty ? nil : currentWebSearches
-
-                            // Merge collected sources into the message's current webSearchState (set by the callback).
-                            // If the router already sent `.completed` but no sources were attached at the time,
-                            // the aggregate state was parked at `.searching` — promote it now.
-                            if !currentSources.isEmpty {
-                                var searchState = chat.messages[lastIndex].webSearchState ?? WebSearchState(status: .searching)
-                                searchState.sources = currentSources
-                                if searchState.status == .searching,
-                                   let latest = currentWebSearches.last,
-                                   latest.status == .completed {
-                                    searchState.status = .completed
-                                    self.webSearchSummary = ""
-                                }
-                                chat.messages[lastIndex].webSearchState = searchState
-                            }
-
-                            self.updateChat(chat, throttleForStreaming: true)
+                        // The streaming loop and `applyWebSearchCallEvent` both run on
+                        // MainActor, so this block executes synchronously with respect to
+                        // event dispatch; reading `segments` / `webSearches` directly here
+                        // is safe and gives the latest values (no stale snapshot race).
+                        guard self.currentChat?.id == streamChatId else { continue }
+                        guard var chat = self.currentChat,
+                              chat.hasActiveStream,
+                              !chat.messages.isEmpty,
+                              let lastIndex = chat.messages.indices.last else {
+                            continue
                         }
+
+                        chat.messages[lastIndex].content = responseContent
+                        chat.messages[lastIndex].thoughts = currentThoughts
+                        chat.messages[lastIndex].thinkingChunks = thinkingChunker.getAllChunks()
+                        chat.messages[lastIndex].isThinking = isInThinkingMode
+                        chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
+                        chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
+                        chat.messages[lastIndex].segments = segments.isEmpty ? nil : segments
+                        chat.messages[lastIndex].webSearches = webSearches.isEmpty ? nil : webSearches
+
+                        // Merge collected sources into the message's current webSearchState.
+                        if !collectedSources.isEmpty {
+                            var searchState = chat.messages[lastIndex].webSearchState ?? WebSearchState(status: .searching)
+                            searchState.sources = collectedSources
+                            chat.messages[lastIndex].webSearchState = searchState
+                        }
+
+                        self.updateChat(chat, throttleForStreaming: true)
                     }
                 }
 
