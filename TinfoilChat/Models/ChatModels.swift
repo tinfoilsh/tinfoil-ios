@@ -444,6 +444,35 @@ enum MessageSegment: Codable, Equatable {
             try container.encode(fetchId, forKey: .fetchId)
         }
     }
+
+    /// Decodes an array of segments while tolerating individual entries whose
+    /// shape is unknown to this client (e.g. a newer platform introduced a
+    /// segment type we don't understand). Unrecognized entries are skipped
+    /// instead of failing the whole decode.
+    static func decodeArrayLenient<K: CodingKey>(
+        from container: KeyedDecodingContainer<K>,
+        forKey key: K
+    ) throws -> [MessageSegment]? {
+        guard container.contains(key) else { return nil }
+        // Decode into a forgiving wrapper that accepts any JSON shape so the
+        // unkeyed container reliably advances past unknown entries, then
+        // attempt to re-decode each wrapper as a `MessageSegment` via its
+        // preserved raw value. Entries that still don't match are dropped.
+        let wrappers = try container.decode([LenientSegment].self, forKey: key)
+        return wrappers.compactMap { $0.segment }
+    }
+}
+
+/// Wrapper that decodes any JSON value into an intermediate form and then
+/// tries to re-interpret it as a `MessageSegment`. Unknown shapes decode
+/// successfully (advancing the unkeyed container) but yield a `nil`
+/// segment so callers can drop them.
+private struct LenientSegment: Decodable {
+    let segment: MessageSegment?
+
+    init(from decoder: Decoder) throws {
+        self.segment = try? MessageSegment(from: decoder)
+    }
 }
 
 /// URL citation from web search results, matching React's Annotation type
@@ -588,8 +617,20 @@ struct Message: Identifiable, Codable, Equatable {
         webSearchBeforeThinking = try container.decodeIfPresent(Bool.self, forKey: .webSearchBeforeThinking)
         annotations = try container.decodeIfPresent([Annotation].self, forKey: .annotations)
         searchReasoning = try container.decodeIfPresent(String.self, forKey: .searchReasoning)
-        segments = try container.decodeIfPresent([MessageSegment].self, forKey: .segments)
-        webSearches = try container.decodeIfPresent([WebSearchInstance].self, forKey: .webSearches)
+        // Segments and webSearches are forward-compatible: unknown segment
+        // shapes (e.g. a new `type` added by a future client) must not fail
+        // the entire message decode. Individual unknown entries are skipped
+        // by `MessageSegment.decodeArrayLenient`; if the whole field is
+        // otherwise malformed, treat it as missing.
+        if container.contains(.segments) {
+            segments = try? MessageSegment.decodeArrayLenient(
+                from: container,
+                forKey: .segments
+            )
+        } else {
+            segments = nil
+        }
+        webSearches = (try? container.decodeIfPresent([WebSearchInstance].self, forKey: .webSearches)) ?? nil
     }
     
     func encode(to encoder: Encoder) throws {
