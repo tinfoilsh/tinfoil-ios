@@ -7,19 +7,37 @@
 
 import SwiftUI
 
-/// Inline row showing web search status; tapping opens sources sheet
+/// Inline row showing web search status; tapping opens sources sheet.
+/// When `groupSize > 1`, the row summarizes an adjacent run of searches
+/// (e.g. "Searched the web on 4 queries") so the chat isn't vertically
+/// polluted by one pill per search.
 struct WebSearchBox: View {
     let webSearchState: WebSearchState
     let isDarkMode: Bool
     let webSearchSummary: String?
+    let groupSize: Int
     let onTap: () -> Void
+
+    init(
+        webSearchState: WebSearchState,
+        isDarkMode: Bool,
+        webSearchSummary: String?,
+        groupSize: Int = 1,
+        onTap: @escaping () -> Void
+    ) {
+        self.webSearchState = webSearchState
+        self.isDarkMode = isDarkMode
+        self.webSearchSummary = webSearchSummary
+        self.groupSize = groupSize
+        self.onTap = onTap
+    }
 
     var body: some View {
         Button(action: onTap) {
             HStack {
                 headerContent
                 Spacer()
-                if webSearchState.status != .searching && !webSearchState.sources.isEmpty {
+                if showsChevron {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
@@ -29,7 +47,19 @@ struct WebSearchBox: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(NoHighlightButtonStyle())
-        .disabled(webSearchState.status == .searching || webSearchState.sources.isEmpty)
+        .disabled(!isInteractive)
+    }
+
+    private var isGroup: Bool { groupSize > 1 }
+
+    private var showsChevron: Bool {
+        guard webSearchState.status != .searching else { return false }
+        return isGroup || !webSearchState.sources.isEmpty
+    }
+
+    private var isInteractive: Bool {
+        guard webSearchState.status != .searching else { return false }
+        return isGroup || !webSearchState.sources.isEmpty
     }
 
     @ViewBuilder
@@ -37,7 +67,11 @@ struct WebSearchBox: View {
         switch webSearchState.status {
         case .searching:
             HStack(spacing: 8) {
-                if let summary = webSearchSummary, !summary.isEmpty {
+                if isGroup {
+                    Text("Searching the web on \(groupSize) queries")
+                        .font(.subheadline)
+                        .foregroundColor(isDarkMode ? .white : .black.opacity(0.8))
+                } else if let summary = webSearchSummary, !summary.isEmpty {
                     Text(summary)
                         .font(.subheadline)
                         .foregroundColor(isDarkMode ? .white : .black.opacity(0.8))
@@ -65,7 +99,14 @@ struct WebSearchBox: View {
                     .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
                     .font(.system(size: 14))
 
-                if webSearchState.sources.isEmpty {
+                if isGroup {
+                    Text("Searched the web on \(groupSize) quer\(groupSize == 1 ? "y" : "ies")")
+                        .font(.subheadline)
+                        .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
+                    if !webSearchState.sources.isEmpty {
+                        sourceFavicons
+                    }
+                } else if webSearchState.sources.isEmpty {
                     Text("Web search completed")
                         .font(.subheadline)
                         .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
@@ -222,5 +263,141 @@ struct SourceRowView: View {
     private func openURL() {
         guard let url = URL(string: source.url) else { return }
         UIApplication.shared.open(url)
+    }
+}
+
+/// Sheet listing every query in a grouped run of web searches, each
+/// expandable to reveal its individual sources.
+struct WebSearchQueriesSheetView: View {
+    let instances: [WebSearchInstance]
+    let isDarkMode: Bool
+    @Environment(\.dismiss) private var dismiss
+    @State private var expandedIds: Set<String> = []
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(instances) { instance in
+                    WebSearchQueryRow(
+                        instance: instance,
+                        isDarkMode: isDarkMode,
+                        isExpanded: expandedIds.contains(instance.id),
+                        onToggle: { toggle(instance.id) }
+                    )
+                    .listRowBackground(Color.clear)
+                }
+            }
+            .listStyle(.plain)
+            .navigationTitle("Searches")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(isDarkMode ? .dark : .light)
+    }
+
+    private func toggle(_ id: String) {
+        if expandedIds.contains(id) {
+            expandedIds.remove(id)
+        } else {
+            expandedIds.insert(id)
+        }
+    }
+}
+
+private struct WebSearchQueryRow: View {
+    let instance: WebSearchInstance
+    let isDarkMode: Bool
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    private var canExpand: Bool { !(instance.sources?.isEmpty ?? true) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button(action: { if canExpand { onToggle() } }) {
+                HStack(spacing: 10) {
+                    statusIcon
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(instance.query ?? "Web search")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(isDarkMode ? .white : .black.opacity(0.85))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        Text(statusLabel)
+                            .font(.system(size: 12))
+                            .foregroundColor(statusColor)
+                    }
+                    Spacer()
+                    if canExpand {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    }
+                }
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PlainButtonStyle())
+            .disabled(!canExpand)
+
+            if isExpanded, let sources = instance.sources, !sources.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(sources) { source in
+                        SourceRowView(source: source, isDarkMode: isDarkMode)
+                    }
+                }
+                .padding(.leading, 26)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var statusIcon: some View {
+        switch instance.status {
+        case .searching:
+            ProgressView()
+                .scaleEffect(0.6)
+                .frame(width: 16, height: 16)
+        case .completed:
+            Image(systemName: "globe")
+                .font(.system(size: 13))
+                .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.5))
+                .frame(width: 16, height: 16)
+        case .failed:
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 13))
+                .foregroundColor(.red.opacity(0.8))
+                .frame(width: 16, height: 16)
+        case .blocked:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 13))
+                .foregroundColor(.orange.opacity(0.8))
+                .frame(width: 16, height: 16)
+        }
+    }
+
+    private var statusLabel: String {
+        switch instance.status {
+        case .searching: return "Searching..."
+        case .completed:
+            let count = instance.sources?.count ?? 0
+            return count == 0 ? "Completed" : "\(count) source\(count == 1 ? "" : "s")"
+        case .failed: return "Failed"
+        case .blocked: return instance.reason ?? "Blocked"
+        }
+    }
+
+    private var statusColor: Color {
+        switch instance.status {
+        case .searching, .completed:
+            return isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5)
+        case .failed: return .red.opacity(0.7)
+        case .blocked: return .orange.opacity(0.7)
+        }
     }
 }
