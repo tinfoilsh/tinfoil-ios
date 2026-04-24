@@ -475,6 +475,101 @@ private struct LenientSegment: Decodable {
     }
 }
 
+private struct DynamicCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int?
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+        self.intValue = nil
+    }
+
+    init?(intValue: Int) {
+        self.stringValue = String(intValue)
+        self.intValue = intValue
+    }
+}
+
+enum JSONValue: Codable, Equatable {
+    case null
+    case bool(Bool)
+    case number(Double)
+    case string(String)
+    case array([JSONValue])
+    case object([String: JSONValue])
+
+    var stringValue: String? {
+        if case .string(let value) = self { return value }
+        return nil
+    }
+
+    var objectValue: [String: JSONValue]? {
+        if case .object(let value) = self { return value }
+        return nil
+    }
+
+    init(from decoder: Decoder) throws {
+        if let object = try? decoder.container(keyedBy: DynamicCodingKey.self) {
+            var values: [String: JSONValue] = [:]
+            for key in object.allKeys {
+                values[key.stringValue] = try object.decode(JSONValue.self, forKey: key)
+            }
+            self = .object(values)
+            return
+        }
+
+        if var array = try? decoder.unkeyedContainer() {
+            var values: [JSONValue] = []
+            while !array.isAtEnd {
+                values.append(try array.decode(JSONValue.self))
+            }
+            self = .array(values)
+            return
+        }
+
+        let single = try decoder.singleValueContainer()
+        if single.decodeNil() {
+            self = .null
+        } else if let value = try? single.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? single.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? single.decode(String.self) {
+            self = .string(value)
+        } else {
+            throw DecodingError.dataCorruptedError(in: single, debugDescription: "Unsupported JSON value")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case .null:
+            var container = encoder.singleValueContainer()
+            try container.encodeNil()
+        case .bool(let value):
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        case .number(let value):
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        case .string(let value):
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        case .array(let values):
+            var container = encoder.unkeyedContainer()
+            for value in values {
+                try container.encode(value)
+            }
+        case .object(let values):
+            var container = encoder.container(keyedBy: DynamicCodingKey.self)
+            for (key, value) in values {
+                guard let codingKey = DynamicCodingKey(stringValue: key) else { continue }
+                try container.encode(value, forKey: codingKey)
+            }
+        }
+    }
+}
+
 /// URL citation from web search results, matching React's Annotation type
 struct URLCitation: Codable, Equatable {
     let title: String
@@ -487,6 +582,12 @@ struct URLCitation: Codable, Equatable {
 struct Annotation: Codable, Equatable {
     let type: String
     let url_citation: URLCitation
+}
+
+struct GenUIToolCall: Codable, Equatable, Identifiable {
+    let id: String
+    let name: String
+    let arguments: String
 }
 
 /// Represents a single message in a chat
@@ -520,6 +621,14 @@ struct Message: Identifiable, Codable, Equatable {
     // order they streamed.
     var segments: [MessageSegment]? = nil
     var webSearches: [WebSearchInstance]? = nil
+    var toolCalls: [GenUIToolCall] = []
+    var timeline: [JSONValue]? = nil
+
+    var hasUnsupportedGenUI: Bool {
+        role == .assistant && (!toolCalls.isEmpty || (timeline?.contains { block in
+            block.objectValue?["type"]?.stringValue == "tool_call"
+        } ?? false))
+    }
 
     static let longMessageAttachmentThreshold = 1200
     var shouldDisplayAsAttachment: Bool {
@@ -562,7 +671,7 @@ struct Message: Identifiable, Codable, Equatable {
         case attachments
         case thinkingDuration, isError
         case webSearchBeforeThinking, annotations, searchReasoning
-        case segments, webSearches
+        case segments, webSearches, toolCalls, timeline
         // Legacy keys for decoding React messages that use the old format
         case documentContent, imageData, imageBase64, multimodalText, documents
     }
@@ -631,6 +740,8 @@ struct Message: Identifiable, Codable, Equatable {
             segments = nil
         }
         webSearches = (try? container.decodeIfPresent([WebSearchInstance].self, forKey: .webSearches)) ?? nil
+        toolCalls = (try? container.decodeIfPresent([GenUIToolCall].self, forKey: .toolCalls)) ?? []
+        timeline = try? container.decodeIfPresent([JSONValue].self, forKey: .timeline)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -667,6 +778,10 @@ struct Message: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(searchReasoning, forKey: .searchReasoning)
         try container.encodeIfPresent(segments, forKey: .segments)
         try container.encodeIfPresent(webSearches, forKey: .webSearches)
+        if !toolCalls.isEmpty {
+            try container.encode(toolCalls, forKey: .toolCalls)
+        }
+        try container.encodeIfPresent(timeline, forKey: .timeline)
     }
 
     // MARK: - Legacy Format Reconstruction

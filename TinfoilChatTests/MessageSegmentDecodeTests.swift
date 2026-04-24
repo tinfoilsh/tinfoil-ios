@@ -72,4 +72,67 @@ struct MessageSegmentDecodeTests {
         let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
         #expect(message.segments?.isEmpty == true)
     }
+
+    @Test func decodesAndPreservesGenUIToolCalls() throws {
+        let json = """
+        {
+          "id": "m1",
+          "role": "assistant",
+          "content": "",
+          "timestamp": "2026-04-21T12:00:00.000Z",
+          "toolCalls": [
+            {
+              "id": "call_1",
+              "name": "render_info_card",
+              "arguments": "{\\"title\\":\\"Hello\\"}"
+            }
+          ],
+          "timeline": [
+            {
+              "type": "tool_call",
+              "id": "tool-call-0",
+              "toolCallId": "call_1",
+              "name": "render_info_card",
+              "arguments": "{\\"title\\":\\"Hello\\"}"
+            }
+          ]
+        }
+        """
+
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        #expect(message.hasUnsupportedGenUI)
+        #expect(message.toolCalls.count == 1)
+        #expect(message.toolCalls[0].name == "render_info_card")
+
+        let encoded = try JSONEncoder().encode(message)
+        let roundTripped = try JSONDecoder().decode(Message.self, from: encoded)
+        #expect(roundTripped.hasUnsupportedGenUI)
+        #expect(roundTripped.toolCalls == message.toolCalls)
+        #expect(roundTripped.timeline == message.timeline)
+    }
+
+    @Test func detectsGenUIFromTimelineWhenToolCallsAreMissing() throws {
+        let json = """
+        {
+          "id": "m1",
+          "role": "assistant",
+          "content": "",
+          "timestamp": "2026-04-21T12:00:00.000Z",
+          "timeline": [
+            { "type": "content", "id": "content-0", "content": "" },
+            {
+              "type": "tool_call",
+              "id": "tool-call-1",
+              "toolCallId": "call_1",
+              "name": "render_link_preview",
+              "arguments": "{\\"url\\":\\"https://example.com\\"}"
+            }
+          ]
+        }
+        """
+
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        #expect(message.toolCalls.isEmpty)
+        #expect(message.hasUnsupportedGenUI)
+    }
 }
