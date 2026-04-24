@@ -435,6 +435,11 @@ struct MessageView: View {
                     }
                 }
 
+                if message.hasUnsupportedGenUI {
+                    UnsupportedGenUINoticeView(isDarkMode: isDarkMode)
+                        .padding(.top, message.content.isEmpty && message.thoughts == nil ? 0 : 8)
+                }
+
                 // Persistent streaming indicator at the bottom of the
                 // currently rendered assistant content. Only shown once
                 // initial content has started arriving so we don't double up
@@ -1448,6 +1453,39 @@ struct GeneratingTableView: View {
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.15), lineWidth: 1)
+        )
+    }
+}
+
+struct UnsupportedGenUINoticeView: View {
+    let isDarkMode: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.orange)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Interactive component unavailable")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(isDarkMode ? .white : .black)
+
+                Text("This message includes a GenUI component. Tinfoil for iOS doesn't support GenUI yet; open this chat on web to view it.")
+                    .font(.caption)
+                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.orange.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                )
         )
     }
 }
