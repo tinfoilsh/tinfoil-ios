@@ -400,12 +400,14 @@ enum MessageSegment: Codable, Equatable {
     case text(String)
     case webSearch(searchId: String)
     case urlFetch(fetchId: String)
+    case toolCall(toolCallId: String)
 
     private enum CodingKeys: String, CodingKey {
         case type
         case text
         case searchId
         case fetchId
+        case toolCallId
     }
 
     init(from decoder: Decoder) throws {
@@ -421,6 +423,9 @@ enum MessageSegment: Codable, Equatable {
         case "url_fetch":
             let fetchId = try container.decode(String.self, forKey: .fetchId)
             self = .urlFetch(fetchId: fetchId)
+        case "tool_call":
+            let toolCallId = try container.decode(String.self, forKey: .toolCallId)
+            self = .toolCall(toolCallId: toolCallId)
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
@@ -442,6 +447,9 @@ enum MessageSegment: Codable, Equatable {
         case .urlFetch(let fetchId):
             try container.encode("url_fetch", forKey: .type)
             try container.encode(fetchId, forKey: .fetchId)
+        case .toolCall(let toolCallId):
+            try container.encode("tool_call", forKey: .type)
+            try container.encode(toolCallId, forKey: .toolCallId)
         }
     }
 

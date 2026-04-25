@@ -1375,6 +1375,22 @@ class ChatViewModel: ObservableObject {
                 // pass-through.
                 var tinfoilEventParser = TinfoilEventParser()
 
+                // GenUI tool-call accumulator. The OpenAI streaming
+                // protocol sends a sequence of partial deltas keyed by
+                // `index`; each delta may carry an `id`, a `name`, and
+                // an `arguments` fragment. We coalesce them by index
+                // and surface the resulting `GenUIToolCall` list as
+                // `toolCalls` on the in-flight assistant message.
+                var streamingToolCalls: [Int: GenUIToolCall] = [:]
+                let appendToolCallSegment: (String) -> Void = { toolCallId in
+                    if !segments.contains(where: {
+                        if case .toolCall(let id) = $0, id == toolCallId { return true }
+                        return false
+                    }) {
+                        segments.append(.toolCall(toolCallId: toolCallId))
+                    }
+                }
+
                 var thinkStartTime: Date? = nil
                 var hasThinkTag = false
                 var thoughtsBuffer = ""
@@ -1461,6 +1477,29 @@ class ChatViewModel: ObservableObject {
                     let hasReasoningContent = chunk.choices.first?.delta.reasoning != nil
                     let reasoningContent = chunk.choices.first?.delta.reasoning ?? ""
                     var didMutateState = false
+
+                    // Accumulate GenUI tool-call deltas. Mirrors the
+                    // webapp's normalizer: deltas may carry only
+                    // partial fragments and we merge them by index.
+                    if let deltas = chunk.choices.first?.delta.toolCalls {
+                        for delta in deltas {
+                            let index = delta.index ?? 0
+                            let existing = streamingToolCalls[index]
+                            let mergedId = delta.id ?? existing?.id ?? ""
+                            let mergedName = delta.function?.name ?? existing?.name ?? ""
+                            let mergedArgs = (existing?.arguments ?? "") + (delta.function?.arguments ?? "")
+                            let updated = GenUIToolCall(
+                                id: mergedId,
+                                name: mergedName,
+                                arguments: mergedArgs
+                            )
+                            streamingToolCalls[index] = updated
+                            if !mergedId.isEmpty {
+                                appendToolCallSegment(mergedId)
+                            }
+                            didMutateState = true
+                        }
+                    }
 
                     // Collect sources from annotations (no deduplication to preserve citation index mapping)
                     if isWebSearchEnabled, let annotations = chunk.choices.first?.delta.annotations {
@@ -1690,6 +1729,9 @@ class ChatViewModel: ObservableObject {
                         chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
                         chat.messages[lastIndex].segments = segments.isEmpty ? nil : segments
                         chat.messages[lastIndex].webSearches = webSearches.isEmpty ? nil : webSearches
+                        chat.messages[lastIndex].toolCalls = streamingToolCalls
+                            .sorted(by: { $0.key < $1.key })
+                            .map { $0.value }
 
                         // Merge collected sources into the message's current webSearchState.
                         if !collectedSources.isEmpty {
@@ -1792,6 +1834,9 @@ class ChatViewModel: ObservableObject {
                         chat.messages[lastIndex].webSearchBeforeThinking = webSearchBeforeThinking
                         chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
                         chat.messages[lastIndex].segments = segments.isEmpty ? nil : segments
+                        chat.messages[lastIndex].toolCalls = streamingToolCalls
+                            .sorted(by: { $0.key < $1.key })
+                            .map { $0.value }
                         // Mirror the final sources onto the most recent WebSearchInstance,
                         // promoting it out of the `.searching` holding state if the router
                         // sent `.completed` before any sources landed.
