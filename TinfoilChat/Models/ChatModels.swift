@@ -636,10 +636,14 @@ struct Message: Identifiable, Codable, Equatable {
     var segments: [MessageSegment]? = nil
     var webSearches: [WebSearchInstance]? = nil
     var toolCalls: [GenUIToolCall] = []
+    /// Cross-platform timeline blocks. The webapp persists tool-call
+    /// resolution state on individual `tool_call` blocks here
+    /// (`resolvedAt` + `resolution`); iOS reads and writes the same
+    /// shape so chats round-trip losslessly. Other block types
+    /// (thinking, content, web_search, url_fetches) are preserved
+    /// verbatim even though iOS renders the chat off its own
+    /// `segments` representation.
     var timeline: [JSONValue]? = nil
-    /// Resolutions for input-surface GenUI tool calls keyed by tool-call id.
-    /// Persisted alongside `toolCalls` so cross-device sync stays lossless.
-    var genUIResolutions: [String: GenUIResolution] = [:]
 
     /// True when this assistant message has at least one tool call whose
     /// widget is not registered on this client. Used to surface the
@@ -667,6 +671,12 @@ struct Message: Identifiable, Codable, Equatable {
         return false
     }
 
+    /// Resolution for the given tool-call id, read from the timeline.
+    /// Mirrors how the webapp reads `block.resolvedAt` / `block.resolution`.
+    func genUIResolution(for toolCallId: String) -> GenUIResolution? {
+        TimelineToolCalls.resolution(in: timeline, toolCallId: toolCallId)
+    }
+
     /// Convenience selector mirroring the webapp's
     /// `selectPendingInputToolCall` for individual messages.
     @MainActor
@@ -675,7 +685,7 @@ struct Message: Identifiable, Codable, Equatable {
         return toolCalls.filter { toolCall in
             guard let widget = GenUIRegistry.shared.widget(named: toolCall.name),
                   widget.surface == .input else { return false }
-            return genUIResolutions[toolCall.id] == nil
+            return genUIResolution(for: toolCall.id) == nil
         }
     }
 
@@ -720,7 +730,7 @@ struct Message: Identifiable, Codable, Equatable {
         case attachments
         case thinkingDuration, isError
         case webSearchBeforeThinking, annotations, searchReasoning
-        case segments, webSearches, toolCalls, timeline, genUIResolutions
+        case segments, webSearches, toolCalls, timeline
         // Legacy keys for decoding React messages that use the old format
         case documentContent, imageData, imageBase64, multimodalText, documents
     }
@@ -791,7 +801,6 @@ struct Message: Identifiable, Codable, Equatable {
         webSearches = (try? container.decodeIfPresent([WebSearchInstance].self, forKey: .webSearches)) ?? nil
         toolCalls = (try? container.decodeIfPresent([GenUIToolCall].self, forKey: .toolCalls)) ?? []
         timeline = try? container.decodeIfPresent([JSONValue].self, forKey: .timeline)
-        genUIResolutions = (try? container.decodeIfPresent([String: GenUIResolution].self, forKey: .genUIResolutions)) ?? [:]
     }
     
     func encode(to encoder: Encoder) throws {
@@ -832,9 +841,6 @@ struct Message: Identifiable, Codable, Equatable {
             try container.encode(toolCalls, forKey: .toolCalls)
         }
         try container.encodeIfPresent(timeline, forKey: .timeline)
-        if !genUIResolutions.isEmpty {
-            try container.encode(genUIResolutions, forKey: .genUIResolutions)
-        }
     }
 
     // MARK: - Legacy Format Reconstruction

@@ -221,7 +221,7 @@ struct MessageView: View {
                         toolCall: toolCall,
                         isStreaming: isTrailing && isLoading && isLastMessage,
                         isDarkMode: isDarkMode,
-                        resolution: message.genUIResolutions[toolCall.id],
+                        resolution: message.genUIResolution(for: toolCall.id),
                         onRetry: nil
                     )
                 }
@@ -473,7 +473,7 @@ struct MessageView: View {
                                     toolCall: toolCall,
                                     isStreaming: false,
                                     isDarkMode: isDarkMode,
-                                    resolution: message.genUIResolutions[toolCall.id],
+                                    resolution: message.genUIResolution(for: toolCall.id),
                                     onRetry: nil
                                 )
                             }

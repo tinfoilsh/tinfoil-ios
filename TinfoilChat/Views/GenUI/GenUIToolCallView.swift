@@ -27,10 +27,12 @@ struct GenUIToolCallView: View {
         // resolved; the live UI lives in the input area.
         if widget?.surface == .input {
             if let widget, let resolution, let data = parsed,
-               let view = widget.renderResolved(rawArgs: data, resolution: resolution, context: context) {
-                view
-            } else {
-                EmptyView()
+               let resolvedView = widget.renderResolved(
+                rawArgs: data,
+                resolution: resolution,
+                context: context
+               ) {
+                return AnyView(resolvedView)
             }
             return AnyView(EmptyView())
         }

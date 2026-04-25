@@ -873,10 +873,11 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    /// Resolves a pending input-surface GenUI tool call: persists the
-    /// resolution onto the most recent assistant message and submits
-    /// the resulting text as a new user message so the conversation
-    /// continues naturally. Mirrors the webapp's `resolveInputToolCall`.
+    /// Resolves a pending input-surface GenUI tool call: writes the
+    /// resolution onto the matching `tool_call` block on the message's
+    /// timeline (the cross-platform wire shape) and submits the result
+    /// text as a new user message so the conversation continues
+    /// naturally. Mirrors the webapp's `resolveInputToolCall`.
     func resolveGenUIToolCall(
         toolCallId: String,
         resultText: String,
@@ -885,15 +886,38 @@ class ChatViewModel: ObservableObject {
         guard !isLoading else { return }
         guard var chat = currentChat else { return }
 
-        let resolution = GenUIResolution(text: resultText, data: resultData)
         var didResolve = false
-
         for index in chat.messages.indices.reversed() {
             guard chat.messages[index].role == .assistant else { continue }
-            if chat.messages[index].toolCalls.contains(where: { $0.id == toolCallId }) {
-                chat.messages[index].genUIResolutions[toolCallId] = resolution
-                didResolve = true
+            guard chat.messages[index].toolCalls.contains(where: { $0.id == toolCallId }) else {
+                break
             }
+            var timeline = chat.messages[index].timeline ?? []
+            // If the timeline is missing this tool_call block (e.g. an
+            // older message reconstructed from `toolCalls` only), seed
+            // a block first so `resolve` has something to update.
+            if !timeline.contains(where: {
+                guard let object = $0.objectValue else { return false }
+                return object["type"]?.stringValue == "tool_call"
+                    && object["toolCallId"]?.stringValue == toolCallId
+            }) {
+                if let toolCall = chat.messages[index].toolCalls.first(where: { $0.id == toolCallId }) {
+                    TimelineToolCalls.upsertStreamingBlock(
+                        in: &timeline,
+                        toolCallId: toolCallId,
+                        name: toolCall.name,
+                        arguments: toolCall.arguments
+                    )
+                }
+            }
+            TimelineToolCalls.resolve(
+                in: &timeline,
+                toolCallId: toolCallId,
+                text: resultText,
+                data: resultData
+            )
+            chat.messages[index].timeline = timeline
+            didResolve = true
             break
         }
 
@@ -1409,9 +1433,19 @@ class ChatViewModel: ObservableObject {
                 // protocol sends a sequence of partial deltas keyed by
                 // `index`; each delta may carry an `id`, a `name`, and
                 // an `arguments` fragment. We coalesce them by index
-                // and surface the resulting `GenUIToolCall` list as
-                // `toolCalls` on the in-flight assistant message.
+                // and write both:
+                //   - the flat `Message.toolCalls` array (mirrored from
+                //     webapp `MessageAssembler.toMessage`), and
+                //   - the canonical `Message.timeline` tool_call blocks
+                //     that the webapp uses to track resolution state.
                 var streamingToolCalls: [Int: GenUIToolCall] = [:]
+                var timelineBlocks: [JSONValue] = []
+                // Once the assistant has emitted a tool call on this
+                // turn, drop subsequent `delta.content` — providers
+                // sometimes trail serialization noise (fragments of the
+                // tool name) through the content channel. Mirrors the
+                // webapp event-normalizer's `sawToolCall` gate.
+                var sawToolCall = false
                 let appendToolCallSegment: (String) -> Void = { toolCallId in
                     if !segments.contains(where: {
                         if case .toolCall(let id) = $0, id == toolCallId { return true }
@@ -1490,6 +1524,12 @@ class ChatViewModel: ObservableObject {
                     }
 
                     var content = chunk.choices.first?.delta.content ?? ""
+                    // Once a tool call has been seen on this turn, drop
+                    // any further `delta.content` to suppress provider
+                    // serialization noise. Mirrors the webapp.
+                    if sawToolCall {
+                        content = ""
+                    }
                     // Strip router-emitted `<tinfoil-event>` markers
                     // from the delta before any downstream logic sees
                     // it, and dispatch the decoded events so the same
@@ -1511,6 +1551,9 @@ class ChatViewModel: ObservableObject {
                     // Accumulate GenUI tool-call deltas. Mirrors the
                     // webapp's normalizer: deltas may carry only
                     // partial fragments and we merge them by index.
+                    // Each merged tool call is also reflected on the
+                    // canonical `timeline` so the wire format matches
+                    // `TimelineToolCallBlock` exactly.
                     if let deltas = chunk.choices.first?.delta.toolCalls {
                         for delta in deltas {
                             let index = delta.index ?? 0
@@ -1526,6 +1569,13 @@ class ChatViewModel: ObservableObject {
                             streamingToolCalls[index] = updated
                             if !mergedId.isEmpty {
                                 appendToolCallSegment(mergedId)
+                                TimelineToolCalls.upsertStreamingBlock(
+                                    in: &timelineBlocks,
+                                    toolCallId: mergedId,
+                                    name: mergedName,
+                                    arguments: mergedArgs
+                                )
+                                sawToolCall = true
                             }
                             didMutateState = true
                         }
@@ -1762,6 +1812,10 @@ class ChatViewModel: ObservableObject {
                         chat.messages[lastIndex].toolCalls = streamingToolCalls
                             .sorted(by: { $0.key < $1.key })
                             .map { $0.value }
+                            .filter { !$0.id.isEmpty }
+                        if !timelineBlocks.isEmpty {
+                            chat.messages[lastIndex].timeline = timelineBlocks
+                        }
 
                         // Merge collected sources into the message's current webSearchState.
                         if !collectedSources.isEmpty {
@@ -1867,6 +1921,10 @@ class ChatViewModel: ObservableObject {
                         chat.messages[lastIndex].toolCalls = streamingToolCalls
                             .sorted(by: { $0.key < $1.key })
                             .map { $0.value }
+                            .filter { !$0.id.isEmpty }
+                        if !timelineBlocks.isEmpty {
+                            chat.messages[lastIndex].timeline = timelineBlocks
+                        }
                         // Mirror the final sources onto the most recent WebSearchInstance,
                         // promoting it out of the `.searching` holding state if the router
                         // sent `.completed` before any sources landed.

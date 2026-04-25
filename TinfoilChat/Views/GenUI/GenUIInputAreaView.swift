@@ -21,7 +21,10 @@ struct PendingInputToolCall: Equatable {
 extension Chat {
     /// The single pending input-surface tool call on the most recent
     /// assistant message, or `nil` when no widget is awaiting input.
-    /// Mirrors the webapp's `selectPendingInputToolCall`.
+    /// Mirrors the webapp's `selectPendingInputToolCall`: walks the
+    /// last assistant message's `toolCalls` in reverse and returns the
+    /// first input-surface widget whose timeline block has not been
+    /// resolved.
     @MainActor
     func pendingInputToolCall() -> PendingInputToolCall? {
         for index in messages.indices.reversed() {
@@ -30,7 +33,7 @@ extension Chat {
             for toolCall in message.toolCalls.reversed() {
                 guard let widget = GenUIRegistry.shared.widget(named: toolCall.name),
                       widget.surface == .input else { continue }
-                if message.genUIResolutions[toolCall.id] != nil { continue }
+                if message.genUIResolution(for: toolCall.id) != nil { continue }
                 guard let data = toolCall.arguments.data(using: .utf8),
                       widget.canRender(rawArgs: data) else { continue }
                 return PendingInputToolCall(
