@@ -18,27 +18,19 @@ struct PendingInputToolCall: Equatable {
     let arguments: String
 }
 
-extension Message {
-    /// Resolution map persisted alongside `toolCalls`. Returns the
-    /// resolution for the given tool-call id, if any.
-    func genUIResolution(for toolCallId: String) -> GenUIResolution? {
-        genUIResolutions[toolCallId]
-    }
-}
-
 extension Chat {
     /// The single pending input-surface tool call on the most recent
     /// assistant message, or `nil` when no widget is awaiting input.
+    /// Mirrors the webapp's `selectPendingInputToolCall`.
     @MainActor
     func pendingInputToolCall() -> PendingInputToolCall? {
         for index in messages.indices.reversed() {
             let message = messages[index]
             guard message.role == .assistant else { continue }
-            // Walk the tool calls in reverse to surface the most-recent one.
             for toolCall in message.toolCalls.reversed() {
                 guard let widget = GenUIRegistry.shared.widget(named: toolCall.name),
                       widget.surface == .input else { continue }
-                if message.genUIResolution(for: toolCall.id) != nil { continue }
+                if message.genUIResolutions[toolCall.id] != nil { continue }
                 guard let data = toolCall.arguments.data(using: .utf8),
                       widget.canRender(rawArgs: data) else { continue }
                 return PendingInputToolCall(

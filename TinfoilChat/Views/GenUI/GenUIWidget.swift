@@ -34,11 +34,49 @@ struct GenUIInputContext {
     let cancel: (() -> Void)?
 }
 
-/// A single resolved choice for an input-surface widget.
+/// A single resolved choice for an input-surface widget. Serializes to the
+/// same wire shape the webapp persists on `TimelineToolCallBlock.resolution`
+/// — `resolvedAt` is encoded as milliseconds since epoch.
 struct GenUIResolution: Codable, Equatable {
     let text: String
     let data: JSONValue?
     let resolvedAt: Date
+
+    init(text: String, data: JSONValue?, resolvedAt: Date = Date()) {
+        self.text = text
+        self.data = data
+        self.resolvedAt = resolvedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case text
+        case data
+        case resolvedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decode(String.self, forKey: .text)
+        data = try container.decodeIfPresent(JSONValue.self, forKey: .data)
+        if let millis = try? container.decode(Double.self, forKey: .resolvedAt) {
+            resolvedAt = Date(timeIntervalSince1970: millis / 1000.0)
+        } else if let date = try? container.decode(Date.self, forKey: .resolvedAt) {
+            resolvedAt = date
+        } else if let dateString = try? container.decode(String.self, forKey: .resolvedAt),
+                  let parsed = ISO8601DateFormatter().date(from: dateString) {
+            resolvedAt = parsed
+        } else {
+            resolvedAt = Date()
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(text, forKey: .text)
+        try container.encodeIfPresent(data, forKey: .data)
+        let millis = resolvedAt.timeIntervalSince1970 * 1000.0
+        try container.encode(millis, forKey: .resolvedAt)
+    }
 }
 
 /// Erased widget protocol used by the registry. Concrete widgets conform via

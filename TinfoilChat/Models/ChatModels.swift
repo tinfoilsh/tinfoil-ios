@@ -590,6 +590,12 @@ struct GenUIToolCall: Codable, Equatable, Identifiable {
     let arguments: String
 }
 
+// `GenUIResolution` (defined in `Views/GenUI/GenUIWidget.swift`) is used
+// both as the in-memory render input and the on-disk storage shape. Its
+// JSON representation matches the webapp's
+// `TimelineToolCallBlock.resolution` so chats round-trip across
+// platforms.
+
 /// Represents a single message in a chat
 struct Message: Identifiable, Codable, Equatable {
     let id: String
@@ -623,11 +629,46 @@ struct Message: Identifiable, Codable, Equatable {
     var webSearches: [WebSearchInstance]? = nil
     var toolCalls: [GenUIToolCall] = []
     var timeline: [JSONValue]? = nil
+    /// Resolutions for input-surface GenUI tool calls keyed by tool-call id.
+    /// Persisted alongside `toolCalls` so cross-device sync stays lossless.
+    var genUIResolutions: [String: GenUIResolution] = [:]
 
+    /// True when this assistant message has at least one tool call whose
+    /// widget is not registered on this client. Used to surface the
+    /// "interactive component unavailable" notice for forward
+    /// compatibility (e.g. a newly-added widget that web supports but
+    /// iOS hasn't shipped yet).
+    @MainActor
     var hasUnsupportedGenUI: Bool {
-        role == .assistant && (!toolCalls.isEmpty || (timeline?.contains { block in
-            block.objectValue?["type"]?.stringValue == "tool_call"
-        } ?? false))
+        guard role == .assistant else { return false }
+        for toolCall in toolCalls {
+            if !GenUIRegistry.shared.isGenUIToolName(toolCall.name) {
+                return true
+            }
+        }
+        if let timeline = timeline {
+            for block in timeline {
+                guard let object = block.objectValue,
+                      object["type"]?.stringValue == "tool_call",
+                      let name = object["name"]?.stringValue else { continue }
+                if !GenUIRegistry.shared.isGenUIToolName(name) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    /// Convenience selector mirroring the webapp's
+    /// `selectPendingInputToolCall` for individual messages.
+    @MainActor
+    func pendingInputToolCalls() -> [GenUIToolCall] {
+        guard role == .assistant else { return [] }
+        return toolCalls.filter { toolCall in
+            guard let widget = GenUIRegistry.shared.widget(named: toolCall.name),
+                  widget.surface == .input else { return false }
+            return genUIResolutions[toolCall.id] == nil
+        }
     }
 
     static let longMessageAttachmentThreshold = 1200
@@ -671,7 +712,7 @@ struct Message: Identifiable, Codable, Equatable {
         case attachments
         case thinkingDuration, isError
         case webSearchBeforeThinking, annotations, searchReasoning
-        case segments, webSearches, toolCalls, timeline
+        case segments, webSearches, toolCalls, timeline, genUIResolutions
         // Legacy keys for decoding React messages that use the old format
         case documentContent, imageData, imageBase64, multimodalText, documents
     }
@@ -742,6 +783,7 @@ struct Message: Identifiable, Codable, Equatable {
         webSearches = (try? container.decodeIfPresent([WebSearchInstance].self, forKey: .webSearches)) ?? nil
         toolCalls = (try? container.decodeIfPresent([GenUIToolCall].self, forKey: .toolCalls)) ?? []
         timeline = try? container.decodeIfPresent([JSONValue].self, forKey: .timeline)
+        genUIResolutions = (try? container.decodeIfPresent([String: GenUIResolution].self, forKey: .genUIResolutions)) ?? [:]
     }
     
     func encode(to encoder: Encoder) throws {
@@ -782,6 +824,9 @@ struct Message: Identifiable, Codable, Equatable {
             try container.encode(toolCalls, forKey: .toolCalls)
         }
         try container.encodeIfPresent(timeline, forKey: .timeline)
+        if !genUIResolutions.isEmpty {
+            try container.encode(genUIResolutions, forKey: .genUIResolutions)
+        }
     }
 
     // MARK: - Legacy Format Reconstruction
