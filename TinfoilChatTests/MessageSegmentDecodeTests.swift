@@ -73,7 +73,8 @@ struct MessageSegmentDecodeTests {
         #expect(message.segments?.isEmpty == true)
     }
 
-    @Test func decodesAndPreservesGenUIToolCalls() throws {
+    @Test @MainActor
+    func decodesAndPreservesGenUIToolCalls() throws {
         let json = """
         {
           "id": "m1",
@@ -111,7 +112,8 @@ struct MessageSegmentDecodeTests {
         #expect(roundTripped.timeline == message.timeline)
     }
 
-    @Test func detectsGenUIFromTimelineWhenToolCallsAreMissing() throws {
+    @Test @MainActor
+    func detectsUnsupportedGenUIFromTimelineWhenToolCallsAreMissing() throws {
         let json = """
         {
           "id": "m1",
@@ -124,8 +126,8 @@ struct MessageSegmentDecodeTests {
               "type": "tool_call",
               "id": "tool-call-1",
               "toolCallId": "call_1",
-              "name": "render_link_preview",
-              "arguments": "{\\"url\\":\\"https://example.com\\"}"
+              "name": "render_future_widget",
+              "arguments": "{\\"foo\\":\\"bar\\"}"
             }
           ]
         }
@@ -134,5 +136,61 @@ struct MessageSegmentDecodeTests {
         let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
         #expect(message.toolCalls.isEmpty)
         #expect(message.hasUnsupportedGenUI)
+    }
+
+    @Test @MainActor
+    func registeredGenUIToolCallIsNotMarkedUnsupported() throws {
+        let json = """
+        {
+          "id": "m1",
+          "role": "assistant",
+          "content": "",
+          "timestamp": "2026-04-21T12:00:00.000Z",
+          "toolCalls": [
+            {
+              "id": "call_1",
+              "name": "render_link_preview",
+              "arguments": "{\\"url\\":\\"https://example.com\\",\\"title\\":\\"Example\\"}"
+            }
+          ]
+        }
+        """
+
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        #expect(message.toolCalls.count == 1)
+        #expect(!message.hasUnsupportedGenUI)
+    }
+
+    @Test @MainActor
+    func readsResolutionFromTimelineToolCallBlock() throws {
+        let resolvedAtMillis: Int = 1_714_060_800_000
+        let json = """
+        {
+          "id": "m1",
+          "role": "assistant",
+          "content": "",
+          "timestamp": "2026-04-21T12:00:00.000Z",
+          "toolCalls": [
+            { "id": "call_1", "name": "ask_user_input", "arguments": "{}" }
+          ],
+          "timeline": [
+            {
+              "type": "tool_call",
+              "id": "tool-call-0",
+              "toolCallId": "call_1",
+              "name": "ask_user_input",
+              "arguments": "{}",
+              "resolvedAt": \(resolvedAtMillis),
+              "resolution": { "text": "Yes", "data": { "choice": "yes" } }
+            }
+          ]
+        }
+        """
+
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        let resolution = try #require(message.genUIResolution(for: "call_1"))
+        #expect(resolution.text == "Yes")
+        let expectedDate = Date(timeIntervalSince1970: TimeInterval(resolvedAtMillis) / 1000)
+        #expect(abs(resolution.resolvedAt.timeIntervalSince(expectedDate)) < 0.001)
     }
 }
