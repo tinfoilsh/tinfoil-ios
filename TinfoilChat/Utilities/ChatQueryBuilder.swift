@@ -26,6 +26,7 @@ struct ChatQueryBuilder {
     ///   - webSearchEnabled: Whether to enable web search for this query (default: false)
     ///   - isMultimodal: Whether the current model supports image content parts
     /// - Returns: A configured ChatQuery
+    @MainActor
     static func buildQuery(
         modelId: String,
         systemPrompt: String,
@@ -34,7 +35,8 @@ struct ChatQueryBuilder {
         maxMessages: Int,
         stream: Bool = true,
         webSearchEnabled: Bool = false,
-        isMultimodal: Bool = false
+        isMultimodal: Bool = false,
+        genUIEnabled: Bool = true
     ) -> ChatQuery {
 
         var messages: [ChatQuery.ChatCompletionMessageParam] = []
@@ -42,8 +44,19 @@ struct ChatQueryBuilder {
         // Most models support system role; DeepSeek is the known exception
         let useSystemRole = !modelId.hasPrefix("deepseek")
 
+        // Append the GenUI prompt hint so the model knows it can call
+        // render_* tools instead of replying with markdown for structured
+        // content. The hint is appended to the system prompt regardless
+        // of which transport carries the system instructions (system role
+        // vs synthetic <system> user message).
+        var effectiveSystemPrompt = systemPrompt
+        if genUIEnabled {
+            let hint = GenUIRegistry.shared.buildPromptHint()
+            effectiveSystemPrompt = systemPrompt.isEmpty ? hint : systemPrompt + "\n\n" + hint
+        }
+
         if useSystemRole {
-            let fullPrompt = rules.isEmpty ? systemPrompt : systemPrompt + "\n\n" + rules
+            let fullPrompt = rules.isEmpty ? effectiveSystemPrompt : effectiveSystemPrompt + "\n\n" + rules
             messages.append(.system(.init(content: .textContent(fullPrompt))))
         }
 
@@ -57,7 +70,7 @@ struct ChatQueryBuilder {
 
                 // For models that don't use system role (e.g. DeepSeek): inject system instructions as a separate user message
                 if !hasAddedSystemInstructions {
-                    let rawInstructions = rules.isEmpty ? systemPrompt : systemPrompt + "\n\n" + rules
+                    let rawInstructions = rules.isEmpty ? effectiveSystemPrompt : effectiveSystemPrompt + "\n\n" + rules
                     let systemContent = "<system>\n\(rawInstructions)\n</system>"
                     messages.append(.user(.init(content: .string(systemContent))))
                     hasAddedSystemInstructions = true
@@ -114,9 +127,14 @@ struct ChatQueryBuilder {
             }
         }
 
+        let tools: [ChatQuery.ChatCompletionToolParam]? = genUIEnabled
+            ? GenUIRegistry.shared.buildToolParams()
+            : nil
+
         return ChatQuery(
             messages: messages,
             model: modelId,
+            tools: tools,
             webSearchOptions: webSearchEnabled ? .init() : nil,
             stream: stream
         )
