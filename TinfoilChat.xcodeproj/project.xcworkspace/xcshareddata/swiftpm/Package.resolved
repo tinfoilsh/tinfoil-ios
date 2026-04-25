@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/openai-swift-fork.git",
       "state" : {
-        "revision" : "0467d40594c2ab2ac0ad810fea07cbf740f309af",
-        "version" : "0.0.5"
+        "revision" : "fb076a51a97b56c3cc2ba4c9e8bcc9e88f59d53f",
+        "version" : "0.0.4"
       }
     },
     {
@@ -141,8 +141,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/textual",
       "state" : {
-        "branch" : "main",
-        "revision" : "d3690cc9b64936694a2e7c1ccda16ebe873f8e02"
+        "revision" : "005baa6df114f7578c5ce82650ed0370be077954",
+        "version" : "0.0.6"
       }
     },
     {
@@ -150,8 +150,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/tinfoil-swift",
       "state" : {
-        "revision" : "d292922f503812a0a5489593d802cf437bae76b4",
-        "version" : "0.0.5"
+        "revision" : "daee5afb9ad2cbd3eabb537b0fbd5cec8882b4ae",
+        "version" : "0.4.8"
       }
     }
   ],
