@@ -677,18 +677,6 @@ struct Message: Identifiable, Codable, Equatable {
         TimelineToolCalls.resolution(in: timeline, toolCallId: toolCallId)
     }
 
-    /// Convenience selector mirroring the webapp's
-    /// `selectPendingInputToolCall` for individual messages.
-    @MainActor
-    func pendingInputToolCalls() -> [GenUIToolCall] {
-        guard role == .assistant else { return [] }
-        return toolCalls.filter { toolCall in
-            guard let widget = GenUIRegistry.shared.widget(named: toolCall.name),
-                  widget.surface == .input else { return false }
-            return genUIResolution(for: toolCall.id) == nil
-        }
-    }
-
     static let longMessageAttachmentThreshold = 1200
     var shouldDisplayAsAttachment: Bool {
         role == .user && content.count >= Message.longMessageAttachmentThreshold

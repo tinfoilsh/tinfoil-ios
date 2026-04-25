@@ -23,7 +23,7 @@ struct PieChartWidget: GenUIWidget {
         GenUISchema.object(
             properties: [
                 "data": GenUISchema.array(
-                    items: GenUISchema.object(properties: [:]),
+                    items: GenUISchema.openObjectOfStringOrNumber(),
                     description: "Slices as [{\"name\":\"A\",\"value\":10}, ...]",
                     minItems: 1
                 ),

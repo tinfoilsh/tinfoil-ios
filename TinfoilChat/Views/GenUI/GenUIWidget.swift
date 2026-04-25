@@ -193,6 +193,19 @@ enum GenUISchema {
         if let description { fields.append(.description(description)) }
         return JSONSchema(fields: fields)
     }
+
+    /// Object whose values are `string | number` and whose property names
+    /// are unconstrained. Mirrors the webapp's
+    /// `z.record(z.string(), z.union([z.string(), z.number()]))` shape used
+    /// by chart-row arrays.
+    static func openObjectOfStringOrNumber(description: String? = nil) -> JSONSchema {
+        var fields: [JSONSchemaField] = [
+            .type(.object),
+            .additionalProperties(stringOrNumber()),
+        ]
+        if let description { fields.append(.description(description)) }
+        return JSONSchema(fields: fields)
+    }
 }
 
 /// `Decodable` shim that accepts either a `String` or a numeric value and

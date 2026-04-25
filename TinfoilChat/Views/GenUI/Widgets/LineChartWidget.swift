@@ -24,7 +24,7 @@ struct LineChartWidget: GenUIWidget {
         GenUISchema.object(
             properties: [
                 "data": GenUISchema.array(
-                    items: GenUISchema.object(properties: [:]),
+                    items: GenUISchema.openObjectOfStringOrNumber(),
                     description: "Data points sharing the same keys",
                     minItems: 1
                 ),
