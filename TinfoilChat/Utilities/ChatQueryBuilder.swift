@@ -122,8 +122,40 @@ struct ChatQueryBuilder {
                 } else {
                     messages.append(.user(.init(content: .string(userContent))))
                 }
-            } else if !msg.content.isEmpty {
-                messages.append(.assistant(.init(content: .textContent(msg.content))))
+            } else if !msg.content.isEmpty || !msg.toolCalls.isEmpty {
+                // Emit `tool_calls` on the assistant message so the model
+                // sees its previously-rendered widgets, then synthesize
+                // `role: 'tool'` results so the API's tool-call/tool-result
+                // pairing rule is satisfied. GenUI tools are display-only
+                // (the client rendered the component); we acknowledge with
+                // a constant payload that mirrors the webapp.
+                let toolCallParams: [ChatQuery.ChatCompletionMessageParam.AssistantMessageParam.ToolCallParam]? = msg.toolCalls.isEmpty
+                    ? nil
+                    : msg.toolCalls.map { tc in
+                        .init(
+                            id: tc.id,
+                            function: .init(
+                                arguments: tc.arguments.isEmpty ? "{}" : tc.arguments,
+                                name: tc.name
+                            )
+                        )
+                    }
+                let assistantContent: ChatQuery.ChatCompletionMessageParam.TextOrRefusalContent? =
+                    msg.content.isEmpty && toolCallParams != nil
+                        ? nil
+                        : .textContent(msg.content)
+                messages.append(.assistant(.init(
+                    content: assistantContent,
+                    toolCalls: toolCallParams
+                )))
+                if let toolCallParams {
+                    for param in toolCallParams {
+                        messages.append(.tool(.init(
+                            content: .textContent("displayed"),
+                            toolCallId: param.id
+                        )))
+                    }
+                }
             }
         }
 
