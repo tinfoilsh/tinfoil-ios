@@ -57,12 +57,30 @@ struct MessageView: View {
         case text(String, isTrailing: Bool)
         case webSearches([WebSearchInstance])
         case urlFetches([URLFetchState])
+        case toolCall(GenUIToolCall, isTrailing: Bool)
     }
 
     private func inlineSegmentRuns(from segments: [MessageSegment]) -> [InlineSegmentRun] {
         let lastTextIndex: Int? = {
             for i in segments.indices.reversed() {
                 if case .text = segments[i] { return i }
+            }
+            return nil
+        }()
+
+        // Index of the last tool-call segment whose widget hasn't yet
+        // produced fully-parseable arguments. Used to drive the streaming
+        // "Generating component" placeholder on exactly that one widget.
+        let lastStreamingToolCallIndex: Int? = {
+            for i in segments.indices.reversed() {
+                guard case .toolCall(let toolCallId) = segments[i],
+                      let toolCall = message.toolCalls.first(where: { $0.id == toolCallId }) else { continue }
+                if !toolCall.arguments.isEmpty,
+                   let data = toolCall.arguments.data(using: .utf8),
+                   (try? JSONSerialization.jsonObject(with: data)) != nil {
+                    return nil
+                }
+                return i
             }
             return nil
         }()
@@ -101,6 +119,12 @@ struct MessageView: View {
                 flushSearches()
                 if let fetch = message.urlFetches.first(where: { $0.id == fetchId }) {
                     fetchBuffer.append(fetch)
+                }
+            case .toolCall(let toolCallId):
+                flushSearches()
+                flushFetches()
+                if let toolCall = message.toolCalls.first(where: { $0.id == toolCallId }) {
+                    runs.append(.toolCall(toolCall, isTrailing: index == lastStreamingToolCallIndex))
                 }
             }
         }
@@ -191,6 +215,14 @@ struct MessageView: View {
                         onTap: {
                             activeURLFetchGroup = IdentifiedGroup(items: group)
                         }
+                    )
+                case .toolCall(let toolCall, let isTrailing):
+                    GenUIToolCallView(
+                        toolCall: toolCall,
+                        isStreaming: isTrailing && isLoading && isLastMessage,
+                        isDarkMode: isDarkMode,
+                        resolution: message.genUIResolutions[toolCall.id],
+                        onRetry: nil
                     )
                 }
             }
@@ -373,7 +405,7 @@ struct MessageView: View {
                     }
                 }
 
-                else if !message.content.isEmpty {
+                else if !message.content.isEmpty || !message.toolCalls.isEmpty {
                     if message.role == .user {
                         if isEditMode {
                             UserMessageEditView(
@@ -430,6 +462,20 @@ struct MessageView: View {
                                 )
                                     .equatable()
                                     .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+
+                            // Render any GenUI tool calls that came from a
+                            // session that didn't persist segments (e.g.
+                            // older saved messages or messages synced from
+                            // a client that doesn't emit segments).
+                            ForEach(message.toolCalls) { toolCall in
+                                GenUIToolCallView(
+                                    toolCall: toolCall,
+                                    isStreaming: false,
+                                    isDarkMode: isDarkMode,
+                                    resolution: message.genUIResolutions[toolCall.id],
+                                    onRetry: nil
+                                )
                             }
                         }
                     }

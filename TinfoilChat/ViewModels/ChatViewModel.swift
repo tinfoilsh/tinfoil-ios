@@ -873,6 +873,36 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Resolves a pending input-surface GenUI tool call: persists the
+    /// resolution onto the most recent assistant message and submits
+    /// the resulting text as a new user message so the conversation
+    /// continues naturally. Mirrors the webapp's `resolveInputToolCall`.
+    func resolveGenUIToolCall(
+        toolCallId: String,
+        resultText: String,
+        resultData: JSONValue?
+    ) {
+        guard !isLoading else { return }
+        guard var chat = currentChat else { return }
+
+        let resolution = GenUIResolution(text: resultText, data: resultData)
+        var didResolve = false
+
+        for index in chat.messages.indices.reversed() {
+            guard chat.messages[index].role == .assistant else { continue }
+            if chat.messages[index].toolCalls.contains(where: { $0.id == toolCallId }) {
+                chat.messages[index].genUIResolutions[toolCallId] = resolution
+                didResolve = true
+            }
+            break
+        }
+
+        guard didResolve else { return }
+
+        updateChat(chat)
+        sendMessage(text: resultText)
+    }
+
     /// Sends a user message and generates a response
     func sendMessage(text: String) {
         guard !isLoading else { return }

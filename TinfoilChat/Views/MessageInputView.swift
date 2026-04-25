@@ -185,8 +185,53 @@ struct MessageInputView: View {
         }
     }
 
+    /// When the latest assistant message ends in an input-surface
+    /// GenUI tool call, the chat input is replaced by the widget.
+    private var pendingInputToolCall: PendingInputToolCall? {
+        viewModel.currentChat?.pendingInputToolCall()
+    }
+
     @ViewBuilder
     private var inputContent: some View {
+        if let pending = pendingInputToolCall {
+            genUIInputContainer(pending: pending)
+        } else {
+            standardInputContent
+        }
+    }
+
+    @ViewBuilder
+    private func genUIInputContainer(pending: PendingInputToolCall) -> some View {
+        VStack(spacing: 4) {
+            rateLimitLabel
+
+            GenUIInputAreaView(
+                pending: pending,
+                isDarkMode: isDarkMode,
+                onResolve: { toolCallId, resultText, resultData in
+                    viewModel.resolveGenUIToolCall(
+                        toolCallId: toolCallId,
+                        resultText: resultText,
+                        resultData: resultData
+                    )
+                },
+                onCancel: nil
+            )
+            .background(
+                RoundedRectangle(cornerRadius: 26)
+                    .fill(isDarkMode ? Color.black.opacity(0.4) : Color.white.opacity(0.7))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 26)
+                    .stroke(GenUIStyle.borderColor(isDarkMode), lineWidth: 1)
+            )
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, inputBottomPadding)
+    }
+
+    @ViewBuilder
+    private var standardInputContent: some View {
         if #available(iOS 26, *) {
             // iOS 26+ with liquid glass effect
             VStack(spacing: 4) {
