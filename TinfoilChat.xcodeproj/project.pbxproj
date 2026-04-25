@@ -573,8 +573,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tinfoilsh/textual";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.0.6;
 			};
 		};
 		99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
