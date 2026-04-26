@@ -55,6 +55,7 @@ struct MessageView: View {
     /// don't stack N full-height pills in the chat.
     private enum InlineSegmentRun {
         case text(String, isTrailing: Bool)
+        case thinking(content: String, isThinking: Bool, duration: Double?)
         case webSearches([WebSearchInstance])
         case urlFetches([URLFetchState])
         case toolCall(GenUIToolCall, isTrailing: Bool)
@@ -110,6 +111,10 @@ struct MessageView: View {
                 if !text.isEmpty {
                     runs.append(.text(text, isTrailing: index == lastTextIndex))
                 }
+            case .thinking(let content, let isThinking, let duration):
+                flushSearches()
+                flushFetches()
+                runs.append(.thinking(content: content, isThinking: isThinking, duration: duration))
             case .webSearch(let searchId):
                 flushFetches()
                 if let instance = message.webSearches?.first(where: { $0.id == searchId }) {
@@ -189,6 +194,15 @@ struct MessageView: View {
                         .transaction { transaction in
                             transaction.animation = nil
                         }
+                case .thinking(let content, let isThinking, let duration):
+                    CollapsibleThinkingBox(
+                        thinkingText: content,
+                        isDarkMode: isDarkMode,
+                        isStreaming: isThinking && isLoading && isLastMessage,
+                        generationTimeSeconds: duration,
+                        thinkingSummary: isLastMessage && isThinking ? viewModel.thinkingSummary : nil,
+                        onTap: { showThoughtsSheet = true }
+                    )
                 case .webSearches(let group):
                     let aggregate = aggregatedState(for: group)
                     let isSearchInFlight = aggregate.status == .searching
@@ -269,6 +283,7 @@ struct MessageView: View {
                     message.content.isEmpty &&
                     message.thoughts == nil &&
                     !message.isThinking &&
+                    (message.segments?.isEmpty ?? true) &&
                     isLoading &&
                     isLastMessage {
                     VStack(alignment: .leading, spacing: 4) {
@@ -293,6 +308,16 @@ struct MessageView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // Assistant messages whose timeline-derived segments cover
+                // the entire message (thinking, web search, content, tool
+                // calls) render through the unified inline-segments
+                // pipeline so chronological order matches the webapp.
+                else if message.role == .assistant,
+                        let segments = message.segments,
+                        !segments.isEmpty {
+                    inlineSegmentsView(segments: segments)
                 }
 
                 // If the message is thinking or has thoughts, display them in a thinking box

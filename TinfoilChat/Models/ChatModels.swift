@@ -395,9 +395,10 @@ struct WebSearchInstance: Codable, Equatable, Identifiable {
 }
 
 /// An ordered segment of assistant content. Preserves the exact order in which
-/// text and inline events (web search, URL fetch) streamed.
+/// text and inline events (thinking, web search, URL fetch, tool call) streamed.
 enum MessageSegment: Codable, Equatable {
     case text(String)
+    case thinking(content: String, isThinking: Bool, duration: Double?)
     case webSearch(searchId: String)
     case urlFetch(fetchId: String)
     case toolCall(toolCallId: String)
@@ -405,6 +406,9 @@ enum MessageSegment: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case type
         case text
+        case content
+        case isThinking
+        case duration
         case searchId
         case fetchId
         case toolCallId
@@ -417,6 +421,11 @@ enum MessageSegment: Codable, Equatable {
         case "text":
             let text = try container.decode(String.self, forKey: .text)
             self = .text(text)
+        case "thinking":
+            let content = try container.decodeIfPresent(String.self, forKey: .content) ?? ""
+            let isThinking = try container.decodeIfPresent(Bool.self, forKey: .isThinking) ?? false
+            let duration = try container.decodeIfPresent(Double.self, forKey: .duration)
+            self = .thinking(content: content, isThinking: isThinking, duration: duration)
         case "web_search":
             let searchId = try container.decode(String.self, forKey: .searchId)
             self = .webSearch(searchId: searchId)
@@ -441,6 +450,11 @@ enum MessageSegment: Codable, Equatable {
         case .text(let text):
             try container.encode("text", forKey: .type)
             try container.encode(text, forKey: .text)
+        case .thinking(let content, let isThinking, let duration):
+            try container.encode("thinking", forKey: .type)
+            try container.encode(content, forKey: .content)
+            try container.encode(isThinking, forKey: .isThinking)
+            try container.encodeIfPresent(duration, forKey: .duration)
         case .webSearch(let searchId):
             try container.encode("web_search", forKey: .type)
             try container.encode(searchId, forKey: .searchId)
@@ -513,6 +527,16 @@ enum JSONValue: Codable, Equatable {
 
     var objectValue: [String: JSONValue]? {
         if case .object(let value) = self { return value }
+        return nil
+    }
+
+    var arrayValue: [JSONValue]? {
+        if case .array(let value) = self { return value }
+        return nil
+    }
+
+    var boolValue: Bool? {
+        if case .bool(let value) = self { return value }
         return nil
     }
 
@@ -789,6 +813,119 @@ struct Message: Identifiable, Codable, Equatable {
         webSearches = (try? container.decodeIfPresent([WebSearchInstance].self, forKey: .webSearches)) ?? nil
         toolCalls = (try? container.decodeIfPresent([GenUIToolCall].self, forKey: .toolCalls)) ?? []
         timeline = try? container.decodeIfPresent([JSONValue].self, forKey: .timeline)
+
+        // For cross-platform parity: webapp messages persist a `timeline`
+        // (chronological array of blocks) but no `segments`. Without
+        // segments, iOS falls into flat-field rendering which loses the
+        // original interleaving of thinking, web search, content, and
+        // tool calls. Synthesize segments + per-search instances from
+        // the timeline so the standard segments rendering pipeline can
+        // reproduce the webapp's chronological layout faithfully.
+        if role == .assistant,
+           segments == nil,
+           let timeline,
+           !timeline.isEmpty {
+            let derived = Self.deriveFromTimeline(timeline)
+            if !derived.segments.isEmpty {
+                segments = derived.segments
+            }
+            if webSearches == nil, !derived.webSearches.isEmpty {
+                webSearches = derived.webSearches
+            }
+            if toolCalls.isEmpty, !derived.toolCalls.isEmpty {
+                toolCalls = derived.toolCalls
+            }
+            if urlFetches.isEmpty, !derived.urlFetches.isEmpty {
+                urlFetches = derived.urlFetches
+            }
+        }
+    }
+
+    /// Walks a webapp-style timeline and produces the iOS-side render
+    /// inputs (segments + web-search instances) in chronological order.
+    /// Mirrors the webapp's `MessageAssembler.toMessage` plus the
+    /// chronological ordering used by `DefaultMessageRenderer`.
+    private static func deriveFromTimeline(
+        _ timeline: [JSONValue]
+    ) -> (
+        segments: [MessageSegment],
+        webSearches: [WebSearchInstance],
+        urlFetches: [URLFetchState],
+        toolCalls: [GenUIToolCall]
+    ) {
+        var segments: [MessageSegment] = []
+        var searches: [WebSearchInstance] = []
+        var fetches: [URLFetchState] = []
+        var calls: [GenUIToolCall] = []
+
+        for block in timeline {
+            guard let object = block.objectValue,
+                  let type = object["type"]?.stringValue else { continue }
+            switch type {
+            case "thinking":
+                let content = object["content"]?.stringValue ?? ""
+                let isThinking = (object["isThinking"]?.boolValue) ?? false
+                let duration = object["duration"]?.numberValue
+                segments.append(.thinking(content: content, isThinking: isThinking, duration: duration))
+
+            case "content":
+                let text = object["content"]?.stringValue ?? ""
+                if !text.isEmpty {
+                    segments.append(.text(text))
+                }
+
+            case "web_search":
+                guard let stateObject = object["state"]?.objectValue else { continue }
+                let id = object["id"]?.stringValue ?? "web-search-\(searches.count)"
+                let query = stateObject["query"]?.stringValue
+                let statusRaw = stateObject["status"]?.stringValue ?? "completed"
+                let status = WebSearchStatus(rawValue: statusRaw) ?? .completed
+                let reason = stateObject["reason"]?.stringValue
+                var sources: [WebSearchSource]? = nil
+                if let array = stateObject["sources"]?.arrayValue {
+                    sources = array.compactMap { value in
+                        guard let item = value.objectValue,
+                              let url = item["url"]?.stringValue else { return nil }
+                        let title = item["title"]?.stringValue ?? url
+                        return WebSearchSource(title: title, url: url)
+                    }
+                }
+                let instance = WebSearchInstance(
+                    id: id,
+                    query: query,
+                    status: status,
+                    sources: sources,
+                    reason: reason
+                )
+                searches.append(instance)
+                segments.append(.webSearch(searchId: id))
+
+            case "url_fetches":
+                guard let array = object["fetches"]?.arrayValue else { continue }
+                for value in array {
+                    guard let item = value.objectValue,
+                          let id = item["id"]?.stringValue,
+                          let url = item["url"]?.stringValue else { continue }
+                    let statusRaw = item["status"]?.stringValue ?? "completed"
+                    let status = URLFetchStatus(rawValue: statusRaw) ?? .completed
+                    let fetch = URLFetchState(id: id, url: url, status: status)
+                    fetches.append(fetch)
+                    segments.append(.urlFetch(fetchId: id))
+                }
+
+            case "tool_call":
+                guard let toolCallId = object["toolCallId"]?.stringValue else { continue }
+                let name = object["name"]?.stringValue ?? ""
+                let arguments = object["arguments"]?.stringValue ?? ""
+                calls.append(GenUIToolCall(id: toolCallId, name: name, arguments: arguments))
+                segments.append(.toolCall(toolCallId: toolCallId))
+
+            default:
+                continue
+            }
+        }
+
+        return (segments, searches, fetches, calls)
     }
     
     func encode(to encoder: Encoder) throws {
