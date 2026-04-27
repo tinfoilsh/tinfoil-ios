@@ -181,6 +181,8 @@ enum Constants {
             static let selectedLanguage = "tinfoil-settings-selected-language"
             static let maxPromptMessages = "tinfoil-settings-max-prompt-messages"
             static let webSearchEnabled = "tinfoil-settings-web-search-enabled"
+            static let reasoningEffort = "tinfoil-settings-reasoning-effort"
+            static let thinkingEnabled = "tinfoil-settings-thinking-enabled"
             static let cloudSyncEnabled = "tinfoil-settings-cloud-sync-enabled"
             static let cloudSyncActiveTab = "tinfoil-settings-cloud-sync-active-tab"
             static let localOnlyModeEnabled = "tinfoil-settings-local-only-mode-enabled"

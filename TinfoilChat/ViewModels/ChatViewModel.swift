@@ -18,6 +18,15 @@ enum ChatStorageTab: String {
     case local
 }
 
+/// Graded reasoning effort exposed to the user. Maps directly onto the
+/// webapp vocabulary; per-model translation (e.g. DeepSeek's `low|medium →
+/// high`, `high → max`) is handled by `ChatQueryBuilder` via `effortMap`.
+enum ReasoningEffort: String, CaseIterable, Sendable {
+    case low
+    case medium
+    case high
+}
+
 @MainActor
 class ChatViewModel: ObservableObject {
     // Published properties for UI updates
@@ -49,6 +58,22 @@ class ChatViewModel: ObservableObject {
     @Published var scrollToUserMessageTrigger: UUID = UUID()
     @Published var isClientInitializing: Bool = false
     @Published var isWebSearchEnabled: Bool = false
+    @Published var reasoningEffort: ReasoningEffort = .medium {
+        didSet {
+            UserDefaults.standard.set(
+                reasoningEffort.rawValue,
+                forKey: Constants.StorageKeys.Settings.reasoningEffort
+            )
+        }
+    }
+    @Published var thinkingEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(
+                thinkingEnabled,
+                forKey: Constants.StorageKeys.Settings.thinkingEnabled
+            )
+        }
+    }
     @Published var imageViewerImages: [Attachment] = []
     @Published var imageViewerIndex: Int = 0
     @Published var showImageViewer: Bool = false
@@ -289,6 +314,23 @@ class ChatViewModel: ObservableObject {
         }
         self.currentModel = model
         self.isWebSearchEnabled = SettingsManager.shared.webSearchEnabled
+
+        // Load persisted reasoning preferences. Both default to the most
+        // permissive setting (thinking on, medium effort) when no value has
+        // been saved yet, matching the webapp.
+        if let savedEffortRaw = UserDefaults.standard.string(
+            forKey: Constants.StorageKeys.Settings.reasoningEffort
+        ), let savedEffort = ReasoningEffort(rawValue: savedEffortRaw) {
+            self.reasoningEffort = savedEffort
+        }
+        if UserDefaults.standard.object(
+            forKey: Constants.StorageKeys.Settings.thinkingEnabled
+        ) != nil {
+            self.thinkingEnabled = UserDefaults.standard.bool(
+                forKey: Constants.StorageKeys.Settings.thinkingEnabled
+            )
+        }
+
         if let savedTab = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.cloudSyncActiveTab),
            let tab = ChatStorageTab(rawValue: savedTab) {
             self.activeStorageTab = tab
@@ -1174,7 +1216,10 @@ class ChatViewModel: ObservableObject {
                     conversationMessages: self.messages,
                     maxMessages: maxMessages,
                     webSearchEnabled: self.isWebSearchEnabled,
-                    isMultimodal: self.currentModel.isMultimodal
+                    isMultimodal: self.currentModel.isMultimodal,
+                    reasoningConfig: self.currentModel.reasoningConfig,
+                    reasoningEffort: self.reasoningEffort,
+                    thinkingEnabled: self.thinkingEnabled
                 )
 
                 // Web search state tracking

@@ -15,6 +15,15 @@ import OpenAI
 /// For models that don't support it, we prepend to the first user message.
 struct ChatQueryBuilder {
 
+    /// Endpoint key for the chat completions API; matches the controlplane
+    /// `reasoningConfig.params` keying.
+    static let chatCompletionsEndpoint = "/v1/chat/completions"
+
+    /// Placeholder substituted with the user-selected reasoning effort when
+    /// expanding `reasoningConfig.params[endpoint].enable`. Mirrors the
+    /// webapp's `EFFORT_PLACEHOLDER`.
+    static let effortPlaceholder = "$EFFORT"
+
     /// Build ChatQuery with model-appropriate system prompt and rules injection
     /// - Parameters:
     ///   - modelId: The model identifier
@@ -25,6 +34,15 @@ struct ChatQueryBuilder {
     ///   - stream: Whether to stream the response (default: true)
     ///   - webSearchEnabled: Whether to enable web search for this query (default: false)
     ///   - isMultimodal: Whether the current model supports image content parts
+    ///   - reasoningConfig: Optional per-model reasoning configuration. When
+    ///     present, the matching enable/disable block from
+    ///     `params[chatCompletionsEndpoint]` is merged into the request body
+    ///     via `extraBody`, with `$EFFORT` substituted using `reasoningEffort`
+    ///     (translated through `effortMap` when provided).
+    ///   - reasoningEffort: User-selected effort tier for models that expose
+    ///     graded effort. Ignored for models that do not.
+    ///   - thinkingEnabled: Whether thinking is on for models that support a
+    ///     toggle. Ignored for models that do not.
     /// - Returns: A configured ChatQuery
     static func buildQuery(
         modelId: String,
@@ -34,7 +52,10 @@ struct ChatQueryBuilder {
         maxMessages: Int,
         stream: Bool = true,
         webSearchEnabled: Bool = false,
-        isMultimodal: Bool = false
+        isMultimodal: Bool = false,
+        reasoningConfig: ReasoningConfig? = nil,
+        reasoningEffort: ReasoningEffort = .medium,
+        thinkingEnabled: Bool = true
     ) -> ChatQuery {
 
         var messages: [ChatQuery.ChatCompletionMessageParam] = []
@@ -114,12 +135,77 @@ struct ChatQueryBuilder {
             }
         }
 
+        let extraBody = makeReasoningExtraBody(
+            reasoningConfig: reasoningConfig,
+            reasoningEffort: reasoningEffort,
+            thinkingEnabled: thinkingEnabled
+        )
+
         return ChatQuery(
             messages: messages,
             model: modelId,
             webSearchOptions: webSearchEnabled ? .init() : nil,
-            stream: stream
+            stream: stream,
+            extraBody: extraBody
         )
+    }
+
+    /// Build the `extraBody` map to splice into the ChatQuery for a reasoning
+    /// model. Returns nil for non-reasoning models or when the config has no
+    /// chat-completions params block.
+    static func makeReasoningExtraBody(
+        reasoningConfig: ReasoningConfig?,
+        reasoningEffort: ReasoningEffort,
+        thinkingEnabled: Bool
+    ) -> [String: OpenAIJSON]? {
+        guard let cfg = reasoningConfig else { return nil }
+        guard let endpointParams = cfg.params?[chatCompletionsEndpoint] else {
+            return nil
+        }
+
+        // Pick enable vs disable based on the toggle. Models that don't
+        // support a toggle always take the enable block.
+        let supportsToggle = cfg.supportsToggle == true
+        let rawBlock: OpenAIJSON?
+        if supportsToggle {
+            rawBlock = thinkingEnabled ? endpointParams.enable : endpointParams.disable
+        } else {
+            rawBlock = endpointParams.enable
+        }
+        guard let block = rawBlock else { return nil }
+
+        // Translate the UI effort through `effortMap` when present (e.g.
+        // DeepSeek V4 only accepts `high`/`max`). Skipped for models that
+        // do not support graded effort, but keeping the substitution
+        // unconditional is harmless because the placeholder will simply not
+        // appear in the block.
+        let supportsEffort = cfg.supportsEffort == true
+        let uiEffort = supportsEffort ? reasoningEffort.rawValue : ReasoningEffort.medium.rawValue
+        let effort = cfg.effortMap?[uiEffort] ?? uiEffort
+
+        let expanded = substituteEffort(block, effort: effort)
+        guard case .object(let dict) = expanded, !dict.isEmpty else { return nil }
+        return dict
+    }
+
+    /// Recursively clone an `OpenAIJSON`, replacing any string equal to
+    /// `effortPlaceholder` with `effort`. Mirrors the webapp's
+    /// `substituteEffort` helper.
+    private static func substituteEffort(_ value: OpenAIJSON, effort: String) -> OpenAIJSON {
+        switch value {
+        case .string(let s):
+            return s == effortPlaceholder ? .string(effort) : .string(s)
+        case .array(let items):
+            return .array(items.map { substituteEffort($0, effort: effort) })
+        case .object(let dict):
+            var out: [String: OpenAIJSON] = [:]
+            for (k, v) in dict {
+                out[k] = substituteEffort(v, effort: effort)
+            }
+            return .object(out)
+        case .null, .bool, .int, .double:
+            return value
+        }
     }
 
 }
