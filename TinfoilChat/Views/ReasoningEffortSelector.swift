@@ -4,7 +4,7 @@
 //
 //  Icon-only pill that opens a menu for picking reasoning effort and (for
 //  models that support it) toggling thinking on/off. The button label is
-//  intentionally just the brain icon — the current effort/state is
+//  intentionally just the lightbulb icon — the current effort/state is
 //  surfaced via the menu's checkmarks rather than the button text.
 //
 //   - Toggle-only (e.g. Gemma): tapping the icon flips `thinkingEnabled`
@@ -17,9 +17,9 @@
 import SwiftUI
 
 private enum EffortOption: String, CaseIterable, Identifiable {
-    case low
-    case medium
     case high
+    case medium
+    case low
 
     var id: String { rawValue }
 
@@ -60,17 +60,31 @@ struct ReasoningEffortSelector: View {
         if !supportsEffort && !supportsToggle {
             EmptyView()
         } else if supportsToggle && !supportsEffort {
-            toggleOnlyButton
+            toggleOnlyMenu
         } else {
             effortMenu
         }
     }
 
-    /// Icon-only pill for models that only expose on/off thinking. Tapping
-    /// flips `thinkingEnabled` immediately without a menu.
-    private var toggleOnlyButton: some View {
-        Button {
-            thinkingEnabled.toggle()
+    /// Menu for models that only expose on/off thinking — same look-and-
+    /// feel as the effort menu, with two options (On / Off) so the
+    /// interaction is consistent regardless of model capabilities.
+    private var toggleOnlyMenu: some View {
+        Menu {
+            Section {
+                Button {
+                    thinkingEnabled = true
+                } label: {
+                    Label("On", systemImage: thinkingEnabled ? "checkmark" : "")
+                }
+                Button {
+                    thinkingEnabled = false
+                } label: {
+                    Label("Off", systemImage: thinkingEnabled ? "" : "checkmark")
+                }
+            } header: {
+                Text("Thinking — turn reasoning on or off")
+            }
         } label: {
             iconLabel(active: thinkingEnabled)
         }
@@ -81,24 +95,28 @@ struct ReasoningEffortSelector: View {
     /// supports a toggle, an "Off" item is included.
     private var effortMenu: some View {
         Menu {
-            if supportsToggle {
-                Button {
-                    thinkingEnabled = false
-                } label: {
-                    Label("Off", systemImage: thinkingEnabled ? "" : "checkmark")
-                }
-            }
-            ForEach(EffortOption.allCases) { option in
-                Button {
-                    if supportsToggle && !thinkingEnabled {
-                        thinkingEnabled = true
+            Section {
+                ForEach(EffortOption.allCases) { option in
+                    Button {
+                        if supportsToggle && !thinkingEnabled {
+                            thinkingEnabled = true
+                        }
+                        reasoningEffort = option.asReasoningEffort
+                    } label: {
+                        let isActive = (!supportsToggle || thinkingEnabled)
+                            && EffortOption(reasoningEffort) == option
+                        Label(option.displayLabel, systemImage: isActive ? "checkmark" : "")
                     }
-                    reasoningEffort = option.asReasoningEffort
-                } label: {
-                    let isActive = (!supportsToggle || thinkingEnabled)
-                        && EffortOption(reasoningEffort) == option
-                    Label(option.displayLabel, systemImage: isActive ? "checkmark" : "")
                 }
+                if supportsToggle {
+                    Button {
+                        thinkingEnabled = false
+                    } label: {
+                        Label("Off", systemImage: thinkingEnabled ? "" : "checkmark")
+                    }
+                }
+            } header: {
+                Text("Thinking — choose how much the model reasons")
             }
         } label: {
             iconLabel(active: !supportsToggle || thinkingEnabled)
@@ -107,24 +125,13 @@ struct ReasoningEffortSelector: View {
     }
 
     /// Shared icon-only pill body used by both the toggle button and the
-    /// effort menu. When inactive, a diagonal slash is drawn through the
-    /// brain to indicate thinking is disabled (SF Symbols has no
-    /// `brain.slash` glyph, so the slash is overlaid manually). The slash
-    /// is rendered as a single solid `.primary` capsule on top of the
-    /// brain, which adapts correctly to both light and dark modes.
+    /// effort menu. Uses the SF Symbols `lightbulb`/`lightbulb.slash`
+    /// glyph pair — the system-provided slash variant adapts to both
+    /// light and dark modes natively, so no manual overlay is needed.
     private func iconLabel(active: Bool) -> some View {
-        Image(systemName: "brain")
-            .font(.system(size: 13, weight: .semibold))
+        Image(systemName: active ? "lightbulb" : "lightbulb.slash")
+            .font(.system(size: 12, weight: .semibold))
             .foregroundColor(active ? .primary : .primary.opacity(0.9))
-            .overlay(alignment: .center) {
-                if !active {
-                    Capsule()
-                        .fill(Color.primary)
-                        .frame(width: 22, height: 2.5)
-                        .rotationEffect(.degrees(-45))
-                        .accessibilityHidden(true)
-                }
-            }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(Color.secondary.opacity(0.12))
