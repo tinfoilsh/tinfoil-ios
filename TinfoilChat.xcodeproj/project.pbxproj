@@ -11,7 +11,7 @@
 		99F154692F4F60C500E9174E /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154682F4F60C500E9174E /* ClerkKit */; };
 		99F1546B2F4F60C500E9174E /* ClerkKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = 99F1546A2F4F60C500E9174E /* ClerkKitUI */; };
 		99F154702F4F610000E9174E /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = 99F1546F2F4F610000E9174E /* SwiftMath */; };
-		99F154732F4F611A00E9174E /* TinfoilAI in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154722F4F611A00E9174E /* TinfoilAI */; };
+		99EEFB1B2F9EE9E8005B3D75 /* TinfoilAI in Frameworks */ = {isa = PBXBuildFile; productRef = 99EEFB1A2F9EE9E8005B3D75 /* TinfoilAI */; };
 		99F1547C2F4F614400E9174E /* Gzip in Frameworks */ = {isa = PBXBuildFile; productRef = 99F1547B2F4F614400E9174E /* Gzip */; };
 		99F154822F4F632500E9174E /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154812F4F632500E9174E /* Sentry */; };
 		99F154842F4F632E00E9174E /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154832F4F632E00E9174E /* RevenueCat */; };
@@ -71,7 +71,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				99F154732F4F611A00E9174E /* TinfoilAI in Frameworks */,
+				99EEFB1B2F9EE9E8005B3D75 /* TinfoilAI in Frameworks */,
 				99F1547C2F4F614400E9174E /* Gzip in Frameworks */,
 				99F154822F4F632500E9174E /* Sentry in Frameworks */,
 				99DDBFA42F6869250038A729 /* Textual in Frameworks */,
@@ -159,7 +159,7 @@
 				99F154682F4F60C500E9174E /* ClerkKit */,
 				99F1546A2F4F60C500E9174E /* ClerkKitUI */,
 				99F1546F2F4F610000E9174E /* SwiftMath */,
-				99F154722F4F611A00E9174E /* TinfoilAI */,
+				99EEFB1A2F9EE9E8005B3D75 /* TinfoilAI */,
 				99F1547B2F4F614400E9174E /* Gzip */,
 				99F154812F4F632500E9174E /* Sentry */,
 				99F154832F4F632E00E9174E /* RevenueCat */,
@@ -203,9 +203,9 @@
 				99F1546C2F4F60E900E9174E /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				99F1546D2F4F60F600E9174E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 				99F1546E2F4F610000E9174E /* XCRemoteSwiftPackageReference "SwiftMath" */,
-				99F154712F4F611A00E9174E /* XCRemoteSwiftPackageReference "tinfoil-swift" */,
 				99F1547A2F4F614400E9174E /* XCRemoteSwiftPackageReference "GzipSwift" */,
 				99DDBFA22F68667C0038A729 /* XCRemoteSwiftPackageReference "textual" */,
+				99EEFB192F9EE9E8005B3D75 /* XCRemoteSwiftPackageReference "tinfoil-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 99F153C32F4F5F0200E9174E /* Products */;
@@ -577,6 +577,14 @@
 				minimumVersion = 0.0.6;
 			};
 		};
+		99EEFB192F9EE9E8005B3D75 /* XCRemoteSwiftPackageReference "tinfoil-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/tinfoilsh/tinfoil-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.5.0;
+			};
+		};
 		99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/clerk/clerk-ios";
@@ -607,14 +615,6 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 1.7.3;
-			};
-		};
-		99F154712F4F611A00E9174E /* XCRemoteSwiftPackageReference "tinfoil-swift" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/tinfoilsh/tinfoil-swift";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.5.0;
 			};
 		};
 		99F1547A2F4F614400E9174E /* XCRemoteSwiftPackageReference "GzipSwift" */ = {
@@ -648,11 +648,6 @@
 			package = 99F1546E2F4F610000E9174E /* XCRemoteSwiftPackageReference "SwiftMath" */;
 			productName = SwiftMath;
 		};
-		99F154722F4F611A00E9174E /* TinfoilAI */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 99F154712F4F611A00E9174E /* XCRemoteSwiftPackageReference "tinfoil-swift" */;
-			productName = TinfoilAI;
-		};
 		99F1547B2F4F614400E9174E /* Gzip */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 99F1547A2F4F614400E9174E /* XCRemoteSwiftPackageReference "GzipSwift" */;
@@ -672,6 +667,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 99F1546D2F4F60F600E9174E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
 			productName = RevenueCatUI;
+		};
+		99EEFB1A2F9EE9E8005B3D75 /* TinfoilAI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 99EEFB192F9EE9E8005B3D75 /* XCRemoteSwiftPackageReference "tinfoil-swift" */;
+			productName = TinfoilAI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
