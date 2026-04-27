@@ -221,6 +221,16 @@ struct MessageInputView: View {
 
                     modelSelectorButton
 
+                    if viewModel.currentModel.isReasoningModel {
+                        ReasoningEffortSelector(
+                            supportsEffort: viewModel.currentModel.supportsReasoningEffort,
+                            supportsToggle: viewModel.currentModel.supportsThinkingToggle,
+                            reasoningEffort: $viewModel.reasoningEffort,
+                            thinkingEnabled: $viewModel.thinkingEnabled
+                        )
+                        .padding(.leading, 4)
+                    }
+
                     Spacer()
 
                     // Microphone button
@@ -313,6 +323,16 @@ struct MessageInputView: View {
                     attachButton
 
                     modelSelectorButton
+
+                    if viewModel.currentModel.isReasoningModel {
+                        ReasoningEffortSelector(
+                            supportsEffort: viewModel.currentModel.supportsReasoningEffort,
+                            supportsToggle: viewModel.currentModel.supportsThinkingToggle,
+                            reasoningEffort: $viewModel.reasoningEffort,
+                            thinkingEnabled: $viewModel.thinkingEnabled
+                        )
+                        .padding(.leading, 4)
+                    }
 
                     Spacer()
 

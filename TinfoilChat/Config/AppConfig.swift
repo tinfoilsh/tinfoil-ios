@@ -6,6 +6,44 @@
 //  Copyright © 2025 Tinfoil. All rights reserved.
 
 import Foundation
+import OpenAI
+
+/// Per-endpoint enable/disable parameter blocks for thinking mode.
+/// Keyed by full endpoint path (e.g. "/v1/chat/completions"). Each block is
+/// shallow-merged into the request body when the toggle is in the
+/// corresponding state. Mirrors the webapp's `ReasoningEndpointParams`.
+///
+/// `OpenAIJSON` is the OpenAI SDK's recursive Codable representation of any
+/// JSON value, used here to carry arbitrary vendor-specific fields like
+/// `chat_template_kwargs` without a typed property per shape. The SDK uses
+/// this distinct name so it does not collide with the app's local
+/// `JSONValue` enum (used for streaming-event payloads).
+struct ReasoningEndpointParams: Codable, Equatable {
+    let enable: OpenAIJSON?
+    let disable: OpenAIJSON?
+}
+
+/// Reasoning capability descriptor returned by the controlplane.
+///
+/// - `supportsEffort: true` — model accepts a graded effort parameter
+///   (low/medium/high).
+/// - `supportsToggle: true` — thinking mode can be turned on or off per
+///   request via `params[endpoint].enable` / `params[endpoint].disable`.
+/// - `defaultEnabled` — initial state of the toggle when `supportsToggle`
+///   is true.
+/// - `effortMap` — optional translation from the UI's effort vocabulary to
+///   the model's actual accepted values (e.g. DeepSeek V4 only accepts
+///   `high`/`max`).
+///
+/// The presence of a `reasoningConfig` object is itself the capability
+/// flag — there is no separate boolean.
+struct ReasoningConfig: Codable, Equatable {
+    let supportsEffort: Bool?
+    let supportsToggle: Bool?
+    let defaultEnabled: Bool?
+    let effortMap: [String: String]?
+    let params: [String: ReasoningEndpointParams]?
+}
 
 /// Model configuration from the new /api/app/models endpoint
 struct AppModelConfig: Codable {
@@ -21,6 +59,7 @@ struct AppModelConfig: Codable {
     let chat: Bool?
     let paid: Bool
     let multimodal: Bool
+    let reasoningConfig: ReasoningConfig?
 }
 
 // The /api/app/models endpoint returns an array directly, not wrapped in an object
@@ -89,6 +128,26 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
     var type: String { appConfig.type }
     var isMultimodal: Bool { appConfig.multimodal }
     var isChat: Bool { appConfig.chat ?? (appConfig.type == "chat") }
+
+    // MARK: - Reasoning capabilities
+
+    /// Full reasoning config for this model, or nil if the model is not a
+    /// reasoning model.
+    var reasoningConfig: ReasoningConfig? { appConfig.reasoningConfig }
+
+    /// True iff the model exposes any reasoning controls. Used to gate the
+    /// reasoning selector visibility.
+    var isReasoningModel: Bool { appConfig.reasoningConfig != nil }
+
+    /// True iff the model exposes a graded effort parameter.
+    var supportsReasoningEffort: Bool {
+        appConfig.reasoningConfig?.supportsEffort == true
+    }
+
+    /// True iff the model exposes an on/off thinking toggle.
+    var supportsThinkingToggle: Bool {
+        appConfig.reasoningConfig?.supportsToggle == true
+    }
 
 
     // For Hashable conformance
