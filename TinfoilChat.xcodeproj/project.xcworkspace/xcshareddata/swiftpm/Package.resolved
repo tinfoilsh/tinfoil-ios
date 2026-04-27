@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/encrypted-http-body-protocol.git",
       "state" : {
-        "revision" : "6668fb608c11e903d4a0b64a8e37a8398e305dc1",
-        "version" : "0.1.5"
+        "revision" : "332a577e06706c925264669f36b35697b27ca637",
+        "version" : "0.2.0"
       }
     },
     {
@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/openai-swift-fork.git",
       "state" : {
-        "revision" : "fb076a51a97b56c3cc2ba4c9e8bcc9e88f59d53f",
-        "version" : "0.0.4"
+        "revision" : "a414c7138a6018bf8e20fa7f2533287091e35b03",
+        "version" : "0.0.6"
       }
     },
     {
@@ -150,8 +150,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/tinfoil-swift",
       "state" : {
-        "revision" : "daee5afb9ad2cbd3eabb537b0fbd5cec8882b4ae",
-        "version" : "0.4.8"
+        "revision" : "f29b7010738aa32c8e6ba10928034e769b02f445",
+        "version" : "0.5.0"
       }
     }
   ],

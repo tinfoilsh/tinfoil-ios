@@ -614,7 +614,7 @@
 			repositoryURL = "https://github.com/tinfoilsh/tinfoil-swift";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.0.5;
+				minimumVersion = 0.5.0;
 			};
 		};
 		99F1547A2F4F614400E9174E /* XCRemoteSwiftPackageReference "GzipSwift" */ = {
