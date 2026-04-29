@@ -96,9 +96,14 @@ final class CloudKeyPreflightValidator {
             }
 
             let encrypted = try JSONDecoder().decode(EncryptedData.self, from: data)
-            let result = try await encryptionService.decrypt(encrypted, as: ProfileData.self)
+            // Decrypt to raw bytes only: a successful AES-GCM open with the primary
+            // key proves the key matches the cloud data. Avoid decoding into a
+            // typed Swift schema here — the JS web client writes blobs whose
+            // schema may evolve, and a Swift decode failure must not be treated
+            // as "wrong key".
+            let (_, usedFallback) = try await encryptionService.decryptRawWithFallbackInfo(encrypted)
 
-            guard !result.usedFallbackKey else {
+            guard !usedFallback else {
                 return mismatchResult
             }
 
@@ -131,11 +136,13 @@ final class CloudKeyPreflightValidator {
                     }
 
                     do {
-                        let result: DecryptionResult<StoredChat> = try encryptionService.decryptV1(
-                            binary,
-                            as: StoredChat.self
-                        )
-                        if !result.usedFallbackKey {
+                        // Schema-free probe: a successful raw decrypt proves the
+                        // primary key works. Decoding into StoredChat here would
+                        // false-positive a "key mismatch" whenever the JS web
+                        // client uploads a chat blob with a slightly different
+                        // shape (e.g. missing optional sync metadata fields).
+                        let (_, usedFallback) = try encryptionService.decryptRawV1WithFallbackInfo(binary)
+                        if !usedFallback {
                             return validResult()
                         }
                         sawMismatch = true
@@ -151,8 +158,8 @@ final class CloudKeyPreflightValidator {
                         EncryptedData.self,
                         from: Data(content.utf8)
                     )
-                    let result = try await encryptionService.decrypt(encryptedData, as: StoredChat.self)
-                    if !result.usedFallbackKey {
+                    let (_, usedFallback) = try await encryptionService.decryptRawWithFallbackInfo(encryptedData)
+                    if !usedFallback {
                         return validResult()
                     }
                     sawMismatch = true
