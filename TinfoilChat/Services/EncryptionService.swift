@@ -465,6 +465,20 @@ extension EncryptionService: ChatEncryptor {
         return data
     }
 
+    /// Decrypt to raw bytes, exposing whether a fallback key was used.
+    /// Used by the cloud-key preflight to answer "does this key work?" without
+    /// requiring the decrypted payload to conform to a specific Swift schema.
+    func decryptRawWithFallbackInfo(_ encrypted: EncryptedData) async throws -> (Data, Bool) {
+        return try await decryptDataWithFallbackInfo(encrypted)
+    }
+
+    /// Decrypt v1 binary content to raw bytes, exposing whether a fallback key was used.
+    func decryptRawV1WithFallbackInfo(_ binary: Data) throws -> (Data, Bool) {
+        return try decryptWithKeyFallback { key in
+            try BinaryCodec.decryptRaw(binary, using: key)
+        }
+    }
+
     /// Shared decryption that tries the primary key, then falls back to key history.
     /// Returns the decrypted data and whether a fallback key was used.
     private func decryptDataWithFallbackInfo(_ encrypted: EncryptedData) async throws -> (Data, Bool) {
