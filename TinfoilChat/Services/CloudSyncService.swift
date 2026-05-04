@@ -571,11 +571,19 @@ class CloudSyncService: ObservableObject {
     private func doSyncAllChats() async -> SyncResult {
         var result = SyncResult()
 
+        // Delete local chats that were deleted on another device
+        var deletedCount = 0
+        if let cachedStatus = getCachedSyncStatus(),
+           let lastUpdated = cachedStatus.lastUpdated {
+            deletedCount = await deleteRemotelyDeletedChats(since: lastUpdated)
+        }
+
         // First, backup any unsynced local changes
         let backupResult = await backupUnsyncedChats()
         result = SyncResult(
             uploaded: backupResult.uploaded,
             downloaded: 0,
+            deleted: deletedCount,
             errors: backupResult.errors
         )
 
@@ -644,6 +652,7 @@ class CloudSyncService: ObservableObject {
                             result = SyncResult(
                                 uploaded: result.uploaded,
                                 downloaded: result.downloaded + 1,
+                                deleted: result.deleted,
                                 errors: result.errors
                             )
                         } else {
@@ -662,6 +671,7 @@ class CloudSyncService: ObservableObject {
                                 result = SyncResult(
                                     uploaded: result.uploaded,
                                     downloaded: result.downloaded + 1,
+                                    deleted: result.deleted,
                                     errors: result.errors
                                 )
                             }
@@ -673,32 +683,20 @@ class CloudSyncService: ObservableObject {
                             result = SyncResult(
                                 uploaded: result.uploaded,
                                 downloaded: result.downloaded + 1,
+                                deleted: result.deleted,
                                 errors: result.errors
                             )
                         } catch {
                             result = SyncResult(
                                 uploaded: result.uploaded,
                                 downloaded: result.downloaded,
+                                deleted: result.deleted,
                                 errors: result.errors + ["Failed to download chat \(remoteChat.id): \(error.localizedDescription)"]
                             )
                         }
                     }
                 }
             }
-
-            // Delete local chats that were deleted on another device
-            var deletedCount = 0
-            if let cachedStatus = getCachedSyncStatus(),
-               let lastUpdated = cachedStatus.lastUpdated {
-                deletedCount = await deleteRemotelyDeletedChats(since: lastUpdated)
-            }
-
-            result = SyncResult(
-                uploaded: result.uploaded,
-                downloaded: result.downloaded,
-                deleted: result.deleted + deletedCount,
-                errors: result.errors
-            )
 
             // Refresh cached sync status so subsequent smart-syncs have up-to-date info
             await refreshSyncStatusCache()
@@ -793,11 +791,15 @@ class CloudSyncService: ObservableObject {
     private func syncChangedChats(since: String) async -> SyncResult {
         var result = SyncResult()
 
+        // Delete local chats that were deleted on another device
+        let deletedCount = await deleteRemotelyDeletedChats(since: since)
+
         // Backup any unsynced local changes first (matches doSyncAllChats behavior)
         let backupResult = await backupUnsyncedChats()
         result = SyncResult(
             uploaded: backupResult.uploaded,
             downloaded: 0,
+            deleted: deletedCount,
             errors: backupResult.errors
         )
 
@@ -845,6 +847,7 @@ class CloudSyncService: ObservableObject {
                             result = SyncResult(
                                 uploaded: result.uploaded,
                                 downloaded: result.downloaded + 1,
+                                deleted: result.deleted,
                                 errors: result.errors
                             )
                         } else {
@@ -860,6 +863,7 @@ class CloudSyncService: ObservableObject {
                                 result = SyncResult(
                                     uploaded: result.uploaded,
                                     downloaded: result.downloaded + 1,
+                                    deleted: result.deleted,
                                     errors: result.errors
                                 )
                             }
@@ -871,12 +875,14 @@ class CloudSyncService: ObservableObject {
                             result = SyncResult(
                                 uploaded: result.uploaded,
                                 downloaded: result.downloaded + 1,
+                                deleted: result.deleted,
                                 errors: result.errors
                             )
                         } catch {
                             result = SyncResult(
                                 uploaded: result.uploaded,
                                 downloaded: result.downloaded,
+                                deleted: result.deleted,
                                 errors: result.errors + ["Failed to download chat \(remoteChat.id): \(error.localizedDescription)"]
                             )
                         }
@@ -887,15 +893,6 @@ class CloudSyncService: ObservableObject {
                 hasMore = changedChats.hasMore && nextToken != nil
                 continuationToken = nextToken
             }
-
-            // Delete local chats that were deleted on another device
-            let deletedCount = await deleteRemotelyDeletedChats(since: since)
-            result = SyncResult(
-                uploaded: result.uploaded,
-                downloaded: result.downloaded,
-                deleted: result.deleted + deletedCount,
-                errors: result.errors
-            )
 
             // Refresh cached sync status so subsequent smart-syncs have up-to-date info
             await refreshSyncStatusCache()
@@ -948,6 +945,7 @@ class CloudSyncService: ObservableObject {
             result = SyncResult(
                 uploaded: result.uploaded + deltaResult.uploaded,
                 downloaded: result.downloaded + deltaResult.downloaded,
+                deleted: result.deleted + deltaResult.deleted,
                 errors: result.errors + deltaResult.errors
             )
 
@@ -957,6 +955,7 @@ class CloudSyncService: ObservableObject {
                 result = SyncResult(
                     uploaded: result.uploaded + fullResult.uploaded,
                     downloaded: result.downloaded + fullResult.downloaded,
+                    deleted: result.deleted + fullResult.deleted,
                     errors: fullResult.errors
                 )
             }
@@ -966,6 +965,7 @@ class CloudSyncService: ObservableObject {
             result = SyncResult(
                 uploaded: result.uploaded + fullResult.uploaded,
                 downloaded: result.downloaded + fullResult.downloaded,
+                deleted: result.deleted + fullResult.deleted,
                 errors: result.errors + fullResult.errors
             )
         }
@@ -1114,7 +1114,8 @@ class CloudSyncService: ObservableObject {
         
         // Don't attempt deletion if not authenticated
         guard await cloudStorage.isAuthenticated() else {
-            return
+            deletedChatsTracker.removeFromDeleted(chatId)
+            throw CloudStorageError.authenticationRequired
         }
         
         do {
@@ -1124,11 +1125,7 @@ class CloudSyncService: ObservableObject {
             deletedChatsTracker.removeFromDeleted(chatId)
             
         } catch {
-            // Silently fail if no auth token set
-            if let error = error as? CloudStorageError,
-               error == .authenticationRequired {
-                return
-            }
+            deletedChatsTracker.removeFromDeleted(chatId)
             throw error
         }
     }
@@ -1202,6 +1199,7 @@ class CloudSyncService: ObservableObject {
         do {
             let deleted = try await cloudStorage.getDeletedChatsSince(since: since)
             for id in deleted.deletedIds {
+                deletedChatsTracker.markAsDeleted(id)
                 await deleteChatFromStorage(id)
             }
             return deleted.deletedIds.count
