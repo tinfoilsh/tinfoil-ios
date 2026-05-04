@@ -804,40 +804,45 @@ class ChatViewModel: ObservableObject {
         guard hasChatAccess else { return }
 
         let isLocal: Bool
-
-        if let index = localChats.firstIndex(where: { $0.id == id }) {
-            localChats.remove(at: index)
+        if localChats.contains(where: { $0.id == id }) {
             isLocal = true
-        } else if let index = chats.firstIndex(where: { $0.id == id }) {
-            chats.remove(at: index)
+        } else if chats.contains(where: { $0.id == id }) {
             isLocal = false
         } else {
             return
         }
 
-        // Mark as deleted for cloud sync (local-only chats are never uploaded)
-        if !isLocal {
-            DeletedChatsTracker.shared.markAsDeleted(id)
-        }
-
-        // If the deleted chat was the current chat, select another one
-        if currentChat?.id == id {
-            let activeList = isLocal ? localChats : chats
-            if let first = activeList.first {
-                currentChat = first
-            } else {
-                createNewChat(isLocalOnly: isLocal)
-            }
-        }
+        let userId = currentUserId
 
         // Delete from file storage and cloud
-        let userId = currentUserId
         Task {
-            await Chat.deleteChatFromStorage(chatId: id, userId: userId)
             if !isLocal && SettingsManager.shared.isCloudSyncEnabled {
                 do {
                     try await cloudSync.deleteFromCloud(id)
                 } catch {
+                    syncErrors.append("Failed to delete chat: \(error.localizedDescription)")
+                    return
+                }
+            } else if !isLocal {
+                // Mark as deleted for cloud sync (local-only chats are never uploaded)
+                DeletedChatsTracker.shared.markAsDeleted(id)
+            }
+
+            await Chat.deleteChatFromStorage(chatId: id, userId: userId)
+
+            if let index = localChats.firstIndex(where: { $0.id == id }) {
+                localChats.remove(at: index)
+            } else if let index = chats.firstIndex(where: { $0.id == id }) {
+                chats.remove(at: index)
+            }
+
+            // If the deleted chat was the current chat, select another one
+            if currentChat?.id == id {
+                let activeList = isLocal ? localChats : chats
+                if let first = activeList.first {
+                    currentChat = first
+                } else {
+                    createNewChat(isLocalOnly: isLocal)
                 }
             }
         }
