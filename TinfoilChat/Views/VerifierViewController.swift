@@ -51,8 +51,12 @@ struct VerifierView: View {
 
     private var isDarkMode: Bool { colorScheme == .dark }
 
+    private var sheetBackground: Color {
+        isDarkMode ? Color.backgroundPrimary : Color(UIColor.systemBackground)
+    }
+
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 16) {
                 if let doc = chatViewModel.verificationDocument {
                     statusBanner(for: doc)
@@ -71,8 +75,12 @@ struct VerifierView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(sheetBackground.ignoresSafeArea())
             .navigationTitle("Verification Center")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(sheetBackground, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { chatViewModel.dismissVerifier() }) {
@@ -82,17 +90,7 @@ struct VerifierView: View {
                     .accessibilityLabel("Close verification screen")
                 }
             }
-            .onAppear { setupNavigationBarAppearance() }
         }
-    }
-
-    private func setupNavigationBarAppearance() {
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithDefaultBackground()
-        appearance.shadowColor = .clear
-        UINavigationBar.appearance().standardAppearance = appearance
-        UINavigationBar.appearance().compactAppearance = appearance
-        UINavigationBar.appearance().scrollEdgeAppearance = appearance
     }
 
     // MARK: - Loading State
@@ -235,7 +233,12 @@ struct VerifierView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(isSelected ? Color.tinfoilAccentLight : Color.clear, lineWidth: 1.5)
+                .stroke(
+                    isSelected
+                        ? Color.tinfoilAccentLight
+                        : Color.primary.opacity(isDarkMode ? 0.18 : 0.12),
+                    lineWidth: isSelected ? 1.5 : 1
+                )
         )
         .overlay(alignment: .topTrailing) {
             statusBadge(status)
