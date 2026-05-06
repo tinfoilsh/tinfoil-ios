@@ -1205,12 +1205,10 @@ struct MarkdownText: View {
 
     var body: some View {
         StructuredText(markdown: content)
-            .textual.structuredTextStyle(.gitHub)
             .textual.highlighterTheme(.default)
             .textual.textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, horizontalPadding)
-            .environment(\.colorScheme, isDarkMode ? .dark : .light)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -1229,12 +1227,10 @@ struct AdaptiveMarkdownText: View {
 
     var body: some View {
         StructuredText(markdown: content)
-            .textual.structuredTextStyle(.gitHub)
             .textual.highlighterTheme(.default)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.bottom, -16)
             .padding(.horizontal, horizontalPadding)
-            .environment(\.colorScheme, isDarkMode ? .dark : .light)
     }
 }
 
