@@ -87,7 +87,8 @@ struct MessageTableView: UIViewRepresentable {
             }
             context.coordinator.lastMessageIds = currentMessageIds
         } else if currentMessageIds != context.coordinator.lastMessageIds {
-            // Message IDs changed without chat ID changing (e.g., regenerate)
+            // Message IDs changed without chat ID changing (e.g., regenerate,
+            // edit, archive cleanup).
             let idsWereReplaced = !currentMessageIds.isEmpty &&
                                   !context.coordinator.lastMessageIds.isEmpty &&
                                   currentMessageIds.isDisjoint(with: context.coordinator.lastMessageIds)
@@ -97,6 +98,23 @@ struct MessageTableView: UIViewRepresentable {
                 context.coordinator.messageWrappers.removeAll()
                 context.coordinator.shownMessageIds.removeAll()
                 context.coordinator.heightCache.removeAll()
+                context.coordinator.messageHeightCache.removeAll()
+            } else {
+                // Drop any wrappers and cached heights that belong to messages
+                // that no longer exist. Without this, long sessions accumulate
+                // ObservableMessageWrapper instances - each holding seven
+                // @Published values - which inflates SwiftUI's environment
+                // property list and shows up as long compareLists / env-diff
+                // hangs in production.
+                let removedIds = context.coordinator.lastMessageIds.subtracting(currentMessageIds)
+                if !removedIds.isEmpty {
+                    for messageId in removedIds {
+                        context.coordinator.messageWrappers.removeValue(forKey: messageId)
+                        context.coordinator.shownMessageIds.remove(messageId)
+                        context.coordinator.messageHeightCache.removeValue(forKey: messageId)
+                    }
+                    context.coordinator.heightCache.removeAll()
+                }
             }
             context.coordinator.lastMessageIds = currentMessageIds
             tableView.reloadData()
