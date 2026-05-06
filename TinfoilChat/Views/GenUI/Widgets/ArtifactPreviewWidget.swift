@@ -29,7 +29,7 @@ struct ArtifactPreviewWidget: GenUIWidget {
     }
 
     let name = "render_artifact_preview"
-    let description = "Display a visual artifact in a side panel: a hosted URL, a self-contained HTML snippet, or Markdown. Use for content worth inspecting at full size."
+    let description = "Display a visual artifact in a side panel: a hosted URL, a self-contained HTML snippet, or Markdown. Use for content worth inspecting at full size — interactive demos, long-form documents, or rich HTML mockups. For SVG illustrations and Mermaid diagrams, emit a fenced `svg` or `mermaid` code block in the regular assistant message instead. The chat shows a compact summary card; clicking it opens the full artifact in the right sidebar."
     let promptHint = "large artifacts (markdown/html/url) opened in a side panel"
 
     var schema: JSONSchema {
