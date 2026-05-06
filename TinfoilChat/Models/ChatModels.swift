@@ -50,6 +50,10 @@ struct Chat: Identifiable, Codable {
     // Project association (used by React, preserved by iOS)
     var projectId: String?
 
+    // Transient flag for ephemeral "temporary" chats. Never persisted to disk
+    // or cloud. Used to power the toolbar incognito toggle.
+    var isTemporary: Bool = false
+
     // Computed properties for sync filtering
     var isBlankChat: Bool {
         // Don't treat failed-to-decrypt chats as blank
@@ -236,7 +240,9 @@ struct Chat: Identifiable, Codable {
     // MARK: - Per-Chat File Storage Methods
 
     /// Routes to `.local` or `.cloud` storage based on `chat.isLocalOnly`.
+    /// Temporary chats are never persisted.
     static func saveChat(_ chat: Chat, userId: String?) async {
+        guard !chat.isTemporary else { return }
         guard let userId = userId else { return }
         let storage: EncryptedFileStorage = chat.isLocalOnly ? .local : .cloud
         do {

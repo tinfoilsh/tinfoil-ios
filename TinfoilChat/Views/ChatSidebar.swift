@@ -31,16 +31,20 @@ struct ChatSidebar: View {
     }
 
     private var filteredChats: [Chat] {
+        let source: [Chat]
         if authManager.isAuthenticated && settings.isCloudSyncEnabled {
             switch activeTab {
             case .cloud:
-                return viewModel.chats
+                source = viewModel.chats
             case .local:
-                return viewModel.localChats
+                source = viewModel.localChats
             }
+        } else {
+            // When cloud sync is off, all chats are local
+            source = viewModel.localChats
         }
-        // When cloud sync is off, all chats are local
-        return viewModel.localChats
+        // Temporary (incognito) chats are never listed in the sidebar
+        return source.filter { !$0.isTemporary }
     }
 
     // Timer to update relative time strings
