@@ -20,6 +20,43 @@ struct CloudSyncSettingsView: View {
     @ObservedObject var authManager: AuthManager
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var passkeyManager = PasskeyManager.shared
+
+    private var cloudSyncBinding: Binding<Bool> {
+        Binding(
+            get: { settings.isCloudSyncEnabled },
+            set: { newValue in
+                if newValue {
+                    if EncryptionService.shared.hasEncryptionKey() {
+                        settings.isCloudSyncEnabled = true
+                        viewModel.reloadEncryptionKey()
+                        Task { await viewModel.performFullSync() }
+                    } else {
+                        Task {
+                            let result = await passkeyManager.retryPasskeySetup()
+                            switch result {
+                            case .manualSetupRequired:
+                                await MainActor.run {
+                                    viewModel.cloudSyncOnboardingMode = .setup
+                                    viewModel.showCloudSyncOnboarding = true
+                                }
+                            case .manualRecoveryRequired:
+                                await MainActor.run {
+                                    viewModel.cloudSyncOnboardingMode = .recovery
+                                    viewModel.showCloudSyncOnboarding = true
+                                }
+                            default:
+                                break
+                            }
+                        }
+                    }
+                } else {
+                    settings.isCloudSyncEnabled = false
+                    viewModel.activeStorageTab = .local
+                    Task { await viewModel.deleteNonLocalChats() }
+                }
+            }
+        )
+    }
     
     @State private var showKeyInput: Bool = false
     @State private var showReplacePrimaryOptions: Bool = false
@@ -30,7 +67,17 @@ struct CloudSyncSettingsView: View {
     
     var body: some View {
         List {
+            Section {
+                Toggle("Cloud Sync", isOn: cloudSyncBinding)
+                    .tint(Color.accentPrimary)
+            } footer: {
+                Text("Encrypt and back up your chats so they sync across devices.")
+                    .font(.caption)
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+
             // Sync Status Section
+            if settings.isCloudSyncEnabled {
             Section {
                     HStack {
                         Text("Sync Status")
@@ -171,6 +218,7 @@ struct CloudSyncSettingsView: View {
                         .font(.caption)
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
+            } // end if settings.isCloudSyncEnabled
 
             // Local-Only Mode Section
             Section {
