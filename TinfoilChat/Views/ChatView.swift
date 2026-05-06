@@ -246,9 +246,20 @@ struct ChatContainer: View {
                         .frame(height: 22)
                         .opacity(isSidebarOpen ? 1 : 0)
 
-                    if authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled && viewModel.activeStorageTab == .local {
+                    if !viewModel.isTemporaryMode && authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled && viewModel.activeStorageTab == .local {
                         chatStorageLabel
                             .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
+                    }
+
+                    if viewModel.isTemporaryMode {
+                        HStack(spacing: 6) {
+                            GhostIcon(size: 14, color: .accentColor, style: .filled)
+                            Text("Temporary")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.accentColor)
+                        }
+                        .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
                     }
                 }
                 .offset(x: (isSidebarOpen && UIDevice.current.userInterfaceIdiom == .pad) ? sidebarWidth / 2 : 0)
@@ -258,13 +269,18 @@ struct ChatContainer: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 VerificationStatusIndicator(viewModel: viewModel, isBadgeExpanded: $isVerificationBadgeExpanded)
             }
-            // Temporary (incognito) chat toggle
-            if authManager.isAuthenticated {
+            // Temporary (incognito) chat toggle. Only shown when no chat is in
+            // progress (i.e. when the new-chat "+" button is hidden). Once a
+            // chat has started, the temporary state is indicated by a label
+            // in the navbar's principal slot instead.
+            if authManager.isAuthenticated && (viewModel.currentChat?.isBlankChat ?? true) {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: toggleTemporaryMode) {
-                        Image(systemName: viewModel.isTemporaryMode ? "theatermasks.fill" : "theatermasks")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundColor(viewModel.isTemporaryMode ? .accentColor : toolbarContentColor)
+                        GhostIcon(
+                            size: 17,
+                            color: viewModel.isTemporaryMode ? .accentColor : toolbarContentColor,
+                            style: viewModel.isTemporaryMode ? .filled : .outline
+                        )
                     }
                     .accessibilityLabel(viewModel.isTemporaryMode ? "Exit temporary chat" : "Start temporary chat")
                 }
@@ -328,22 +344,15 @@ struct ChatContainer: View {
     
     /// The scrollable chat message area
     private var chatArea: some View {
-        ZStack(alignment: .top) {
-            ChatListView(
-                isDarkMode: colorScheme == .dark,
-                isLoading: viewModel.isLoading,
-                onRequestSignIn: showAuthenticationView,
-                viewModel: viewModel,
-                messageText: $messageText
-            )
-            .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
-            .ignoresSafeArea(edges: .top)
-
-            if viewModel.isTemporaryMode {
-                TemporaryChatBorderOverlay()
-                    .allowsHitTesting(false)
-            }
-        }
+        ChatListView(
+            isDarkMode: colorScheme == .dark,
+            isLoading: viewModel.isLoading,
+            onRequestSignIn: showAuthenticationView,
+            viewModel: viewModel,
+            messageText: $messageText
+        )
+        .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
+        .ignoresSafeArea(edges: .top)
     }
     
     /// The sliding sidebar and dimming overlay
@@ -1075,39 +1084,5 @@ extension Animation {
         @unknown default:
             self = .easeInOut(duration: duration) // Fallback
         }
-    }
-}
-
-/// Subtle accent border + label rendered on top of the chat area while
-/// temporary (incognito) mode is active. Mirrors the webapp's tinted
-/// container / accent border treatment.
-private struct TemporaryChatBorderOverlay: View {
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: "theatermasks.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("Temporary chat")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-            }
-            .foregroundColor(.accentColor)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(
-                Capsule()
-                    .fill(Color.accentColor.opacity(0.15))
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(Color.accentColor.opacity(0.4), lineWidth: 1)
-                    )
-            )
-            .padding(.top, 4)
-
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
     }
 }
