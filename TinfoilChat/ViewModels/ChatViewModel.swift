@@ -1227,10 +1227,12 @@ class ChatViewModel: ObservableObject {
                 }
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
                 
-                // Add personalization - use ProfileManager first, then fall back to SettingsManager
+                // Add personalization - use ProfileManager first, then fall back to SettingsManager.
+                // ProfileManager returns a fully-formed `<user_preferences>` block; the
+                // SettingsManager fallback already does the same.
                 var personalizationXML = ""
                 if let profilePersonalization = profileManager.getPersonalizationPrompt() {
-                    personalizationXML = "<user_preferences>\n\(profilePersonalization)\n</user_preferences>"
+                    personalizationXML = profilePersonalization
                 } else {
                     personalizationXML = settingsManager.generateUserPreferencesXML()
                 }

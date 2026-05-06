@@ -199,33 +199,46 @@ class SettingsManager: ObservableObject {
         isLocalOnlyModeEnabled = false
     }
 
-    // Generate user preferences XML for system prompt
+    // Generate user preferences XML for system prompt.
+    // Treats `isPersonalizationEnabled` as a soft preference: when any field is
+    // populated we still inject it so the model has the user's context. This
+    // matches `ProfileManager.getPersonalizationPrompt()`.
     func generateUserPreferencesXML() -> String {
-        guard isPersonalizationEnabled else { return "" }
-        
-        var xml = "<user_preferences>\n"
-        
-        if !nickname.isEmpty {
-            xml += "  <nickname>\(nickname)</nickname>\n"
+        let trimmedNickname = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedProfession = profession.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nonEmptyTraits = selectedTraits.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let trimmedContext = additionalContext.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let hasAnyField = !trimmedNickname.isEmpty
+            || !trimmedProfession.isEmpty
+            || !nonEmptyTraits.isEmpty
+            || !trimmedContext.isEmpty
+
+        guard hasAnyField else { return "" }
+
+        var xml = "The user has provided personal preferences for this conversation. Adapt your responses according to these settings while maintaining accuracy and helpfulness.\n\n<user_preferences>"
+
+        if !trimmedNickname.isEmpty {
+            xml += "\n  <nickname>\(trimmedNickname)</nickname>"
         }
-        
-        if !profession.isEmpty {
-            xml += "  <profession>\(profession)</profession>\n"
+
+        if !trimmedProfession.isEmpty {
+            xml += "\n  <profession>\(trimmedProfession)</profession>"
         }
-        
-        if !selectedTraits.isEmpty {
-            xml += "  <traits>\n"
-            for trait in selectedTraits {
-                xml += "    <trait>\(trait)</trait>\n"
+
+        if !nonEmptyTraits.isEmpty {
+            xml += "\n  <traits>"
+            for trait in nonEmptyTraits {
+                xml += "\n    <trait>\(trait)</trait>"
             }
-            xml += "  </traits>\n"
+            xml += "\n  </traits>"
         }
-        
-        if !additionalContext.isEmpty {
-            xml += "  <additional_context>\(additionalContext)</additional_context>\n"
+
+        if !trimmedContext.isEmpty {
+            xml += "\n  <additional_context>\n    \(trimmedContext)\n  </additional_context>"
         }
-        
-        xml += "</user_preferences>"
+
+        xml += "\n</user_preferences>"
         return xml
     }
     

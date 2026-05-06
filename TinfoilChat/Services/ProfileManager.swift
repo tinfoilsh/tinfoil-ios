@@ -436,34 +436,53 @@ class ProfileManager: ObservableObject {
                p1.customSystemPrompt != p2.customSystemPrompt
     }
     
-    /// Generate personalization prompt for chat
+    /// Generate personalization prompt for chat as a `<user_preferences>` XML block.
+    ///
+    /// Mirrors the webapp's `useCustomSystemPrompt` so the same prompt structure
+    /// reaches the model regardless of platform. The `isUsingPersonalization`
+    /// flag is treated as a soft preference — if the user has filled in fields
+    /// we still inject them, since the most common cause of "the model doesn't
+    /// know my name" is the flag not having flipped to true (e.g. cross-device
+    /// sync, restore from cloud, edit-without-save). "Reset All" clears the
+    /// fields outright, which makes this method return `nil` naturally.
     func getPersonalizationPrompt() -> String? {
-        guard isUsingPersonalization else { return nil }
-        
-        var components: [String] = []
-        
-        if !nickname.isEmpty {
-            components.append("The user's name is \(nickname).")
+        let trimmedNickname = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedProfession = profession.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nonEmptyTraits = traits.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let trimmedContext = additionalContext.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let hasAnyField = !trimmedNickname.isEmpty
+            || !trimmedProfession.isEmpty
+            || !nonEmptyTraits.isEmpty
+            || !trimmedContext.isEmpty
+
+        guard hasAnyField else { return nil }
+
+        var xml = "The user has provided personal preferences for this conversation. Adapt your responses according to these settings while maintaining accuracy and helpfulness.\n\n<user_preferences>"
+
+        if !trimmedNickname.isEmpty {
+            xml += "\n  <nickname>\(trimmedNickname)</nickname>"
         }
-        
-        if !profession.isEmpty {
-            components.append("They work as a \(profession).")
+
+        if !trimmedProfession.isEmpty {
+            xml += "\n  <profession>\(trimmedProfession)</profession>"
         }
-        
-        if !traits.isEmpty {
-            let traitsText = traits.joined(separator: ", ")
-            components.append("Their interests/traits include: \(traitsText).")
+
+        if !nonEmptyTraits.isEmpty {
+            xml += "\n  <traits>"
+            for trait in nonEmptyTraits {
+                xml += "\n    <trait>\(trait)</trait>"
+            }
+            xml += "\n  </traits>"
         }
-        
-        if !additionalContext.isEmpty {
-            components.append(additionalContext)
+
+        if !trimmedContext.isEmpty {
+            xml += "\n  <additional_context>\n    \(trimmedContext)\n  </additional_context>"
         }
-        
-        if !language.isEmpty && language != "English" {
-            components.append("Please respond in \(language).")
-        }
-        
-        return components.isEmpty ? nil : components.joined(separator: " ")
+
+        xml += "\n</user_preferences>"
+
+        return xml
     }
     
     /// Get custom system prompt if enabled
