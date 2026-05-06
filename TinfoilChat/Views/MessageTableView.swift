@@ -326,23 +326,26 @@ struct MessageTableView: UIViewRepresentable {
             cell.backgroundColor = .clear
 
             if parent.messages.isEmpty {
-                cell.contentConfiguration = UIHostingConfiguration {
-                    if let authManager = parent.viewModel.authManager {
-                        WelcomeView(
-                            isDarkMode: parent.isDarkMode,
-                            authManager: authManager,
-                            onRequestSignIn: parent.onRequestSignIn
-                        )
-                        .padding(.vertical, 16)
-                        .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 0)
-                        .frame(maxWidth: 900)
-                        .frame(maxWidth: .infinity)
-                        .markdownStyleHost(isDarkMode: parent.isDarkMode)
+                if cell.boundContentToken != "welcome" {
+                    cell.contentConfiguration = UIHostingConfiguration {
+                        if let authManager = parent.viewModel.authManager {
+                            WelcomeView(
+                                isDarkMode: parent.isDarkMode,
+                                authManager: authManager,
+                                onRequestSignIn: parent.onRequestSignIn
+                            )
+                            .padding(.vertical, 16)
+                            .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 0)
+                            .frame(maxWidth: 900)
+                            .frame(maxWidth: .infinity)
+                            .markdownStyleHost(isDarkMode: parent.isDarkMode)
+                        }
                     }
+                    .minSize(width: 0, height: 0)
+                    .margins(.all, 0)
+                    .background(.clear)
+                    cell.boundContentToken = "welcome"
                 }
-                .minSize(width: 0, height: 0)
-                .margins(.all, 0)
-                .background(.clear)
             } else {
                 let message = parent.messages[indexPath.row]
                 let isLastMessage = indexPath.row == parent.messages.count - 1
@@ -359,14 +362,23 @@ struct MessageTableView: UIViewRepresentable {
                     messageIndex: indexPath.row
                 )
 
-                // Always recreate the content configuration to ensure correct wrapper is used
-                cell.contentConfiguration = UIHostingConfiguration {
-                    ObservableMessageCell(wrapper: wrapper, viewModel: parent.viewModel, coordinator: self)
-                        .markdownStyleHost(isDarkMode: parent.isDarkMode)
+                // Only rebuild the hosting configuration when the cell is now
+                // bound to a different message. Reassigning the configuration
+                // for the same wrapper tears down the SwiftUI subgraph and
+                // can deallocate AG attributes that an in-flight context
+                // menu animation is still tracking - the cause of the
+                // ContextMenuResponder.startTrackingUpdates EXC_BAD_ACCESS
+                // we see when the table reloads during streaming.
+                if cell.boundContentToken != message.id {
+                    cell.contentConfiguration = UIHostingConfiguration {
+                        ObservableMessageCell(wrapper: wrapper, viewModel: parent.viewModel, coordinator: self)
+                            .markdownStyleHost(isDarkMode: parent.isDarkMode)
+                    }
+                    .minSize(width: 0, height: 0)
+                    .margins(.all, 0)
+                    .background(.clear)
+                    cell.boundContentToken = message.id
                 }
-                .minSize(width: 0, height: 0)
-                .margins(.all, 0)
-                .background(.clear)
             }
 
             return cell
@@ -760,6 +772,28 @@ private struct MarkdownStyleHost: ViewModifier {
 extension View {
     fileprivate func markdownStyleHost(isDarkMode: Bool) -> some View {
         modifier(MarkdownStyleHost(isDarkMode: isDarkMode))
+    }
+}
+
+extension UITableViewCell {
+    private static var boundContentTokenKey: UInt8 = 0
+
+    /// Identifier of the content currently hosted by this cell ("welcome" or
+    /// a message id). Used to skip a `contentConfiguration` reassignment when
+    /// the cell is being dequeued for the same logical content it already
+    /// hosts.
+    fileprivate var boundContentToken: String? {
+        get {
+            objc_getAssociatedObject(self, &Self.boundContentTokenKey) as? String
+        }
+        set {
+            objc_setAssociatedObject(
+                self,
+                &Self.boundContentTokenKey,
+                newValue,
+                .OBJC_ASSOCIATION_COPY_NONATOMIC
+            )
+        }
     }
 }
 
