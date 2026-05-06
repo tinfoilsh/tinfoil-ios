@@ -924,14 +924,15 @@ private struct LongMessageDetailView: View {
     let message: Message
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                SelectableTextView(text: message.content)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            ScrollView {
+                MarkdownText(content: message.content, isDarkMode: colorScheme == .dark)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
             }
-            .padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Color.backgroundPrimary)
             .navigationTitle("Long Message")
