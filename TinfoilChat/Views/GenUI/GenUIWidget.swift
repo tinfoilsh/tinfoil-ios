@@ -14,9 +14,12 @@ import SwiftUI
 ///
 /// - `inline`: inside the assistant message body in the chat scroll.
 /// - `input`: replaces the `MessageInputView` until the user resolves it.
+/// - `artifact`: compact inline summary plus a dedicated artifact surface
+///   (reserved for future widgets; currently treated like `inline`).
 enum GenUIWidgetSurface {
     case inline
     case input
+    case artifact
 }
 
 /// Read-only context passed to inline-surface widgets.
