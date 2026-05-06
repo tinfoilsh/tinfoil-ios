@@ -654,10 +654,24 @@ struct CloudSyncOnboardingView: View {
         isProcessing = true
         Task {
             let newKey = EncryptionService.shared.generateKey()
+            let activationMode: CloudKeyActivationMode = mode == .recovery ? .explicitStartFresh : .recoverExisting
+
+            // If the user already has an active passkey, the passkey wraps the
+            // encryption key and they don't need to manually save a recovery
+            // copy. Complete setup immediately and let them reveal a backup
+            // copy from Settings later if they want.
+            if PasskeyManager.shared.passkeyActive {
+                await MainActor.run {
+                    generatedKey = newKey
+                    generatedKeyMode = activationMode
+                }
+                await completeSetup(with: newKey, activationMode: activationMode)
+                return
+            }
 
             await MainActor.run {
                 generatedKey = newKey
-                generatedKeyMode = mode == .recovery ? .explicitStartFresh : .recoverExisting
+                generatedKeyMode = activationMode
                 keyError = nil
                 isProcessing = false
                 direction = .trailing
@@ -693,6 +707,12 @@ struct CloudSyncOnboardingView: View {
             isProcessing = false
             if let errorMessage {
                 keyError = errorMessage
+                if currentStep != .keyDisplay {
+                    direction = .trailing
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                        currentStep = .keyDisplay
+                    }
+                }
                 return
             }
 
