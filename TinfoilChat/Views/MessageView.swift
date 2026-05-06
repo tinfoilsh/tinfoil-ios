@@ -61,7 +61,12 @@ struct MessageView: View {
         case toolCall(GenUIToolCall, isTrailing: Bool)
     }
 
-    private func inlineSegmentRuns(from segments: [MessageSegment]) -> [InlineSegmentRun] {
+    private struct IdentifiedInlineSegmentRun: Identifiable {
+        let id: String
+        let run: InlineSegmentRun
+    }
+
+    private func inlineSegmentRuns(from segments: [MessageSegment]) -> [IdentifiedInlineSegmentRun] {
         let lastTextIndex: Int? = {
             for i in segments.indices.reversed() {
                 if case .text = segments[i] { return i }
@@ -86,20 +91,32 @@ struct MessageView: View {
             return nil
         }()
 
-        var runs: [InlineSegmentRun] = []
+        var runs: [IdentifiedInlineSegmentRun] = []
         var searchBuffer: [WebSearchInstance] = []
+        var searchBufferStartIndex: Int?
         var fetchBuffer: [URLFetchState] = []
+        var fetchBufferStartIndex: Int?
 
         func flushSearches() {
-            if !searchBuffer.isEmpty {
-                runs.append(.webSearches(searchBuffer))
+            if let firstId = searchBuffer.first?.id,
+               let startIndex = searchBufferStartIndex {
+                runs.append(IdentifiedInlineSegmentRun(
+                    id: "websearches:\(startIndex):\(firstId)",
+                    run: .webSearches(searchBuffer)
+                ))
                 searchBuffer.removeAll()
+                searchBufferStartIndex = nil
             }
         }
         func flushFetches() {
-            if !fetchBuffer.isEmpty {
-                runs.append(.urlFetches(fetchBuffer))
+            if let firstId = fetchBuffer.first?.id,
+               let startIndex = fetchBufferStartIndex {
+                runs.append(IdentifiedInlineSegmentRun(
+                    id: "urlfetches:\(startIndex):\(firstId)",
+                    run: .urlFetches(fetchBuffer)
+                ))
                 fetchBuffer.removeAll()
+                fetchBufferStartIndex = nil
             }
         }
 
@@ -109,27 +126,42 @@ struct MessageView: View {
                 flushSearches()
                 flushFetches()
                 if !text.isEmpty {
-                    runs.append(.text(text, isTrailing: index == lastTextIndex))
+                    runs.append(IdentifiedInlineSegmentRun(
+                        id: "text:\(index)",
+                        run: .text(text, isTrailing: index == lastTextIndex)
+                    ))
                 }
             case .thinking(let content, let isThinking, let duration):
                 flushSearches()
                 flushFetches()
-                runs.append(.thinking(content: content, isThinking: isThinking, duration: duration))
+                runs.append(IdentifiedInlineSegmentRun(
+                    id: "thinking:\(index)",
+                    run: .thinking(content: content, isThinking: isThinking, duration: duration)
+                ))
             case .webSearch(let searchId):
                 flushFetches()
                 if let instance = message.webSearches?.first(where: { $0.id == searchId }) {
+                    if searchBuffer.isEmpty {
+                        searchBufferStartIndex = index
+                    }
                     searchBuffer.append(instance)
                 }
             case .urlFetch(let fetchId):
                 flushSearches()
                 if let fetch = message.urlFetches.first(where: { $0.id == fetchId }) {
+                    if fetchBuffer.isEmpty {
+                        fetchBufferStartIndex = index
+                    }
                     fetchBuffer.append(fetch)
                 }
             case .toolCall(let toolCallId):
                 flushSearches()
                 flushFetches()
                 if let toolCall = message.toolCalls.first(where: { $0.id == toolCallId }) {
-                    runs.append(.toolCall(toolCall, isTrailing: index == lastStreamingToolCallIndex))
+                    runs.append(IdentifiedInlineSegmentRun(
+                        id: "toolcall:\(index):\(toolCall.id)",
+                        run: .toolCall(toolCall, isTrailing: index == lastStreamingToolCallIndex)
+                    ))
                 }
             }
         }
@@ -178,8 +210,8 @@ struct MessageView: View {
     private func inlineSegmentsView(segments: [MessageSegment]) -> some View {
         let runs = inlineSegmentRuns(from: segments)
         VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(runs.enumerated()), id: \.offset) { _, run in
-                switch run {
+            ForEach(runs) { identifiedRun in
+                switch identifiedRun.run {
                 case .text(let text, let isTrailing):
                     let isStreamingText = isTrailing && isLoading && isLastMessage
                     LaTeXMarkdownView(
