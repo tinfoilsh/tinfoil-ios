@@ -440,57 +440,17 @@ struct SettingsView: View {
             }
 
             if authManager.isAuthenticated {
-                HStack {
-                    Toggle("Cloud Sync", isOn: Binding(
-                        get: { settings.isCloudSyncEnabled },
-                        set: { newValue in
-                            if newValue {
-                                if EncryptionService.shared.hasEncryptionKey() {
-                                    settings.isCloudSyncEnabled = true
-                                    chatViewModel.reloadEncryptionKey()
-                                    Task {
-                                        await chatViewModel.performFullSync()
-                                    }
-                                } else {
-                                    Task {
-                                        let result = await passkeyManager.retryPasskeySetup()
-                                        switch result {
-                                        case .manualSetupRequired:
-                                            await MainActor.run {
-                                                chatViewModel.cloudSyncOnboardingMode = .setup
-                                                chatViewModel.showCloudSyncOnboarding = true
-                                            }
-                                        case .manualRecoveryRequired:
-                                            await MainActor.run {
-                                                chatViewModel.cloudSyncOnboardingMode = .recovery
-                                                chatViewModel.showCloudSyncOnboarding = true
-                                            }
-                                        default:
-                                            break
-                                        }
-                                    }
-                                }
-                            } else {
-                                settings.isCloudSyncEnabled = false
-                                chatViewModel.activeStorageTab = .local
-                                Task {
-                                    await chatViewModel.deleteNonLocalChats()
-                                }
-                            }
-                        }
-                    ))
-                    .tint(Color.accentPrimary)
-
-                    if settings.isCloudSyncEnabled {
-                        NavigationLink {
-                            CloudSyncSettingsView(
-                                viewModel: chatViewModel,
-                                authManager: authManager
-                            )
-                        } label: {
-                            EmptyView()
-                        }
-                        .frame(width: 20)
+                NavigationLink {
+                    CloudSyncSettingsView(
+                        viewModel: chatViewModel,
+                        authManager: authManager
+                    )
+                } label: {
+                    HStack {
+                        Text("Cloud Sync")
+                        Spacer()
+                        Text(settings.isCloudSyncEnabled ? "On" : "Off")
+                            .foregroundColor(.secondary)
                     }
                 }
 
