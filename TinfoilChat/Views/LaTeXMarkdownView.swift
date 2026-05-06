@@ -43,13 +43,11 @@ private struct SegmentView: View {
                     citationUrls: citationUrls
                 )
             StructuredText(markdown: strippedText)
-                .textual.structuredTextStyle(.gitHub)
                 .textual.highlighterTheme(isStreaming ? .plain : .default)
                 .if(textSelectionEnabled) { view in
                     view.textual.textSelection(.enabled)
                 }
                 .fixedSize(horizontal: false, vertical: true)
-                .environment(\.colorScheme, isDarkMode ? .dark : .light)
         case .latex(let latex, let isDisplay):
             LaTeXView(
                 latex: latex,
@@ -180,7 +178,6 @@ struct LaTeXMarkdownView: View, Equatable {
                 markdownFallback(content: content)
             }
         }
-        .environment(\.colorScheme, isDarkMode ? .dark : .light)
         .padding(.horizontal, horizontalPadding)
         .frame(maxWidth: horizontalPadding > 0 ? .infinity : nil, alignment: maxWidthAlignment)
         .transaction { transaction in
@@ -208,13 +205,11 @@ struct LaTeXMarkdownView: View, Equatable {
                 citationUrls: citationUrls
             )
         return StructuredText(markdown: strippedText)
-            .textual.structuredTextStyle(.gitHub)
             .textual.highlighterTheme(isStreaming ? .plain : .default)
             .if(textSelectionEnabled) { view in
                 view.textual.textSelection(.enabled)
             }
             .fixedSize(horizontal: false, vertical: true)
-            .environment(\.colorScheme, isDarkMode ? .dark : .light)
     }
 
     /// Rewrite standard markdown links whose URL matches an annotated web-search

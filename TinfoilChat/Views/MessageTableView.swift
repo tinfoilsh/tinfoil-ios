@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Textual
 
 struct MessageTableView: UIViewRepresentable {
     let archivedMessagesStartIndex: Int
@@ -336,6 +337,7 @@ struct MessageTableView: UIViewRepresentable {
                         .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 0)
                         .frame(maxWidth: 900)
                         .frame(maxWidth: .infinity)
+                        .markdownStyleHost(isDarkMode: parent.isDarkMode)
                     }
                 }
                 .minSize(width: 0, height: 0)
@@ -360,6 +362,7 @@ struct MessageTableView: UIViewRepresentable {
                 // Always recreate the content configuration to ensure correct wrapper is used
                 cell.contentConfiguration = UIHostingConfiguration {
                     ObservableMessageCell(wrapper: wrapper, viewModel: parent.viewModel, coordinator: self)
+                        .markdownStyleHost(isDarkMode: parent.isDarkMode)
                 }
                 .minSize(width: 0, height: 0)
                 .margins(.all, 0)
@@ -735,6 +738,28 @@ struct ObservableMessageCell: View {
                 hasAppeared = true
             }
         }
+    }
+}
+
+/// Applies the Textual styles every markdown view in a message cell needs,
+/// once at the cell host. Doing this here means the eleven environment
+/// writes that `structuredTextStyle(.gitHub)` expands into are paid one
+/// time per cell instead of once per `LaTeXMarkdownView` / `SegmentView`
+/// inside the cell, which is what was driving the long `compareLists` /
+/// `EnvironmentBox.update` hangs in production.
+private struct MarkdownStyleHost: ViewModifier {
+    let isDarkMode: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .textual.structuredTextStyle(.gitHub)
+            .environment(\.colorScheme, isDarkMode ? .dark : .light)
+    }
+}
+
+extension View {
+    fileprivate func markdownStyleHost(isDarkMode: Bool) -> some View {
+        modifier(MarkdownStyleHost(isDarkMode: isDarkMode))
     }
 }
 
