@@ -44,6 +44,7 @@ struct ChatQueryBuilder {
     ///   - thinkingEnabled: Whether thinking is on for models that support a
     ///     toggle. Ignored for models that do not.
     /// - Returns: A configured ChatQuery
+    @MainActor
     static func buildQuery(
         modelId: String,
         systemPrompt: String,
@@ -55,7 +56,8 @@ struct ChatQueryBuilder {
         isMultimodal: Bool = false,
         reasoningConfig: ReasoningConfig? = nil,
         reasoningEffort: ReasoningEffort = .medium,
-        thinkingEnabled: Bool = true
+        thinkingEnabled: Bool = true,
+        genUIEnabled: Bool = true
     ) -> ChatQuery {
 
         var messages: [ChatQuery.ChatCompletionMessageParam] = []
@@ -63,8 +65,19 @@ struct ChatQueryBuilder {
         // Most models support system role; DeepSeek is the known exception
         let useSystemRole = !modelId.hasPrefix("deepseek")
 
+        // Append the GenUI prompt hint so the model knows it can call
+        // render_* tools instead of replying with markdown for structured
+        // content. The hint is appended to the system prompt regardless
+        // of which transport carries the system instructions (system role
+        // vs synthetic <system> user message).
+        var effectiveSystemPrompt = systemPrompt
+        if genUIEnabled {
+            let hint = GenUIRegistry.shared.buildPromptHint()
+            effectiveSystemPrompt = systemPrompt.isEmpty ? hint : systemPrompt + "\n\n" + hint
+        }
+
         if useSystemRole {
-            let fullPrompt = rules.isEmpty ? systemPrompt : systemPrompt + "\n\n" + rules
+            let fullPrompt = rules.isEmpty ? effectiveSystemPrompt : effectiveSystemPrompt + "\n\n" + rules
             messages.append(.system(.init(content: .textContent(fullPrompt))))
         }
 
@@ -78,7 +91,7 @@ struct ChatQueryBuilder {
 
                 // For models that don't use system role (e.g. DeepSeek): inject system instructions as a separate user message
                 if !hasAddedSystemInstructions {
-                    let rawInstructions = rules.isEmpty ? systemPrompt : systemPrompt + "\n\n" + rules
+                    let rawInstructions = rules.isEmpty ? effectiveSystemPrompt : effectiveSystemPrompt + "\n\n" + rules
                     let systemContent = "<system>\n\(rawInstructions)\n</system>"
                     messages.append(.user(.init(content: .string(systemContent))))
                     hasAddedSystemInstructions = true
@@ -130,10 +143,55 @@ struct ChatQueryBuilder {
                 } else {
                     messages.append(.user(.init(content: .string(userContent))))
                 }
-            } else if !msg.content.isEmpty {
-                messages.append(.assistant(.init(content: .textContent(msg.content))))
+            } else if !msg.content.isEmpty || !msg.toolCalls.isEmpty {
+                // Emit `tool_calls` on the assistant message so the model
+                // sees its previously-rendered widgets, then synthesize
+                // `role: 'tool'` results so the API's tool-call/tool-result
+                // pairing rule is satisfied. GenUI tools are display-only
+                // (the client rendered the component); we acknowledge with
+                // a constant payload that mirrors the webapp.
+                let toolCallParams: [ChatQuery.ChatCompletionMessageParam.AssistantMessageParam.ToolCallParam]? = msg.toolCalls.isEmpty
+                    ? nil
+                    : msg.toolCalls.map { tc in
+                        .init(
+                            id: tc.id,
+                            function: .init(
+                                arguments: tc.arguments.isEmpty ? "{}" : tc.arguments,
+                                name: tc.name
+                            )
+                        )
+                    }
+                let assistantContent: ChatQuery.ChatCompletionMessageParam.TextOrRefusalContent? =
+                    msg.content.isEmpty && toolCallParams != nil
+                        ? nil
+                        : .textContent(msg.content)
+                messages.append(.assistant(.init(
+                    content: assistantContent,
+                    toolCalls: toolCallParams
+                )))
+                if let toolCallParams {
+                    for param in toolCallParams {
+                        messages.append(.tool(.init(
+                            content: .textContent("displayed"),
+                            toolCallId: param.id
+                        )))
+                    }
+                }
             }
         }
+
+        let tools: [ChatQuery.ChatCompletionToolParam]? = genUIEnabled
+            ? GenUIRegistry.shared.buildToolParams()
+            : nil
+
+        // Mirror the webapp: when GenUI tools are present, send
+        // `tool_choice: "auto"` and opt in to parallel tool calls so the
+        // model can emit multiple `render_*` calls in a single response
+        // (e.g., timer + chart + recipe + map at once). Without these
+        // flags some providers return only a single tool call.
+        let toolChoice: ChatQuery.ChatCompletionFunctionCallOptionParam? =
+            (tools?.isEmpty == false) ? .auto : nil
+        let parallelToolCalls: Bool? = (tools?.isEmpty == false) ? true : nil
 
         let extraBody = makeReasoningExtraBody(
             reasoningConfig: reasoningConfig,
@@ -144,6 +202,9 @@ struct ChatQueryBuilder {
         return ChatQuery(
             messages: messages,
             model: modelId,
+            parallelToolCalls: parallelToolCalls,
+            toolChoice: toolChoice,
+            tools: tools,
             webSearchOptions: webSearchEnabled ? .init() : nil,
             stream: stream,
             extraBody: extraBody

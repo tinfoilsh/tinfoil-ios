@@ -55,14 +55,33 @@ struct MessageView: View {
     /// don't stack N full-height pills in the chat.
     private enum InlineSegmentRun {
         case text(String, isTrailing: Bool)
+        case thinking(content: String, isThinking: Bool, duration: Double?)
         case webSearches([WebSearchInstance])
         case urlFetches([URLFetchState])
+        case toolCall(GenUIToolCall, isTrailing: Bool)
     }
 
     private func inlineSegmentRuns(from segments: [MessageSegment]) -> [InlineSegmentRun] {
         let lastTextIndex: Int? = {
             for i in segments.indices.reversed() {
                 if case .text = segments[i] { return i }
+            }
+            return nil
+        }()
+
+        // Index of the last tool-call segment whose widget hasn't yet
+        // produced fully-parseable arguments. Used to drive the streaming
+        // "Generating component" placeholder on exactly that one widget.
+        let lastStreamingToolCallIndex: Int? = {
+            for i in segments.indices.reversed() {
+                guard case .toolCall(let toolCallId) = segments[i],
+                      let toolCall = message.toolCalls.first(where: { $0.id == toolCallId }) else { continue }
+                if !toolCall.arguments.isEmpty,
+                   let data = toolCall.arguments.data(using: .utf8),
+                   (try? JSONSerialization.jsonObject(with: data)) != nil {
+                    return nil
+                }
+                return i
             }
             return nil
         }()
@@ -92,6 +111,10 @@ struct MessageView: View {
                 if !text.isEmpty {
                     runs.append(.text(text, isTrailing: index == lastTextIndex))
                 }
+            case .thinking(let content, let isThinking, let duration):
+                flushSearches()
+                flushFetches()
+                runs.append(.thinking(content: content, isThinking: isThinking, duration: duration))
             case .webSearch(let searchId):
                 flushFetches()
                 if let instance = message.webSearches?.first(where: { $0.id == searchId }) {
@@ -101,6 +124,12 @@ struct MessageView: View {
                 flushSearches()
                 if let fetch = message.urlFetches.first(where: { $0.id == fetchId }) {
                     fetchBuffer.append(fetch)
+                }
+            case .toolCall(let toolCallId):
+                flushSearches()
+                flushFetches()
+                if let toolCall = message.toolCalls.first(where: { $0.id == toolCallId }) {
+                    runs.append(.toolCall(toolCall, isTrailing: index == lastStreamingToolCallIndex))
                 }
             }
         }
@@ -165,6 +194,15 @@ struct MessageView: View {
                         .transaction { transaction in
                             transaction.animation = nil
                         }
+                case .thinking(let content, let isThinking, let duration):
+                    CollapsibleThinkingBox(
+                        thinkingText: content,
+                        isDarkMode: isDarkMode,
+                        isStreaming: isThinking && isLoading && isLastMessage,
+                        generationTimeSeconds: duration,
+                        thinkingSummary: isLastMessage && isThinking ? viewModel.thinkingSummary : nil,
+                        onTap: { showThoughtsSheet = true }
+                    )
                 case .webSearches(let group):
                     let aggregate = aggregatedState(for: group)
                     let isSearchInFlight = aggregate.status == .searching
@@ -192,9 +230,43 @@ struct MessageView: View {
                             activeURLFetchGroup = IdentifiedGroup(items: group)
                         }
                     )
+                case .toolCall(let toolCall, let isTrailing):
+                    GenUIToolCallView(
+                        toolCall: toolCall,
+                        isStreaming: isTrailing && isLoading && isLastMessage,
+                        isDarkMode: isDarkMode,
+                        resolution: message.genUIResolution(for: toolCall.id),
+                        onRetry: nil
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
+    }
+
+    private func segmentsCoverEntireAssistantMessage(_ segments: [MessageSegment]) -> Bool {
+        if message.thoughts != nil || message.isThinking {
+            let hasThinkingSegment = segments.contains { segment in
+                if case .thinking = segment { return true }
+                return false
+            }
+            if !hasThinkingSegment { return false }
+        }
+        if !message.content.isEmpty {
+            let hasTextSegment = segments.contains { segment in
+                if case .text(let text) = segment, !text.isEmpty { return true }
+                return false
+            }
+            if !hasTextSegment { return false }
+        }
+        for toolCall in message.toolCalls {
+            let hasToolCallSegment = segments.contains { segment in
+                if case .toolCall(let id) = segment, id == toolCall.id { return true }
+                return false
+            }
+            if !hasToolCallSegment { return false }
+        }
+        return true
     }
 
     /// URLs the router annotated as web-search citations on this message.
@@ -237,6 +309,7 @@ struct MessageView: View {
                     message.content.isEmpty &&
                     message.thoughts == nil &&
                     !message.isThinking &&
+                    (message.segments?.isEmpty ?? true) &&
                     isLoading &&
                     isLastMessage {
                     VStack(alignment: .leading, spacing: 4) {
@@ -261,6 +334,17 @@ struct MessageView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // Assistant messages whose timeline-derived segments cover
+                // the entire message (thinking, web search, content, tool
+                // calls) render through the unified inline-segments
+                // pipeline so chronological order matches the webapp.
+                else if message.role == .assistant,
+                        let segments = message.segments,
+                        !segments.isEmpty,
+                        segmentsCoverEntireAssistantMessage(segments) {
+                    inlineSegmentsView(segments: segments)
                 }
 
                 // If the message is thinking or has thoughts, display them in a thinking box
@@ -373,7 +457,7 @@ struct MessageView: View {
                     }
                 }
 
-                else if !message.content.isEmpty {
+                else if !message.content.isEmpty || !message.toolCalls.isEmpty {
                     if message.role == .user {
                         if isEditMode {
                             UserMessageEditView(
@@ -430,6 +514,21 @@ struct MessageView: View {
                                 )
                                     .equatable()
                                     .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+
+                            // Render any GenUI tool calls that came from a
+                            // session that didn't persist segments (e.g.
+                            // older saved messages or messages synced from
+                            // a client that doesn't emit segments).
+                            ForEach(message.toolCalls) { toolCall in
+                                GenUIToolCallView(
+                                    toolCall: toolCall,
+                                    isStreaming: false,
+                                    isDarkMode: isDarkMode,
+                                    resolution: message.genUIResolution(for: toolCall.id),
+                                    onRetry: nil
+                                )
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                     }
@@ -1467,11 +1566,11 @@ struct UnsupportedGenUINoticeView: View {
                 .foregroundColor(.orange)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Interactive component unavailable")
+                Text("Component unavailable")
                     .font(.subheadline.weight(.medium))
                     .foregroundColor(isDarkMode ? .white : .black)
 
-                Text("This message includes a GenUI component. Tinfoil for iOS doesn't support GenUI yet; open this chat on web to view it.")
+                Text("This message includes a component that isn't available in this version of the app.")
                     .font(.caption)
                     .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
                     .fixedSize(horizontal: false, vertical: true)
