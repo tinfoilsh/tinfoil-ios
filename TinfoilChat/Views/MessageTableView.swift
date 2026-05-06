@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Textual
+import ObjectiveC
 
 struct MessageTableView: UIViewRepresentable {
     let archivedMessagesStartIndex: Int
@@ -326,26 +327,24 @@ struct MessageTableView: UIViewRepresentable {
             cell.backgroundColor = .clear
 
             if parent.messages.isEmpty {
-                if cell.boundContentToken != "welcome" {
-                    cell.contentConfiguration = UIHostingConfiguration {
-                        if let authManager = parent.viewModel.authManager {
-                            WelcomeView(
-                                isDarkMode: parent.isDarkMode,
-                                authManager: authManager,
-                                onRequestSignIn: parent.onRequestSignIn
-                            )
-                            .padding(.vertical, 16)
-                            .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 0)
-                            .frame(maxWidth: 900)
-                            .frame(maxWidth: .infinity)
-                            .markdownStyleHost(isDarkMode: parent.isDarkMode)
-                        }
+                cell.contentConfiguration = UIHostingConfiguration {
+                    if let authManager = parent.viewModel.authManager {
+                        WelcomeView(
+                            isDarkMode: parent.isDarkMode,
+                            authManager: authManager,
+                            onRequestSignIn: parent.onRequestSignIn
+                        )
+                        .padding(.vertical, 16)
+                        .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 0)
+                        .frame(maxWidth: 900)
+                        .frame(maxWidth: .infinity)
+                        .markdownStyleHost(isDarkMode: parent.isDarkMode)
                     }
-                    .minSize(width: 0, height: 0)
-                    .margins(.all, 0)
-                    .background(.clear)
-                    cell.boundContentToken = "welcome"
                 }
+                .minSize(width: 0, height: 0)
+                .margins(.all, 0)
+                .background(.clear)
+                cell.boundContentToken = "welcome"
             } else {
                 let message = parent.messages[indexPath.row]
                 let isLastMessage = indexPath.row == parent.messages.count - 1
@@ -372,7 +371,6 @@ struct MessageTableView: UIViewRepresentable {
                 if cell.boundContentToken != message.id {
                     cell.contentConfiguration = UIHostingConfiguration {
                         ObservableMessageCell(wrapper: wrapper, viewModel: parent.viewModel, coordinator: self)
-                            .markdownStyleHost(isDarkMode: parent.isDarkMode)
                     }
                     .minSize(width: 0, height: 0)
                     .margins(.all, 0)
@@ -721,6 +719,7 @@ struct ObservableMessageCell: View {
                     messageIndex: wrapper.messageIndex
                 )
                 .environmentObject(viewModel)
+                .markdownStyleHost(isDarkMode: wrapper.isDarkMode)
                 .opacity(wrapper.isArchived ? 0.6 : 1.0)
                 .padding(.vertical, 8)
                 .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 8)
