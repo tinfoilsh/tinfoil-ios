@@ -1863,57 +1863,70 @@ private struct SourcesSheetView: View {
     
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(sources) { source in
-                    Button {
-                        if let url = URL(string: source.url) {
-                            UIApplication.shared.open(url)
-                        }
-                    } label: {
-                        HStack(spacing: 12) {
-                            AsyncImage(url: URL(string: faviconUrl(for: getDomain(from: source.url)))) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                case .failure, .empty:
-                                    Image(systemName: "globe")
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .foregroundColor(.gray)
-                                @unknown default:
-                                    EmptyView()
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    ForEach(sources) { source in
+                        Button {
+                            if let url = URL(string: source.url) {
+                                UIApplication.shared.open(url)
+                            }
+                        } label: {
+                            HStack(spacing: 12) {
+                                AsyncImage(url: URL(string: faviconUrl(for: getDomain(from: source.url)))) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                    case .failure, .empty:
+                                        Image(systemName: "globe")
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .foregroundColor(.secondary)
+                                    @unknown default:
+                                        EmptyView()
+                                    }
                                 }
+                                .frame(width: 24, height: 24)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(source.title)
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundColor(isDarkMode ? .white : .black)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+
+                                    Text(getDomain(from: source.url))
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+
+                                Spacer(minLength: 8)
+
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.secondary)
                             }
-                            .frame(width: 24, height: 24)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                            
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(source.title)
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundColor(isDarkMode ? .white : .black)
-                                    .lineLimit(2)
-                                
-                                Text(getDomain(from: source.url))
-                                    .font(.system(size: 13))
-                                    .foregroundColor(.gray)
-                            }
-                            
-                            Spacer()
-                            
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 12))
-                                .foregroundColor(.gray)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(isDarkMode ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                            )
                         }
-                        .padding(.vertical, 4)
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(PlainButtonStyle())
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .listStyle(.plain)
+            .background((isDarkMode ? Color.black : Color(UIColor.systemBackground)).ignoresSafeArea())
             .navigationTitle("Sources")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(isDarkMode ? Color.black : Color(UIColor.systemBackground), for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
