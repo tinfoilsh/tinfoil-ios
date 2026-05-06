@@ -66,7 +66,7 @@ struct RecipeCardWidget: GenUIWidget {
     }
 
     let name = "render_recipe_card"
-    let description = "Display a cookable recipe card with ingredients and step-by-step instructions."
+    let description = "Display a cookable recipe card with ingredients and step-by-step instructions. Use when presenting a recipe, cooking procedure, or multi-step preparation with ingredients."
     let promptHint = "a cookable recipe card with ingredients and steps"
 
     var schema: JSONSchema {

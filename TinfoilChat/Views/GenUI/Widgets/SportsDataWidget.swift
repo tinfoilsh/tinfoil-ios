@@ -53,7 +53,7 @@ struct SportsDataWidget: GenUIWidget {
     }
 
     let name = "render_sports_data"
-    let description = "Display a sports fixture (game scoreline) or a league standings table."
+    let description = "Display a sports fixture (game scoreline) or a league standings table. Use when the user asks about a game score, match result, or league table."
     let promptHint = "a sports fixture scoreline or a league standings table"
 
     var schema: JSONSchema {
@@ -85,7 +85,7 @@ struct SportsDataWidget: GenUIWidget {
                     enumValues: ["fixture", "standings"]
                 ),
                 "title": GenUISchema.string(),
-                "status": GenUISchema.string(),
+                "status": GenUISchema.string(description: "e.g. \"Final\", \"Live — 3rd quarter\", \"Scheduled\""),
                 "venue": GenUISchema.string(),
                 "startTime": GenUISchema.string(),
                 "home": team,

@@ -21,13 +21,13 @@ struct MessageComposeWidget: GenUIWidget {
     }
 
     let name = "render_message_compose"
-    let description = "Draft a message or email with one or more tone variants. Includes Copy and (for email) Open in Mail."
+    let description = "Draft a message or email with one or more tone variants. Includes Copy and (for email) Open in Mail. Use when proposing a reply, message, or email draft to send."
     let promptHint = "a draft message or email with optional tone variants and Copy / Open in Mail"
 
     var schema: JSONSchema {
         let variant = GenUISchema.object(
             properties: [
-                "label": GenUISchema.string(description: "Short variant label, e.g. \"Formal\""),
+                "label": GenUISchema.string(description: "Short variant label, e.g. \"Formal\", \"Concise\", \"Apologetic\""),
                 "subject": GenUISchema.string(),
                 "body": GenUISchema.string(),
             ],
@@ -35,10 +35,17 @@ struct MessageComposeWidget: GenUIWidget {
         )
         return GenUISchema.object(
             properties: [
-                "channel": GenUISchema.string(enumValues: ["email", "message"]),
+                "channel": GenUISchema.string(
+                    description: "email (shows subject + \"Open in Mail\") or message (body only)",
+                    enumValues: ["email", "message"]
+                ),
                 "to": GenUISchema.string(description: "Recipient — used for mailto:"),
-                "title": GenUISchema.string(),
-                "variants": GenUISchema.array(items: variant, minItems: 1),
+                "title": GenUISchema.string(description: "Card title, e.g. \"Draft reply to Alice\""),
+                "variants": GenUISchema.array(
+                    items: variant,
+                    description: "One or more message drafts to offer. First variant is selected by default.",
+                    minItems: 1
+                ),
             ],
             required: ["variants"]
         )
