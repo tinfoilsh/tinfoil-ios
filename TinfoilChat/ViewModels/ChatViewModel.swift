@@ -168,6 +168,11 @@ class ChatViewModel: ObservableObject {
     @Published var audioError: String? = nil
     @Published var showMicrophonePermissionAlert: Bool = false
 
+    // Temporary (incognito) chat mode. When active, the current chat is an
+    // ephemeral in-memory chat that is never persisted or synced.
+    @Published var isTemporaryMode: Bool = false
+    private var previousChatIdBeforeTemporary: String?
+
     // Attachment properties
     @Published var pendingAttachments: [Attachment] = []
     @Published var isProcessingAttachment: Bool = false
@@ -682,6 +687,19 @@ class ChatViewModel: ObservableObject {
             cancelGeneration()
         }
 
+        // Exit temporary mode when the user explicitly creates a fresh chat.
+        if isTemporaryMode {
+            if let temp = currentChat, temp.isTemporary {
+                if temp.isLocalOnly {
+                    localChats.removeAll { $0.id == temp.id }
+                } else {
+                    chats.removeAll { $0.id == temp.id }
+                }
+            }
+            isTemporaryMode = false
+            previousChatIdBeforeTemporary = nil
+        }
+
         let shouldBeLocal: Bool
         if let explicit = isLocalOnly {
             shouldBeLocal = explicit
@@ -724,12 +742,88 @@ class ChatViewModel: ObservableObject {
         selectChat(newChat)
         shouldFocusInput = focusInput
     }
-    
+
+    /// Toggles temporary (incognito) chat mode. When enabled, the current chat
+    /// is replaced with an ephemeral in-memory chat that is never persisted to
+    /// disk or synced to the cloud. Disabling restores the previously active
+    /// chat (or creates a new one if none was tracked).
+    func toggleTemporaryMode() {
+        guard hasChatAccess else { return }
+
+        if isLoading {
+            cancelGeneration()
+        }
+
+        if isTemporaryMode {
+            // Exit temporary mode: drop the ephemeral chat and restore previous.
+            if let current = currentChat, current.isTemporary {
+                if current.isLocalOnly {
+                    localChats.removeAll { $0.id == current.id }
+                } else {
+                    chats.removeAll { $0.id == current.id }
+                }
+            }
+
+            isTemporaryMode = false
+            let previousId = previousChatIdBeforeTemporary
+            previousChatIdBeforeTemporary = nil
+
+            if let previousId,
+               let restored = chats.first(where: { $0.id == previousId })
+                                ?? localChats.first(where: { $0.id == previousId }) {
+                selectChat(restored)
+            } else {
+                createNewChat()
+            }
+        } else {
+            // Enter temporary mode: snapshot the current chat ID and swap in a
+            // brand-new ephemeral chat.
+            previousChatIdBeforeTemporary = currentChat?.id
+
+            guard let model = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first else {
+                return
+            }
+
+            var temp = Chat(
+                id: "temp-\(UUID().uuidString.lowercased())",
+                title: "Temporary Chat",
+                modelType: model,
+                userId: currentUserId,
+                isLocalOnly: true
+            )
+            temp.isTemporary = true
+
+            // Track in localChats so existing flows (selection, message rendering)
+            // see it. It is filtered out of the sidebar via `isBlankChat`/sort
+            // logic and never persisted thanks to the `isTemporary` guards in
+            // `Chat.saveChat` / `ChatViewModel.saveChat`.
+            localChats.insert(temp, at: 0)
+            isTemporaryMode = true
+            selectChat(temp)
+            shouldFocusInput = true
+        }
+    }
+
     /// Selects a chat as the current chat
     func selectChat(_ chat: Chat) {
         // Cancel any ongoing generation first
         if isLoading {
             cancelGeneration()
+        }
+
+        // If the user picked a different chat while in temporary mode, drop
+        // the ephemeral chat and exit temporary mode. The selected chat takes
+        // over normally below.
+        if isTemporaryMode && !chat.isTemporary {
+            if let temp = currentChat, temp.isTemporary {
+                if temp.isLocalOnly {
+                    localChats.removeAll { $0.id == temp.id }
+                } else {
+                    chats.removeAll { $0.id == temp.id }
+                }
+            }
+            isTemporaryMode = false
+            previousChatIdBeforeTemporary = nil
         }
 
         // Find the most up-to-date version of the chat in both arrays
@@ -2572,6 +2666,7 @@ class ChatViewModel: ObservableObject {
     
     /// Saves a single chat to per-chat file storage and triggers cloud backup
     private func saveChat(_ chat: Chat) {
+        guard !chat.isTemporary else { return }
         guard hasChatAccess else { return }
         guard !chat.messages.isEmpty || chat.decryptionFailed else { return }
 
