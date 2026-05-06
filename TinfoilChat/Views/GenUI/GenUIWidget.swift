@@ -165,11 +165,17 @@ enum GenUISchema {
         return JSONSchema(fields: fields)
     }
 
-    static func number(description: String? = nil, minimum: Double? = nil, maximum: Double? = nil) -> JSONSchema {
+    static func number(
+        description: String? = nil,
+        minimum: Double? = nil,
+        maximum: Double? = nil,
+        exclusiveMinimum: Double? = nil
+    ) -> JSONSchema {
         var fields: [JSONSchemaField] = [.type(.number)]
         if let description { fields.append(.description(description)) }
         if let minimum { fields.append(.minimum(minimum)) }
         if let maximum { fields.append(.maximum(maximum)) }
+        if let exclusiveMinimum { fields.append(.exclusiveMinimum(exclusiveMinimum)) }
         return JSONSchema(fields: fields)
     }
 

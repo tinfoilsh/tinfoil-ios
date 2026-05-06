@@ -11,7 +11,6 @@ import OpenAI
 import SwiftUI
 import UIKit
 
-private let minTimerSeconds: Double = 1
 private let maxTimerSeconds: Double = 604_800
 
 struct ClockWidget: GenUIWidget {
@@ -57,11 +56,11 @@ struct ClockWidget: GenUIWidget {
                 "showSeconds": GenUISchema.boolean(description: "Clock mode: include the second hand (default true)."),
                 "showDate": GenUISchema.boolean(description: "Clock mode: include date line (default true)."),
                 "durationSeconds": GenUISchema.number(
-                    description: "Timer mode. Duration in seconds. Prefer for requests like \"set a 5 minute timer\".",
-                    minimum: minTimerSeconds,
-                    maximum: maxTimerSeconds
+                    description: "Timer mode. Duration in seconds. Prefer this for requests like \"set a 5 minute timer\".",
+                    maximum: maxTimerSeconds,
+                    exclusiveMinimum: 0
                 ),
-                "target": GenUISchema.string(description: "Timer mode. ISO date-time when the timer should end."),
+                "target": GenUISchema.string(description: "Timer mode. ISO date-time when the timer should end, e.g. \"2026-12-31T23:59:59Z\". Use when an exact end time is known."),
                 "completedMessage": GenUISchema.string(description: "Timer mode. Message shown when the timer finishes."),
                 "alarmMode": GenUISchema.string(
                     description: "Timer mode. Alarm behavior when done. \"sound\" beeps; \"flash\" stays silent and flashes visually. Defaults to sound.",
