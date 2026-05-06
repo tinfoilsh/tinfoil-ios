@@ -7,6 +7,7 @@
 
 import Foundation
 import AVFoundation
+import UIKit
 import TinfoilAI
 import OpenAI
 
@@ -21,6 +22,7 @@ class AudioRecordingService: NSObject, ObservableObject {
     private var audioRecorder: AVAudioRecorder?
     private var timeoutTimer: Timer?
     private var recordingURL: URL?
+    private var didDisableIdleTimer: Bool = false
 
     private override init() {
         super.init()
@@ -65,6 +67,7 @@ class AudioRecordingService: NSObject, ObservableObject {
         audioRecorder = try AVAudioRecorder(url: url, settings: settings)
         audioRecorder?.record()
         isRecording = true
+        disableIdleTimer()
 
         // Auto-stop after timeout
         timeoutTimer = Timer.scheduledTimer(withTimeInterval: Constants.Audio.recordingTimeoutSeconds, repeats: false) { [weak self] _ in
@@ -85,6 +88,7 @@ class AudioRecordingService: NSObject, ObservableObject {
         audioRecorder?.stop()
         audioRecorder = nil
         isRecording = false
+        restoreIdleTimer()
 
         return recordingURL
     }
@@ -143,6 +147,24 @@ class AudioRecordingService: NSObject, ObservableObject {
         guard let url = recordingURL else { return }
         try? FileManager.default.removeItem(at: url)
         recordingURL = nil
+    }
+
+    private func disableIdleTimer() {
+        guard !didDisableIdleTimer else { return }
+        didDisableIdleTimer = true
+        Task { @MainActor in
+            if !UIApplication.shared.isIdleTimerDisabled {
+                UIApplication.shared.isIdleTimerDisabled = true
+            }
+        }
+    }
+
+    private func restoreIdleTimer() {
+        guard didDisableIdleTimer else { return }
+        didDisableIdleTimer = false
+        Task { @MainActor in
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
     }
 }
 
