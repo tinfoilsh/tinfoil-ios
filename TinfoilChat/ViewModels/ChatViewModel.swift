@@ -1622,7 +1622,7 @@ class ChatViewModel: ObservableObject {
                 var hapticChunkCount = 0
                 var hasStartedResponse = false
                 var lastUIUpdateTime = Date.distantPast
-                let uiUpdateInterval: TimeInterval = 0.033
+                let uiUpdateInterval: TimeInterval = Constants.Streaming.uiUpdateInterval
 
                 await MainActor.run {
                     if let chat = self.currentChat,

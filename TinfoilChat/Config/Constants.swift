@@ -65,6 +65,17 @@ enum Constants {
         static let maxCellHeight: CGFloat = 200_000
     }
 
+    enum Streaming {
+        /// Minimum interval between SwiftUI invalidations during a streaming
+        /// response. Updating any faster forces SwiftUI to walk a long
+        /// environment property list and rebuild the markdown view tree on
+        /// every token, which has been observed to either burn the main
+        /// thread or grow the AttributeGraph until it aborts on a 256 MB
+        /// realloc. 100 ms is fast enough that a reader does not perceive
+        /// the throttle while keeping per-second renders bounded.
+        static let uiUpdateInterval: TimeInterval = 0.1
+    }
+
     enum API {
         static let chatCompletionsEndpoint = "/v1/chat/completions"
         static let baseURL = "https://api.tinfoil.sh"
