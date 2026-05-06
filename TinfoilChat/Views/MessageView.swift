@@ -679,14 +679,19 @@ struct MessageView: View {
                 }
                 .cornerRadius(16)
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
-                .contextMenu {
-                    if message.role == .user && !message.content.isEmpty {
+                // While a stream is in flight the table reloads its rows
+                // every UI tick, which can deallocate the SwiftUI subgraph
+                // that backs an in-flight context menu and trip a deref of
+                // a freed AG attribute (ContextMenuResponder.startTrackingUpdates
+                // EXC_BAD_ACCESS). Withhold the menu entirely until streaming
+                // finishes; long-press still works between turns.
+                .if(message.role == .user && !message.content.isEmpty && !viewModel.isLoading) { view in
+                    view.contextMenu {
                         Button {
                             viewModel.regenerateMessage(at: messageIndex)
                         } label: {
                             Label("Resend", systemImage: "arrow.clockwise")
                         }
-                        .disabled(viewModel.isLoading)
 
                         Button {
                             UIPasteboard.general.string = message.content
