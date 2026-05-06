@@ -26,6 +26,7 @@ struct CloudSyncSettingsView: View {
     @State private var keyInputMode: KeyInputMode = .replacePrimary
     @State private var replacePrimaryMode: CloudKeyActivationMode = .recoverExisting
     @State private var copiedToClipboard: Bool = false
+    @State private var showBackupKeySheet: Bool = false
     
     var body: some View {
         List {
@@ -131,6 +132,13 @@ struct CloudSyncSettingsView: View {
                     }
                     
                     if passkeyManager.passkeyActive {
+                        Button(action: {
+                            showBackupKeySheet = true
+                        }) {
+                            Label("Reveal Backup Key", systemImage: "key.viewfinder")
+                                .foregroundColor(.primary)
+                        }
+
                         Button(action: {
                             keyInputMode = .addRecovery
                             showKeyInput = true
@@ -258,6 +266,9 @@ struct CloudSyncSettingsView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showBackupKeySheet) {
+                BackupEncryptionKeySheet()
+            }
     }
     
     private func maskKey(_ key: String) -> String {
@@ -300,6 +311,120 @@ struct CloudSyncSettingsView: View {
             return replacePrimaryMode == .recoverExisting
                 ? "Recover Existing Data"
                 : "Start Fresh"
+        }
+    }
+}
+
+/// Sheet that reveals the current encryption key as a backup. Shown only when
+/// the user has an active passkey, since their passkey already wraps the key
+/// and they don't need to handle a copy day-to-day.
+private struct BackupEncryptionKeySheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isCopied: Bool = false
+    @State private var showFullKey: Bool = false
+
+    private var key: String? {
+        EncryptionService.shared.getKey()
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                ZStack {
+                    Circle()
+                        .fill(Color.accentColor.opacity(0.15))
+                        .frame(width: 64, height: 64)
+                    Image(systemName: "key.viewfinder")
+                        .font(.system(size: 28))
+                        .foregroundColor(.accentColor)
+                }
+                .padding(.top, 24)
+
+                Text("Backup Encryption Key")
+                    .font(.title2)
+                    .fontWeight(.bold)
+
+                Text("Your passkey already secures cloud sync on this device. Save a copy of this key only if you want a paper backup or need to sign in on a device without your passkey.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+
+                if let key {
+                    VStack(spacing: 12) {
+                        Text(showFullKey ? key : maskedKey(key))
+                            .font(.system(.footnote, design: .monospaced))
+                            .foregroundColor(.primary)
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(UIColor.secondarySystemBackground))
+                            .cornerRadius(10)
+                            .textSelection(.enabled)
+                            .animation(nil, value: showFullKey)
+
+                        HStack(spacing: 12) {
+                            Button(action: {
+                                var transaction = Transaction()
+                                transaction.disablesAnimations = true
+                                withTransaction(transaction) {
+                                    showFullKey.toggle()
+                                }
+                            }) {
+                                Label(showFullKey ? "Hide" : "Reveal", systemImage: showFullKey ? "eye.slash" : "eye")
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(Color(UIColor.tertiarySystemBackground))
+                                    .cornerRadius(10)
+                            }
+
+                            Button(action: { copyKey(key) }) {
+                                Label(isCopied ? "Copied" : "Copy",
+                                      systemImage: isCopied ? "checkmark" : "doc.on.doc")
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(isCopied ? Color.green.opacity(0.2) : Color(UIColor.tertiarySystemBackground))
+                                    .cornerRadius(10)
+                            }
+                        }
+                        .foregroundColor(.primary)
+                    }
+                    .padding(.horizontal)
+                } else {
+                    Text("No encryption key found on this device.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+            }
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func maskedKey(_ key: String) -> String {
+        guard key.count > 16 else { return key }
+        let prefix = String(key.prefix(8))
+        let suffix = String(key.suffix(8))
+        return "\(prefix)…\(suffix)"
+    }
+
+    private func copyKey(_ key: String) {
+        UIPasteboard.general.setItems(
+            [[UIPasteboard.typeAutomatic: key]],
+            options: [
+                .expirationDate: Date().addingTimeInterval(Constants.CloudSync.clipboardExpirationSeconds)
+            ]
+        )
+        isCopied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            isCopied = false
         }
     }
 }
