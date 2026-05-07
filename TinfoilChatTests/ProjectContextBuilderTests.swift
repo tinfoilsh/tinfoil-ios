@@ -3,6 +3,18 @@ import Testing
 @testable import TinfoilChat
 
 struct ProjectContextBuilderTests {
+    @Test func decodesEncryptedContentObjectOrString() throws {
+        let envelope = EncryptedData(iv: "iv", data: "data")
+        let objectData = try JSONEncoder().encode(envelope)
+        let stringData = try JSONEncoder().encode(String(data: objectData, encoding: .utf8) ?? "")
+
+        let objectDecoded = try JSONDecoder().decode(EncryptedProjectContent.self, from: objectData)
+        let stringDecoded = try JSONDecoder().decode(EncryptedProjectContent.self, from: stringData)
+
+        #expect(objectDecoded.encryptedData.iv == "iv")
+        #expect(stringDecoded.encryptedData.data == "data")
+    }
+
     @Test func buildsWebappCompatibleProjectContext() {
         let project = Project(
             id: "project-1",

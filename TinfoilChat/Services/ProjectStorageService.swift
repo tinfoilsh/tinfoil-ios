@@ -153,7 +153,7 @@ final class ProjectStorageService: ObservableObject {
         }
 
         let item = try decoder.decode(ProjectStorageItem.self, from: data)
-        let encrypted = try decodeEncryptedData(from: item.content)
+        let encrypted = item.content.encryptedData
         let decryptionResult = try await EncryptionService.shared.decrypt(encrypted, as: ProjectData.self)
         let projectData = decryptionResult.value
 
@@ -372,7 +372,7 @@ private struct ProjectStorageItem: Codable {
     let createdAt: String
     let updatedAt: String
     let syncVersion: Int
-    let content: String
+    let content: EncryptedProjectContent
 }
 
 private extension Sequence {
