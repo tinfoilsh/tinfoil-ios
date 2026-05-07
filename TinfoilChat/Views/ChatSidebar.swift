@@ -375,6 +375,9 @@ struct ChatSidebar: View {
                         .rotationEffect(.degrees(isProjectsExpanded ? 0 : -90))
                         .foregroundColor(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -437,6 +440,9 @@ struct ChatSidebar: View {
                     .rotationEffect(.degrees(isChatsExpanded ? 0 : -90))
                     .foregroundColor(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
