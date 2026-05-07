@@ -244,7 +244,7 @@ struct ChatContainer: View {
                         .resizable()
                         .scaledToFit()
                         .frame(height: 22)
-                        .opacity(isSidebarOpen ? 1 : 0)
+                        .opacity(isSidebarOpen && viewModel.activeProject == nil ? 1 : 0)
 
                     if !viewModel.isTemporaryMode && viewModel.activeProject == nil && authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled && viewModel.activeStorageTab == .local {
                         chatStorageLabel
@@ -262,7 +262,7 @@ struct ChatContainer: View {
                                 .lineLimit(1)
                                 .foregroundColor(.accentColor)
                         }
-                        .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
+                        .opacity(isVerificationBadgeExpanded ? 0 : 1)
                     }
 
                     if viewModel.isTemporaryMode && viewModel.activeProject == nil {
