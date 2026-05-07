@@ -205,7 +205,7 @@ struct ChatContainer: View {
                 GeometryReader { geometry in
                     HStack(spacing: 0) {
                         if isSidebarOpen {
-                            ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
+                            activeSidebar
                                 .frame(width: sidebarWidth)
                                 .overlay(alignment: .trailing) {
                                     Rectangle()
@@ -246,12 +246,26 @@ struct ChatContainer: View {
                         .frame(height: 22)
                         .opacity(isSidebarOpen ? 1 : 0)
 
-                    if !viewModel.isTemporaryMode && authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled && viewModel.activeStorageTab == .local {
+                    if !viewModel.isTemporaryMode && viewModel.activeProject == nil && authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled && viewModel.activeStorageTab == .local {
                         chatStorageLabel
                             .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
                     }
 
-                    if viewModel.isTemporaryMode {
+                    if let activeProject = viewModel.activeProject {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.accentColor)
+                            Text(activeProject.name)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .lineLimit(1)
+                                .foregroundColor(.accentColor)
+                        }
+                        .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
+                    }
+
+                    if viewModel.isTemporaryMode && viewModel.activeProject == nil {
                         HStack(spacing: 6) {
                             GhostIcon(size: 14, color: .accentColor, style: .filled)
                             Text("Temporary")
@@ -377,7 +391,7 @@ struct ChatContainer: View {
             
             // Sidebar with slide transition
             HStack(spacing: 0) {
-                ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
+                activeSidebar
                     .frame(width: sidebarWidth)
                     .overlay(alignment: .trailing) {
                         Rectangle()
@@ -391,6 +405,15 @@ struct ChatContainer: View {
             }
         }
         .animation(.easeInOut, value: isSidebarOpen)
+    }
+
+    @ViewBuilder
+    private var activeSidebar: some View {
+        if viewModel.isProjectMode || viewModel.isLoadingProject {
+            ProjectSidebar(isOpen: $isSidebarOpen, viewModel: viewModel)
+        } else {
+            ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
+        }
     }
     
     // MARK: - Helper Methods
