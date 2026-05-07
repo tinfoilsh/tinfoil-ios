@@ -304,7 +304,7 @@ struct DeletedChatsResponse: Codable {
 /// Remote chat metadata from API
 struct RemoteChat: Codable {
     let id: String
-    let key: String
+    let key: String?
     let createdAt: String
     let updatedAt: String
     let title: String?  // Optional - encrypted chats don't have readable titles
@@ -340,6 +340,10 @@ struct UploadConversationRequest: Codable {
 struct UpdateMetadataRequest: Codable {
     let conversationId: String
     let metadata: [String: String]
+}
+
+struct UpdateChatProjectRequest: Codable {
+    let projectId: String?
 }
 
 // MARK: - Profile Sync Models

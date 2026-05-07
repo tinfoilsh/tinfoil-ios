@@ -95,6 +95,7 @@ enum Constants {
 
     enum Pagination {
         static let chatsPerPage = 20
+        static let projectsPerPage = 20
         static let recentChatThresholdSeconds: TimeInterval = 120  // 2 minutes
         static let cleanupThresholdSeconds: TimeInterval = 90     // 1.5 minutes
     }
@@ -131,6 +132,13 @@ enum Constants {
     enum Summarizer {
         static let enclaveURL = "https://summarizer.tinfoil.sh"
         static let configRepo = "tinfoilsh/confidential-summarizer"
+    }
+
+    enum DocumentProcessing {
+        static let enclaveURL = "https://doc-upload.inf9.tinfoil.sh"
+        static let configRepo = "tinfoilsh/confidential-doc-upload"
+        static let convertPath = "/v1/convert/file"
+        static let defaultMode = "text"
     }
 
     enum ThinkingSummary {
@@ -271,7 +279,7 @@ enum Constants {
         static let previewMaxWidth: CGFloat = 200
         static let messageThumbnailSize: CGFloat = 80
         static let messageThumbnailColumns: Int = 3
-        static let supportedDocumentExtensions: Set<String> = ["pdf", "txt", "md", "csv", "html"]
+        static let supportedDocumentExtensions: Set<String> = ["pdf", "docx", "pptx", "xlsx", "txt", "md", "csv", "html", "json", "xml"]
         static let supportedImageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic"]
         static let defaultImageMimeType = "image/jpeg"
     }
