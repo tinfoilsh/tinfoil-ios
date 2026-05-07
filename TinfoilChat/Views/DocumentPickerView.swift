@@ -15,7 +15,13 @@ struct DocumentPickerView: UIViewControllerRepresentable {
         .plainText,
         .html,
         .commaSeparatedText,
-        UTType(filenameExtension: "md") ?? .plainText
+        .json,
+        .xml,
+        .image,
+        UTType(filenameExtension: "md") ?? .plainText,
+        UTType(filenameExtension: "docx") ?? .data,
+        UTType(filenameExtension: "pptx") ?? .data,
+        UTType(filenameExtension: "xlsx") ?? .data
     ]
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {

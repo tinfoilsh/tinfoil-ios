@@ -44,16 +44,18 @@ final class DocumentProcessingService {
             throw ProcessingError.fileTooLarge(fileSize)
         }
 
-        return try await Task.detached(priority: .userInitiated) {
-            switch fileExtension {
-            case "pdf":
-                return try self.extractTextFromPDF(at: url)
-            case "txt", "md", "csv", "html":
-                return try self.readPlainText(at: url)
-            default:
-                throw ProcessingError.unsupportedFormat(fileExtension)
-            }
-        }.value
+        switch fileExtension {
+        case "pdf":
+            return try await Task.detached(priority: .userInitiated) {
+                try self.extractTextFromPDF(at: url)
+            }.value
+        case "txt", "md", "csv", "html", "json", "xml":
+            return try await Task.detached(priority: .userInitiated) {
+                try self.readPlainText(at: url)
+            }.value
+        default:
+            return try await DocumentConversionService.shared.convertToMarkdown(url: url, filename: url.lastPathComponent)
+        }
     }
 
     private func extractTextFromPDF(at url: URL) throws -> String {
