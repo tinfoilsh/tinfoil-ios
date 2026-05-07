@@ -24,6 +24,8 @@ struct ChatSidebar: View {
     @State private var selectedEncryptedChat: Chat? = nil
 
     @State private var isTabSwitching: Bool = false
+    @State private var isProjectsExpanded: Bool = true
+    @State private var isChatsExpanded: Bool = true
     @ObservedObject private var settings = SettingsManager.shared
 
     private var activeTab: ChatStorageTab {
@@ -43,8 +45,8 @@ struct ChatSidebar: View {
             // When cloud sync is off, all chats are local
             source = viewModel.localChats
         }
-        // Temporary (incognito) chats are never listed in the sidebar
-        return source.filter { !$0.isTemporary }
+        // Temporary and project chats are never listed in the root chat sidebar
+        return source.filter { !$0.isTemporary && $0.projectId == nil }
     }
 
     // Timer to update relative time strings
@@ -124,6 +126,9 @@ struct ChatSidebar: View {
                 isOpen = false
             }
         }
+        .task {
+            await viewModel.loadProjects()
+        }
     }
     
     private var sidebarContent: some View {
@@ -170,13 +175,23 @@ struct ChatSidebar: View {
                     .padding(.vertical, 8)
             }
 
+            if authManager.isAuthenticated && settings.isCloudSyncEnabled {
+                projectsSection
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+            }
+
+            chatsSectionHeader
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
             // Chat List - shows multiple chats for all authenticated users
             if isTabSwitching {
                 Spacer()
                 ProgressView()
                     .progressViewStyle(CircularProgressViewStyle())
                 Spacer()
-            } else {
+            } else if isChatsExpanded {
             ScrollView {
                 LazyVStack(spacing: 12) {
                     ForEach(Array(filteredChats.enumerated()), id: \.element.id) { index, chat in
@@ -208,6 +223,19 @@ struct ChatSidebar: View {
                             onDelete: { confirmDelete(chat) },
                             showEditDelete: authManager.isAuthenticated
                         )
+                        .contextMenu {
+                            if authManager.isAuthenticated && !chat.isBlankChat && !chat.decryptionFailed {
+                                ForEach(viewModel.projects.filter { $0.decryptionFailed != true }) { project in
+                                    Button {
+                                        Task {
+                                            await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
+                                        }
+                                    } label: {
+                                        Label("Add to \(project.name)", systemImage: "folder")
+                                    }
+                                }
+                            }
+                        }
                     }
                     
                     // Load More button or loading indicator (cloud tab only — local chats are never paginated)
@@ -275,6 +303,8 @@ struct ChatSidebar: View {
                 await viewModel.performFullSync()
             }
             .frame(maxHeight: .infinity)
+            } else {
+                Spacer()
             } // end tab switching else
 
             Divider()
@@ -322,6 +352,93 @@ struct ChatSidebar: View {
             .safeAreaPadding(.bottom)
         }
         .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private var projectsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isProjectsExpanded.toggle()
+                }
+            } label: {
+                HStack {
+                    Label("Projects", systemImage: "folder")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Spacer()
+                    if viewModel.isLoadingProjects {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                    }
+                    Image(systemName: "chevron.down")
+                        .font(.caption)
+                        .rotationEffect(.degrees(isProjectsExpanded ? 0 : -90))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if isProjectsExpanded {
+                Button {
+                    Task {
+                        await viewModel.createProject()
+                    }
+                } label: {
+                    Label("New project", systemImage: "folder.badge.plus")
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color(UIColor.secondarySystemBackground).opacity(0.3))
+                        .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+
+                ForEach(viewModel.projects) { project in
+                    Button {
+                        Task {
+                            await viewModel.enterProject(projectId: project.id)
+                            withAnimation {
+                                isOpen = false
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: project.decryptionFailed == true ? "lock.fill" : "folder")
+                                .foregroundColor(project.decryptionFailed == true ? .orange : .accentColor)
+                            Text(project.name)
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                        .font(.subheadline)
+                        .padding(10)
+                        .background(Color(UIColor.secondarySystemBackground).opacity(0.3))
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(project.decryptionFailed == true)
+                }
+            }
+        }
+    }
+
+    private var chatsSectionHeader: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isChatsExpanded.toggle()
+            }
+        } label: {
+            HStack {
+                Label("Chats", systemImage: "bubble.left.and.bubble.right")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+                    .rotationEffect(.degrees(isChatsExpanded ? 0 : -90))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
     }
     
     private var cloudLocalTabSwitcher: some View {
