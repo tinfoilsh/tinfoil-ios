@@ -12,6 +12,7 @@ struct ProjectSidebar: View {
     @Binding var isOpen: Bool
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
 
+    @State private var detailsExpanded = false
     @State private var documentsExpanded = true
     @State private var chatsExpanded = true
     @State private var showDocumentPicker = false
@@ -125,43 +126,75 @@ struct ProjectSidebar: View {
     }
 
     private var detailsSection: some View {
-        Section("Details") {
-            TextField("Name", text: $editingName)
-                .submitLabel(.done)
-                .onChange(of: editingName) { _, _ in hasPendingChanges = true }
-
-            TextField("Description", text: $editingDescription, axis: .vertical)
-                .lineLimit(2...4)
-                .onChange(of: editingDescription) { _, _ in hasPendingChanges = true }
-
-            TextField("Instructions", text: $editingInstructions, axis: .vertical)
-                .lineLimit(3...8)
-                .onChange(of: editingInstructions) { _, _ in hasPendingChanges = true }
-
-            TextField("Memory (one fact per line)", text: $editingMemory, axis: .vertical)
-                .lineLimit(3...8)
-                .onChange(of: editingMemory) { _, _ in hasPendingChanges = true }
-
-            Button {
-                Task {
-                    await viewModel.updateActiveProject(
-                        name: editingName.trimmingCharacters(in: .whitespacesAndNewlines),
-                        description: editingDescription,
-                        systemInstructions: editingInstructions,
-                        memory: memoryFactsFromEditor()
-                    )
-                    hasPendingChanges = false
+        Section {
+            DisclosureGroup(isExpanded: $detailsExpanded) {
+                fieldRow(label: "Name") {
+                    TextField("Project name", text: $editingName)
+                        .submitLabel(.done)
+                        .multilineTextAlignment(.trailing)
+                        .onChange(of: editingName) { _, _ in hasPendingChanges = true }
                 }
+
+                multilineFieldRow(label: "Description", placeholder: "What is this project about?", text: $editingDescription, lineLimit: 2...4)
+
+                multilineFieldRow(label: "Instructions", placeholder: "How should Tin behave in this project?", text: $editingInstructions, lineLimit: 3...8)
+
+                multilineFieldRow(label: "Memory", placeholder: "One fact per line", text: $editingMemory, lineLimit: 3...8)
+
+                Button {
+                    Task {
+                        await viewModel.updateActiveProject(
+                            name: editingName.trimmingCharacters(in: .whitespacesAndNewlines),
+                            description: editingDescription,
+                            systemInstructions: editingInstructions,
+                            memory: memoryFactsFromEditor()
+                        )
+                        hasPendingChanges = false
+                    }
+                } label: {
+                    Label("Save changes", systemImage: "checkmark.circle.fill")
+                }
+                .disabled(!hasPendingChanges || project == nil)
             } label: {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                    Text("Save changes")
-                    Spacer()
-                }
+                Label("Details", systemImage: "slider.horizontal.3")
             }
-            .disabled(!hasPendingChanges || project == nil)
         }
         .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+
+    private func fieldRow<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+            Spacer()
+            content()
+                .font(.subheadline)
+        }
+    }
+
+    private func multilineFieldRow(label: String, placeholder: String, text: Binding<String>, lineLimit: ClosedRange<Int>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label.uppercased())
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+                .tracking(0.5)
+
+            TextField(placeholder, text: text, axis: .vertical)
+                .font(.subheadline)
+                .lineLimit(lineLimit)
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.settingsBackground(for: colorScheme))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Color.gray.opacity(0.25), lineWidth: 1)
+                )
+                .onChange(of: text.wrappedValue) { _, _ in hasPendingChanges = true }
+        }
+        .padding(.vertical, 4)
     }
 
     private var documentsSection: some View {
