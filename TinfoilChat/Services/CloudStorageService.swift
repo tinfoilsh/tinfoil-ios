@@ -475,6 +475,97 @@ class CloudStorageService: ObservableObject {
         return try JSONDecoder().decode(ChatListResponse.self, from: data)
     }
 
+    // MARK: - Project Chat Operations
+
+    func updateChatProject(chatId: String, projectId: String?) async throws {
+        let url = URL(string: "\(apiBaseURL)/api/storage/conversation/\(chatId)/project")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.allHTTPHeaderFields = try await getHeaders()
+        request.httpBody = try JSONEncoder().encode(UpdateChatProjectRequest(projectId: projectId))
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw CloudStorageError.metadataUpdateFailed
+        }
+    }
+
+    func listProjectChats(projectId: String, includeContent: Bool = false, continuationToken: String? = nil) async throws -> ProjectChatListResponse {
+        var components = URLComponents(string: "\(apiBaseURL)/api/projects/\(projectId)/chats")!
+        var queryItems: [URLQueryItem] = []
+
+        if includeContent {
+            queryItems.append(URLQueryItem(name: "includeContent", value: "true"))
+        }
+        if let continuationToken {
+            queryItems.append(URLQueryItem(name: "continuationToken", value: continuationToken))
+        }
+        if !queryItems.isEmpty {
+            components.queryItems = queryItems
+        }
+
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.allHTTPHeaderFields = try await getHeaders()
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw CloudStorageError.listFailed
+        }
+
+        return try JSONDecoder().decode(ProjectChatListResponse.self, from: data)
+    }
+
+    func getProjectChatsSyncStatus(projectId: String) async throws -> ChatSyncStatus {
+        var components = URLComponents(string: "\(apiBaseURL)/api/projects/\(projectId)/chats/sync-status")!
+        components.queryItems = [URLQueryItem(name: "_t", value: String(Int(Date().timeIntervalSince1970 * 1000)))]
+
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.allHTTPHeaderFields = try await getHeaders()
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw CloudStorageError.listFailed
+        }
+
+        return try JSONDecoder().decode(ChatSyncStatus.self, from: data)
+    }
+
+    func getProjectChatsUpdatedSince(projectId: String, since: String, continuationToken: String? = nil) async throws -> ProjectChatListResponse {
+        var components = URLComponents(string: "\(apiBaseURL)/api/projects/\(projectId)/chats/updated-since")!
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "since", value: since),
+            URLQueryItem(name: "_t", value: String(Int(Date().timeIntervalSince1970 * 1000)))
+        ]
+        if let continuationToken {
+            queryItems.append(URLQueryItem(name: "continuationToken", value: continuationToken))
+        }
+        components.queryItems = queryItems
+
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.allHTTPHeaderFields = try await getHeaders()
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw CloudStorageError.listFailed
+        }
+
+        return try JSONDecoder().decode(ProjectChatListResponse.self, from: data)
+    }
+
     /// Get chats updated since a specific timestamp
     func getChatsUpdatedSince(since: String, includeContent: Bool = false, continuationToken: String? = nil) async throws -> ChatListResponse {
         var components = URLComponents(string: "\(apiBaseURL)/api/chats/updated-since")!
