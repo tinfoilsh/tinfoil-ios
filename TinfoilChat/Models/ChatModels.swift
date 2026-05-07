@@ -143,7 +143,8 @@ struct Chat: Identifiable, Codable {
         syncedAt: Date? = nil,
         locallyModified: Bool = true,
         updatedAt: Date? = nil,
-        isLocalOnly: Bool = false
+        isLocalOnly: Bool = false,
+        projectId: String? = nil
     ) -> Chat {
         // Try to use the provided model, fall back to current model, then first available
         guard let model = modelType ?? AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first else {
@@ -162,7 +163,8 @@ struct Chat: Identifiable, Codable {
             syncedAt: syncedAt,
             locallyModified: locallyModified,
             updatedAt: updatedAt,
-            isLocalOnly: isLocalOnly
+            isLocalOnly: isLocalOnly,
+            projectId: projectId
         )
     }
     

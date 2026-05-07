@@ -108,6 +108,7 @@ class ChatViewModel: ObservableObject {
     private let passkeyManager = PasskeyManager.shared
     private let cloudSync = CloudSyncService.shared
     private let streamingTracker = StreamingTracker.shared
+    private let projectStorage = ProjectStorageService.shared
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
     private var hasPerformedInitialSync: Bool = false  // Track if initial sync has been done
     private var hasAnonymousChatsToSync: Bool = false  // Track if we have anonymous chats to sync
@@ -178,6 +179,16 @@ class ChatViewModel: ObservableObject {
     @Published var isProcessingAttachment: Bool = false
     @Published var attachmentError: String? = nil
     @Published var pendingImageThumbnails: [String: String] = [:]
+
+    // Project properties
+    @Published var projects: [Project] = []
+    @Published var activeProject: Project?
+    @Published var projectDocuments: [ProjectDocument] = []
+    @Published var isLoadingProjects: Bool = false
+    @Published var isLoadingProject: Bool = false
+    @Published var isUploadingProjectDocument: Bool = false
+    @Published var projectError: String?
+
     // Private properties
     private var client: TinfoilAI?
     private var currentTask: Task<Void, Error>?
@@ -217,12 +228,28 @@ class ChatViewModel: ObservableObject {
                     currentChat = localChat
                     activeStorageTab = .local
                 }
+            } else {
+                projects = []
+                activeProject = nil
+                projectDocuments = []
+                projectError = nil
             }
         }
     }
     
     var messages: [Message] {
         currentChat?.messages ?? []
+    }
+
+    var isProjectMode: Bool {
+        activeProject != nil
+    }
+
+    var activeProjectChats: [Chat] {
+        guard let projectId = activeProject?.id else { return [] }
+        return chats
+            .filter { $0.projectId == projectId && !$0.isTemporary && !$0.isBlankChat }
+            .sorted { $0.createdAt > $1.createdAt }
     }
     
     // Computed property to check if user has premium access
@@ -678,7 +705,7 @@ class ChatViewModel: ObservableObject {
     }
 
     /// Creates a new chat and sets it as the current chat
-    func createNewChat(language: String? = nil, modelType: ModelType? = nil, isLocalOnly: Bool? = nil, focusInput: Bool = true) {
+    func createNewChat(language: String? = nil, modelType: ModelType? = nil, isLocalOnly: Bool? = nil, projectId: String? = nil, focusInput: Bool = true) {
         // Allow creating new chats for all authenticated users
         guard hasChatAccess else { return }
         
@@ -700,8 +727,11 @@ class ChatViewModel: ObservableObject {
             previousChatIdBeforeTemporary = nil
         }
 
+        let targetProjectId = projectId ?? activeProject?.id
         let shouldBeLocal: Bool
-        if let explicit = isLocalOnly {
+        if targetProjectId != nil {
+            shouldBeLocal = false
+        } else if let explicit = isLocalOnly {
             shouldBeLocal = explicit
         } else if !SettingsManager.shared.isCloudSyncEnabled {
             shouldBeLocal = true
@@ -713,13 +743,13 @@ class ChatViewModel: ObservableObject {
 
         // Check if we already have a blank chat in the target list
         if shouldBeLocal {
-            if let existing = localChats.first(where: { $0.isBlankChat }) {
+            if let existing = localChats.first(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
                 selectChat(existing)
                 shouldFocusInput = focusInput
                 return
             }
         } else {
-            if let existing = chats.first(where: { $0.isBlankChat }) {
+            if let existing = chats.first(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
                 selectChat(existing)
                 shouldFocusInput = focusInput
                 return
@@ -731,7 +761,8 @@ class ChatViewModel: ObservableObject {
             modelType: modelType ?? currentModel,
             language: language,
             userId: currentUserId,
-            isLocalOnly: shouldBeLocal
+            isLocalOnly: shouldBeLocal,
+            projectId: targetProjectId
         )
 
         if shouldBeLocal {
@@ -741,6 +772,250 @@ class ChatViewModel: ObservableObject {
         }
         selectChat(newChat)
         shouldFocusInput = focusInput
+    }
+
+    func loadProjects() async {
+        guard hasChatAccess, SettingsManager.shared.isCloudSyncEnabled else {
+            projects = []
+            return
+        }
+
+        isLoadingProjects = true
+        projectError = nil
+        do {
+            projects = try await projectStorage.loadProjects()
+        } catch {
+            projectError = error.localizedDescription
+        }
+        isLoadingProjects = false
+    }
+
+    @discardableResult
+    func createProject(name: String? = nil) async -> Project? {
+        guard hasChatAccess else { return nil }
+
+        isLoadingProject = true
+        projectError = nil
+        do {
+            let project = try await projectStorage.createProject(
+                CreateProjectData(name: name ?? Self.generateProjectName())
+            )
+            projects.insert(project, at: 0)
+            await enterProject(projectId: project.id)
+            isLoadingProject = false
+            return project
+        } catch {
+            projectError = error.localizedDescription
+            isLoadingProject = false
+            return nil
+        }
+    }
+
+    func enterProject(projectId: String) async {
+        guard hasChatAccess else { return }
+
+        isLoadingProject = true
+        projectError = nil
+        do {
+            let project = try await projectStorage.getProject(projectId)
+            guard let project else {
+                throw CloudStorageError.downloadFailed
+            }
+
+            let documents = try await projectStorage.listDocuments(projectId: projectId, includeContent: true)
+            activeProject = project
+            projectDocuments = documents
+
+            let syncResult = await cloudSync.smartSync(projectId: projectId)
+            if syncResult.downloaded > 0 || syncResult.uploaded > 0 || activeProjectChats.isEmpty {
+                await loadProjectChatsIntoMemory(projectId: projectId)
+            }
+
+            createNewChat(isLocalOnly: false, projectId: projectId)
+        } catch {
+            projectError = error.localizedDescription
+        }
+        isLoadingProject = false
+    }
+
+    func exitProject() {
+        activeProject = nil
+        projectDocuments = []
+        projectError = nil
+        createNewChat(isLocalOnly: false)
+    }
+
+    func updateActiveProject(name: String? = nil, description: String? = nil, systemInstructions: String? = nil, memory: [MemoryFact]? = nil) async {
+        guard let project = activeProject else { return }
+
+        projectError = nil
+        do {
+            let update = UpdateProjectData(
+                name: name,
+                description: description,
+                systemInstructions: systemInstructions,
+                memory: memory
+            )
+            try await projectStorage.updateProject(project.id, data: update)
+            var updated = project
+            updated.name = name ?? updated.name
+            updated.description = description ?? updated.description
+            updated.systemInstructions = systemInstructions ?? updated.systemInstructions
+            updated.memory = memory ?? updated.memory
+            updated.updatedAt = ISO8601DateFormatter().string(from: Date())
+            activeProject = updated
+            if let index = projects.firstIndex(where: { $0.id == updated.id }) {
+                projects[index] = updated
+            }
+        } catch {
+            projectError = error.localizedDescription
+        }
+    }
+
+    func deleteActiveProject() async {
+        guard let project = activeProject else { return }
+
+        projectError = nil
+        do {
+            try await projectStorage.deleteProject(project.id)
+            projects.removeAll { $0.id == project.id }
+            exitProject()
+        } catch {
+            projectError = error.localizedDescription
+        }
+    }
+
+    func uploadProjectDocument(url: URL, filename: String) async {
+        guard let project = activeProject else { return }
+
+        isUploadingProjectDocument = true
+        projectError = nil
+        do {
+            let markdown = try await DocumentConversionService.shared.convertToMarkdown(
+                url: url,
+                filename: filename
+            )
+            let contentType = DocumentConversionService.mimeType(for: filename)
+            let document = try await projectStorage.uploadDocument(
+                projectId: project.id,
+                filename: filename,
+                contentType: contentType,
+                content: markdown
+            )
+            projectDocuments.append(document)
+        } catch {
+            projectError = error.localizedDescription
+        }
+        isUploadingProjectDocument = false
+    }
+
+    func deleteProjectDocument(_ documentId: String) async {
+        guard let project = activeProject else { return }
+
+        let existing = projectDocuments
+        projectDocuments.removeAll { $0.id == documentId }
+        do {
+            try await projectStorage.deleteDocument(projectId: project.id, documentId: documentId)
+        } catch {
+            projectDocuments = existing
+            projectError = error.localizedDescription
+        }
+    }
+
+    func moveChatToProject(chatId: String, projectId: String) async {
+        await updateChatProject(chatId: chatId, projectId: projectId)
+    }
+
+    func removeChatFromProject(chatId: String) async {
+        await updateChatProject(chatId: chatId, projectId: nil)
+    }
+
+    private func updateChatProject(chatId: String, projectId: String?) async {
+        guard hasChatAccess else { return }
+
+        let wasCurrent = currentChat?.id == chatId
+        guard var chat = chatForProjectMove(chatId) else { return }
+        let wasLocal = chat.isLocalOnly
+        let oldProjectId = chat.projectId
+
+        chat.projectId = projectId
+        chat.isLocalOnly = false
+        chat.locallyModified = true
+        chat.updatedAt = Date()
+
+        if wasLocal {
+            localChats.removeAll { $0.id == chatId }
+            chats.insert(chat, at: min(1, chats.count))
+            if let userId = currentUserId {
+                try? await EncryptedFileStorage.local.deleteChat(chatId: chatId, userId: userId)
+            }
+        } else {
+            replaceChat(chat)
+        }
+
+        if wasCurrent {
+            currentChat = chat
+        }
+
+        saveChat(chat)
+
+        do {
+            try await cloudSync.updateChatProject(chatId, projectId: projectId)
+            await cloudSync.backupChat(chatId, ensureLatestUpload: true)
+            if let projectId {
+                await loadProjectChatsIntoMemory(projectId: projectId)
+            }
+        } catch {
+            projectError = error.localizedDescription
+            chat.projectId = oldProjectId
+            chat.isLocalOnly = wasLocal
+            replaceChat(chat)
+            saveChat(chat)
+            return
+        }
+
+        if wasCurrent, activeProject?.id != projectId {
+            createNewChat(isLocalOnly: false, projectId: activeProject?.id)
+        }
+    }
+
+    private func chatForProjectMove(_ chatId: String) -> Chat? {
+        if let location = findChatLocation(chatId) {
+            return chat(at: location)
+        }
+        return nil
+    }
+
+    private func loadProjectChatsIntoMemory(projectId: String) async {
+        let projectChats = await loadProjectChatsFromStorage(projectId: projectId)
+        for projectChat in projectChats {
+            if let index = chats.firstIndex(where: { $0.id == projectChat.id }) {
+                chats[index] = projectChat
+            } else {
+                chats.append(projectChat)
+            }
+        }
+        chats.sort { $0.createdAt > $1.createdAt }
+    }
+
+    private func loadProjectChatsFromStorage(projectId: String) async -> [Chat] {
+        guard let userId = currentUserId else { return [] }
+        let index = await Chat.loadChatIndex(userId: userId)
+        let ids = index
+            .filter {
+                $0.projectId == projectId &&
+                ($0.messageCount > 0 || $0.decryptionFailed || $0.titleState != .placeholder)
+            }
+            .sorted { $0.createdAt > $1.createdAt }
+            .map(\.id)
+        return await Chat.loadChats(chatIds: ids, userId: userId)
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private static func generateProjectName() -> String {
+        let adjectives = ["Private", "Secret", "Encrypted", "Anonymous", "Stealth", "Incognito", "Covert", "Hidden"]
+        let animals = ["Orangutan", "Penguin", "Platypus", "Armadillo", "Chameleon", "Pangolin", "Narwhal", "Capybara"]
+        return "\(adjectives.randomElement() ?? "Private") \(animals.randomElement() ?? "Project")"
     }
 
     /// Toggles temporary (incognito) chat mode. When enabled, the current chat
@@ -1345,6 +1620,11 @@ class ChatViewModel: ObservableObject {
                 
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{CURRENT_DATETIME}", with: currentDateTime)
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{TIMEZONE}", with: timezone)
+                systemPrompt = ProjectContextBuilder.applyProjectContext(
+                    to: systemPrompt,
+                    project: self.activeProject,
+                    documents: self.projectDocuments
+                )
                 
                 // Process rules with same replacements
                 var processedRules = AppConfig.shared.rules
