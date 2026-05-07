@@ -831,7 +831,7 @@ class ChatViewModel: ObservableObject {
                 await loadProjectChatsIntoMemory(projectId: projectId)
             }
 
-            createNewChat(isLocalOnly: false, projectId: projectId)
+            createNewChat(isLocalOnly: false, projectId: projectId, focusInput: false)
         } catch {
             projectError = error.localizedDescription
         }
@@ -842,7 +842,7 @@ class ChatViewModel: ObservableObject {
         activeProject = nil
         projectDocuments = []
         projectError = nil
-        createNewChat(isLocalOnly: false)
+        createNewChat(isLocalOnly: false, focusInput: false)
     }
 
     func updateActiveProject(name: String? = nil, description: String? = nil, systemInstructions: String? = nil, memory: [MemoryFact]? = nil) async {
