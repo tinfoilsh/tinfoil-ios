@@ -199,6 +199,7 @@ class CloudSyncService: ObservableObject {
         // Set token getter for both R2 storage and ProfileSync
         cloudStorage.setTokenGetter(tokenGetter)
         ProfileSyncService.shared.setTokenGetter(tokenGetter)
+        ProjectStorageService.shared.setTokenGetter(tokenGetter)
         
     }
     
@@ -478,6 +479,9 @@ class CloudSyncService: ObservableObject {
 
             var decryptedChat = decryptionResult.value
             decryptedChat.formatVersion = formatVersion
+            if let remoteProjectId = remoteChat.projectId {
+                decryptedChat.projectId = remoteProjectId
+            }
 
             // Prefer blob's createdAt (matches React's `decrypted.createdAt ?? remote.createdAt`).
             // StoredChat decoder falls back to Date() on parse failure — detect that
@@ -516,9 +520,12 @@ class CloudSyncService: ObservableObject {
     
     /// Download a remote chat by ID, apply metadata dates, and save locally.
     /// Returns `true` if the chat was downloaded and saved, `false` on failure.
-    private func downloadAndSaveRemoteChat(_ remoteChat: RemoteChat) async throws {
+    private func downloadAndSaveRemoteChat(_ remoteChat: RemoteChat, projectId: String? = nil) async throws {
         guard var downloadedChat = try await cloudStorage.downloadChat(remoteChat.id) else {
             return
+        }
+        if let projectId = projectId ?? remoteChat.projectId {
+            downloadedChat.projectId = projectId
         }
 
         // If decryption failed, don't overwrite a valid local copy.
@@ -974,6 +981,323 @@ class CloudSyncService: ObservableObject {
         return result
     }
 
+    func smartSync(projectId: String?) async -> SyncResult {
+        guard let projectId else {
+            return await smartSync()
+        }
+        return await smartSyncProjectChats(projectId)
+    }
+
+    func updateChatProject(_ chatId: String, projectId: String?) async throws {
+        guard canWriteToCloud() else { return }
+        try await cloudStorage.updateChatProject(chatId: chatId, projectId: projectId)
+    }
+
+    func syncProjectChats(_ projectId: String) async -> SyncResult {
+        guard !isSyncing else {
+            return SyncResult()
+        }
+
+        guard await cloudStorage.isAuthenticated() else {
+            return SyncResult()
+        }
+
+        isSyncing = true
+        syncStatus = "Syncing project..."
+        defer {
+            isSyncing = false
+            syncStatus = ""
+            lastSyncDate = Date()
+        }
+
+        let result = await doSyncProjectChats(projectId)
+        syncErrors = result.errors
+        return result
+    }
+
+    private func smartSyncProjectChats(_ projectId: String) async -> SyncResult {
+        guard !isSyncing else {
+            return SyncResult()
+        }
+
+        guard await cloudStorage.isAuthenticated() else {
+            return SyncResult()
+        }
+
+        let unsyncedChats = await getUnsyncedChats()
+        let localProjectChanges = unsyncedChats.contains {
+            $0.projectId == projectId && !$0.isBlankChat && !$0.messages.isEmpty
+        }
+
+        do {
+            let remoteStatus = try await cloudStorage.getProjectChatsSyncStatus(projectId: projectId)
+            let cachedStatus = getCachedProjectChatSyncStatus(projectId)
+
+            if !localProjectChanges,
+               let cachedStatus,
+               remoteStatus.count == cachedStatus.count,
+               remoteStatus.lastUpdated == cachedStatus.lastUpdated {
+                return SyncResult()
+            }
+
+            isSyncing = true
+            syncStatus = "Syncing project..."
+            defer {
+                isSyncing = false
+                syncStatus = ""
+                lastSyncDate = Date()
+            }
+
+            if !localProjectChanges,
+               let cachedLastUpdated = cachedStatus?.lastUpdated,
+               remoteStatus.count == cachedStatus?.count {
+                let result = await syncProjectChatsChanged(projectId, since: cachedLastUpdated)
+                if result.errors.isEmpty {
+                    saveProjectChatSyncStatus(projectId, remoteStatus)
+                    return result
+                }
+            }
+
+            let result = await doSyncProjectChats(projectId)
+            syncErrors = result.errors
+            return result
+        } catch {
+            return await syncProjectChats(projectId)
+        }
+    }
+
+    private func doSyncProjectChats(_ projectId: String) async -> SyncResult {
+        var result = SyncResult()
+
+        let backupResult = await backupUnsyncedProjectChats(projectId)
+        result = SyncResult(
+            uploaded: backupResult.uploaded,
+            downloaded: 0,
+            deleted: 0,
+            errors: backupResult.errors
+        )
+
+        do {
+            _ = try? await encryptionService.initialize()
+
+            let localChats = await getAllChatsFromStorage()
+            let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
+            var continuationToken: String? = nil
+
+            repeat {
+                let remoteList = try await cloudStorage.listProjectChats(
+                    projectId: projectId,
+                    includeContent: true,
+                    continuationToken: continuationToken
+                )
+
+                for remoteChat in remoteList.chats {
+                    if deletedChatsTracker.isDeleted(remoteChat.id) {
+                        continue
+                    }
+
+                    if !(await shouldProcessRemoteChat(remoteChat)) {
+                        continue
+                    }
+
+                    if let localChat = localChatMap[remoteChat.id],
+                       localChat.locallyModified || localChat.hasActiveStream || streamingTracker.isStreaming(localChat.id) {
+                        continue
+                    }
+
+                    if let content = remoteChat.content {
+                        if var decrypted = await decryptRemoteChat(remoteChat, content: content) {
+                            decrypted.chat.projectId = projectId
+                            await saveChatToStorage(decrypted.chat)
+                            await markChatAsSynced(decrypted.chat.id, version: decrypted.chat.syncVersion)
+                            result = SyncResult(
+                                uploaded: result.uploaded,
+                                downloaded: result.downloaded + 1,
+                                deleted: result.deleted,
+                                errors: result.errors
+                            )
+                        } else {
+                            let localChat = localChatMap[remoteChat.id]
+                            let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
+                            if !hasValidLocal {
+                                var placeholder = createEncryptedPlaceholder(
+                                    remoteChat: remoteChat,
+                                    encryptedContent: content
+                                )
+                                placeholder.projectId = projectId
+                                await saveChatToStorage(placeholder)
+                                result = SyncResult(
+                                    uploaded: result.uploaded,
+                                    downloaded: result.downloaded + 1,
+                                    deleted: result.deleted,
+                                    errors: result.errors
+                                )
+                            }
+                        }
+                    } else {
+                        try await downloadAndSaveRemoteChat(remoteChat, projectId: projectId)
+                        result = SyncResult(
+                            uploaded: result.uploaded,
+                            downloaded: result.downloaded + 1,
+                            deleted: result.deleted,
+                            errors: result.errors
+                        )
+                    }
+                }
+
+                let nextToken = remoteList.nextContinuationToken?.isEmpty == false ? remoteList.nextContinuationToken : nil
+                continuationToken = remoteList.hasMore == true ? nextToken : nil
+            } while continuationToken != nil
+
+            let status = try await cloudStorage.getProjectChatsSyncStatus(projectId: projectId)
+            saveProjectChatSyncStatus(projectId, status)
+            await syncCrossScope()
+        } catch {
+            result = SyncResult(
+                uploaded: result.uploaded,
+                downloaded: result.downloaded,
+                deleted: result.deleted,
+                errors: result.errors + ["Project sync failed: \(error.localizedDescription)"]
+            )
+        }
+
+        return result
+    }
+
+    private func syncProjectChatsChanged(_ projectId: String, since: String) async -> SyncResult {
+        var result = SyncResult()
+
+        let backupResult = await backupUnsyncedProjectChats(projectId)
+        result = SyncResult(
+            uploaded: backupResult.uploaded,
+            downloaded: 0,
+            deleted: 0,
+            errors: backupResult.errors
+        )
+
+        do {
+            _ = try? await encryptionService.initialize()
+
+            let localChats = await getAllChatsFromStorage()
+            let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
+            var continuationToken: String? = nil
+
+            repeat {
+                let changed = try await cloudStorage.getProjectChatsUpdatedSince(
+                    projectId: projectId,
+                    since: since,
+                    continuationToken: continuationToken
+                )
+
+                for remoteChat in changed.chats {
+                    if deletedChatsTracker.isDeleted(remoteChat.id) {
+                        continue
+                    }
+
+                    if let localChat = localChatMap[remoteChat.id],
+                       localChat.locallyModified || localChat.hasActiveStream || streamingTracker.isStreaming(localChat.id) {
+                        continue
+                    }
+
+                    if let content = remoteChat.content {
+                        if var decrypted = await decryptRemoteChat(remoteChat, content: content) {
+                            decrypted.chat.projectId = projectId
+                            await saveChatToStorage(decrypted.chat)
+                            await markChatAsSynced(decrypted.chat.id, version: decrypted.chat.syncVersion)
+                            result = SyncResult(
+                                uploaded: result.uploaded,
+                                downloaded: result.downloaded + 1,
+                                deleted: result.deleted,
+                                errors: result.errors
+                            )
+                        } else {
+                            let localChat = localChatMap[remoteChat.id]
+                            let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
+                            if !hasValidLocal {
+                                var placeholder = createEncryptedPlaceholder(
+                                    remoteChat: remoteChat,
+                                    encryptedContent: content
+                                )
+                                placeholder.projectId = projectId
+                                await saveChatToStorage(placeholder)
+                                result = SyncResult(
+                                    uploaded: result.uploaded,
+                                    downloaded: result.downloaded + 1,
+                                    deleted: result.deleted,
+                                    errors: result.errors
+                                )
+                            }
+                        }
+                    } else {
+                        try await downloadAndSaveRemoteChat(remoteChat, projectId: projectId)
+                        result = SyncResult(
+                            uploaded: result.uploaded,
+                            downloaded: result.downloaded + 1,
+                            deleted: result.deleted,
+                            errors: result.errors
+                        )
+                    }
+                }
+
+                let nextToken = changed.nextContinuationToken?.isEmpty == false ? changed.nextContinuationToken : nil
+                continuationToken = changed.hasMore == true ? nextToken : nil
+            } while continuationToken != nil
+
+            let status = try await cloudStorage.getProjectChatsSyncStatus(projectId: projectId)
+            saveProjectChatSyncStatus(projectId, status)
+            await syncCrossScope()
+        } catch {
+            result = SyncResult(
+                uploaded: result.uploaded,
+                downloaded: result.downloaded,
+                deleted: result.deleted,
+                errors: result.errors + ["Project delta sync failed: \(error.localizedDescription)"]
+            )
+        }
+
+        return result
+    }
+
+    private func backupUnsyncedProjectChats(_ projectId: String) async -> SyncResult {
+        var result = SyncResult()
+
+        guard canWriteToCloud() else {
+            return result
+        }
+
+        let unsyncedChats = await getUnsyncedChats()
+        let unsyncedProjectChats = unsyncedChats.filter { $0.projectId == projectId }
+
+        for chat in unsyncedProjectChats {
+            guard !chat.isBlankChat,
+                  !chat.messages.isEmpty,
+                  !chat.decryptionFailed,
+                  chat.encryptedData == nil,
+                  !streamingTracker.isStreaming(chat.id) else {
+                continue
+            }
+
+            do {
+                try await uploadAndMarkSynced(chat)
+                result = SyncResult(
+                    uploaded: result.uploaded + 1,
+                    downloaded: result.downloaded,
+                    deleted: result.deleted,
+                    errors: result.errors
+                )
+            } catch {
+                result = SyncResult(
+                    uploaded: result.uploaded,
+                    downloaded: result.downloaded,
+                    deleted: result.deleted,
+                    errors: result.errors + ["Failed to backup project chat \(chat.id): \(error.localizedDescription)"]
+                )
+            }
+        }
+
+        return result
+    }
+
     /// Clear cached sync status (call on logout)
     func clearSyncStatus() {
         UserDefaults.standard.removeObject(forKey: syncStatusKey)
@@ -993,6 +1317,21 @@ class CloudSyncService: ObservableObject {
         let status = ChatSyncStatus(count: count, lastUpdated: lastUpdated)
         if let data = try? JSONEncoder().encode(status) {
             UserDefaults.standard.set(data, forKey: syncStatusKey)
+        }
+    }
+
+    private func getCachedProjectChatSyncStatus(_ projectId: String) -> ChatSyncStatus? {
+        let key = Constants.StorageKeys.Sync.projectChatStatus(projectId: projectId)
+        guard let data = UserDefaults.standard.data(forKey: key) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(ChatSyncStatus.self, from: data)
+    }
+
+    private func saveProjectChatSyncStatus(_ projectId: String, _ status: ChatSyncStatus) {
+        let key = Constants.StorageKeys.Sync.projectChatStatus(projectId: projectId)
+        if let data = try? JSONEncoder().encode(status) {
+            UserDefaults.standard.set(data, forKey: key)
         }
     }
 
