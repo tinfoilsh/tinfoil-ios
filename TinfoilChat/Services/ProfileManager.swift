@@ -133,13 +133,13 @@ class ProfileManager: ObservableObject {
             isDarkMode: isDarkMode,
             maxPromptMessages: maxPromptMessages,
             language: language,
-            nickname: nickname.isEmpty ? nil : nickname,
-            profession: profession.isEmpty ? nil : profession,
-            traits: traits.isEmpty ? nil : traits,
-            additionalContext: additionalContext.isEmpty ? nil : additionalContext,
+            nickname: nickname,
+            profession: profession,
+            traits: traits,
+            additionalContext: additionalContext,
             isUsingPersonalization: isUsingPersonalization,
             isUsingCustomPrompt: isUsingCustomPrompt,
-            customSystemPrompt: customSystemPrompt.isEmpty ? nil : customSystemPrompt,
+            customSystemPrompt: customSystemPrompt,
             version: lastSyncedVersion,  // Will be incremented by ProfileSyncService
             updatedAt: ISO8601DateFormatter().string(from: Date())
         )
@@ -158,14 +158,27 @@ class ProfileManager: ObservableObject {
         if let language = profile.language {
             self.language = language
         }
-        // For personalization fields, treat nil as cleared/empty to ensure cross-device erasure propagates
-        self.nickname = profile.nickname ?? ""
-        self.profession = profile.profession ?? ""
-        self.traits = profile.traits ?? []
-        self.additionalContext = profile.additionalContext ?? ""
-        self.isUsingPersonalization = profile.isUsingPersonalization ?? false
-        self.isUsingCustomPrompt = profile.isUsingCustomPrompt ?? false
-        self.customSystemPrompt = profile.customSystemPrompt ?? ""
+        if let nickname = profile.nickname {
+            self.nickname = nickname
+        }
+        if let profession = profile.profession {
+            self.profession = profession
+        }
+        if let traits = profile.traits {
+            self.traits = traits
+        }
+        if let additionalContext = profile.additionalContext {
+            self.additionalContext = additionalContext
+        }
+        if let isUsingPersonalization = profile.isUsingPersonalization {
+            self.isUsingPersonalization = isUsingPersonalization
+        }
+        if let isUsingCustomPrompt = profile.isUsingCustomPrompt {
+            self.isUsingCustomPrompt = isUsingCustomPrompt
+        }
+        if let customSystemPrompt = profile.customSystemPrompt {
+            self.customSystemPrompt = customSystemPrompt
+        }
         if let version = profile.version {
             self.lastSyncedVersion = version
         }
