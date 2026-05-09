@@ -45,6 +45,7 @@ private actor UploadCoalescer {
         var workerRunning: Bool = false
         var failureCount: Int = 0
         var waiters: [CheckedContinuation<Void, Never>] = []
+        var throwingWaiters: [CheckedContinuation<Void, Error>] = []
     }
 
     private var states: [String: ChatUploadState] = [:]
@@ -74,11 +75,25 @@ private actor UploadCoalescer {
         }
     }
 
+    func enqueueAndWait(_ chatId: String) async throws {
+        enqueue(chatId)
+
+        guard let state = states[chatId], state.workerRunning || state.dirty else {
+            return
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            states[chatId]?.throwingWaiters.append(continuation)
+        }
+    }
+
     private func runWorker(_ chatId: String) async {
+        var terminalError: Error?
+
         while states[chatId]?.dirty == true {
             states[chatId]?.dirty = false
 
-            await uploadWithRetry(chatId)
+            terminalError = await uploadWithRetry(chatId)
         }
 
         // Notify waiters and clean up in a single access
@@ -87,22 +102,35 @@ private actor UploadCoalescer {
             waiter.resume()
         }
 
+        let throwingWaiters = states[chatId]?.throwingWaiters ?? []
+        for waiter in throwingWaiters {
+            if let terminalError {
+                waiter.resume(throwing: terminalError)
+            } else {
+                waiter.resume()
+            }
+        }
+
         let failureCount = states[chatId]?.failureCount ?? 0
         if failureCount == 0 {
             states.removeValue(forKey: chatId)
         } else {
             states[chatId]?.workerRunning = false
             states[chatId]?.waiters = []
+            states[chatId]?.throwingWaiters = []
         }
     }
 
-    private func uploadWithRetry(_ chatId: String) async {
+    private func uploadWithRetry(_ chatId: String) async -> Error? {
+        var lastError: Error?
+
         for attempt in 0...Constants.Sync.uploadMaxRetries {
             do {
                 try await uploadFn(chatId)
                 states[chatId]?.failureCount = 0
-                return
+                return nil
             } catch {
+                lastError = error
                 let currentCount = states[chatId]?.failureCount ?? 0
                 states[chatId]?.failureCount = currentCount + 1
 
@@ -119,10 +147,12 @@ private actor UploadCoalescer {
                 // If dirty was set during backoff, return early to upload fresh data
                 let isDirty = states[chatId]?.dirty ?? false
                 if isDirty {
-                    return
+                    return nil
                 }
             }
         }
+
+        return lastError
     }
 }
 
@@ -305,7 +335,7 @@ class CloudSyncService: ObservableObject {
             }
 
             do {
-                try await uploadAndMarkSynced(chat)
+                try await uploadCoalescer.enqueueAndWait(chat.id)
                 result = SyncResult(
                     uploaded: result.uploaded + 1,
                     downloaded: result.downloaded,
@@ -1278,7 +1308,7 @@ class CloudSyncService: ObservableObject {
             }
 
             do {
-                try await uploadAndMarkSynced(chat)
+                try await uploadCoalescer.enqueueAndWait(chat.id)
                 result = SyncResult(
                     uploaded: result.uploaded + 1,
                     downloaded: result.downloaded,
@@ -1515,6 +1545,8 @@ class CloudSyncService: ObservableObject {
     /// Upload a chat to cloud and mark it as synced with an incremented version.
     /// Encapsulates the two-step "upload current version, increment after success" protocol.
     private func uploadAndMarkSynced(_ chat: Chat) async throws {
+        guard !streamingTracker.isStreaming(chat.id) else { return }
+
         let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion)
         try await cloudStorage.uploadChat(storedChat)
         await markChatAsSynced(chat.id, version: chat.syncVersion + 1)
@@ -1714,7 +1746,7 @@ class CloudSyncService: ObservableObject {
                 
                 // Save locally then upload (will be encrypted with new key)
                 await saveChatToStorage(StoredChat(from: chatToReencrypt))
-                try await uploadAndMarkSynced(chatToReencrypt)
+                try await uploadCoalescer.enqueueAndWait(chatToReencrypt.id)
                 
                 result.uploaded += 1
                 result.reencrypted += 1
