@@ -51,6 +51,7 @@ class ProfileManager: ObservableObject {
     // Keychain keys
     private let keychainKey = "userProfile"
     private let keychainService = "com.tinfoil.chat.profile"
+    private let profileDirtyKey = "com.tinfoil.chat.profile.dirty"
     
     private init() {
         loadFromKeychain()
@@ -79,13 +80,41 @@ class ProfileManager: ObservableObject {
             lastSyncedVersion = version
         }
         // Treat the loaded profile as the last synced baseline
-        lastSyncedProfile = profile
+        if !hasPendingLocalProfileChanges {
+            lastSyncedProfile = profile
+        }
     }
     
     /// Save profile to Keychain
     private func saveToKeychain() {
         let profile = createProfileData()
-        
+
+        persistProfileToKeychain(profile)
+
+        // For user-initiated changes, schedule a debounced cloud sync
+        if !isApplyingProfile {
+            markLocalProfileChanged()
+            if !isSyncing {
+                debounceCloudSync()
+            } else {
+                // If a sync is running, we'll re-check after it finishes
+            }
+        }
+    }
+
+    private var hasPendingLocalProfileChanges: Bool {
+        UserDefaults.standard.bool(forKey: profileDirtyKey)
+    }
+
+    private func markLocalProfileChanged() {
+        UserDefaults.standard.set(true, forKey: profileDirtyKey)
+    }
+
+    private func clearLocalProfileChanged() {
+        UserDefaults.standard.removeObject(forKey: profileDirtyKey)
+    }
+
+    private func persistProfileToKeychain(_ profile: ProfileData) {
         guard let data = try? JSONEncoder().encode(profile) else {
             return
         }
@@ -95,15 +124,6 @@ class ProfileManager: ObservableObject {
         let service = keychainService
         keychainQueue.async {
             helper.save(data, for: key, service: service)
-        }
-
-        // For user-initiated changes, schedule a debounced cloud sync
-        if !isApplyingProfile {
-            if !isSyncing {
-                debounceCloudSync()
-            } else {
-                // If a sync is running, we'll re-check after it finishes
-            }
         }
     }
     
@@ -288,6 +308,10 @@ class ProfileManager: ObservableObject {
             return
         }
 
+        guard !hasPendingLocalProfileChanges else {
+            return
+        }
+
         // Prevent overlapping pulls
         guard !isPulling else { return }
         isPulling = true
@@ -302,18 +326,11 @@ class ProfileManager: ObservableObject {
                     applyProfile(cloudProfile)
                     
                     // Save to keychain without triggering local change observers
-                    let data = try? JSONEncoder().encode(cloudProfile)
-                    if let data = data {
-                        let helper = self.keychainHelper
-                        let key = self.keychainKey
-                        let service = self.keychainService
-                        self.keychainQueue.async {
-                            helper.save(data, for: key, service: service)
-                        }
-                    }
+                    persistProfileToKeychain(cloudProfile)
                     
                     lastSyncedVersion = cloudVersion
                     lastSyncedProfile = cloudProfile
+                    clearLocalProfileChanged()
                     lastSyncDate = Date()
                     syncError = nil
                 }
@@ -371,7 +388,11 @@ class ProfileManager: ObservableObject {
                     // Fallback: ensure we at least bump our local version
                     lastSyncedVersion = (profile.version ?? lastSyncedVersion) + 1
                 }
-                lastSyncedProfile = profile
+                var syncedProfile = profile
+                syncedProfile.version = lastSyncedVersion
+                lastSyncedProfile = syncedProfile
+                persistProfileToKeychain(syncedProfile)
+                clearLocalProfileChanged()
                 lastSyncDate = Date()
                 syncError = nil
                 
@@ -404,11 +425,12 @@ class ProfileManager: ObservableObject {
         do {
             if let decryptedProfile = try await profileSync.retryDecryptionWithNewKey() {
                 applyProfile(decryptedProfile)
-                saveToKeychain()
+                persistProfileToKeychain(decryptedProfile)
                 if let version = decryptedProfile.version {
                     lastSyncedVersion = version
                 }
                 lastSyncedProfile = decryptedProfile
+                clearLocalProfileChanged()
                 syncError = nil
             }
         } catch {
@@ -512,6 +534,7 @@ class ProfileManager: ObservableObject {
         lastSyncedVersion = 0
         lastSyncedProfile = nil
         syncError = nil
+        clearLocalProfileChanged()
         
         // Clear cloud cache
         profileSync.clearCache()
