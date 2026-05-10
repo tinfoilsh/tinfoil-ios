@@ -14,21 +14,23 @@ enum ProjectContextBuilder {
     }
 
     static func build(project: Project, documents: [ProjectDocument]) -> String {
-        var context = "## Project: \(project.name)\n"
+        var context = "## Project: \(neutralizeSentinels(project.name))\n"
 
         if !project.description.isEmpty {
-            context += "\n\(project.description)\n"
+            context += "\n\(neutralizeSentinels(project.description))\n"
         }
 
         if !project.systemInstructions.isEmpty {
-            context += "\n### Instructions\n\(project.systemInstructions)\n"
+            context += "\n### Instructions\n\(neutralizeSentinels(project.systemInstructions))\n"
         }
 
         let documentsWithContent = documents.filter { ($0.content?.isEmpty == false) }
         if !documentsWithContent.isEmpty {
             context += "\n### Documents\n"
             for document in documentsWithContent {
-                context += "--- \(document.filename) ---\n\(document.content ?? "")\n\n"
+                let safeFilename = neutralizeSentinels(document.filename)
+                let safeContent = neutralizeSentinels(document.content ?? "")
+                context += "--- \(safeFilename) ---\n\(safeContent)\n\n"
             }
         }
 
@@ -42,5 +44,11 @@ enum ProjectContextBuilder {
         guard !projectContext.isEmpty else { return baseSystemPrompt }
 
         return "\(baseSystemPrompt)\n\n<project_context>\n\(projectContext)\n</project_context>"
+    }
+
+    private static func neutralizeSentinels(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "<project_context>", with: "<project_context\u{200B}>")
+            .replacingOccurrences(of: "</project_context>", with: "</project_context\u{200B}>")
     }
 }
