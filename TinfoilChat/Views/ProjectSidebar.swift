@@ -67,6 +67,7 @@ struct ProjectSidebar: View {
         .frame(width: 300)
         .background(Color.settingsBackground(for: colorScheme))
         .ignoresSafeArea(edges: .bottom)
+        .ignoresSafeArea(.keyboard)
         .onAppear(perform: syncEditingState)
         .onChange(of: project?.id) { _, _ in syncEditingState() }
         .onChange(of: project?.name) { _, _ in syncEditingState() }
