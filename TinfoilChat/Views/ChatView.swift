@@ -232,9 +232,13 @@ struct ChatContainer: View {
         .applyTransparentToolbarIfAvailable()
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                if isInProjectChat && !isSidebarOpen {
+                if viewModel.activeProject != nil && !isSidebarOpen {
                     Button {
-                        viewModel.returnToProjectLanding()
+                        if isInProjectChat {
+                            viewModel.returnToProjectLanding()
+                        } else {
+                            viewModel.exitProject()
+                        }
                     } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 18, weight: .semibold))
