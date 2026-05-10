@@ -159,15 +159,15 @@ struct ChatSidebar: View {
                     .progressViewStyle(CircularProgressViewStyle())
                 Spacer()
             } else if isChatsExpanded {
-                chatsDescription
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-
                 if authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled {
                     cloudLocalTabSwitcher
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
                 }
+
+                chatsDescription
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
 
             ScrollView {
                 LazyVStack(spacing: 12) {
@@ -406,21 +406,19 @@ struct ChatSidebar: View {
 
     @ViewBuilder
     private var chatsDescription: some View {
-        Group {
-            if !authManager.isAuthenticated {
-                Text("Log in to save chat history.")
-            } else if !settings.isCloudSyncEnabled {
-                Text("Chats are only stored locally on this device.")
-            } else if activeTab == .local {
-                Text("Local chats are stored only on this device and won't sync across devices.")
-            } else {
-                Text("Your chats are encrypted and synced to the cloud. The encryption key is only stored on this device and never sent to Tinfoil.")
+        if authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled {
+            Group {
+                if activeTab == .local {
+                    Text("Local chats are stored only on this device and won't sync across devices.")
+                } else {
+                    Text("Your chats are encrypted and synced to the cloud. The encryption key is only stored on this device and never sent to Tinfoil.")
+                }
             }
+            .font(.caption)
+            .foregroundColor(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .font(.caption)
-        .foregroundColor(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var chatsSectionHeader: some View {
