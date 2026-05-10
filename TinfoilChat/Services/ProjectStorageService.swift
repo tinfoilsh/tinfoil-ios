@@ -202,8 +202,8 @@ final class ProjectStorageService: ObservableObject {
         repeat {
             let response = try await listProjects(
                 limit: limit,
-                includeContent: true,
-                continuationToken: continuationToken
+                continuationToken: continuationToken,
+                includeContent: true
             )
             allItems.append(contentsOf: response.projects)
             let nextToken = response.nextContinuationToken?.isEmpty == false ? response.nextContinuationToken : nil
