@@ -298,14 +298,16 @@ struct ChatContainer: View {
                 .animation(.easeInOut(duration: 0.2), value: isSidebarOpen)
                 .animation(.easeInOut(duration: 0.35), value: isVerificationBadgeExpanded)
             }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                VerificationStatusIndicator(viewModel: viewModel, isBadgeExpanded: $isVerificationBadgeExpanded)
+            if viewModel.activeProject == nil {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    VerificationStatusIndicator(viewModel: viewModel, isBadgeExpanded: $isVerificationBadgeExpanded)
+                }
             }
             // Temporary (incognito) chat toggle. Only shown when no chat is in
             // progress (i.e. when the new-chat "+" button is hidden). Once a
             // chat has started, the temporary state is indicated by a label
             // in the navbar's principal slot instead.
-            if authManager.isAuthenticated && (viewModel.currentChat?.isBlankChat ?? true) {
+            if authManager.isAuthenticated && viewModel.activeProject == nil && (viewModel.currentChat?.isBlankChat ?? true) {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: toggleTemporaryMode) {
                         GhostIcon(
@@ -318,7 +320,7 @@ struct ChatContainer: View {
                 }
             }
             // Only show new chat button when chat has messages (not a new/blank chat)
-            if authManager.isAuthenticated && !(viewModel.currentChat?.isBlankChat ?? true) {
+            if authManager.isAuthenticated && viewModel.activeProject == nil && !(viewModel.currentChat?.isBlankChat ?? true) {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: createNewChat) {
                         Image(systemName: "plus")

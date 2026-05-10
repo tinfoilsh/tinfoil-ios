@@ -22,8 +22,7 @@ struct ProjectPage: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
+        Form {
                 if let project {
                     Section {
                         HStack(spacing: 12) {
@@ -104,12 +103,8 @@ struct ProjectPage: View {
                 }
                 .listRowBackground(Color.cardSurface(for: colorScheme))
             }
-            .scrollContentBackground(.hidden)
-            .background(Color.settingsBackground(for: colorScheme))
-            .navigationTitle(project?.name ?? "Project")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar(.hidden, for: .navigationBar)
-        }
+        .scrollContentBackground(.hidden)
+        .background(Color.settingsBackground(for: colorScheme))
         .onAppear { syncEditingName() }
         .onChange(of: project?.id) { _, _ in syncEditingName() }
         .onChange(of: project?.name) { _, _ in
