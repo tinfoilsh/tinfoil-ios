@@ -167,6 +167,7 @@ struct ChatSidebar: View {
                         .foregroundColor(.secondary)
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 16)
@@ -363,7 +364,7 @@ struct ChatSidebar: View {
     }
 
     private var projectsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isProjectsExpanded.toggle()
@@ -398,9 +399,10 @@ struct ChatSidebar: View {
                     Label("New project", systemImage: "folder.badge.plus")
                         .font(.subheadline)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 14)
                         .background(Color(UIColor.secondarySystemBackground).opacity(0.3))
-                        .cornerRadius(8)
+                        .cornerRadius(10)
                 }
                 .buttonStyle(.plain)
 
@@ -413,7 +415,7 @@ struct ChatSidebar: View {
                             }
                         }
                     } label: {
-                        HStack {
+                        HStack(spacing: 12) {
                             Image(systemName: project.decryptionFailed == true ? "lock.fill" : "folder")
                                 .foregroundColor(project.decryptionFailed == true ? .orange : .accentColor)
                             Text(project.name)
@@ -421,9 +423,11 @@ struct ChatSidebar: View {
                             Spacer()
                         }
                         .font(.subheadline)
-                        .padding(10)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 14)
                         .background(Color(UIColor.secondarySystemBackground).opacity(0.3))
-                        .cornerRadius(8)
+                        .cornerRadius(10)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .disabled(project.decryptionFailed == true)
