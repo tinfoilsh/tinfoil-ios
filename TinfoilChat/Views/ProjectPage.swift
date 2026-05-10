@@ -14,6 +14,8 @@ struct ProjectPage: View {
 
     @State private var deletingChatId: String?
     @State private var showDeleteChatAlert = false
+    @State private var editingName: String = ""
+    @FocusState private var isNameFieldFocused: Bool
 
     private var project: Project? {
         viewModel.activeProject
@@ -29,9 +31,15 @@ struct ProjectPage: View {
                                 .font(.title3)
                                 .foregroundColor(.accentColor)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(project.name)
+                                TextField("Project name", text: $editingName)
                                     .font(.headline)
-                                    .lineLimit(1)
+                                    .textFieldStyle(.plain)
+                                    .submitLabel(.done)
+                                    .focused($isNameFieldFocused)
+                                    .onSubmit { commitName() }
+                                    .onChange(of: isNameFieldFocused) { _, focused in
+                                        if !focused { commitName() }
+                                    }
                                 if !project.description.isEmpty {
                                     Text(project.description)
                                         .font(.subheadline)
@@ -102,6 +110,11 @@ struct ProjectPage: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
         }
+        .onAppear { syncEditingName() }
+        .onChange(of: project?.id) { _, _ in syncEditingName() }
+        .onChange(of: project?.name) { _, _ in
+            if !isNameFieldFocused { syncEditingName() }
+        }
         .alert("Delete Chat", isPresented: $showDeleteChatAlert) {
             Button("Cancel", role: .cancel) {
                 deletingChatId = nil
@@ -112,6 +125,22 @@ struct ProjectPage: View {
                 }
                 deletingChatId = nil
             }
+        }
+    }
+
+    private func syncEditingName() {
+        editingName = project?.name ?? ""
+    }
+
+    private func commitName() {
+        guard let project else { return }
+        let trimmed = editingName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != project.name else {
+            editingName = project.name
+            return
+        }
+        Task {
+            await viewModel.updateActiveProject(name: trimmed)
         }
     }
 
@@ -196,7 +225,6 @@ struct ProjectDetailsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
 
-    @State private var editingName = ""
     @State private var editingDescription = ""
     @State private var editingInstructions = ""
     @State private var editingMemory = ""
@@ -209,13 +237,6 @@ struct ProjectDetailsView: View {
 
     var body: some View {
         Form {
-            Section("Name") {
-                TextField("Project name", text: $editingName)
-                    .submitLabel(.done)
-                    .onChange(of: editingName) { _, _ in hasPendingChanges = true }
-            }
-            .listRowBackground(Color.cardSurface(for: colorScheme))
-
             Section("Description") {
                 TextField("What is this project about?", text: $editingDescription, axis: .vertical)
                     .lineLimit(3...8)
@@ -269,7 +290,6 @@ struct ProjectDetailsView: View {
             isSaving = true
             viewModel.projectError = nil
             await viewModel.updateActiveProject(
-                name: editingName.trimmingCharacters(in: .whitespacesAndNewlines),
                 description: editingDescription,
                 systemInstructions: editingInstructions,
                 memory: memoryFactsFromEditor()
@@ -283,7 +303,6 @@ struct ProjectDetailsView: View {
 
     private func syncEditingState() {
         guard let project else { return }
-        editingName = project.name
         editingDescription = project.description
         editingInstructions = project.systemInstructions
         editingMemory = project.memory.map(\.fact).joined(separator: "\n")
