@@ -141,194 +141,192 @@ struct ChatSidebar: View {
     
     private var sidebarContent: some View {
         VStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if authManager.isAuthenticated && settings.isCloudSyncEnabled {
+                        projectsSection
+                            .padding(.horizontal, 16)
+                            .padding(.top, 16)
+                    }
 
-            if authManager.isAuthenticated && settings.isCloudSyncEnabled {
-                projectsSection
-                    .padding(.horizontal, 16)
-                    .padding(.top, 16)
-            }
-
-            chatsSectionHeader
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-
-            // Chat List - shows multiple chats for all authenticated users
-            if isTabSwitching {
-                Spacer()
-                ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle())
-                Spacer()
-            } else if isChatsExpanded {
-                if authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled {
-                    cloudLocalTabSwitcher
+                    chatsSectionHeader
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
-                }
 
-                chatsDescription
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(Array(filteredChats.enumerated()), id: \.element.id) { index, chat in
-                        ChatListItem(
-                            chat: chat,
-                            isSelected: viewModel.currentChat?.id == chat.id,
-                            isEditing: editingChatId == chat.id,
-                            editingTitle: $editingTitle,
-                            timeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
-                            onSelect: {
-                                if chat.decryptionFailed {
-                                    // Show alert for encrypted chats
-                                    selectedEncryptedChat = chat
-                                    showEncryptedChatAlert = true
-                                } else {
-                                    viewModel.selectChat(chat)
-                                }
-                            },
-                            onEdit: { 
-                                if editingChatId == chat.id {
-                                    // Save the edit
-                                    viewModel.updateChatTitle(chat.id, newTitle: editingTitle)
-                                    editingChatId = nil
-                                } else {
-                                    // Start editing
-                                    startEditing(chat)
-                                }
-                            },
-                            onDelete: { confirmDelete(chat) },
-                            showEditDelete: authManager.isAuthenticated
-                        )
-                        .contextMenu {
-                            if authManager.isAuthenticated && !chat.isBlankChat && !chat.decryptionFailed {
-                                ForEach(viewModel.projects.filter { $0.decryptionFailed != true }) { project in
-                                    Button {
-                                        Task {
-                                            await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
-                                        }
-                                    } label: {
-                                        Label("Add to \(project.name)", systemImage: "folder")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Load More button or loading indicator (cloud tab only — local chats are never paginated)
-                    if viewModel.hasMoreChats && activeTab != .local {
-                        if viewModel.isLoadingMore {
-                            HStack {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle())
-                                    .scaleEffect(0.8)
-                                Text("Loading...")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
+                    if isTabSwitching {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle())
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                        } else {
-                            Group {
-                                if #available(iOS 26, *) {
-                                    Button(action: {
-                                        Task {
-                                            await viewModel.loadMoreChats()
-                                        }
-                                    }) {
-                                        Text("Load More")
-                                            .font(.system(size: 16, weight: .regular))
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 12)
-                                    }
-                                    .buttonStyle(.glass)
-                                    .clipShape(RoundedRectangle(cornerRadius: 20))
-                                } else {
-                                    Button(action: {
-                                        Task {
-                                            await viewModel.loadMoreChats()
-                                        }
-                                    }) {
-                                        Text("Load More")
-                                            .foregroundColor(.primary)
-                                            .font(.system(size: 16, weight: .regular))
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 12)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 20)
-                                                    .fill(Color(UIColor.secondarySystemBackground).opacity(0.3))
-                                            )
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 20)
-                                                    .strokeBorder(Color.gray.opacity(0.1), lineWidth: 1)
-                                            )
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                }
-                            }
+                            .padding(.vertical, 24)
+                    } else if isChatsExpanded {
+                        if authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled {
+                            cloudLocalTabSwitcher
+                                .padding(.horizontal, 16)
+                                .padding(.top, 8)
                         }
+
+                        chatsDescription
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+
+                        chatList
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                            .padding(.bottom, 8)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 8)
             }
             .applyAlwaysBounceIfAvailable()
             .refreshable {
-                // Ensure auth state is up-to-date, then attempt a full sync.
                 await authManager.initializeAuthState()
                 await viewModel.performFullSync()
             }
             .frame(maxHeight: .infinity)
-            } else {
-                Spacer()
-            } // end tab switching else
 
             Divider()
                 .background(Color.gray.opacity(0.3))
 
-            // Settings Button
-            Group {
-                if #available(iOS 26, *) {
-                    Button(action: {
-                        viewModel.showSidebarSettings = true
-                    }) {
-                        HStack {
-                            Image(systemName: "gear")
-                            Text("Settings")
+            settingsButton
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
+                .safeAreaPadding(.bottom)
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private var chatList: some View {
+        VStack(spacing: 12) {
+            ForEach(Array(filteredChats.enumerated()), id: \.element.id) { _, chat in
+                ChatListItem(
+                    chat: chat,
+                    isSelected: viewModel.currentChat?.id == chat.id,
+                    isEditing: editingChatId == chat.id,
+                    editingTitle: $editingTitle,
+                    timeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
+                    onSelect: {
+                        if chat.decryptionFailed {
+                            selectedEncryptedChat = chat
+                            showEncryptedChatAlert = true
+                        } else {
+                            viewModel.selectChat(chat)
                         }
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 16)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    }
-                    .buttonStyle(.glass)
-                } else {
-                    Button(action: {
-                        viewModel.showSidebarSettings = true
-                    }) {
-                        HStack {
-                            Image(systemName: "gear")
-                            Text("Settings")
+                    },
+                    onEdit: {
+                        if editingChatId == chat.id {
+                            viewModel.updateChatTitle(chat.id, newTitle: editingTitle)
+                            editingChatId = nil
+                        } else {
+                            startEditing(chat)
                         }
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 16)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .background(Color.sidebarButtonBackground(for: colorScheme))
-                        .foregroundColor(colorScheme == .dark ? .white : .black)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .strokeBorder(colorScheme == .dark ? Color.clear : Color.gray.opacity(0.2), lineWidth: 1)
-                        )
-                        .cornerRadius(8)
+                    },
+                    onDelete: { confirmDelete(chat) },
+                    showEditDelete: authManager.isAuthenticated
+                )
+                .contextMenu {
+                    if authManager.isAuthenticated && !chat.isBlankChat && !chat.decryptionFailed {
+                        ForEach(viewModel.projects.filter { $0.decryptionFailed != true }) { project in
+                            Button {
+                                Task {
+                                    await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
+                                }
+                            } label: {
+                                Label("Add to \(project.name)", systemImage: "folder")
+                            }
+                        }
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 8)
-            .safeAreaPadding(.bottom)
+
+            if viewModel.hasMoreChats && activeTab != .local {
+                if viewModel.isLoadingMore {
+                    HStack {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle())
+                            .scaleEffect(0.8)
+                        Text("Loading...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                } else {
+                    loadMoreButton
+                }
+            }
         }
-        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder
+    private var loadMoreButton: some View {
+        if #available(iOS 26, *) {
+            Button {
+                Task { await viewModel.loadMoreChats() }
+            } label: {
+                Text("Load More")
+                    .font(.system(size: 16, weight: .regular))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.glass)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+        } else {
+            Button {
+                Task { await viewModel.loadMoreChats() }
+            } label: {
+                Text("Load More")
+                    .foregroundColor(.primary)
+                    .font(.system(size: 16, weight: .regular))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color(UIColor.secondarySystemBackground).opacity(0.3))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .strokeBorder(Color.gray.opacity(0.1), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+    }
+
+    @ViewBuilder
+    private var settingsButton: some View {
+        if #available(iOS 26, *) {
+            Button {
+                viewModel.showSidebarSettings = true
+            } label: {
+                HStack {
+                    Image(systemName: "gear")
+                    Text("Settings")
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .buttonStyle(.glass)
+        } else {
+            Button {
+                viewModel.showSidebarSettings = true
+            } label: {
+                HStack {
+                    Image(systemName: "gear")
+                    Text("Settings")
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .background(Color.sidebarButtonBackground(for: colorScheme))
+                .foregroundColor(colorScheme == .dark ? .white : .black)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(colorScheme == .dark ? Color.clear : Color.gray.opacity(0.2), lineWidth: 1)
+                )
+                .cornerRadius(8)
+            }
+        }
     }
 
     private var projectsSection: some View {
