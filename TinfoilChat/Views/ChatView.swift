@@ -215,7 +215,7 @@ struct ChatContainer: View {
                                 .transition(.move(edge: .leading))
                         }
                         
-                        chatArea
+                        mainSurface
                             .frame(width: isSidebarOpen ? geometry.size.width - sidebarWidth : geometry.size.width)
                     }
                 }
@@ -223,7 +223,7 @@ struct ChatContainer: View {
             } else {
                 // iPhone: Overlay layout
                 ZStack {
-                    chatArea
+                    mainSurface
                     sidebarLayer
                 }
             }
@@ -232,10 +232,21 @@ struct ChatContainer: View {
         .applyTransparentToolbarIfAvailable()
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button(action: toggleSidebar) {
-                    MenuToXButton(isX: isSidebarOpen)
-                        .frame(width: 24, height: 24)
-                        .foregroundColor(toolbarContentColor)
+                if isInProjectChat && !isSidebarOpen {
+                    Button {
+                        viewModel.returnToProjectLanding()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 18, weight: .semibold))
+                            .frame(width: 24, height: 24)
+                            .foregroundColor(toolbarContentColor)
+                    }
+                } else {
+                    Button(action: toggleSidebar) {
+                        MenuToXButton(isX: isSidebarOpen)
+                            .frame(width: 24, height: 24)
+                            .foregroundColor(toolbarContentColor)
+                    }
                 }
             }
             ToolbarItem(placement: .principal) {
@@ -409,10 +420,25 @@ struct ChatContainer: View {
 
     @ViewBuilder
     private var activeSidebar: some View {
-        if viewModel.isProjectMode || viewModel.isLoadingProject {
-            ProjectSidebar(isOpen: $isSidebarOpen, viewModel: viewModel)
+        ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
+    }
+
+    private var isShowingProjectLanding: Bool {
+        viewModel.activeProject != nil && (viewModel.currentChat?.isBlankChat ?? true)
+    }
+
+    private var isInProjectChat: Bool {
+        viewModel.activeProject != nil && (viewModel.currentChat?.isBlankChat == false)
+    }
+
+    @ViewBuilder
+    private var mainSurface: some View {
+        if isShowingProjectLanding {
+            ProjectPage(viewModel: viewModel)
+                .background(Color.settingsBackground(for: colorScheme))
+                .ignoresSafeArea(edges: .top)
         } else {
-            ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
+            chatArea
         }
     }
     

@@ -400,6 +400,9 @@ struct ChatSidebar: View {
                     Button {
                         Task {
                             await viewModel.enterProject(projectId: project.id)
+                            withAnimation {
+                                isOpen = false
+                            }
                         }
                     } label: {
                         HStack {

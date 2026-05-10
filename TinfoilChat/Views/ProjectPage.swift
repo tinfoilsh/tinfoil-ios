@@ -1,19 +1,17 @@
 //
-//  ProjectSidebar.swift
+//  ProjectPage.swift
 //  TinfoilChat
 //
-//  Sidebar shown while a project is active.
+//  Full-screen project landing page shown when a project is active and no
+//  project chat is currently selected.
 //
 
 import SwiftUI
 
-struct ProjectSidebar: View {
-    @Environment(\.colorScheme) var colorScheme
-    @Binding var isOpen: Bool
+struct ProjectPage: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
 
-    @State private var editingChatId: String?
-    @State private var editingTitle = ""
     @State private var deletingChatId: String?
     @State private var showDeleteChatAlert = false
 
@@ -23,88 +21,87 @@ struct ProjectSidebar: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                exitButton
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
-
-                header
-
-                if let error = viewModel.projectError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundColor(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                }
-
-                List {
+            Form {
+                if let project {
                     Section {
-                        NavigationLink {
-                            ProjectDetailsView(viewModel: viewModel)
-                        } label: {
-                            Label("Details", systemImage: "slider.horizontal.3")
-                        }
-
-                        NavigationLink {
-                            ProjectDocumentsView(viewModel: viewModel)
-                        } label: {
-                            HStack {
-                                Label("Documents", systemImage: "doc.text")
-                                Spacer()
-                                if !viewModel.projectDocuments.isEmpty {
-                                    Text("\(viewModel.projectDocuments.count)")
+                        HStack(spacing: 12) {
+                            Image(systemName: "folder.fill")
+                                .font(.title3)
+                                .foregroundColor(.accentColor)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(project.name)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                if !project.description.isEmpty {
+                                    Text(project.description)
                                         .font(.subheadline)
                                         .foregroundColor(.secondary)
+                                        .lineLimit(3)
                                 }
                             }
                         }
-
-                        NavigationLink {
-                            ProjectSettingsView(viewModel: viewModel, isOpen: $isOpen)
-                        } label: {
-                            Label("Settings", systemImage: "gearshape")
-                        }
-                    }
-                    .listRowBackground(Color.cardSurface(for: colorScheme))
-
-                    Section {
-                        Button {
-                            viewModel.createNewChat(isLocalOnly: false, projectId: project?.id)
-                            withAnimation {
-                                isOpen = false
-                            }
-                        } label: {
-                            Label("New project chat", systemImage: "square.and.pencil")
-                        }
-
-                        if viewModel.activeProjectChats.isEmpty {
-                            Text("No project chats yet")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        } else {
-                            ForEach(viewModel.activeProjectChats) { chat in
-                                chatRow(chat)
-                            }
-                        }
-                    } header: {
-                        Text("Project chats")
+                        .padding(.vertical, 4)
                     }
                     .listRowBackground(Color.cardSurface(for: colorScheme))
                 }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
-                .background(Color.settingsBackground(for: colorScheme))
+
+                Section {
+                    NavigationLink {
+                        ProjectDetailsView(viewModel: viewModel)
+                    } label: {
+                        Label("Details", systemImage: "slider.horizontal.3")
+                    }
+
+                    NavigationLink {
+                        ProjectDocumentsView(viewModel: viewModel)
+                    } label: {
+                        HStack {
+                            Label("Documents", systemImage: "doc.text")
+                            Spacer()
+                            if !viewModel.projectDocuments.isEmpty {
+                                Text("\(viewModel.projectDocuments.count)")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    NavigationLink {
+                        ProjectSettingsView(viewModel: viewModel)
+                    } label: {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                }
+                .listRowBackground(Color.cardSurface(for: colorScheme))
+
+                Section {
+                    Button {
+                        viewModel.createNewChat(isLocalOnly: false, projectId: project?.id)
+                    } label: {
+                        Label("New project chat", systemImage: "square.and.pencil")
+                    }
+                    .disabled(project == nil)
+
+                    if viewModel.activeProjectChats.isEmpty {
+                        Text("No project chats yet")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(viewModel.activeProjectChats) { chat in
+                            chatRow(chat)
+                        }
+                    }
+                } header: {
+                    Text("Project chats")
+                }
+                .listRowBackground(Color.cardSurface(for: colorScheme))
             }
-            .frame(width: 300)
+            .scrollContentBackground(.hidden)
             .background(Color.settingsBackground(for: colorScheme))
-            .navigationBarHidden(true)
+            .navigationTitle(project?.name ?? "Project")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
         }
-        .frame(width: 300)
-        .ignoresSafeArea(edges: .bottom)
-        .ignoresSafeArea(.keyboard)
         .alert("Delete Chat", isPresented: $showDeleteChatAlert) {
             Button("Cancel", role: .cancel) {
                 deletingChatId = nil
@@ -118,55 +115,9 @@ struct ProjectSidebar: View {
         }
     }
 
-    private var exitButton: some View {
-        Button {
-            viewModel.exitProject()
-            withAnimation {
-                isOpen = false
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.left")
-                    .font(.subheadline.weight(.semibold))
-                Text("Exit Project")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                Spacer()
-            }
-            .foregroundColor(.accentColor)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Image(systemName: "folder.fill")
-                    .font(.subheadline)
-                    .foregroundColor(.accentColor)
-                Text(project?.name ?? "Project")
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
-                Spacer()
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 12)
-        .overlay(
-            Divider().background(Color.gray.opacity(0.3)),
-            alignment: .bottom
-        )
-    }
-
     private func chatRow(_ chat: Chat) -> some View {
         Button {
             viewModel.selectChat(chat)
-            withAnimation {
-                isOpen = false
-            }
         } label: {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -181,11 +132,9 @@ struct ProjectSidebar: View {
                     }
                 }
                 Spacer()
-                if viewModel.currentChat?.id == chat.id {
-                    Image(systemName: "checkmark")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundColor(.accentColor)
-                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
             }
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -243,7 +192,7 @@ struct ProjectSidebar: View {
 
 // MARK: - Project Details Page
 
-private struct ProjectDetailsView: View {
+struct ProjectDetailsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
 
@@ -361,7 +310,7 @@ private struct ProjectDetailsView: View {
 
 // MARK: - Project Documents Page
 
-private struct ProjectDocumentsView: View {
+struct ProjectDocumentsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @State private var showDocumentPicker = false
@@ -454,11 +403,9 @@ private struct ProjectDocumentsView: View {
 
 // MARK: - Project Settings Page
 
-private struct ProjectSettingsView: View {
+struct ProjectSettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.dismiss) private var dismiss
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
-    @Binding var isOpen: Bool
     @State private var showDeleteAlert = false
 
     private var project: Project? {
@@ -498,9 +445,6 @@ private struct ProjectSettingsView: View {
             Button("Delete", role: .destructive) {
                 Task {
                     await viewModel.deleteActiveProject()
-                    withAnimation {
-                        isOpen = false
-                    }
                 }
             }
         } message: {
