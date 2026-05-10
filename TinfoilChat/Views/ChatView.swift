@@ -445,7 +445,6 @@ struct ChatContainer: View {
         if isShowingProjectLanding {
             ProjectPage(viewModel: viewModel)
                 .background(Color.settingsBackground(for: colorScheme))
-                .ignoresSafeArea(edges: .top)
         } else {
             chatArea
         }
