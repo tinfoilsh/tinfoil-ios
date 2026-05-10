@@ -969,7 +969,19 @@ class ChatViewModel: ObservableObject {
             projectError = error.localizedDescription
             chat.projectId = oldProjectId
             chat.isLocalOnly = wasLocal
-            replaceChat(chat)
+            if wasLocal {
+                chats.removeAll { $0.id == chatId }
+                if let index = localChats.firstIndex(where: { $0.id == chatId }) {
+                    localChats[index] = chat
+                } else {
+                    localChats.insert(chat, at: min(1, localChats.count))
+                }
+            } else {
+                replaceChat(chat)
+            }
+            if wasCurrent {
+                currentChat = chat
+            }
             saveChat(chat)
             return
         }
