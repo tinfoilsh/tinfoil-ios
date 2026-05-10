@@ -845,6 +845,11 @@ class ChatViewModel: ObservableObject {
         createNewChat(isLocalOnly: false, focusInput: false)
     }
 
+    func returnToProjectLanding() {
+        guard let projectId = activeProject?.id else { return }
+        createNewChat(isLocalOnly: false, projectId: projectId, focusInput: false)
+    }
+
     func updateActiveProject(name: String? = nil, description: String? = nil, systemInstructions: String? = nil, memory: [MemoryFact]? = nil) async {
         guard let project = activeProject else { return }
 
