@@ -110,12 +110,22 @@ actor DocumentConversionService {
 
     private static func multipartBody(boundary: String, fileData: Data, filename: String, contentType: String) -> Data {
         var body = Data()
+        let safeFilename = sanitizeMultipartHeaderValue(filename)
+        let safeContentType = sanitizeMultipartHeaderValue(contentType)
         body.appendString("--\(boundary)\r\n")
-        body.appendString("Content-Disposition: form-data; name=\"files\"; filename=\"\(filename)\"\r\n")
-        body.appendString("Content-Type: \(contentType)\r\n\r\n")
+        body.appendString("Content-Disposition: form-data; name=\"files\"; filename=\"\(safeFilename)\"\r\n")
+        body.appendString("Content-Type: \(safeContentType)\r\n\r\n")
         body.append(fileData)
         body.appendString("\r\n--\(boundary)--\r\n")
         return body
+    }
+
+    private static func sanitizeMultipartHeaderValue(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: "")
     }
 }
 
