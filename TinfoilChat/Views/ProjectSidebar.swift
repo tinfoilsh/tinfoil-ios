@@ -143,13 +143,16 @@ struct ProjectSidebar: View {
 
                 Button {
                     Task {
+                        viewModel.projectError = nil
                         await viewModel.updateActiveProject(
                             name: editingName.trimmingCharacters(in: .whitespacesAndNewlines),
                             description: editingDescription,
                             systemInstructions: editingInstructions,
                             memory: memoryFactsFromEditor()
                         )
-                        hasPendingChanges = false
+                        if viewModel.projectError == nil {
+                            hasPendingChanges = false
+                        }
                     }
                 } label: {
                     Label("Save changes", systemImage: "checkmark.circle.fill")
@@ -397,7 +400,7 @@ struct ProjectSidebar: View {
     }
 
     private func memoryFactsFromEditor() -> [MemoryFact] {
-        let existing = Dictionary(uniqueKeysWithValues: (project?.memory ?? []).map { ($0.fact, $0) })
+        let existing = Dictionary((project?.memory ?? []).map { ($0.fact, $0) }, uniquingKeysWith: { first, _ in first })
         return editingMemory
             .split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
