@@ -238,6 +238,9 @@ struct ChatContainer: View {
                             viewModel.returnToProjectLanding()
                         } else {
                             viewModel.exitProject()
+                            withAnimation {
+                                isSidebarOpen = true
+                            }
                         }
                     } label: {
                         Image(systemName: "chevron.left")

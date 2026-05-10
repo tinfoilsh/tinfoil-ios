@@ -24,7 +24,7 @@ struct ChatSidebar: View {
     @State private var selectedEncryptedChat: Chat? = nil
 
     @State private var isTabSwitching: Bool = false
-    @State private var isProjectsExpanded: Bool = true
+    @State private var isProjectsExpanded: Bool = false
     @State private var isChatsExpanded: Bool = true
     @ObservedObject private var settings = SettingsManager.shared
 
