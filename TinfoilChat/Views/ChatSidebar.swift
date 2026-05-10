@@ -129,6 +129,14 @@ struct ChatSidebar: View {
         .task {
             await viewModel.loadProjects()
         }
+        .onChange(of: viewModel.shouldExpandProjectsInSidebar) { _, shouldExpand in
+            if shouldExpand {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isProjectsExpanded = true
+                }
+                viewModel.shouldExpandProjectsInSidebar = false
+            }
+        }
     }
     
     private var sidebarContent: some View {
