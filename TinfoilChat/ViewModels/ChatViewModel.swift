@@ -49,6 +49,7 @@ class ChatViewModel: ObservableObject {
     @Published var cloudSyncOnboardingMode: CloudSyncOnboardingMode = .setup
     @Published var shouldOpenCloudSync: Bool = false
     @Published var shouldExpandProjectsInSidebar: Bool = false
+    @Published var isViewingProjectChat: Bool = false
     @Published var scrollTargetMessageId: String? = nil 
     @Published var scrollTargetOffset: CGFloat = 0 
     /// When set to true, the input field should become first responder (focus keyboard)
@@ -817,6 +818,7 @@ class ChatViewModel: ObservableObject {
 
         isLoadingProject = true
         projectError = nil
+        isViewingProjectChat = false
         do {
             let project = try await projectStorage.getProject(projectId)
             guard let project else {
@@ -843,13 +845,26 @@ class ChatViewModel: ObservableObject {
         activeProject = nil
         projectDocuments = []
         projectError = nil
+        isViewingProjectChat = false
         shouldExpandProjectsInSidebar = true
         createNewChat(isLocalOnly: false, focusInput: false)
     }
 
     func returnToProjectLanding() {
         guard let projectId = activeProject?.id else { return }
+        isViewingProjectChat = false
         createNewChat(isLocalOnly: false, projectId: projectId, focusInput: false)
+    }
+
+    func openProjectChat(_ chat: Chat) {
+        selectChat(chat)
+        isViewingProjectChat = true
+    }
+
+    func startNewProjectChat() {
+        guard let projectId = activeProject?.id else { return }
+        createNewChat(isLocalOnly: false, projectId: projectId)
+        isViewingProjectChat = true
     }
 
     func updateActiveProject(name: String? = nil, description: String? = nil, systemInstructions: String? = nil, memory: [MemoryFact]? = nil) async {
