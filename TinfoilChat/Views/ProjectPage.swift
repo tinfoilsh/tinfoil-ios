@@ -83,7 +83,7 @@ struct ProjectPage: View {
 
                 Section {
                     Button {
-                        viewModel.createNewChat(isLocalOnly: false, projectId: project?.id)
+                        viewModel.startNewProjectChat()
                     } label: {
                         Label("New project chat", systemImage: "square.and.pencil")
                     }
@@ -141,7 +141,7 @@ struct ProjectPage: View {
 
     private func chatRow(_ chat: Chat) -> some View {
         Button {
-            viewModel.selectChat(chat)
+            viewModel.openProjectChat(chat)
         } label: {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {

@@ -433,11 +433,11 @@ struct ChatContainer: View {
     }
 
     private var isShowingProjectLanding: Bool {
-        viewModel.activeProject != nil && (viewModel.currentChat?.isBlankChat ?? true)
+        viewModel.activeProject != nil && !viewModel.isViewingProjectChat
     }
 
     private var isInProjectChat: Bool {
-        viewModel.activeProject != nil && (viewModel.currentChat?.isBlankChat == false)
+        viewModel.activeProject != nil && viewModel.isViewingProjectChat
     }
 
     @ViewBuilder
