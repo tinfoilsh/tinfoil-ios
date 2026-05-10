@@ -12,72 +12,99 @@ struct ProjectSidebar: View {
     @Binding var isOpen: Bool
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
 
-    @State private var detailsExpanded = false
-    @State private var documentsExpanded = true
-    @State private var chatsExpanded = true
-    @State private var showDocumentPicker = false
-    @State private var editingName = ""
-    @State private var editingDescription = ""
-    @State private var editingInstructions = ""
-    @State private var editingMemory = ""
     @State private var editingChatId: String?
     @State private var editingTitle = ""
     @State private var deletingChatId: String?
     @State private var showDeleteChatAlert = false
-    @State private var showDeleteProjectAlert = false
-    @State private var hasPendingChanges = false
 
     private var project: Project? {
         viewModel.activeProject
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-
-            if let error = viewModel.projectError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        NavigationStack {
+            VStack(spacing: 0) {
+                exitButton
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-            }
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
 
-            List {
-                detailsSection
-                documentsSection
-                chatsSection
-                deleteSection
+                header
+
+                if let error = viewModel.projectError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                }
+
+                List {
+                    Section {
+                        NavigationLink {
+                            ProjectDetailsView(viewModel: viewModel)
+                        } label: {
+                            Label("Details", systemImage: "slider.horizontal.3")
+                        }
+
+                        NavigationLink {
+                            ProjectDocumentsView(viewModel: viewModel)
+                        } label: {
+                            HStack {
+                                Label("Documents", systemImage: "doc.text")
+                                Spacer()
+                                if !viewModel.projectDocuments.isEmpty {
+                                    Text("\(viewModel.projectDocuments.count)")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+
+                        NavigationLink {
+                            ProjectSettingsView(viewModel: viewModel, isOpen: $isOpen)
+                        } label: {
+                            Label("Settings", systemImage: "gearshape")
+                        }
+                    }
+                    .listRowBackground(Color.cardSurface(for: colorScheme))
+
+                    Section {
+                        Button {
+                            viewModel.createNewChat(isLocalOnly: false, projectId: project?.id)
+                            withAnimation {
+                                isOpen = false
+                            }
+                        } label: {
+                            Label("New project chat", systemImage: "square.and.pencil")
+                        }
+
+                        if viewModel.activeProjectChats.isEmpty {
+                            Text("No project chats yet")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        } else {
+                            ForEach(viewModel.activeProjectChats) { chat in
+                                chatRow(chat)
+                            }
+                        }
+                    } header: {
+                        Text("Project chats")
+                    }
+                    .listRowBackground(Color.cardSurface(for: colorScheme))
+                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(Color.settingsBackground(for: colorScheme))
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
+            .frame(width: 300)
             .background(Color.settingsBackground(for: colorScheme))
-            .scrollDismissesKeyboardIfAvailable()
-
-            Divider()
-                .background(Color.gray.opacity(0.3))
-
-            exitButton
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 8)
-                .safeAreaPadding(.bottom)
+            .navigationBarHidden(true)
         }
         .frame(width: 300)
-        .background(Color.settingsBackground(for: colorScheme))
         .ignoresSafeArea(edges: .bottom)
         .ignoresSafeArea(.keyboard)
-        .onAppear(perform: syncEditingState)
-        .onChange(of: project?.id) { _, _ in syncEditingState() }
-        .onChange(of: project?.name) { _, _ in syncEditingState() }
-        .sheet(isPresented: $showDocumentPicker) {
-            DocumentPickerView { url, fileName in
-                Task {
-                    await viewModel.uploadProjectDocument(url: url, filename: fileName)
-                }
-            }
-        }
         .alert("Delete Chat", isPresented: $showDeleteChatAlert) {
             Button("Cancel", role: .cancel) {
                 deletingChatId = nil
@@ -89,16 +116,27 @@ struct ProjectSidebar: View {
                 deletingChatId = nil
             }
         }
-        .alert("Delete Project", isPresented: $showDeleteProjectAlert) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                Task {
-                    await viewModel.deleteActiveProject()
-                }
+    }
+
+    private var exitButton: some View {
+        Button {
+            viewModel.exitProject()
+            withAnimation {
+                isOpen = false
             }
-        } message: {
-            Text("This deletes the project and its project context documents.")
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.left")
+                    .font(.subheadline.weight(.semibold))
+                Text("Exit Project")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Spacer()
+            }
+            .foregroundColor(.accentColor)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
     private var header: some View {
@@ -108,185 +146,19 @@ struct ProjectSidebar: View {
                     .font(.subheadline)
                     .foregroundColor(.accentColor)
                 Text(project?.name ?? "Project")
-                    .font(.headline)
+                    .font(.title3)
+                    .fontWeight(.semibold)
                     .lineLimit(1)
                 Spacer()
             }
-
-            Text("Context, documents, and chats")
-                .font(.caption)
-                .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
-        .padding(.vertical, 16)
+        .padding(.bottom, 12)
         .overlay(
             Divider().background(Color.gray.opacity(0.3)),
             alignment: .bottom
         )
-    }
-
-    private var detailsSection: some View {
-        Section {
-            DisclosureGroup(isExpanded: $detailsExpanded) {
-                fieldRow(label: "Name") {
-                    TextField("Project name", text: $editingName)
-                        .submitLabel(.done)
-                        .multilineTextAlignment(.trailing)
-                        .onChange(of: editingName) { _, _ in hasPendingChanges = true }
-                }
-
-                multilineFieldRow(label: "Description", placeholder: "What is this project about?", text: $editingDescription, lineLimit: 2...4)
-
-                multilineFieldRow(label: "Instructions", placeholder: "How should Tin behave in this project?", text: $editingInstructions, lineLimit: 3...8)
-
-                multilineFieldRow(label: "Memory", placeholder: "One fact per line", text: $editingMemory, lineLimit: 3...8)
-
-                Button {
-                    Task {
-                        viewModel.projectError = nil
-                        await viewModel.updateActiveProject(
-                            name: editingName.trimmingCharacters(in: .whitespacesAndNewlines),
-                            description: editingDescription,
-                            systemInstructions: editingInstructions,
-                            memory: memoryFactsFromEditor()
-                        )
-                        if viewModel.projectError == nil {
-                            hasPendingChanges = false
-                        }
-                    }
-                } label: {
-                    Label("Save changes", systemImage: "checkmark.circle.fill")
-                }
-                .disabled(!hasPendingChanges || project == nil)
-            } label: {
-                Label("Details", systemImage: "slider.horizontal.3")
-            }
-        }
-        .listRowBackground(Color.cardSurface(for: colorScheme))
-    }
-
-    private func fieldRow<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
-        HStack {
-            Text(label)
-                .font(.subheadline)
-            Spacer()
-            content()
-                .font(.subheadline)
-        }
-    }
-
-    private func multilineFieldRow(label: String, placeholder: String, text: Binding<String>, lineLimit: ClosedRange<Int>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label.uppercased())
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .foregroundColor(.secondary)
-                .tracking(0.5)
-
-            TextField(placeholder, text: text, axis: .vertical)
-                .font(.subheadline)
-                .lineLimit(lineLimit)
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.settingsBackground(for: colorScheme))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(Color.gray.opacity(0.25), lineWidth: 1)
-                )
-                .onChange(of: text.wrappedValue) { _, _ in hasPendingChanges = true }
-        }
-        .padding(.vertical, 4)
-    }
-
-    private var documentsSection: some View {
-        Section {
-            DisclosureGroup(isExpanded: $documentsExpanded) {
-                if viewModel.projectDocuments.isEmpty && !viewModel.isUploadingProjectDocument {
-                    Text("No documents yet")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-
-                ForEach(viewModel.projectDocuments) { document in
-                    documentRow(document)
-                }
-
-                if viewModel.isUploadingProjectDocument {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                        Text("Uploading…")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                Button {
-                    showDocumentPicker = true
-                } label: {
-                    Label("Add document", systemImage: "plus.circle.fill")
-                }
-                .disabled(viewModel.isUploadingProjectDocument)
-            } label: {
-                Label("Documents", systemImage: "doc.text")
-            }
-        }
-        .listRowBackground(Color.cardSurface(for: colorScheme))
-    }
-
-    private func documentRow(_ document: ProjectDocument) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "doc")
-                .foregroundColor(.secondary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(document.filename.isEmpty ? "Encrypted" : document.filename)
-                    .font(.subheadline)
-                    .lineLimit(1)
-                Text(formatFileSize(document.sizeBytes))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button(role: .destructive) {
-                Task {
-                    await viewModel.deleteProjectDocument(document.id)
-                }
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-        }
-    }
-
-    private var chatsSection: some View {
-        Section {
-            DisclosureGroup(isExpanded: $chatsExpanded) {
-                Button {
-                    viewModel.createNewChat(isLocalOnly: false, projectId: project?.id)
-                    withAnimation {
-                        isOpen = false
-                    }
-                } label: {
-                    Label("New project chat", systemImage: "square.and.pencil")
-                }
-
-                if viewModel.activeProjectChats.isEmpty {
-                    Text("No project chats yet")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                } else {
-                    ForEach(viewModel.activeProjectChats) { chat in
-                        chatRow(chat)
-                    }
-                }
-            } label: {
-                Label("Chats", systemImage: "bubble.left.and.bubble.right")
-            }
-        }
-        .listRowBackground(Color.cardSurface(for: colorScheme))
     }
 
     private func chatRow(_ chat: Chat) -> some View {
@@ -353,42 +225,111 @@ struct ProjectSidebar: View {
         }
     }
 
-    private var deleteSection: some View {
-        Section {
-            Button(role: .destructive) {
-                showDeleteProjectAlert = true
-            } label: {
-                Label("Delete project", systemImage: "trash")
-            }
-            .disabled(project == nil)
+    private func relativeTimeString(from date: Date) -> String {
+        let difference = Date().timeIntervalSince(date)
+        if difference < 60 {
+            return "Just now"
+        } else if difference < 3600 {
+            return "\(Int(difference / 60))m ago"
+        } else if difference < 86400 {
+            return "\(Int(difference / 3600))h ago"
+        } else if difference < 604800 {
+            return "\(Int(difference / 86400))d ago"
+        } else {
+            return "\(Int(difference / 604800))w ago"
         }
-        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+}
+
+// MARK: - Project Details Page
+
+private struct ProjectDetailsView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject var viewModel: TinfoilChat.ChatViewModel
+
+    @State private var editingName = ""
+    @State private var editingDescription = ""
+    @State private var editingInstructions = ""
+    @State private var editingMemory = ""
+    @State private var hasPendingChanges = false
+    @State private var isSaving = false
+
+    private var project: Project? {
+        viewModel.activeProject
     }
 
-    private var exitButton: some View {
-        Button {
-            viewModel.exitProject()
-            withAnimation {
-                isOpen = false
+    var body: some View {
+        Form {
+            Section("Name") {
+                TextField("Project name", text: $editingName)
+                    .submitLabel(.done)
+                    .onChange(of: editingName) { _, _ in hasPendingChanges = true }
             }
-        } label: {
-            HStack {
-                Image(systemName: "arrow.left")
-                Text("Exit Project")
-                    .fontWeight(.medium)
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+
+            Section("Description") {
+                TextField("What is this project about?", text: $editingDescription, axis: .vertical)
+                    .lineLimit(3...8)
+                    .onChange(of: editingDescription) { _, _ in hasPendingChanges = true }
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 16)
-            .frame(maxWidth: .infinity)
-            .background(Color.sidebarButtonBackground(for: colorScheme))
-            .foregroundColor(colorScheme == .dark ? .white : .black)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.08) : Color.gray.opacity(0.2), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+
+            Section("Instructions") {
+                TextField("How should Tin behave in this project?", text: $editingInstructions, axis: .vertical)
+                    .lineLimit(5...15)
+                    .onChange(of: editingInstructions) { _, _ in hasPendingChanges = true }
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+
+            Section {
+                TextField("One fact per line", text: $editingMemory, axis: .vertical)
+                    .lineLimit(5...15)
+                    .onChange(of: editingMemory) { _, _ in hasPendingChanges = true }
+            } header: {
+                Text("Memory")
+            } footer: {
+                Text("Each line becomes a memory fact stored with the project.")
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
         }
-        .buttonStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.settingsBackground(for: colorScheme))
+        .navigationTitle("Details")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    saveChanges()
+                } label: {
+                    if isSaving {
+                        ProgressView()
+                    } else {
+                        Text("Save")
+                            .fontWeight(.semibold)
+                    }
+                }
+                .disabled(!hasPendingChanges || project == nil || isSaving)
+            }
+        }
+        .onAppear(perform: syncEditingState)
+        .onChange(of: project?.id) { _, _ in syncEditingState() }
+    }
+
+    private func saveChanges() {
+        Task {
+            isSaving = true
+            viewModel.projectError = nil
+            await viewModel.updateActiveProject(
+                name: editingName.trimmingCharacters(in: .whitespacesAndNewlines),
+                description: editingDescription,
+                systemInstructions: editingInstructions,
+                memory: memoryFactsFromEditor()
+            )
+            if viewModel.projectError == nil {
+                hasPendingChanges = false
+            }
+            isSaving = false
+        }
     }
 
     private func syncEditingState() {
@@ -396,7 +337,7 @@ struct ProjectSidebar: View {
         editingName = project.name
         editingDescription = project.description
         editingInstructions = project.systemInstructions
-        editingMemory = project.memory.map(\.fact).joined(separator: "\n\n")
+        editingMemory = project.memory.map(\.fact).joined(separator: "\n")
         hasPendingChanges = false
     }
 
@@ -416,6 +357,89 @@ struct ProjectSidebar: View {
                 )
             }
     }
+}
+
+// MARK: - Project Documents Page
+
+private struct ProjectDocumentsView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject var viewModel: TinfoilChat.ChatViewModel
+    @State private var showDocumentPicker = false
+
+    var body: some View {
+        Form {
+            if viewModel.projectDocuments.isEmpty && !viewModel.isUploadingProjectDocument {
+                Section {
+                    Text("No documents yet. Add files to use as context for this project.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .listRowBackground(Color.cardSurface(for: colorScheme))
+            } else {
+                Section {
+                    ForEach(viewModel.projectDocuments) { document in
+                        documentRow(document)
+                    }
+
+                    if viewModel.isUploadingProjectDocument {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("Uploading…")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .listRowBackground(Color.cardSurface(for: colorScheme))
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Color.settingsBackground(for: colorScheme))
+        .navigationTitle("Documents")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showDocumentPicker = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .disabled(viewModel.isUploadingProjectDocument)
+            }
+        }
+        .sheet(isPresented: $showDocumentPicker) {
+            DocumentPickerView { url, fileName in
+                Task {
+                    await viewModel.uploadProjectDocument(url: url, filename: fileName)
+                }
+            }
+        }
+    }
+
+    private func documentRow(_ document: ProjectDocument) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "doc")
+                .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(document.filename.isEmpty ? "Encrypted" : document.filename)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                Text(formatFileSize(document.sizeBytes))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                Task {
+                    await viewModel.deleteProjectDocument(document.id)
+                }
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+    }
 
     private func formatFileSize(_ bytes: Int) -> String {
         if bytes < 1024 {
@@ -426,30 +450,70 @@ struct ProjectSidebar: View {
         }
         return String(format: "%.1f MB", Double(bytes) / (1024.0 * 1024.0))
     }
-
-    private func relativeTimeString(from date: Date) -> String {
-        let difference = Date().timeIntervalSince(date)
-        if difference < 60 {
-            return "Just now"
-        } else if difference < 3600 {
-            return "\(Int(difference / 60))m ago"
-        } else if difference < 86400 {
-            return "\(Int(difference / 3600))h ago"
-        } else if difference < 604800 {
-            return "\(Int(difference / 86400))d ago"
-        } else {
-            return "\(Int(difference / 604800))w ago"
-        }
-    }
 }
 
-private extension View {
-    @ViewBuilder
-    func scrollDismissesKeyboardIfAvailable() -> some View {
-        if #available(iOS 16.0, *) {
-            self.scrollDismissesKeyboard(.interactively)
-        } else {
-            self
+// MARK: - Project Settings Page
+
+private struct ProjectSettingsView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var viewModel: TinfoilChat.ChatViewModel
+    @Binding var isOpen: Bool
+    @State private var showDeleteAlert = false
+
+    private var project: Project? {
+        viewModel.activeProject
+    }
+
+    var body: some View {
+        Form {
+            if let project {
+                Section("Project info") {
+                    LabeledContent("Created", value: relativeDate(project.createdAt))
+                    LabeledContent("Updated", value: relativeDate(project.updatedAt))
+                    LabeledContent("Documents", value: "\(viewModel.projectDocuments.count)")
+                    LabeledContent("Chats", value: "\(viewModel.activeProjectChats.count)")
+                }
+                .listRowBackground(Color.cardSurface(for: colorScheme))
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    showDeleteAlert = true
+                } label: {
+                    Label("Delete project", systemImage: "trash")
+                }
+                .disabled(project == nil)
+            } footer: {
+                Text("Deletes the project, its context documents, and removes this project from all associated chats.")
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
         }
+        .scrollContentBackground(.hidden)
+        .background(Color.settingsBackground(for: colorScheme))
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Delete Project", isPresented: $showDeleteAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                Task {
+                    await viewModel.deleteActiveProject()
+                    withAnimation {
+                        isOpen = false
+                    }
+                }
+            }
+        } message: {
+            Text("This deletes the project and its project context documents.")
+        }
+    }
+
+    private func relativeDate(_ iso: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = formatter.date(from: iso) ?? ISO8601DateFormatter().date(from: iso) ?? Date()
+        let style = RelativeDateTimeFormatter()
+        style.unitsStyle = .abbreviated
+        return style.localizedString(for: date, relativeTo: Date())
     }
 }
