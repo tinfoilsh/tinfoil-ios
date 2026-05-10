@@ -142,45 +142,10 @@ struct ChatSidebar: View {
     private var sidebarContent: some View {
         VStack(spacing: 0) {
 
-            // Chat History Header
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Chat History")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundColor(.secondary)
-
-                if !authManager.isAuthenticated {
-                    Text("Log in to save chat history.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                } else if !settings.isCloudSyncEnabled {
-                    Text("Chats are only stored locally on this device.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                } else if activeTab == .local {
-                    Text("Local chats are stored only on this device and won't sync across devices.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                } else {
-                    Text("Your chats are encrypted and synced to the cloud. The encryption key is only stored on this device and never sent to Tinfoil.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 16)
-            .overlay(
-                Divider()
-                    .background(Color.gray.opacity(0.3)),
-                alignment: .bottom
-            )
-
             if authManager.isAuthenticated && settings.isCloudSyncEnabled {
                 projectsSection
                     .padding(.horizontal, 16)
-                    .padding(.top, 8)
+                    .padding(.top, 16)
             }
 
             chatsSectionHeader
@@ -194,6 +159,10 @@ struct ChatSidebar: View {
                     .progressViewStyle(CircularProgressViewStyle())
                 Spacer()
             } else if isChatsExpanded {
+                chatsDescription
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+
                 if authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled {
                     cloudLocalTabSwitcher
                         .padding(.horizontal, 16)
@@ -433,6 +402,25 @@ struct ChatSidebar: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var chatsDescription: some View {
+        Group {
+            if !authManager.isAuthenticated {
+                Text("Log in to save chat history.")
+            } else if !settings.isCloudSyncEnabled {
+                Text("Chats are only stored locally on this device.")
+            } else if activeTab == .local {
+                Text("Local chats are stored only on this device and won't sync across devices.")
+            } else {
+                Text("Your chats are encrypted and synced to the cloud. The encryption key is only stored on this device and never sent to Tinfoil.")
+            }
+        }
+        .font(.caption)
+        .foregroundColor(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var chatsSectionHeader: some View {
