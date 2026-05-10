@@ -196,8 +196,21 @@ final class ProjectStorageService: ObservableObject {
     }
 
     func loadProjects(limit: Int = Constants.Pagination.projectsPerPage) async throws -> [Project] {
-        let response = try await listProjects(limit: limit, includeContent: true)
-        return try await response.projects.asyncMap { item in
+        var allItems: [ProjectListItem] = []
+        var continuationToken: String? = nil
+
+        repeat {
+            let response = try await listProjects(
+                limit: limit,
+                includeContent: true,
+                continuationToken: continuationToken
+            )
+            allItems.append(contentsOf: response.projects)
+            let nextToken = response.nextContinuationToken?.isEmpty == false ? response.nextContinuationToken : nil
+            continuationToken = response.hasMore ? nextToken : nil
+        } while continuationToken != nil
+
+        return try await allItems.asyncMap { item in
             guard let content = item.content else {
                 return Project(
                     id: item.id,
