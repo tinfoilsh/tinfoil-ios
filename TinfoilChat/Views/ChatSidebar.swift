@@ -177,13 +177,6 @@ struct ChatSidebar: View {
                 alignment: .bottom
             )
 
-            // Cloud / Local tab switcher
-            if authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled {
-                cloudLocalTabSwitcher
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-            }
-
             if authManager.isAuthenticated && settings.isCloudSyncEnabled {
                 projectsSection
                     .padding(.horizontal, 16)
@@ -201,6 +194,12 @@ struct ChatSidebar: View {
                     .progressViewStyle(CircularProgressViewStyle())
                 Spacer()
             } else if isChatsExpanded {
+                if authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled {
+                    cloudLocalTabSwitcher
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                }
+
             ScrollView {
                 LazyVStack(spacing: 12) {
                     ForEach(Array(filteredChats.enumerated()), id: \.element.id) { index, chat in
