@@ -48,6 +48,7 @@ class ChatViewModel: ObservableObject {
     @Published var showCloudSyncOnboarding: Bool = false
     @Published var cloudSyncOnboardingMode: CloudSyncOnboardingMode = .setup
     @Published var shouldOpenCloudSync: Bool = false
+    @Published var shouldExpandProjectsInSidebar: Bool = false
     @Published var scrollTargetMessageId: String? = nil 
     @Published var scrollTargetOffset: CGFloat = 0 
     /// When set to true, the input field should become first responder (focus keyboard)
@@ -842,6 +843,7 @@ class ChatViewModel: ObservableObject {
         activeProject = nil
         projectDocuments = []
         projectError = nil
+        shouldExpandProjectsInSidebar = true
         createNewChat(isLocalOnly: false, focusInput: false)
     }
 
