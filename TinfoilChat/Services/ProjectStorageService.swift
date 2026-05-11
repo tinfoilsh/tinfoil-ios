@@ -78,6 +78,19 @@ final class ProjectStorageService: ObservableObject {
         }
     }
 
+    @MainActor
+    private func ensureCloudWritesAuthorized() async throws {
+        if CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey() {
+            return
+        }
+
+        let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
+        guard validation.canWrite,
+              CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated) else {
+            throw CloudStorageError.encryptionKeyRequired
+        }
+    }
+
     func generateProjectId() async throws -> GenerateProjectIdResponse {
         var request = URLRequest(url: URL(string: "\(apiBaseURL)/api/projects/generate-id")!)
         request.httpMethod = "POST"
@@ -86,6 +99,8 @@ final class ProjectStorageService: ObservableObject {
     }
 
     func createProject(_ data: CreateProjectData) async throws -> Project {
+        try await ensureCloudWritesAuthorized()
+
         let idResponse = try await generateProjectId()
         let payload = ProjectData(
             name: data.name,
@@ -115,6 +130,8 @@ final class ProjectStorageService: ObservableObject {
     }
 
     func updateProject(_ projectId: String, data: UpdateProjectData) async throws {
+        try await ensureCloudWritesAuthorized()
+
         guard let existing = try await getProject(projectId) else {
             throw CloudStorageError.invalidResponse
         }
@@ -263,6 +280,8 @@ final class ProjectStorageService: ObservableObject {
     }
 
     func uploadDocument(projectId: String, filename: String, contentType: String, content: String) async throws -> ProjectDocument {
+        try await ensureCloudWritesAuthorized()
+
         let idResponse = try await generateDocumentId(projectId: projectId)
         let payload = ProjectDocumentPayload(content: content, filename: filename, contentType: contentType)
         let encrypted = try await EncryptionService.shared.encrypt(payload)

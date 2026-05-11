@@ -129,6 +129,12 @@ struct CloudSyncSettingsView: View {
                             .font(.caption)
                             .foregroundColor(.orange)
                     }
+
+                    if passkeyManager.passkeyBackupNeedsAttention {
+                        Text("Your passkey backup could not be updated with the current encryption key. Re-add a passkey or reveal and save your backup key before signing out.")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
                     
                     Button(action: {
                         Task {

@@ -31,6 +31,7 @@ final class PasskeyManager: ObservableObject {
     @Published var passkeyActive: Bool = false
     @Published var passkeySetupAvailable: Bool = false
     @Published var showPasskeyRecoveryChoice: Bool = false
+    @Published var passkeyBackupNeedsAttention: Bool = false
 
     // MARK: - Callbacks
 
@@ -55,6 +56,7 @@ final class PasskeyManager: ObservableObject {
         passkeyActive = false
         passkeySetupAvailable = false
         showPasskeyRecoveryChoice = false
+        passkeyBackupNeedsAttention = false
         onRecoveryComplete = nil
         onKeyRefreshedFromBackup = nil
         syncCheckTask?.cancel()
@@ -124,6 +126,13 @@ final class PasskeyManager: ObservableObject {
     ) async -> Bool {
         guard let user = Clerk.shared.user else { return false }
 
+        if authorizationMode != .explicitStartFresh {
+            guard await CloudKeyPreflightValidator.shared.inspectRemoteState() == .empty else {
+                passkeySetupAvailable = true
+                return false
+            }
+        }
+
         let newKey = EncryptionService.shared.generateKey()
 
         do {
@@ -154,6 +163,7 @@ final class PasskeyManager: ObservableObject {
                 throw CloudKeyAuthorizationError.authorizationUnavailable
             }
             activatePasskey()
+            passkeyBackupNeedsAttention = false
             return true
 
         } catch {
@@ -273,9 +283,11 @@ final class PasskeyManager: ObservableObject {
 
             passkeyActive = true
             passkeySetupAvailable = false
+            passkeyBackupNeedsAttention = false
             startSyncCheck()
         } catch {
-            // Passkey creation failed or cancelled — leave state unchanged
+            passkeyBackupNeedsAttention = true
+            passkeySetupAvailable = true
         }
     }
 
@@ -354,8 +366,10 @@ final class PasskeyManager: ObservableObject {
             )
             setLocalSyncVersion(credentialId: result.credentialId, version: saveResult.syncVersion)
             setLocalBundleVersion(saveResult.bundleVersion)
+            passkeyBackupNeedsAttention = false
         } catch {
-            // Non-fatal — passkey backup is stale but user can re-backup from Settings
+            passkeyBackupNeedsAttention = true
+            passkeySetupAvailable = true
         }
     }
 
@@ -364,6 +378,7 @@ final class PasskeyManager: ObservableObject {
     private func activatePasskey() {
         SettingsManager.shared.isCloudSyncEnabled = true
         passkeyActive = true
+        passkeyBackupNeedsAttention = false
         startSyncCheck()
     }
 
@@ -488,8 +503,6 @@ final class PasskeyManager: ObservableObject {
     /// Uses the cached PRF to avoid biometric prompts. If no cached PRF
     /// is available, the check is skipped silently.
     private func refreshKeyFromPasskeyBackup() async {
-        var pendingRemoteVersion: (credentialId: String, syncVersion: Int, bundleVersion: Int)?
-
         do {
             guard let cached = passkeyService.getCachedPrfResult() else { return }
 
@@ -513,11 +526,6 @@ final class PasskeyManager: ObservableObject {
                 return
             }
 
-            pendingRemoteVersion = (
-                credentialId: cached.credentialId,
-                syncVersion: entry.sync_version,
-                bundleVersion: entry.bundle_version ?? 0
-            )
             let appliedMode = try await applyRecoveredKeyBundle(bundle)
 
             setLocalSyncVersion(credentialId: cached.credentialId, version: entry.sync_version)
@@ -529,14 +537,6 @@ final class PasskeyManager: ObservableObject {
 
             onKeyRefreshedFromBackup?()
         } catch {
-            if error is CloudKeyAuthorizationError,
-               let pendingRemoteVersion {
-                setLocalSyncVersion(
-                    credentialId: pendingRemoteVersion.credentialId,
-                    version: pendingRemoteVersion.syncVersion
-                )
-                setLocalBundleVersion(pendingRemoteVersion.bundleVersion)
-            }
             // Non-fatal — will retry on next interval
         }
     }

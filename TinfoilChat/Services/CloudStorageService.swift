@@ -611,6 +611,7 @@ enum CloudStorageError: LocalizedError {
     case metadataUpdateFailed
     case encryptionFailed
     case decryptionFailed
+    case encryptionKeyRequired
 
     var errorDescription: String? {
         switch self {
@@ -632,6 +633,8 @@ enum CloudStorageError: LocalizedError {
             return "Failed to encrypt chat data"
         case .decryptionFailed:
             return "Failed to decrypt chat data"
+        case .encryptionKeyRequired:
+            return "Cloud sync writes are paused until this device verifies the current encryption key"
         }
     }
 }
