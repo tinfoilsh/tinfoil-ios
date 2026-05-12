@@ -164,7 +164,8 @@ struct ChatQueryBuilderReasoningTests {
         #expect(body == nil)
     }
 
-    @Test func extraBodyMakesItIntoEncodedChatQuery() throws {
+    @Test @MainActor
+    func extraBodyMakesItIntoEncodedChatQuery() throws {
         let query = ChatQueryBuilder.buildQuery(
             modelId: "deepseek-v4-pro",
             systemPrompt: "you are tin",
