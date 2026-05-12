@@ -147,9 +147,9 @@ struct ChatQueryBuilder {
                 // Emit `tool_calls` on the assistant message so the model
                 // sees its previously-rendered widgets, then synthesize
                 // `role: 'tool'` results so the API's tool-call/tool-result
-                // pairing rule is satisfied. GenUI tools are display-only
-                // (the client rendered the component); we acknowledge with
-                // a constant payload that mirrors the webapp.
+                // pairing rule is satisfied. Auto-continue tools have no
+                // real side effect, so we acknowledge with the same inert
+                // payload the router synthesises mid-turn for consistency.
                 let toolCallParams: [ChatQuery.ChatCompletionMessageParam.AssistantMessageParam.ToolCallParam]? = msg.toolCalls.isEmpty
                     ? nil
                     : msg.toolCalls.map { tc in
@@ -172,7 +172,7 @@ struct ChatQueryBuilder {
                 if let toolCallParams {
                     for param in toolCallParams {
                         messages.append(.tool(.init(
-                            content: .textContent("displayed"),
+                            content: .textContent("executed"),
                             toolCallId: param.id
                         )))
                     }

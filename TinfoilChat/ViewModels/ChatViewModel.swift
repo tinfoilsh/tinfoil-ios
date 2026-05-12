@@ -1900,12 +1900,6 @@ class ChatViewModel: ObservableObject {
                 //     that the webapp uses to track resolution state.
                 var streamingToolCalls: [Int: GenUIToolCall] = [:]
                 var timelineBlocks: [JSONValue] = []
-                // Once the assistant has emitted a tool call on this
-                // turn, drop subsequent `delta.content` — providers
-                // sometimes trail serialization noise (fragments of the
-                // tool name) through the content channel. Mirrors the
-                // webapp event-normalizer's `sawToolCall` gate.
-                var sawToolCall = false
                 let appendToolCallSegment: (String) -> Void = { toolCallId in
                     if !segments.contains(where: {
                         if case .toolCall(let id) = $0, id == toolCallId { return true }
@@ -1984,12 +1978,6 @@ class ChatViewModel: ObservableObject {
                     }
 
                     var content = chunk.choices.first?.delta.content ?? ""
-                    // Once a tool call has been seen on this turn, drop
-                    // any further `delta.content` to suppress provider
-                    // serialization noise. Mirrors the webapp.
-                    if sawToolCall {
-                        content = ""
-                    }
                     // Strip router-emitted `<tinfoil-event>` markers
                     // from the delta before any downstream logic sees
                     // it, and dispatch the decoded events so the same
@@ -2035,7 +2023,6 @@ class ChatViewModel: ObservableObject {
                                     name: mergedName,
                                     arguments: mergedArgs
                                 )
-                                sawToolCall = true
                             }
                             didMutateState = true
                         }
