@@ -48,6 +48,9 @@ final class GenUIRegistry {
     }
 
     /// Build the OpenAI `tools` array used on chat completion requests.
+    /// Each GenUI tool is flagged with the router's auto-continue header
+    /// so the model produces a single coherent turn (tool call followed
+    /// by surrounding prose) instead of ending at the tool boundary.
     func buildToolParams() -> [ChatQuery.ChatCompletionToolParam] {
         widgets.map { widget in
             ChatQuery.ChatCompletionToolParam(
@@ -55,7 +58,10 @@ final class GenUIRegistry {
                     name: widget.name,
                     description: widget.description,
                     parameters: widget.schema,
-                    strict: nil
+                    strict: nil,
+                    extra: [
+                        "x-tinfoil-tool-auto-continue": .bool(true),
+                    ]
                 )
             )
         }
