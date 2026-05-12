@@ -373,13 +373,9 @@ struct LaTeXMarkdownView: View, Equatable {
             }
             j += 1
 
-            // Capture URL (everything up to the next `~`)
-            let urlStart = j
-            var urlEnd = j
             var foundTilde = false
             while j < count {
                 if chars[j] == "~" {
-                    urlEnd = j
                     foundTilde = true
                     break
                 }
@@ -413,20 +409,6 @@ struct LaTeXMarkdownView: View, Equatable {
             }
 
             if found {
-                // Convert citation to a markdown link: [domain](URL)
-                var urlView = String.UnicodeScalarView()
-                for k in urlStart..<urlEnd { urlView.append(chars[k]) }
-                let url = String(urlView)
-                let linkUrl = url.removingPercentEncoding ?? url
-                let domain: String
-                if let parsed = URL(string: linkUrl), let host = parsed.host {
-                    domain = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-                } else {
-                    domain = linkUrl
-                }
-                for c in " [\(domain)](\(linkUrl))".unicodeScalars {
-                    result.append(c)
-                }
                 i = j
             } else {
                 for k in i..<j {
