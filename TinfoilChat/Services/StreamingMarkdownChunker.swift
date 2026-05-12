@@ -236,6 +236,7 @@ class StreamingMarkdownChunker {
         let lines = bufferedLines()
         guard lines.count >= 2 else { return nil }
 
+        var hasCompletedDataRow = false
         for (index, line) in lines.enumerated() where index >= 2 {
             let trimmed = line.text.trimmingCharacters(in: .whitespaces)
             let isIncompleteCurrentLine = index == lines.count - 1 && !line.hasTerminatingNewline
@@ -250,13 +251,14 @@ class StreamingMarkdownChunker {
             }
 
             guard isPotentialTableRow(line.text) else {
-                guard !isIncompleteCurrentLine || allowIncompleteTrailingContent else { return nil }
+                guard hasCompletedDataRow || !isIncompleteCurrentLine || allowIncompleteTrailingContent else { return nil }
                 let tableEnd = line.range.lowerBound
                 return (
                     table: String(workingBuffer[..<tableEnd]),
                     trailing: String(workingBuffer[tableEnd...])
                 )
             }
+            hasCompletedDataRow = true
         }
 
         return nil
