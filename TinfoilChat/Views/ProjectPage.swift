@@ -222,7 +222,6 @@ struct ProjectDetailsView: View {
 
     @State private var editingDescription = ""
     @State private var editingInstructions = ""
-    @State private var editingMemory = ""
     @State private var hasPendingChanges = false
     @State private var isSaving = false
 
@@ -243,17 +242,6 @@ struct ProjectDetailsView: View {
                 TextField("How should Tin behave in this project?", text: $editingInstructions, axis: .vertical)
                     .lineLimit(5...15)
                     .onChange(of: editingInstructions) { _, _ in hasPendingChanges = true }
-            }
-            .listRowBackground(Color.cardSurface(for: colorScheme))
-
-            Section {
-                TextField("One fact per line", text: $editingMemory, axis: .vertical)
-                    .lineLimit(5...15)
-                    .onChange(of: editingMemory) { _, _ in hasPendingChanges = true }
-            } header: {
-                Text("Memory")
-            } footer: {
-                Text("Each line becomes a memory fact stored with the project.")
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
         }
@@ -286,8 +274,7 @@ struct ProjectDetailsView: View {
             viewModel.projectError = nil
             await viewModel.updateActiveProject(
                 description: editingDescription,
-                systemInstructions: editingInstructions,
-                memory: memoryFactsFromEditor()
+                systemInstructions: editingInstructions
             )
             if viewModel.projectError == nil {
                 hasPendingChanges = false
@@ -300,25 +287,7 @@ struct ProjectDetailsView: View {
         guard let project else { return }
         editingDescription = project.description
         editingInstructions = project.systemInstructions
-        editingMemory = project.memory.map(\.fact).joined(separator: "\n")
         hasPendingChanges = false
-    }
-
-    private func memoryFactsFromEditor() -> [MemoryFact] {
-        let existing = Dictionary((project?.memory ?? []).map { ($0.fact, $0) }, uniquingKeysWith: { first, _ in first })
-        return editingMemory
-            .split(separator: "\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .map { line in
-                existing[line] ?? MemoryFact(
-                    id: UUID().uuidString.lowercased(),
-                    fact: line,
-                    date: ISO8601DateFormatter().string(from: Date()),
-                    category: "other",
-                    confidence: 1
-                )
-            }
     }
 }
 
