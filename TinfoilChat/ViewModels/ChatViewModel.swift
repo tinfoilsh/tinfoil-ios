@@ -799,8 +799,9 @@ class ChatViewModel: ObservableObject {
         isLoadingProject = true
         projectError = nil
         do {
+            let resolvedName = name ?? "My Project #\(projects.count + 1)"
             let project = try await projectStorage.createProject(
-                CreateProjectData(name: name ?? Self.generateProjectName())
+                CreateProjectData(name: resolvedName)
             )
             projects.insert(project, at: 0)
             await enterProject(projectId: project.id)
@@ -1044,12 +1045,6 @@ class ChatViewModel: ObservableObject {
             .map(\.id)
         return await Chat.loadChats(chatIds: ids, userId: userId)
             .sorted { $0.createdAt > $1.createdAt }
-    }
-
-    private static func generateProjectName() -> String {
-        let adjectives = ["Private", "Secret", "Encrypted", "Anonymous", "Stealth", "Incognito", "Covert", "Hidden"]
-        let animals = ["Orangutan", "Penguin", "Platypus", "Armadillo", "Chameleon", "Pangolin", "Narwhal", "Capybara"]
-        return "\(adjectives.randomElement() ?? "Private") \(animals.randomElement() ?? "Project")"
     }
 
     /// Toggles temporary (incognito) chat mode. When enabled, the current chat
