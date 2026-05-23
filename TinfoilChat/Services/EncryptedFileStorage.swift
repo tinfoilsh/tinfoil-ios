@@ -87,6 +87,46 @@ actor EncryptedFileStorage {
         return dir.appendingPathComponent("index.enc")
     }
 
+    private func syncMetadataPath(chatId: String, userId: String) throws -> URL {
+        let dir = try chatsDirectory(userId: userId)
+        return dir.appendingPathComponent("\(sanitizePathComponent(chatId)).sync.json")
+    }
+
+    private struct SyncMetadataSidecar: Codable {
+        let syncVersion: Int
+        let syncedAt: Date?
+        let locallyModified: Bool
+    }
+
+    private func readSyncSidecar(chatId: String, userId: String) -> SyncMetadataSidecar? {
+        guard
+            let path = try? syncMetadataPath(chatId: chatId, userId: userId),
+            fileManager.fileExists(atPath: path.path),
+            let data = try? Data(contentsOf: path),
+            let meta = try? decoder.decode(SyncMetadataSidecar.self, from: data)
+        else {
+            return nil
+        }
+        return meta
+    }
+
+    private func writeSyncSidecar(
+        chatId: String,
+        userId: String,
+        _ meta: SyncMetadataSidecar
+    ) throws {
+        let path = try syncMetadataPath(chatId: chatId, userId: userId)
+        let data = try encoder.encode(meta)
+        try data.write(to: path, options: [.atomic, .completeFileProtection])
+    }
+
+    private func overlaySyncSidecar(_ chat: inout Chat, userId: String) {
+        guard let meta = readSyncSidecar(chatId: chat.id, userId: userId) else { return }
+        chat.syncVersion = meta.syncVersion
+        chat.syncedAt = meta.syncedAt
+        chat.locallyModified = meta.locallyModified
+    }
+
     // MARK: - Index Operations
 
     func loadIndex(userId: String) async throws -> [ChatIndexEntry] {
@@ -162,13 +202,21 @@ actor EncryptedFileStorage {
         // Try .enc file first
         let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
         if fileManager.fileExists(atPath: encPath.path) {
-            return try await loadChatFromFile(encPath, isRaw: false)
+            if var chat = try await loadChatFromFile(encPath, isRaw: false) {
+                overlaySyncSidecar(&chat, userId: userId)
+                return chat
+            }
+            return nil
         }
 
         // Try .raw file
         let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
         if fileManager.fileExists(atPath: rawPath.path) {
-            return try await loadChatFromFile(rawPath, isRaw: true)
+            if var chat = try await loadChatFromFile(rawPath, isRaw: true) {
+                overlaySyncSidecar(&chat, userId: userId)
+                return chat
+            }
+            return nil
         }
 
         // Neither exists — remove stale index entry if present
@@ -192,6 +240,11 @@ actor EncryptedFileStorage {
             try fileManager.removeItem(at: rawPath)
         }
 
+        let sidecarPath = try syncMetadataPath(chatId: chatId, userId: userId)
+        if fileManager.fileExists(atPath: sidecarPath.path) {
+            try? fileManager.removeItem(at: sidecarPath)
+        }
+
         var entries = (try? await loadIndex(userId: userId)) ?? []
         entries.removeAll { $0.id == chatId }
         try await saveIndex(entries, userId: userId)
@@ -213,9 +266,10 @@ actor EncryptedFileStorage {
         }
     }
 
-    /// Atomically update only sync metadata fields on a chat without
-    /// touching messages or other content. This avoids the race where a
-    /// full load-modify-save could overwrite in-progress user edits.
+    /// Persist sync metadata for a chat without touching its encrypted
+    /// content file. The sidecar is the source of truth; loadChat
+    /// overlays it onto the chat on read, so concurrent saveChat calls
+    /// can never clobber an in-flight sync metadata update.
     func updateSyncMetadata(
         chatId: String,
         userId: String,
@@ -223,11 +277,23 @@ actor EncryptedFileStorage {
         syncedAt: Date,
         locallyModified: Bool
     ) async throws {
-        guard var chat = try await loadChat(chatId: chatId, userId: userId) else { return }
-        chat.syncVersion = syncVersion
-        chat.syncedAt = syncedAt
-        chat.locallyModified = locallyModified
-        try await saveChat(chat, userId: userId)
+        try writeSyncSidecar(
+            chatId: chatId,
+            userId: userId,
+            SyncMetadataSidecar(
+                syncVersion: syncVersion,
+                syncedAt: syncedAt,
+                locallyModified: locallyModified
+            )
+        )
+
+        var entries = (try? await loadIndex(userId: userId)) ?? []
+        if let idx = entries.firstIndex(where: { $0.id == chatId }) {
+            entries[idx].syncVersion = syncVersion
+            entries[idx].syncedAt = syncedAt
+            entries[idx].locallyModified = locallyModified
+            try await saveIndex(entries, userId: userId)
+        }
     }
 
     // MARK: - Bulk Operations
@@ -265,7 +331,8 @@ actor EncryptedFileStorage {
             let chatId = fileURL.deletingPathExtension().lastPathComponent
             guard chatId != "index" else { continue }
 
-            if let chat = try? await loadChatFromFile(fileURL, isRaw: ext == "raw") {
+            if var chat = try? await loadChatFromFile(fileURL, isRaw: ext == "raw") {
+                overlaySyncSidecar(&chat, userId: userId)
                 entries.append(ChatIndexEntry(from: chat))
             }
         }

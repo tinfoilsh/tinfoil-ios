@@ -1468,8 +1468,49 @@ class CloudSyncService: ObservableObject {
         guard !streamingTracker.isStreaming(chat.id) else { return }
 
         let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion)
-        let newVersion = try await cloudStorage.uploadChat(storedChat) ?? chat.syncVersion + 1
+        let result = try await cloudStorage.uploadChat(storedChat)
+        let newVersion = result.syncVersion ?? chat.syncVersion + 1
+        if !result.rewrites.isEmpty {
+            await applyAttachmentRewrites(chatId: chat.id, rewrites: result.rewrites)
+        }
         await markChatAsSynced(chat.id, version: newVersion)
+    }
+
+    /// Apply enclave-minted attachment ids/keys to the freshest local
+    /// copy of the chat, matching by the stable client-side id that
+    /// the upload captured. The chat object we uploaded is a private
+    /// snapshot, so without this step the persistent chat keeps the
+    /// pre-upload local ids and the next sync would either re-upload
+    /// the same bytes or fail to fetch the cloud copy on another
+    /// device.
+    private func applyAttachmentRewrites(
+        chatId: String,
+        rewrites: [CloudStorageService.AttachmentRewrite]
+    ) async {
+        guard let userId = await getCurrentUserId() else { return }
+        guard var chat = try? await EncryptedFileStorage.cloud.loadChat(
+            chatId: chatId,
+            userId: userId
+        ) else { return }
+
+        let rewriteByClientId = Dictionary(
+            uniqueKeysWithValues: rewrites.map { ($0.clientId, $0) }
+        )
+
+        var didChange = false
+        for msgIdx in chat.messages.indices {
+            for attIdx in chat.messages[msgIdx].attachments.indices {
+                let clientId = chat.messages[msgIdx].attachments[attIdx].id
+                guard let rewrite = rewriteByClientId[clientId] else { continue }
+                chat.messages[msgIdx].attachments[attIdx].id = rewrite.serverId
+                chat.messages[msgIdx].attachments[attIdx].encryptionKey =
+                    rewrite.encryptionKey
+                didChange = true
+            }
+        }
+
+        guard didChange else { return }
+        try? await EncryptedFileStorage.cloud.saveChat(chat, userId: userId)
     }
 
     private func markChatAsSynced(_ chatId: String, version: Int) async {

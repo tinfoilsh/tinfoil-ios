@@ -91,15 +91,34 @@ class CloudStorageService: ObservableObject {
 
     // MARK: - Upload
 
+    struct AttachmentRewrite {
+        let clientId: String
+        let serverId: String
+        let encryptionKey: String
+    }
+
+    struct UploadChatResult {
+        let syncVersion: Int?
+        let rewrites: [AttachmentRewrite]
+    }
+
     /// Push a chat through the sync enclave. The caller's CEK (raw
     /// bytes from `EncryptionService`) is base64-encoded and sent on
     /// the wire; the enclave seals the row under v2 AAD and returns
     /// the new etag, which we surface as the chat's new sync version.
+    ///
+    /// Returns the new syncVersion alongside any attachment rewrites
+    /// (client-minted id → enclave-minted id + per-attachment key) so
+    /// the caller can persist them against the freshest local copy
+    /// without mutating the chat object passed in.
     @discardableResult
-    func uploadChat(_ chat: StoredChat) async throws -> Int? {
+    func uploadChat(_ chat: StoredChat) async throws -> UploadChatResult {
         var chatToUpload = chat
         let idempotencyKey = newSyncEnclaveIdempotencyKey()
-        try await encryptAndUploadAttachments(&chatToUpload, idempotencyKey: idempotencyKey)
+        let rewrites = try await encryptAndUploadAttachments(
+            &chatToUpload,
+            idempotencyKey: idempotencyKey
+        )
         stripBase64FromMessages(&chatToUpload.messages)
 
         let plaintext = try JSONEncoder().encode(chatToUpload)
@@ -132,13 +151,17 @@ class CloudStorageService: ObservableObject {
                 metadata: metadata
             )
         )
-        return etagToSyncVersion(response.etag)
+        return UploadChatResult(
+            syncVersion: etagToSyncVersion(response.etag),
+            rewrites: rewrites
+        )
     }
 
     private func encryptAndUploadAttachments(
         _ chat: inout StoredChat,
         idempotencyKey: String
-    ) async throws {
+    ) async throws -> [AttachmentRewrite] {
+        var rewrites: [AttachmentRewrite] = []
         var attachmentIndex = 0
         for msgIdx in chat.messages.indices {
             for attIdx in chat.messages[msgIdx].attachments.indices {
@@ -165,10 +188,18 @@ class CloudStorageService: ObservableObject {
                         idempotencyKey: attIdemKey
                     )
                 )
+                rewrites.append(
+                    AttachmentRewrite(
+                        clientId: att.id,
+                        serverId: result.id,
+                        encryptionKey: result.attKey
+                    )
+                )
                 chat.messages[msgIdx].attachments[attIdx].id = result.id
                 chat.messages[msgIdx].attachments[attIdx].encryptionKey = result.attKey
             }
         }
+        return rewrites
     }
 
     private func stripBase64FromMessages(_ messages: inout [Message]) {
