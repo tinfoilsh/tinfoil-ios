@@ -135,12 +135,17 @@ enum LegacyBlobMigration {
         let totalMigrated = list.reduce(0) { $0 + $1.migrated }
         let totalRemaining = list.reduce(0) { $0 + $1.remaining }
         let totalBlocked = list.reduce(0) { $0 + $1.blocked.count }
+        // Default to false for an empty report so a pass that bailed
+        // before recording any scopes (e.g. every migrate-all call
+        // threw) is never treated as a clean drain. `run()` flips
+        // this to true only when the enclave actually returned a
+        // non-partial response with nothing left to migrate.
         return MigrationReport(
             scopes: list,
             totalMigrated: totalMigrated,
             totalRemaining: totalRemaining,
             totalBlocked: totalBlocked,
-            fullyMigrated: totalRemaining == 0 && totalBlocked == 0
+            fullyMigrated: !list.isEmpty && totalRemaining == 0 && totalBlocked == 0
         )
     }
 }

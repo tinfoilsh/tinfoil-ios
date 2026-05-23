@@ -90,7 +90,15 @@ class ProfileSyncService: ObservableObject {
             )
             guard let item = response.items.first else { return nil }
             if !item.ok {
-                if item.code == WireCodes.notFound { return nil }
+                if item.code == WireCodes.notFound {
+                    // The row no longer exists server-side; any
+                    // prior decrypt-failure state is stale and would
+                    // wedge future syncs that consult
+                    // `hasFailedRemoteDecryption()`.
+                    self.failedDecryptionData = nil
+                    self.cachedProfile = nil
+                    return nil
+                }
                 self.failedDecryptionData = "code:\(item.code ?? "UNKNOWN")"
                 self.cachedProfile = nil
                 return nil
@@ -131,26 +139,22 @@ class ProfileSyncService: ObservableObject {
         let metadata: [String: AnyCodable] = [
             "version": AnyCodable(profileWithMetadata.version ?? 1)
         ]
-        do {
-            let response = try await SyncEnclaveAPI.push(
-                EnclavePushRequest(
-                    scope: profileScope,
-                    id: profileRowId,
-                    key: keyB64,
-                    plaintext: plaintext.base64EncodedString(),
-                    ifMatch: ifMatch,
-                    idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                    metadata: metadata
-                )
+        let response = try await SyncEnclaveAPI.push(
+            EnclavePushRequest(
+                scope: profileScope,
+                id: profileRowId,
+                key: keyB64,
+                plaintext: plaintext.base64EncodedString(),
+                ifMatch: ifMatch,
+                idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                metadata: metadata
             )
-            if let etagVersion = Int(response.etag) {
-                profileWithMetadata.version = etagVersion
-            }
-            self.cachedProfile = profileWithMetadata
-            return (true, profileWithMetadata.version)
-        } catch {
-            return (false, nil)
+        )
+        if let etagVersion = Int(response.etag) {
+            profileWithMetadata.version = etagVersion
         }
+        self.cachedProfile = profileWithMetadata
+        return (true, profileWithMetadata.version)
     }
 
     /// Re-attempt a profile fetch after a key change. The enclave

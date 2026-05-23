@@ -1807,21 +1807,21 @@ private struct SourcesButton: View {
     let sources: [WebSearchSource]
     let isDarkMode: Bool
     let action: () -> Void
-    
-    private var uniqueDomains: [String] {
+
+    private var uniqueDomainSources: [(domain: String, url: String)] {
         var seen = Set<String>()
-        var domains: [String] = []
+        var entries: [(domain: String, url: String)] = []
         for source in sources {
             let domain = getDomain(from: source.url)
             if !seen.contains(domain) {
                 seen.insert(domain)
-                domains.append(domain)
+                entries.append((domain: domain, url: source.url))
             }
-            if domains.count >= 4 { break }
+            if entries.count >= 4 { break }
         }
-        return domains
+        return entries
     }
-    
+
     private func getDomain(from urlString: String) -> String {
         guard let url = URL(string: urlString),
               let host = url.host else {
@@ -1829,40 +1829,26 @@ private struct SourcesButton: View {
         }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
-    
-    private func faviconUrl(for domain: String) -> String {
-        "https://icons.duckduckgo.com/ip3/\(domain).ico"
-    }
-    
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 4) {
                 Text("Sources")
                     .font(.system(size: 13, weight: .medium))
-                
+
                 // Overlapping favicons
                 HStack(spacing: -6) {
-                    ForEach(Array(uniqueDomains.enumerated()), id: \.offset) { index, domain in
-                        AsyncImage(url: URL(string: faviconUrl(for: domain))) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                            case .failure, .empty:
-                                Image(systemName: "globe")
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .foregroundColor(.gray)
-                            @unknown default:
-                                EmptyView()
-                            }
-                        }
+                    ForEach(Array(uniqueDomainSources.enumerated()), id: \.offset) { index, entry in
+                        FaviconImage(
+                            url: entry.url,
+                            placeholderColor: .gray,
+                            placeholderFontSize: 10
+                        )
                         .frame(width: 18, height: 18)
                         .background(isDarkMode ? Color.black : Color.white)
                         .clipShape(Circle())
                         .overlay(Circle().stroke(isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.1), lineWidth: 1))
-                        .zIndex(Double(uniqueDomains.count - index))
+                        .zIndex(Double(uniqueDomainSources.count - index))
                     }
                 }
             }
@@ -1881,7 +1867,7 @@ private struct SourcesSheetView: View {
     let sources: [WebSearchSource]
     let isDarkMode: Bool
     @Environment(\.dismiss) private var dismiss
-    
+
     private func getDomain(from urlString: String) -> String {
         guard let url = URL(string: urlString),
               let host = url.host else {
@@ -1889,11 +1875,7 @@ private struct SourcesSheetView: View {
         }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
-    
-    private func faviconUrl(for domain: String) -> String {
-        "https://icons.duckduckgo.com/ip3/\(domain).ico"
-    }
-    
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -1905,21 +1887,11 @@ private struct SourcesSheetView: View {
                             }
                         } label: {
                             HStack(spacing: 12) {
-                                AsyncImage(url: URL(string: faviconUrl(for: getDomain(from: source.url)))) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fit)
-                                    case .failure, .empty:
-                                        Image(systemName: "globe")
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fit)
-                                            .foregroundColor(.secondary)
-                                    @unknown default:
-                                        EmptyView()
-                                    }
-                                }
+                                FaviconImage(
+                                    url: source.url,
+                                    placeholderColor: .secondary,
+                                    placeholderFontSize: 12
+                                )
                                 .frame(width: 24, height: 24)
                                 .clipShape(RoundedRectangle(cornerRadius: 6))
 

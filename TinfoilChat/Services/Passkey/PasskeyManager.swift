@@ -249,21 +249,20 @@ final class PasskeyManager: ObservableObject {
 
         // Determine whether to register-key or add-bundle by probing
         // the enclave first. A 404 / nil key_id means "first time
-        // ever", in which case we register the key + initial bundle.
+        // ever", in which case we register the existing local CEK
+        // with an initial bundle — never generate a fresh CEK here,
+        // or we'd silently strand every local chat sealed under the
+        // existing key.
         do {
             let state = try await SyncEnclaveAPI.keyCurrent()
             if state.keyId == nil {
-                let result = await PasskeyKeyFlow.registerNewKeyWithPasskey(
+                let result = await PasskeyKeyFlow.registerExistingKeyWithPasskey(
+                    existingCek: cek,
                     user: user,
                     createdVia: .recovery
                 )
-                if case .success(let newCek, let newKeyIdHex, let credentialId, _) = result {
-                    do {
-                        try await applyFreshCek(cek: newCek)
-                        persistEnclaveKeyState(keyIdHex: newKeyIdHex, credentialId: credentialId)
-                    } catch {
-                        return
-                    }
+                if case .success(_, _, let credentialId, _) = result {
+                    persistEnclaveKeyState(keyIdHex: keyIdHex, credentialId: credentialId)
                     activatePasskey()
                 }
                 return
@@ -285,16 +284,12 @@ final class PasskeyManager: ObservableObject {
     }
 
     /// No-op shim retained for compatibility with views that still
-    /// call this on a periodic schedule. Bundles do not need to be
-    /// re-encrypted on the new wire — each passkey's wrapped CEK is
-    /// stable for the lifetime of that passkey. We still refresh the
-    /// PRF cache so silent auth keeps working.
-    func updatePasskeyBackup() async {
-        // Bundles are immutable per credentialId; the only thing
-        // that can drift across devices is the key_id itself
-        // (start_fresh wipes), which the periodic sync check
-        // already handles.
-    }
+    /// call this on a periodic schedule. Bundles are immutable per
+    /// credentialId on the new wire — each passkey's wrapped CEK is
+    /// stable for the lifetime of that passkey. The only thing that
+    /// can drift across devices is the key_id itself (start_fresh
+    /// wipes), which the periodic sync check already handles.
+    func updatePasskeyBackup() async {}
 
     // MARK: - Private Helpers
 

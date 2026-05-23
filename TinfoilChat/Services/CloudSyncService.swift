@@ -1564,7 +1564,12 @@ class CloudSyncService: ObservableObject {
             }
         }
 
-        _ = await smartSync()
+        // Bypass the status-cache short-circuit in smartSync(): the
+        // remote rows themselves haven't changed, only our local
+        // placeholders. A full pull is required to actually refetch
+        // them, otherwise we've just deleted the failed chats and
+        // left nothing in their place.
+        _ = await syncAllChats()
 
         let stillFailing = await getAllChatsFromStorage().filter { $0.decryptionFailed }.count
         return max(0, failedChats.count - stillFailing)

@@ -204,6 +204,11 @@ class AuthManager: ObservableObject {
         // save the current chat (hasChatAccess depends on isAuthenticated).
         chatViewModel?.handleSignOut()
 
+        // Drop the cloud CEK and device key so a different user signing in
+        // on the same device cannot inherit the previous user's keys.
+        EncryptionService.shared.clearKey()
+        DeviceEncryptionService.shared.clearKey()
+
         localUserData = nil
         isAuthenticated = false
         hasActiveSubscription = false

@@ -71,6 +71,32 @@ enum PasskeyKeyFlow {
         user: PasskeyUserInfo,
         createdVia: SyncEnclaveCreatedVia = .passkey
     ) async -> PasskeyFlowResult {
+        var cekBytes = [UInt8](repeating: 0, count: SyncEnclaveKeyBundle.cekByteCount)
+        let cekRandomStatus = SecRandomCopyBytes(kSecRandomDefault, cekBytes.count, &cekBytes)
+        guard cekRandomStatus == errSecSuccess else {
+            return .failure(.registerFailed, message: "Secure random generation failed (status \(cekRandomStatus))")
+        }
+        return await registerKeyWithPasskey(
+            user: user,
+            cek: Data(cekBytes),
+            createdVia: createdVia
+        )
+    }
+
+    /// Shared core of the two "register the first CEK + initial
+    /// bundle" entry points. Creates the passkey, derives the
+    /// key_id, wraps the CEK under the PRF-derived KEK, and calls
+    /// `register-key`. The caller decides where the CEK comes from
+    /// (freshly generated vs. an existing local one).
+    private static func registerKeyWithPasskey(
+        user: PasskeyUserInfo,
+        cek: Data,
+        createdVia: SyncEnclaveCreatedVia
+    ) async -> PasskeyFlowResult {
+        guard cek.count == SyncEnclaveKeyBundle.cekByteCount else {
+            return .failure(.registerFailed, message: "CEK is the wrong size")
+        }
+
         let passkey: PrfPasskeyResult
         do {
             passkey = try await PasskeyService.shared.createPasskey(
@@ -81,10 +107,6 @@ enum PasskeyKeyFlow {
         } catch let err {
             return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
         }
-
-        var cekBytes = [UInt8](repeating: 0, count: SyncEnclaveKeyBundle.cekByteCount)
-        _ = SecRandomCopyBytes(kSecRandomDefault, cekBytes.count, &cekBytes)
-        let cek = Data(cekBytes)
 
         let keyIdHex: String
         do {
@@ -225,6 +247,27 @@ enum PasskeyKeyFlow {
         )
     }
 
+    // MARK: - First-time backup: register the existing local CEK
+
+    /// Back up an already-local CEK to the enclave by creating a
+    /// passkey, wrapping the *existing* CEK under that passkey's
+    /// PRF-derived KEK, and calling `register-key` with that bundle.
+    /// Used by "Add this device to passkey backup" when the enclave
+    /// has no key yet but the device already has one — generating a
+    /// fresh CEK in that case would silently strand every local
+    /// chat sealed under the existing key.
+    static func registerExistingKeyWithPasskey(
+        existingCek: Data,
+        user: PasskeyUserInfo,
+        createdVia: SyncEnclaveCreatedVia = .recovery
+    ) async -> PasskeyFlowResult {
+        return await registerKeyWithPasskey(
+            user: user,
+            cek: existingCek,
+            createdVia: createdVia
+        )
+    }
+
     // MARK: - Multi-device: enroll new passkey for current CEK
 
     static func addBundleForCurrentKey(
@@ -282,25 +325,22 @@ enum PasskeyKeyFlow {
 
     /// Revoke a passkey bundle from the current key. Caller still
     /// holds the CEK locally so cloud reads/writes keep working from
-    /// other enrolled passkeys.
+    /// other enrolled passkeys. Throws on enclave error so callers
+    /// can react to the specific failure (network, auth, no such
+    /// bundle, etc.) instead of a yes/no signal.
     static func removeBundleFromCurrentKey(
         cek: Data,
         keyIdHex: String,
         credentialId: String
-    ) async -> Bool {
-        do {
-            _ = try await SyncEnclaveAPI.removeBundle(
-                EnclaveRemoveBundleRequest(
-                    keyId: keyIdHex,
-                    key: cek.base64EncodedString(),
-                    credentialId: credentialId,
-                    idempotencyKey: newSyncEnclaveIdempotencyKey()
-                )
+    ) async throws {
+        _ = try await SyncEnclaveAPI.removeBundle(
+            EnclaveRemoveBundleRequest(
+                keyId: keyIdHex,
+                key: ***********************(),
+                credentialId: credentialId,
+                idempotencyKey: newSyncEnclaveIdempotencyKey()
             )
-            return true
-        } catch {
-            return false
-        }
+        )
     }
 
     // MARK: - Mapping

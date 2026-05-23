@@ -114,6 +114,9 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
             throw EncryptionError.keyNotInitialized
         }
         let (_, bytes) = try normalizeKeyInput(key)
+        guard bytes.count == SyncEnclaveKeyBundle.cekByteCount else {
+            throw EncryptionError.invalidKeyLength
+        }
         return bytes
     }
 

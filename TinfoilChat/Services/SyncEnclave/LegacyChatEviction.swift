@@ -19,10 +19,12 @@ enum LegacyChatEviction {
     /// twice. Local-only chats (DeviceEncryptionService) are left
     /// alone because they were never tangled up in the cloud key.
     static func runIfNeeded(userId: String?) async {
-        let defaults = UserDefaults.standard
-        let flagKey = Constants.StorageKeys.Migration.legacyCloudChatsEvicted
-        guard !defaults.bool(forKey: flagKey) else { return }
         guard let userId, !userId.isEmpty else { return }
+        let defaults = UserDefaults.standard
+        // Scope the one-shot flag per user so signing in as a second
+        // local account re-runs the eviction for that user's cache.
+        let flagKey = Constants.StorageKeys.Migration.legacyCloudChatsEvicted + "_" + userId
+        guard !defaults.bool(forKey: flagKey) else { return }
 
         let storage = EncryptedFileStorage.cloud
         let chats: [Chat]
@@ -32,11 +34,21 @@ enum LegacyChatEviction {
             return
         }
 
+        var allDeletesSucceeded = true
         for chat in chats where shouldEvict(chat) {
-            try? await storage.deleteChat(chatId: chat.id, userId: userId)
+            do {
+                try await storage.deleteChat(chatId: chat.id, userId: userId)
+            } catch {
+                allDeletesSucceeded = false
+            }
         }
 
-        defaults.set(true, forKey: flagKey)
+        // Only mark the migration complete when every targeted chat
+        // was actually evicted; a partial failure should re-run on
+        // next launch so the orphan rows don't survive forever.
+        if allDeletesSucceeded {
+            defaults.set(true, forKey: flagKey)
+        }
     }
 
     private static func shouldEvict(_ chat: Chat) -> Bool {

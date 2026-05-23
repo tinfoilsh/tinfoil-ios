@@ -26,6 +26,7 @@ struct SyncEnclaveBundleBody {
 enum SyncEnclaveKeyBundleError: LocalizedError {
     case wrongCekLength(Int)
     case wrongIvLength(Int)
+    case randomGenerationFailed(OSStatus)
 
     var errorDescription: String? {
         switch self {
@@ -33,6 +34,8 @@ enum SyncEnclaveKeyBundleError: LocalizedError {
             return "CEK must be 32 bytes (got \(got))"
         case .wrongIvLength(let got):
             return "AES-GCM IV must be 12 bytes (got \(got))"
+        case .randomGenerationFailed(let status):
+            return "Secure random generation failed (status \(status))"
         }
     }
 }
@@ -63,7 +66,10 @@ enum SyncEnclaveKeyBundle {
             throw SyncEnclaveKeyBundleError.wrongCekLength(cek.count)
         }
         var ivBytes = [UInt8](repeating: 0, count: aesGcmIvByteCount)
-        _ = SecRandomCopyBytes(kSecRandomDefault, ivBytes.count, &ivBytes)
+        let status = SecRandomCopyBytes(kSecRandomDefault, ivBytes.count, &ivBytes)
+        guard status == errSecSuccess else {
+            throw SyncEnclaveKeyBundleError.randomGenerationFailed(status)
+        }
         let iv = Data(ivBytes)
         let nonce = try AES.GCM.Nonce(data: iv)
         let sealed = try AES.GCM.seal(cek, using: kek, nonce: nonce)

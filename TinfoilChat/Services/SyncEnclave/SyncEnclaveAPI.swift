@@ -626,9 +626,14 @@ private struct EmptyBody: Encodable {}
 /// write and refreshed when the caller has a new logical write to
 /// perform. Format: 32 lowercase hex characters (128 bits from
 /// `SecRandomCopyBytes`).
+///
+/// Traps on CSPRNG failure: a predictable key would silently dedupe
+/// against earlier writes via the enclave's idempotency cache, which
+/// is worse than crashing the request.
 func newSyncEnclaveIdempotencyKey() -> String {
     var bytes = [UInt8](repeating: 0, count: 16)
-    _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+    let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+    precondition(status == errSecSuccess, "SecRandomCopyBytes failed: \(status)")
     return bytes.map { String(format: "%02x", $0) }.joined()
 }
 

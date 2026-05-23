@@ -143,6 +143,11 @@ enum Constants {
         static let configRepo = "tinfoilsh/confidential-summarizer"
     }
 
+    enum Metadata {
+        static let enclaveURL = "https://opengraph-metadata.tinfoil.sh"
+        static let configRepo = "tinfoilsh/confidential-website-metadata-fetcher"
+    }
+
     enum DocumentProcessing {
         static let enclaveURL = "https://doc-upload.inf9.tinfoil.sh"
         static let configRepo = "tinfoilsh/confidential-doc-upload"

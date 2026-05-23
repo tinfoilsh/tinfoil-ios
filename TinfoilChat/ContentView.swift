@@ -166,6 +166,19 @@ struct ContentView: View {
                 hasActiveSubscription: hasSubscription
             )
         }
+        .overlay {
+            if scenePhase != .active {
+                ZStack {
+                    (colorScheme == .dark ? Color.backgroundPrimary : Color.white)
+                        .ignoresSafeArea()
+                    Image(colorScheme == .dark ? "logo-white" : "logo-dark")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 48)
+                }
+                .transition(.opacity)
+            }
+        }
     }
 
     private func requestAppReviewIfEligible() {

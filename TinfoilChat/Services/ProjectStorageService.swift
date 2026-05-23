@@ -158,39 +158,35 @@ final class ProjectStorageService: ObservableObject {
 
     func getProject(_ projectId: String) async throws -> Project? {
         guard let keys = CEKEncoding.pullKeysIfAvailable() else { return nil }
-        do {
-            let response = try await SyncEnclaveAPI.pull(
-                EnclavePullRequest(
-                    scope: .project,
-                    ids: [projectId],
-                    all: nil,
-                    cursor: nil,
-                    limit: nil,
-                    keys: keys
-                )
+        let response = try await SyncEnclaveAPI.pull(
+            EnclavePullRequest(
+                scope: .project,
+                ids: [projectId],
+                all: nil,
+                cursor: nil,
+                limit: nil,
+                keys: keys
             )
-            guard let item = response.items.first else { return nil }
-            if !item.ok {
-                if item.code == WireCodes.notFound { return nil }
-                return nil
-            }
-            guard let b64 = item.plaintext,
-                  let plaintext = Data(base64Encoded: b64) else { return nil }
-            let decoded = try JSONDecoder().decode(ProjectData.self, from: plaintext)
-            let now = isoNow()
-            return Project(
-                id: projectId,
-                name: decoded.name,
-                description: decoded.description,
-                systemInstructions: decoded.systemInstructions,
-                memory: decoded.memory,
-                createdAt: now,
-                updatedAt: now,
-                syncVersion: etagToSyncVersion(item.etag)
-            )
-        } catch {
-            return nil
+        )
+        guard let item = response.items.first else { return nil }
+        if !item.ok {
+            if item.code == WireCodes.notFound { return nil }
+            throw CloudStorageError.invalidResponse
         }
+        guard let b64 = item.plaintext,
+              let plaintext = Data(base64Encoded: b64) else { return nil }
+        let decoded = try JSONDecoder().decode(ProjectData.self, from: plaintext)
+        let now = isoNow()
+        return Project(
+            id: projectId,
+            name: decoded.name,
+            description: decoded.description,
+            systemInstructions: decoded.systemInstructions,
+            memory: decoded.memory,
+            createdAt: now,
+            updatedAt: now,
+            syncVersion: etagToSyncVersion(item.etag)
+        )
     }
 
     func getProjects(_ projectIds: [String]) async throws -> [String: Project] {
