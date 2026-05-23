@@ -1471,7 +1471,13 @@ class CloudSyncService: ObservableObject {
         let result = try await cloudStorage.uploadChat(storedChat)
         let newVersion = result.syncVersion ?? chat.syncVersion + 1
         if !result.rewrites.isEmpty {
-            await applyAttachmentRewrites(chatId: chat.id, rewrites: result.rewrites)
+            // Persist the enclave-minted attachment ids before marking
+            // the chat synced. If the local rewrite fails we want the
+            // next sync pass to retry the upload (so the cloud copy and
+            // the on-disk copy converge on the same ids) rather than
+            // record success while the local chat still points at
+            // pre-upload client ids.
+            try await applyAttachmentRewrites(chatId: chat.id, rewrites: result.rewrites)
         }
         await markChatAsSynced(chat.id, version: newVersion)
     }
@@ -1486,9 +1492,9 @@ class CloudSyncService: ObservableObject {
     private func applyAttachmentRewrites(
         chatId: String,
         rewrites: [CloudStorageService.AttachmentRewrite]
-    ) async {
+    ) async throws {
         guard let userId = await getCurrentUserId() else { return }
-        guard var chat = try? await EncryptedFileStorage.cloud.loadChat(
+        guard var chat = try await EncryptedFileStorage.cloud.loadChat(
             chatId: chatId,
             userId: userId
         ) else { return }
@@ -1510,7 +1516,7 @@ class CloudSyncService: ObservableObject {
         }
 
         guard didChange else { return }
-        try? await EncryptedFileStorage.cloud.saveChat(chat, userId: userId)
+        try await EncryptedFileStorage.cloud.saveChat(chat, userId: userId)
     }
 
     private func markChatAsSynced(_ chatId: String, version: Int) async {

@@ -185,6 +185,26 @@ actor EncryptedFileStorage {
             }
         }
 
+        // The sidecar is the source of truth for sync metadata
+        // (overlaySyncSidecar reapplies it on every load), so the
+        // embedded fields on the chat object can drift unless saveChat
+        // promotes them. Advance the sidecar only when the caller's
+        // snapshot is at least as fresh as what's already on disk,
+        // otherwise a load-modify-save that overlapped a concurrent
+        // updateSyncMetadata would silently regress the version.
+        let existingSidecar = readSyncSidecar(chatId: chat.id, userId: userId)
+        if existingSidecar == nil || chat.syncVersion >= existingSidecar!.syncVersion {
+            try writeSyncSidecar(
+                chatId: chat.id,
+                userId: userId,
+                SyncMetadataSidecar(
+                    syncVersion: chat.syncVersion,
+                    syncedAt: chat.syncedAt,
+                    locallyModified: chat.locallyModified
+                )
+            )
+        }
+
         // Load the index after the file write to minimize the reentrancy window
         // between this read and the subsequent save (the await on encryptData above
         // is a suspension point where other actor methods could interleave).
