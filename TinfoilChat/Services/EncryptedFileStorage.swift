@@ -122,8 +122,8 @@ actor EncryptedFileStorage {
         let data = try encoder.encode(chat)
 
         if isCorrupted {
-            // Write as plain JSON — the encryptedData field already contains
-            // the original encrypted payload for future decryption retry
+            // Write as plain JSON so the next sync can replace the
+            // placeholder with the enclave-unsealed copy.
             let filePath = try chatFilePath(chatId: chat.id, userId: userId, isCorrupted: true)
             try data.write(to: filePath, options: [.atomic, .completeFileProtection])
 

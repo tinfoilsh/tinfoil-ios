@@ -51,26 +51,6 @@ enum BinaryCodec {
         return combined
     }
 
-    /// AES-GCM decrypt → gunzip → JSON-decode.
-    /// Expects the combined wire format: nonce(12) || ciphertext || tag(16).
-    static func decryptAndDecompress<T: Decodable>(_ data: Data, using key: SymmetricKey, as type: T.Type) throws -> T {
-        let raw = try decryptRaw(data, using: key)
-        return try JSONDecoder().decode(type, from: raw)
-    }
-
-    /// AES-GCM decrypt → gunzip, returning raw decompressed bytes.
-    static func decryptRaw(_ data: Data, using key: SymmetricKey) throws -> Data {
-        let minLength = nonceSize + tagSize
-        guard data.count > minLength else {
-            throw BinaryCodecError.invalidCombinedLength
-        }
-        let sealedBox = try AES.GCM.SealedBox(combined: data)
-        let decrypted = try AES.GCM.open(sealedBox, using: key)
-        guard decrypted.isGzipped else {
-            return decrypted
-        }
-        return try decrypted.gunzipped()
-    }
 }
 
 // MARK: - Per-attachment encryption (random key, no compression)

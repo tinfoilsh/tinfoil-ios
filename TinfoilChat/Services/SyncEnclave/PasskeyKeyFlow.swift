@@ -1,0 +1,337 @@
+//
+//  PasskeyKeyFlow.swift
+//  TinfoilChat
+//
+//  High-level passkey + sync-enclave glue. Mirrors the webapp's
+//  `services/sync-enclave/passkey-key-flow.ts`.
+//
+//  The enclave wire (see `internal/server/types.go`) exposes only
+//  `register-key`, `add-bundle`, `remove-bundle` and `current` for
+//  key management. There is no "list bundles" endpoint, so this
+//  layer's contract is:
+//
+//    - registerNewKeyWithPasskey: create a passkey, generate a fresh
+//      CEK, wrap it under the passkey-PRF KEK, register the key +
+//      initial bundle with the enclave. Treats a 409 from the enclave
+//      as "remote key already exists, fall through to unlock".
+//
+//    - unlockWithPasskey: authenticate a passkey, derive the KEK,
+//      unwrap a bundle that the caller already has on hand (e.g. one
+//      retrieved via `keyCurrent()`).
+//
+//    - addBundleForCurrentKey: enroll a brand-new passkey for an
+//      existing key (multi-device flow).
+//
+//  The CEK is held only in memory at the call site and zeroed by
+//  callers when the session ends.
+//
+
+import ClerkKit
+import CryptoKit
+import Foundation
+
+enum PasskeyFlowFailure: String, Sendable {
+    case userCancelled
+    case prfUnsupported
+    case passkeyTimeout
+    case noRemoteBundle
+    case noRemoteKey
+    case bundleDecryptFailed
+    case registerFailed
+    case enclaveUnavailable
+    case remoteKeyExists
+    case keyIdMismatch
+}
+
+enum PasskeyFlowResult: Sendable {
+    case success(cek: Data, keyIdHex: String, credentialId: String, createdVia: String?)
+    case failure(PasskeyFlowFailure, message: String? = nil)
+}
+
+struct PasskeyUserInfo {
+    let userId: String
+    let userEmail: String
+    let displayName: String
+}
+
+/// `created_via` values accepted by the enclave's `RegisterKey` op.
+enum SyncEnclaveCreatedVia: String, Codable, Sendable {
+    case passkey
+    case manual
+    case recovery
+    case startFresh = "start_fresh"
+}
+
+@MainActor
+enum PasskeyKeyFlow {
+
+    // MARK: - Brand-new user: generate + register CEK
+
+    static func registerNewKeyWithPasskey(
+        user: PasskeyUserInfo,
+        createdVia: SyncEnclaveCreatedVia = .passkey
+    ) async -> PasskeyFlowResult {
+        let passkey: PrfPasskeyResult
+        do {
+            passkey = try await PasskeyService.shared.createPasskey(
+                userId: user.userId,
+                userEmail: user.userEmail,
+                displayName: user.displayName
+            )
+        } catch let err {
+            return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
+        }
+
+        var cekBytes = [UInt8](repeating: 0, count: SyncEnclaveKeyBundle.cekByteCount)
+        _ = SecRandomCopyBytes(kSecRandomDefault, cekBytes.count, &cekBytes)
+        let cek = Data(cekBytes)
+
+        let keyIdHex: String
+        do {
+            keyIdHex = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+        } catch {
+            return .failure(.registerFailed, message: error.localizedDescription)
+        }
+
+        let kek = PasskeyService.deriveKeyEncryptionKey(from: passkey.prfOutput)
+        let bundle: SyncEnclaveBundleBody
+        do {
+            bundle = try SyncEnclaveKeyBundle.wrapCek(
+                credentialId: passkey.credentialId,
+                kek: kek,
+                cek: cek
+            )
+        } catch {
+            return .failure(.bundleDecryptFailed, message: error.localizedDescription)
+        }
+
+        do {
+            _ = try await SyncEnclaveAPI.registerKey(
+                EnclaveKeyRegisterRequest(
+                    key: cek.base64EncodedString(),
+                    ifMatch: IfMatchSentinels.anyKey,
+                    createdVia: createdVia.rawValue,
+                    idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                    initialBundle: EnclaveKeyRegisterBundleInput(
+                        credentialId: bundle.credentialId,
+                        kekIvHex: bundle.kekIvHex,
+                        encryptedKeysHex: bundle.wrappedKeyHex
+                    )
+                )
+            )
+        } catch let err as SyncEnclaveError {
+            return .failure(failureFromEnclaveError(err), message: err.message)
+        } catch {
+            return .failure(.enclaveUnavailable, message: error.localizedDescription)
+        }
+
+        return .success(
+            cek: cek,
+            keyIdHex: keyIdHex,
+            credentialId: passkey.credentialId,
+            createdVia: createdVia.rawValue
+        )
+    }
+
+    // MARK: - Returning user: unlock from server
+
+    /// End-to-end "returning user" unlock against the enclave. Wraps
+    /// keyCurrent() + unlockWithPasskey() + the key_id binding check
+    /// into a single call.
+    static func unlockFromServer(prefer: String? = nil) async -> PasskeyFlowResult {
+        let state: EnclaveKeyCurrentResponse
+        do {
+            state = try await SyncEnclaveAPI.keyCurrent()
+        } catch let err as SyncEnclaveError {
+            return .failure(failureFromEnclaveError(err), message: err.message)
+        } catch {
+            return .failure(.enclaveUnavailable, message: error.localizedDescription)
+        }
+
+        guard let serverKeyId = state.keyId, !state.bundles.isEmpty else {
+            return .failure(.noRemoteKey)
+        }
+
+        let candidates = state.bundles.values.sorted { $0.credentialId < $1.credentialId }
+        let result = await unlockWithPasskey(candidates: candidates, prefer: prefer)
+        guard case .success(let cek, let derivedKeyIdHex, let credentialId, _) = result else {
+            return result
+        }
+
+        // §8.6 binding check — the bundle plaintext carries the
+        // key_id the ciphertext was wrapped against. The enclave's
+        // reported key_id MUST match the derived id, or the bundle
+        // is talking about a different key.
+        guard derivedKeyIdHex == serverKeyId else {
+            return .failure(.keyIdMismatch, message: "keyId \(derivedKeyIdHex) != enclave \(serverKeyId)")
+        }
+        return .success(
+            cek: cek,
+            keyIdHex: derivedKeyIdHex,
+            credentialId: credentialId,
+            createdVia: state.createdVia
+        )
+    }
+
+    /// Recover the user's CEK by re-authenticating their passkey and
+    /// unwrapping a candidate bundle. The caller supplies the bundles —
+    /// typically from a fresh `keyCurrent()` probe.
+    static func unlockWithPasskey(
+        candidates: [EnclaveKeyCurrentBundle],
+        prefer: String? = nil
+    ) async -> PasskeyFlowResult {
+        guard !candidates.isEmpty else {
+            return .failure(.noRemoteBundle)
+        }
+        let credIds = candidates.map(\.credentialId)
+        let ordered: [String]
+        if let prefer, credIds.contains(prefer) {
+            ordered = [prefer] + credIds.filter { $0 != prefer }
+        } else {
+            ordered = credIds
+        }
+
+        let passkey: PrfPasskeyResult
+        do {
+            passkey = try await PasskeyService.shared.authenticatePasskey(credentialIds: ordered)
+        } catch let err {
+            return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
+        }
+
+        guard let bundle = candidates.first(where: { $0.credentialId == passkey.credentialId }) else {
+            return .failure(.noRemoteBundle)
+        }
+
+        let kek = PasskeyService.deriveKeyEncryptionKey(from: passkey.prfOutput)
+        let cek: Data
+        do {
+            cek = try SyncEnclaveKeyBundle.unwrapCek(kek: kek, bundle: bundle)
+        } catch {
+            return .failure(.bundleDecryptFailed, message: error.localizedDescription)
+        }
+
+        let keyIdHex: String
+        do {
+            keyIdHex = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+        } catch {
+            return .failure(.bundleDecryptFailed, message: error.localizedDescription)
+        }
+
+        return .success(
+            cek: cek,
+            keyIdHex: keyIdHex,
+            credentialId: passkey.credentialId,
+            createdVia: nil
+        )
+    }
+
+    // MARK: - Multi-device: enroll new passkey for current CEK
+
+    static func addBundleForCurrentKey(
+        cek: Data,
+        keyIdHex: String,
+        user: PasskeyUserInfo
+    ) async -> PasskeyFlowResult {
+        let passkey: PrfPasskeyResult
+        do {
+            passkey = try await PasskeyService.shared.createPasskey(
+                userId: user.userId,
+                userEmail: user.userEmail,
+                displayName: user.displayName
+            )
+        } catch let err {
+            return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
+        }
+
+        let kek = PasskeyService.deriveKeyEncryptionKey(from: passkey.prfOutput)
+        let bundle: SyncEnclaveBundleBody
+        do {
+            bundle = try SyncEnclaveKeyBundle.wrapCek(
+                credentialId: passkey.credentialId,
+                kek: kek,
+                cek: cek
+            )
+        } catch {
+            return .failure(.bundleDecryptFailed, message: error.localizedDescription)
+        }
+
+        do {
+            _ = try await SyncEnclaveAPI.addBundle(
+                EnclaveAddBundleRequest(
+                    keyId: keyIdHex,
+                    key: cek.base64EncodedString(),
+                    credentialId: bundle.credentialId,
+                    kekIvHex: bundle.kekIvHex,
+                    encryptedKeysHex: bundle.wrappedKeyHex,
+                    idempotencyKey: newSyncEnclaveIdempotencyKey()
+                )
+            )
+        } catch let err as SyncEnclaveError {
+            return .failure(failureFromEnclaveError(err), message: err.message)
+        } catch {
+            return .failure(.enclaveUnavailable, message: error.localizedDescription)
+        }
+
+        return .success(
+            cek: cek,
+            keyIdHex: keyIdHex,
+            credentialId: passkey.credentialId,
+            createdVia: nil
+        )
+    }
+
+    /// Revoke a passkey bundle from the current key. Caller still
+    /// holds the CEK locally so cloud reads/writes keep working from
+    /// other enrolled passkeys.
+    static func removeBundleFromCurrentKey(
+        cek: Data,
+        keyIdHex: String,
+        credentialId: String
+    ) async -> Bool {
+        do {
+            _ = try await SyncEnclaveAPI.removeBundle(
+                EnclaveRemoveBundleRequest(
+                    keyId: keyIdHex,
+                    key: cek.base64EncodedString(),
+                    credentialId: credentialId,
+                    idempotencyKey: newSyncEnclaveIdempotencyKey()
+                )
+            )
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    // MARK: - Mapping
+
+    private static func failureFromPasskeyError(_ err: Error) -> PasskeyFlowFailure {
+        if let passkeyError = err as? PasskeyError {
+            switch passkeyError {
+            case .prfNotSupported, .prfOutputMissing:
+                return .prfUnsupported
+            case .userCancelled:
+                return .userCancelled
+            case .authorizationFailed, .randomGenerationFailed, .invalidBase64url:
+                return .userCancelled
+            }
+        }
+        return .userCancelled
+    }
+
+    private static func failureFromEnclaveError(_ err: SyncEnclaveError) -> PasskeyFlowFailure {
+        if err.code == WireCodes.existingDataUnderOtherKey || err.status == 409 {
+            return .remoteKeyExists
+        }
+        if let status = err.status, status >= 500 {
+            return .enclaveUnavailable
+        }
+        if err.code == WireCodes.attestationFailed {
+            return .enclaveUnavailable
+        }
+        if err.code == WireCodes.network {
+            return .enclaveUnavailable
+        }
+        return .registerFailed
+    }
+}

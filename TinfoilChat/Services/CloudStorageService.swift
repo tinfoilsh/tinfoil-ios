@@ -2,170 +2,174 @@
 //  CloudStorageService.swift
 //  TinfoilChat
 //
-//  Service for interacting with cloud storage backend
+//  Cloud storage adapter built on top of the attested sync enclave.
+//  The enclave is the only encryptor; the controlplane only ever
+//  sees ciphertext from its perspective. Mirrors
+//  `services/cloud/cloud-storage.ts` in the webapp.
 //
 
-import Foundation
 import ClerkKit
+import CryptoKit
+import Foundation
 
-/// Service for managing cloud storage operations
+/// Service for managing cloud storage operations.
 class CloudStorageService: ObservableObject {
     static let shared = CloudStorageService()
 
-    private let apiBaseURL = Constants.API.baseURL
+    private let chatListLimit = Constants.SyncEnclave.chatListLimit
+    private let projectChatListLimit = Constants.SyncEnclave.projectChatListLimit
     private var getToken: (() async -> String?)? = nil
 
     private init() {}
 
     // MARK: - Configuration
 
-    /// Set the token getter function for authentication
+    /// Set the token getter function for authentication. Wires the same
+    /// closure into the shared sync enclave client so attested calls
+    /// pick up the user's Clerk JWT automatically.
     func setTokenGetter(_ tokenGetter: @escaping () async -> String?) {
         self.getToken = tokenGetter
+        let captured = tokenGetter
+        Task {
+            await SyncEnclaveClient.shared.setTokenGetter { await captured() }
+        }
     }
 
-    /// Default token getter using Clerk
+    /// Default token getter using Clerk.
     private func defaultTokenGetter() async -> String? {
         do {
-            // Check if Clerk has a publishable key
             guard await !Clerk.shared.publishableKey.isEmpty else {
                 return nil
             }
 
-            // Ensure Clerk is loaded
             let isLoaded = await Clerk.shared.isLoaded
             if !isLoaded {
                 try await Clerk.shared.refreshClient()
             }
 
-            // Get session token
             if let session = await Clerk.shared.session {
-                // Get a fresh token
                 if let token = try? await session.getToken() {
                     return token
-                } else if let tokenResource = session.lastActiveToken {
+                }
+                if let tokenResource = session.lastActiveToken {
                     return tokenResource.jwt
                 }
             }
-
             return nil
         } catch {
             return nil
         }
     }
 
-    /// Check if user is authenticated
+    /// Check if user is authenticated.
     func isAuthenticated() async -> Bool {
         let token = await (getToken ?? defaultTokenGetter)()
         return token != nil && !token!.isEmpty
     }
 
-    // MARK: - API Headers
+    // MARK: - Conversation ID generation
 
-    private func getHeaders(contentType: String = "application/json") async throws -> [String: String] {
-        guard let token = await (getToken ?? defaultTokenGetter)() else {
-            throw CloudStorageError.authenticationRequired
-        }
-
-        return [
-            "Authorization": "Bearer \(token)",
-            "Content-Type": contentType
-        ]
-    }
-
-    // MARK: - Conversation ID Generation
-
-    /// Generate a unique conversation ID with reverse timestamp
+    /// Generate a unique conversation ID with reverse timestamp via the
+    /// controlplane's helper endpoint. The id format is shared with the
+    /// webapp so chats stay sortable cross-device.
     func generateConversationId(timestamp: String? = nil) async throws -> GenerateConversationIdResponse {
-        let url = URL(string: "\(apiBaseURL)/api/chats/generate-id")!
+        let url = URL(string: "\(Constants.API.baseURL)/api/chats/generate-id")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.allHTTPHeaderFields = try await getHeaders()
+        request.allHTTPHeaderFields = try await getControlplaneHeaders()
 
         let body = GenerateConversationIdRequest(timestamp: timestamp)
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw CloudStorageError.invalidResponse
         }
-
         return try JSONDecoder().decode(GenerateConversationIdResponse.self, from: data)
     }
 
-    // MARK: - Upload Operations
+    // MARK: - Upload
 
-    /// Upload a chat to cloud storage using v1 binary format.
-    /// 1. Encrypt and upload image attachments separately
-    /// 2. Strip base64 image data from messages
-    /// 3. Compress, encrypt, and upload the chat as a binary blob
-    func uploadChat(_ chat: StoredChat) async throws {
+    /// Push a chat through the sync enclave. The caller's CEK (raw
+    /// bytes from `EncryptionService`) is base64-encoded and sent on
+    /// the wire; the enclave seals the row under v2 AAD and returns
+    /// the new etag, which we surface as the chat's new sync version.
+    @discardableResult
+    func uploadChat(_ chat: StoredChat) async throws -> Int? {
         var chatToUpload = chat
-
-        // Upload image attachments and record encryption keys on each attachment
-        try await encryptAndUploadAttachments(&chatToUpload)
-
-        // Strip full-size base64 from image attachments (thumbnails stay inline)
+        let idempotencyKey = newSyncEnclaveIdempotencyKey()
+        try await encryptAndUploadAttachments(&chatToUpload, idempotencyKey: idempotencyKey)
         stripBase64FromMessages(&chatToUpload.messages)
 
-        // Compress + encrypt the chat as v1 binary
-        let binaryData = try EncryptionService.shared.encryptV1(chatToUpload)
+        let plaintext = try JSONEncoder().encode(chatToUpload)
+        let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
 
-        // Upload to the binary conversation endpoint
-        let url = URL(string: "\(apiBaseURL)/api/storage/conversation/\(chat.id)/data")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        request.allHTTPHeaderFields = try await getHeaders(contentType: "application/octet-stream")
-        request.setValue(String(chat.messages.count), forHTTPHeaderField: "X-Message-Count")
-        if let projectId = chat.projectId {
-            request.setValue(projectId, forHTTPHeaderField: "X-Project-Id")
+        var metadata: [String: AnyCodable] = [
+            "messageCount": AnyCodable(chatToUpload.messages.count)
+        ]
+        // Always emit projectId so the enclave→controlplane path
+        // mirrors what the local chat row says. nil clears the
+        // server's project_id column; omitting the field would leave
+        // a stale assignment behind on cross-project moves.
+        if let projectId = chatToUpload.projectId {
+            metadata["projectId"] = AnyCodable(projectId)
+        } else {
+            metadata["projectId"] = AnyCodable(NSNull())
         }
-        request.httpBody = binaryData
 
-        let (_, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw CloudStorageError.uploadFailed
-        }
+        let ifMatch: String? = chatToUpload.syncVersion > 0
+            ? String(chatToUpload.syncVersion)
+            : "0"
+        let response = try await SyncEnclaveAPI.push(
+            EnclavePushRequest(
+                scope: .chat,
+                id: chatToUpload.id,
+                key: keyB64,
+                plaintext: plaintext.base64EncodedString(),
+                ifMatch: ifMatch,
+                idempotencyKey: idempotencyKey,
+                metadata: metadata
+            )
+        )
+        return etagToSyncVersion(response.etag)
     }
 
-    /// Encrypt and upload each image attachment, storing encryption key material on the attachment.
-    private func encryptAndUploadAttachments(_ chat: inout StoredChat) async throws {
+    private func encryptAndUploadAttachments(
+        _ chat: inout StoredChat,
+        idempotencyKey: String
+    ) async throws {
+        var attachmentIndex = 0
         for msgIdx in chat.messages.indices {
             for attIdx in chat.messages[msgIdx].attachments.indices {
-                let attachment = chat.messages[msgIdx].attachments[attIdx]
-                guard attachment.type == .image, let base64 = attachment.base64,
-                      let imageData = Data(base64Encoded: base64) else { continue }
-
-                let result = try BinaryCodec.encryptAttachment(imageData)
-                try await uploadAttachment(attachmentId: attachment.id, chatId: chat.id, data: result.encryptedData)
-
-                chat.messages[msgIdx].attachments[attIdx].encryptionKey = result.key.base64EncodedString()
+                defer { attachmentIndex += 1 }
+                let att = chat.messages[msgIdx].attachments[attIdx]
+                guard att.type == .image,
+                      let base64 = att.base64,
+                      att.encryptionKey == nil,
+                      let raw = Data(base64Encoded: base64) else {
+                    continue
+                }
+                let attIdemKey = attachmentIdempotencyKey(
+                    uploadKey: idempotencyKey,
+                    attachmentIndex: attachmentIndex
+                )
+                // The enclave mints both the durable attachment id
+                // and a fresh per-attachment AES-256 key. The chat
+                // envelope (sealed under the user's CEK) is what
+                // keeps the per-attachment keys confidential at rest.
+                let result = try await SyncEnclaveAPI.attachmentPut(
+                    EnclaveAttachmentPutRequest(
+                        chatId: chat.id,
+                        plaintext: raw.base64EncodedString(),
+                        idempotencyKey: attIdemKey
+                    )
+                )
+                chat.messages[msgIdx].attachments[attIdx].id = result.id
+                chat.messages[msgIdx].attachments[attIdx].encryptionKey = result.attKey
             }
         }
     }
 
-    /// Upload a single encrypted attachment blob.
-    private func uploadAttachment(attachmentId: String, chatId: String, data: Data) async throws {
-        let url = URL(string: "\(apiBaseURL)/api/storage/attachment/\(attachmentId)")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        request.allHTTPHeaderFields = try await getHeaders(contentType: "application/octet-stream")
-        request.setValue(chatId, forHTTPHeaderField: "X-Chat-Id")
-        request.httpBody = data
-
-        let (_, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw CloudStorageError.uploadFailed
-        }
-    }
-
-    /// Remove full-size base64 from image attachments. Thumbnails remain inline.
     private func stripBase64FromMessages(_ messages: inout [Message]) {
         for msgIdx in messages.indices {
             for attIdx in messages[msgIdx].attachments.indices {
@@ -176,114 +180,96 @@ class CloudStorageService: ObservableObject {
         }
     }
 
-    // MARK: - Download Operations
+    private func attachmentIdempotencyKey(uploadKey: String, attachmentIndex: Int) -> String {
+        let input = "attachment:\(uploadKey):\(attachmentIndex)"
+        let digest = SHA256.hash(data: Data(input.utf8))
+        return digest.prefix(16).map { String(format: "%02x", $0) }.joined()
+    }
 
-    /// Download a chat from cloud storage.
-    /// Routes v0 (legacy JSON) and v1 (binary) based on the X-Format-Version response header.
+    // MARK: - Download
+
+    /// Pull a chat from the enclave by id. Returns nil for NOT_FOUND.
+    /// The enclave returns plaintext (v2); we JSON-decode it into the
+    /// local `StoredChat` shape. On unexpected decode failure we keep
+    /// the legacy placeholder behavior so the rest of the app can
+    /// still display the chat row.
     func downloadChat(_ chatId: String) async throws -> StoredChat? {
-        let url = URL(string: "\(apiBaseURL)/api/storage/conversation/\(chatId)")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.allHTTPHeaderFields = try await getHeaders()
+        guard let keys = CEKEncoding.pullKeysIfAvailable() else { return nil }
+        let response = try await SyncEnclaveAPI.pull(
+            EnclavePullRequest(
+                scope: .chat,
+                ids: [chatId],
+                all: nil,
+                cursor: nil,
+                limit: nil,
+                keys: keys
+            )
+        )
+        guard let item = response.items.first else { return nil }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw CloudStorageError.invalidResponse
+        if !item.ok {
+            if item.code == WireCodes.notFound { return nil }
+            return encryptedPlaceholder(chatId: chatId)
         }
 
-        if httpResponse.statusCode == 404 {
+        guard let plaintextB64 = item.plaintext,
+              let plaintext = Data(base64Encoded: plaintextB64) else {
             return nil
         }
 
-        guard httpResponse.statusCode == 200 else {
-            throw CloudStorageError.downloadFailed
-        }
-
-        let formatVersion = Int(httpResponse.value(forHTTPHeaderField: "X-Format-Version") ?? "0") ?? 0
-
         do {
-            let result: DecryptionResult<StoredChat>
-            if formatVersion == 1 {
-                result = try EncryptionService.shared.decryptV1(data, as: StoredChat.self)
-            } else {
-                let encrypted = try JSONDecoder().decode(EncryptedData.self, from: data)
-                result = try await EncryptionService.shared.decrypt(encrypted, as: StoredChat.self)
+            var chat = try JSONDecoder().decode(StoredChat.self, from: plaintext)
+            chat.formatVersion = 2
+            if let syncVersion = etagToSyncVersion(item.etag) {
+                chat.syncVersion = syncVersion
             }
-
-            var chat = result.value
-            chat.formatVersion = formatVersion
             return chat
         } catch {
-            // If decryption fails, create a placeholder with encrypted data for recovery
-            let timestamp = chatId.split(separator: "_").first.map(String.init) ?? ""
-            let parsedTimestamp = Int(timestamp) ?? 0
-            let createdAtMs = parsedTimestamp > 0 ? Double(Constants.Sync.maxReverseTimestamp - parsedTimestamp) : Date().timeIntervalSince1970 * 1000
-
-            // Store encrypted data for recovery: v1 binary gets base64-encoded into the string field
-            let encryptedString: String? = formatVersion == 1
-                ? data.base64EncodedString()
-                : String(data: data, encoding: .utf8)
-
-            return StoredChat.encryptedPlaceholder(
-                id: chatId,
-                createdAt: Date(timeIntervalSince1970: createdAtMs / 1000.0),
-                updatedAt: Date(),
-                formatVersion: formatVersion,
-                encryptedData: encryptedString
-            )
+            return encryptedPlaceholder(chatId: chatId)
         }
     }
 
-    // Re-encrypt with the current key when a legacy key was needed for decryption.
-    // MARK: - Attachment Operations
-
-    /// Fetch a single encrypted attachment blob from the public endpoint (no auth needed).
-    func fetchAttachment(attachmentId: String) async throws -> Data {
-        let url = URL(string: "\(apiBaseURL)/api/storage/attachment/\(attachmentId)")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw CloudStorageError.downloadFailed
-        }
-
-        return data
+    private func encryptedPlaceholder(chatId: String) -> StoredChat {
+        let timestamp = chatId.split(separator: "_").first.map(String.init) ?? ""
+        let parsedTimestamp = Int(timestamp) ?? 0
+        let createdAtMs = parsedTimestamp > 0
+            ? Double(Constants.Sync.maxReverseTimestamp - parsedTimestamp)
+            : Date().timeIntervalSince1970 * 1000
+        return StoredChat.encryptedPlaceholder(
+            id: chatId,
+            createdAt: Date(timeIntervalSince1970: createdAtMs / 1000.0),
+            updatedAt: Date()
+        )
     }
 
-    /// Fetch and decrypt all v1 image attachments in a message array in parallel.
-    /// Returns a dictionary mapping attachment IDs to their decoded base64 strings
-    /// so callers can merge results into the current (possibly updated) messages
-    /// without overwriting the entire array with a stale snapshot.
+    // MARK: - Attachments
+
+    /// Fetch and decrypt all image attachments that have no base64 yet.
+    /// Returns a dictionary mapping attachment IDs to their decoded
+    /// base64 strings so callers can merge results into the current
+    /// (possibly updated) messages without overwriting the entire
+    /// array with a stale snapshot.
     func loadImages(in messages: [Message]) async -> [String: String] {
-        // Collect work items: (attachmentId, keyData)
-        var work: [(String, Data)] = []
+        var work: [(String, String)] = []
         for msg in messages {
             for att in msg.attachments {
                 guard att.type == .image,
                       att.base64 == nil,
-                      let keyB64 = att.encryptionKey,
-                      let keyData = Data(base64Encoded: keyB64),
-                      keyData.count == BinaryCodec.aes256KeySize else { continue }
-                work.append((att.id, keyData))
+                      let attKey = att.encryptionKey else { continue }
+                work.append((att.id, attKey))
             }
         }
-
         guard !work.isEmpty else { return [:] }
 
         var results: [String: String] = [:]
-
         await withTaskGroup(of: (String, String?).self) { group in
-            for (attId, keyData) in work {
+            for (attId, key) in work {
                 group.addTask {
                     do {
-                        let encrypted = try await self.fetchAttachment(attachmentId: attId)
-                        let decrypted = try BinaryCodec.decryptAttachment(encrypted, key: keyData)
-                        return (attId, decrypted.base64EncodedString())
+                        let bytes = try await SyncEnclaveAPI.attachmentGet(
+                            EnclaveAttachmentGetRequest(id: attId, attKey: key)
+                        )
+                        return (attId, bytes.base64EncodedString())
                     } catch {
                         return (attId, nil)
                     }
@@ -295,322 +281,360 @@ class CloudStorageService: ObservableObject {
                 }
             }
         }
-
         return results
     }
 
-    // MARK: - List Operations
+    // MARK: - List
 
-    /// List chats from cloud storage with optional pagination
-    func listChats(limit: Int? = nil, continuationToken: String? = nil, includeContent: Bool = false) async throws -> ChatListResponse {
-
-        var components = URLComponents(string: "\(apiBaseURL)/api/chats/list")!
-        var queryItems: [URLQueryItem] = []
-
-        if let limit = limit {
-            queryItems.append(URLQueryItem(name: "limit", value: String(limit)))
+    func listChats(
+        limit: Int? = nil,
+        continuationToken: String? = nil,
+        includeContent: Bool = false
+    ) async throws -> ChatListResponse {
+        let effectiveLimit = min(limit ?? chatListLimit, 500)
+        let status = try await SyncEnclaveAPI.listStatus(
+            EnclaveListStatusRequest(
+                scope: .chat,
+                cursor: continuationToken,
+                limit: effectiveLimit,
+                projectId: nil
+            )
+        )
+        var conversations = status.updates.map(remoteChatFromStatus)
+        if includeContent && !conversations.isEmpty {
+            await attachInlineContent(&conversations)
         }
-        if let continuationToken = continuationToken {
-            queryItems.append(URLQueryItem(name: "continuationToken", value: continuationToken))
-        }
-        if includeContent {
-            queryItems.append(URLQueryItem(name: "includeContent", value: "true"))
-        }
-
-        if !queryItems.isEmpty {
-            components.queryItems = queryItems
-        }
-
-
-        var request = URLRequest(url: components.url!)
-        request.httpMethod = "GET"
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.allHTTPHeaderFields = try await getHeaders()
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw CloudStorageError.listFailed
-        }
-
-
-        guard httpResponse.statusCode == 200 else {
-            throw CloudStorageError.listFailed
-        }
-
-        do {
-            let result = try JSONDecoder().decode(ChatListResponse.self, from: data)
-            return result
-        } catch {
-            throw error
-        }
+        return ChatListResponse(
+            conversations: conversations,
+            nextContinuationToken: status.nextCursor,
+            hasMore: hasNextCursor(status.nextCursor)
+        )
     }
 
-    // MARK: - Delete Operations
-
-    /// Delete a chat from cloud storage
-    func deleteChat(_ chatId: String) async throws {
-        let url = URL(string: "\(apiBaseURL)/api/storage/conversation/\(chatId)")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "DELETE"
-        request.allHTTPHeaderFields = try await getHeaders()
-
-        let (_, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw CloudStorageError.invalidResponse
+    func getChatsUpdatedSince(
+        since: String,
+        includeContent: Bool = false,
+        continuationToken: String? = nil
+    ) async throws -> ChatListResponse {
+        let status = try await SyncEnclaveAPI.listStatus(
+            EnclaveListStatusRequest(
+                scope: .chat,
+                cursor: continuationToken ?? since,
+                limit: chatListLimit,
+                projectId: nil
+            )
+        )
+        var conversations = status.updates.map(remoteChatFromStatus)
+        if includeContent && !conversations.isEmpty {
+            await attachInlineContent(&conversations)
         }
-
-        // 404 is acceptable for delete (already deleted)
-        guard httpResponse.statusCode == 200 || httpResponse.statusCode == 404 else {
-            throw CloudStorageError.deleteFailed
-        }
+        return ChatListResponse(
+            conversations: conversations,
+            nextContinuationToken: status.nextCursor,
+            hasMore: hasNextCursor(status.nextCursor)
+        )
     }
 
-    // MARK: - Metadata Operations
-
-    /// Update metadata for a chat
-    func updateMetadata(chatId: String, metadata: [String: String]) async throws {
-        let url = URL(string: "\(apiBaseURL)/api/storage/metadata")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.allHTTPHeaderFields = try await getHeaders()
-
-        let body = UpdateMetadataRequest(conversationId: chatId, metadata: metadata)
-        request.httpBody = try JSONEncoder().encode(body)
-
-        let (_, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw CloudStorageError.metadataUpdateFailed
-        }
-    }
-
-    // MARK: - Sync Status Operations
-
-    /// Get chat sync status (count and lastUpdated) for efficient sync checking
-    func getChatSyncStatus() async throws -> ChatSyncStatus {
-        let url = URL(string: "\(apiBaseURL)/api/chats/sync-status")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.allHTTPHeaderFields = try await getHeaders()
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw CloudStorageError.listFailed
-        }
-
-        return try JSONDecoder().decode(ChatSyncStatus.self, from: data)
-    }
-
-    /// Get IDs of chats deleted since a specific timestamp
-    func getDeletedChatsSince(since: String) async throws -> DeletedChatsResponse {
-        var components = URLComponents(string: "\(apiBaseURL)/api/chats/deleted-since")!
-        components.queryItems = [
-            URLQueryItem(name: "since", value: since)
-        ]
-
-        var request = URLRequest(url: components.url!)
-        request.httpMethod = "GET"
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.allHTTPHeaderFields = try await getHeaders()
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw CloudStorageError.listFailed
-        }
-
-        return try JSONDecoder().decode(DeletedChatsResponse.self, from: data)
-    }
-
-    /// Get sync status across ALL chats (regardless of project scope)
     func getAllChatsSyncStatus() async throws -> ChatSyncStatus {
-        let url = URL(string: "\(apiBaseURL)/api/chats/all-sync-status")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.allHTTPHeaderFields = try await getHeaders()
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw CloudStorageError.listFailed
-        }
-
-        return try JSONDecoder().decode(ChatSyncStatus.self, from: data)
+        try await getChatSyncStatus()
     }
 
-    /// Get ALL chats updated since a timestamp (not filtered by project)
-    func getAllChatsUpdatedSince(since: String, continuationToken: String? = nil) async throws -> ChatListResponse {
-        var components = URLComponents(string: "\(apiBaseURL)/api/chats/all-updated-since")!
-        var queryItems: [URLQueryItem] = [
-            URLQueryItem(name: "since", value: since)
-        ]
-
-        if let continuationToken = continuationToken {
-            queryItems.append(URLQueryItem(name: "continuationToken", value: continuationToken))
-        }
-
-        components.queryItems = queryItems
-
-        var request = URLRequest(url: components.url!)
-        request.httpMethod = "GET"
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.allHTTPHeaderFields = try await getHeaders()
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw CloudStorageError.listFailed
-        }
-
-        return try JSONDecoder().decode(ChatListResponse.self, from: data)
+    func getAllChatsUpdatedSince(
+        since: String,
+        continuationToken: String? = nil
+    ) async throws -> ChatListResponse {
+        try await getChatsUpdatedSince(
+            since: since,
+            includeContent: true,
+            continuationToken: continuationToken
+        )
     }
 
-    // MARK: - Project Chat Operations
+    // MARK: - Sync status
 
+    /// Walk the enclave list-status pages and return the aggregate
+    /// count + most-recent updated_at.
+    func getChatSyncStatus() async throws -> ChatSyncStatus {
+        var count = 0
+        var lastUpdated: String? = nil
+        var cursor: String? = nil
+        repeat {
+            let status = try await SyncEnclaveAPI.listStatus(
+                EnclaveListStatusRequest(scope: .chat, cursor: cursor, limit: 500, projectId: nil)
+            )
+            count += status.updates.count
+            for update in status.updates {
+                if let prev = lastUpdated {
+                    if update.updatedAt > prev { lastUpdated = update.updatedAt }
+                } else {
+                    lastUpdated = update.updatedAt
+                }
+            }
+            cursor = status.nextCursor
+        } while hasNextCursor(cursor)
+        return ChatSyncStatus(count: count, lastUpdated: lastUpdated)
+    }
+
+    func getDeletedChatsSince(since: String) async throws -> DeletedChatsResponse {
+        var deletedIds: [String] = []
+        var cursor: String? = since
+        repeat {
+            let status = try await SyncEnclaveAPI.listStatus(
+                EnclaveListStatusRequest(scope: .chat, cursor: cursor, limit: 500, projectId: nil)
+            )
+            for entry in status.deletes {
+                deletedIds.append(entry.id)
+            }
+            cursor = status.nextCursor
+        } while hasNextCursor(cursor)
+        return DeletedChatsResponse(deletedIds: deletedIds)
+    }
+
+    // MARK: - Delete
+
+    /// Delete a single chat. Uses an unconditional `if_match=null` so
+    /// the enclave handles stale-etag retries internally.
+    func deleteChat(_ chatId: String) async throws {
+        let key = try CEKEncoding.requirePrimaryKeyB64()
+        _ = try await SyncEnclaveAPI.deleteRow(
+            EnclaveDeleteRequest(
+                scope: .chat,
+                id: chatId,
+                ifMatch: nil,
+                idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                key: key
+            )
+        )
+    }
+
+    /// Delete every chat for the current user. Paginates list-status
+    /// and issues one delete per row.
+    @discardableResult
+    func deleteAllChats() async throws -> Int {
+        let key = try CEKEncoding.requirePrimaryKeyB64()
+        var deleted = 0
+        var cursor: String? = nil
+        repeat {
+            let status = try await SyncEnclaveAPI.listStatus(
+                EnclaveListStatusRequest(scope: .chat, cursor: cursor, limit: 500, projectId: nil)
+            )
+            for update in status.updates {
+                _ = try await SyncEnclaveAPI.deleteRow(
+                    EnclaveDeleteRequest(
+                        scope: .chat,
+                        id: update.id,
+                        ifMatch: nil,
+                        idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                        key: key
+                    )
+                )
+                deleted += 1
+            }
+            cursor = status.nextCursor
+        } while hasNextCursor(cursor)
+        return deleted
+    }
+
+    // MARK: - Project chat operations
+
+    /// No-op. Project membership rides on the next `uploadChat`
+    /// (via `metadata.projectId`) and the enclave stamps the row's
+    /// `project_id` column from there. Callers MUST pair this with a
+    /// `backupChat` so the change actually propagates.
     func updateChatProject(chatId: String, projectId: String?) async throws {
-        let url = URL(string: "\(apiBaseURL)/api/storage/conversation/\(chatId)/project")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "PATCH"
-        request.allHTTPHeaderFields = try await getHeaders()
-        request.httpBody = try JSONEncoder().encode(UpdateChatProjectRequest(projectId: projectId))
-
-        let (_, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw CloudStorageError.metadataUpdateFailed
-        }
+        _ = chatId
+        _ = projectId
     }
 
-    func listProjectChats(projectId: String, includeContent: Bool = false, continuationToken: String? = nil) async throws -> ProjectChatListResponse {
-        var components = URLComponents(string: "\(apiBaseURL)/api/projects/\(projectId)/chats")!
-        var queryItems: [URLQueryItem] = []
+    func listProjectChats(
+        projectId: String,
+        includeContent: Bool = false,
+        continuationToken: String? = nil
+    ) async throws -> ProjectChatListResponse {
+        var chats: [RemoteChat] = []
+        var cursor = continuationToken
+        var nextContinuationToken: String? = nil
+        repeat {
+            let status = try await SyncEnclaveAPI.listStatus(
+                EnclaveListStatusRequest(
+                    scope: .chat,
+                    cursor: cursor,
+                    limit: projectChatListLimit,
+                    projectId: projectId
+                )
+            )
+            chats.append(contentsOf: status.updates
+                .filter { $0.projectId == projectId }
+                .map(remoteChatFromStatus))
+            cursor = status.nextCursor
+            nextContinuationToken = status.nextCursor
+            if chats.count >= projectChatListLimit { break }
+        } while hasNextCursor(cursor)
 
-        if includeContent {
-            queryItems.append(URLQueryItem(name: "includeContent", value: "true"))
+        if includeContent && !chats.isEmpty {
+            await attachInlineContent(&chats)
         }
-        if let continuationToken {
-            queryItems.append(URLQueryItem(name: "continuationToken", value: continuationToken))
-        }
-        if !queryItems.isEmpty {
-            components.queryItems = queryItems
-        }
 
-        var request = URLRequest(url: components.url!)
-        request.httpMethod = "GET"
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.allHTTPHeaderFields = try await getHeaders()
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw CloudStorageError.listFailed
-        }
-
-        return try JSONDecoder().decode(ProjectChatListResponse.self, from: data)
+        return ProjectChatListResponse(
+            chats: chats,
+            hasMore: hasNextCursor(nextContinuationToken),
+            nextContinuationToken: nextContinuationToken
+        )
     }
 
     func getProjectChatsSyncStatus(projectId: String) async throws -> ChatSyncStatus {
-        var components = URLComponents(string: "\(apiBaseURL)/api/projects/\(projectId)/chats/sync-status")!
-        components.queryItems = [URLQueryItem(name: "_t", value: String(Int(Date().timeIntervalSince1970 * 1000)))]
-
-        var request = URLRequest(url: components.url!)
-        request.httpMethod = "GET"
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.allHTTPHeaderFields = try await getHeaders()
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw CloudStorageError.listFailed
-        }
-
-        return try JSONDecoder().decode(ChatSyncStatus.self, from: data)
+        var count = 0
+        var lastUpdated: String? = nil
+        var cursor: String? = nil
+        repeat {
+            let status = try await SyncEnclaveAPI.listStatus(
+                EnclaveListStatusRequest(
+                    scope: .chat,
+                    cursor: cursor,
+                    limit: 500,
+                    projectId: projectId
+                )
+            )
+            for update in status.updates {
+                guard update.projectId == projectId else { continue }
+                count += 1
+                if let prev = lastUpdated {
+                    if update.updatedAt > prev { lastUpdated = update.updatedAt }
+                } else {
+                    lastUpdated = update.updatedAt
+                }
+            }
+            cursor = status.nextCursor
+        } while hasNextCursor(cursor)
+        return ChatSyncStatus(count: count, lastUpdated: lastUpdated)
     }
 
-    func getProjectChatsUpdatedSince(projectId: String, since: String, continuationToken: String? = nil) async throws -> ProjectChatListResponse {
-        var components = URLComponents(string: "\(apiBaseURL)/api/projects/\(projectId)/chats/updated-since")!
-        var queryItems: [URLQueryItem] = [
-            URLQueryItem(name: "since", value: since),
-            URLQueryItem(name: "_t", value: String(Int(Date().timeIntervalSince1970 * 1000)))
-        ]
-        if let continuationToken {
-            queryItems.append(URLQueryItem(name: "continuationToken", value: continuationToken))
-        }
-        components.queryItems = queryItems
+    func getProjectChatsUpdatedSince(
+        projectId: String,
+        since: String,
+        continuationToken: String? = nil
+    ) async throws -> ProjectChatListResponse {
+        var chats: [RemoteChat] = []
+        var cursor: String? = continuationToken ?? since
+        var nextContinuationToken: String? = nil
+        repeat {
+            let status = try await SyncEnclaveAPI.listStatus(
+                EnclaveListStatusRequest(
+                    scope: .chat,
+                    cursor: cursor,
+                    limit: projectChatListLimit,
+                    projectId: projectId
+                )
+            )
+            chats.append(contentsOf: status.updates
+                .filter { $0.projectId == projectId && $0.updatedAt > since }
+                .map(remoteChatFromStatus))
+            cursor = status.nextCursor
+            nextContinuationToken = status.nextCursor
+            if chats.count >= projectChatListLimit { break }
+        } while hasNextCursor(cursor)
 
-        var request = URLRequest(url: components.url!)
-        request.httpMethod = "GET"
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.allHTTPHeaderFields = try await getHeaders()
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw CloudStorageError.listFailed
-        }
-
-        return try JSONDecoder().decode(ProjectChatListResponse.self, from: data)
+        return ProjectChatListResponse(
+            chats: chats,
+            hasMore: hasNextCursor(nextContinuationToken),
+            nextContinuationToken: nextContinuationToken
+        )
     }
 
-    /// Get chats updated since a specific timestamp
-    func getChatsUpdatedSince(since: String, includeContent: Bool = false, continuationToken: String? = nil) async throws -> ChatListResponse {
-        var components = URLComponents(string: "\(apiBaseURL)/api/chats/updated-since")!
-        var queryItems: [URLQueryItem] = [
-            URLQueryItem(name: "since", value: since)
+    // MARK: - Helpers
+
+    private func attachInlineContent(_ conversations: inout [RemoteChat]) async {
+        guard let keys = CEKEncoding.pullKeysIfAvailable() else { return }
+        let ids = conversations.map(\.id)
+        do {
+            let response = try await SyncEnclaveAPI.pull(
+                EnclavePullRequest(
+                    scope: .chat,
+                    ids: ids,
+                    all: nil,
+                    cursor: nil,
+                    limit: nil,
+                    keys: keys
+                )
+            )
+            var pulledById: [String: (content: String, syncVersion: Int?)] = [:]
+            for item in response.items {
+                if !item.ok { continue }
+                guard let b64 = item.plaintext,
+                      let data = Data(base64Encoded: b64),
+                      let content = String(data: data, encoding: .utf8) else { continue }
+                pulledById[item.id] = (content, etagToSyncVersion(item.etag))
+            }
+            for index in conversations.indices {
+                let id = conversations[index].id
+                guard let pulled = pulledById[id] else { continue }
+                conversations[index].content = pulled.content
+                conversations[index].formatVersion = 2
+                if let sync = pulled.syncVersion {
+                    conversations[index].syncVersion = sync
+                }
+            }
+        } catch {
+            // Listing succeeded; surface only metadata when content
+            // pulls fail. Callers fall back to per-chat downloads.
+        }
+    }
+
+    private func remoteChatFromStatus(_ update: EnclaveListStatusUpdate) -> RemoteChat {
+        return RemoteChat(
+            id: update.id,
+            key: nil,
+            createdAt: createdAtFromReverseId(update.id),
+            updatedAt: update.updatedAt,
+            title: nil,
+            messageCount: nil,
+            syncVersion: etagToSyncVersion(update.etag) ?? 1,
+            size: nil,
+            content: nil,
+            formatVersion: 2,
+            projectId: update.projectId
+        )
+    }
+
+    private func etagToSyncVersion(_ etag: String?) -> Int? {
+        guard let etag, let value = Int(etag), value > 0 else { return nil }
+        return value
+    }
+
+    private func hasNextCursor(_ cursor: String?) -> Bool {
+        guard let cursor else { return false }
+        return !cursor.isEmpty
+    }
+
+    private func createdAtFromReverseId(_ id: String) -> String {
+        guard let prefix = id.split(separator: "_").first,
+              let reverse = Int(prefix) else {
+            return ISO8601DateFormatter.enclaveFractional.string(from: Date())
+        }
+        let ms = Constants.Sync.maxReverseTimestamp - reverse
+        let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1000.0)
+        return ISO8601DateFormatter.enclaveFractional.string(from: date)
+    }
+
+    // MARK: - Controlplane headers (id generation only)
+
+    private func getControlplaneHeaders(contentType: String = "application/json") async throws -> [String: String] {
+        guard let token = await (getToken ?? defaultTokenGetter)(), !token.isEmpty else {
+            throw CloudStorageError.authenticationRequired
+        }
+        return [
+            "Authorization": "Bearer \(token)",
+            "Content-Type": contentType
         ]
-
-        if includeContent {
-            queryItems.append(URLQueryItem(name: "includeContent", value: "true"))
-        }
-
-        if let continuationToken = continuationToken {
-            queryItems.append(URLQueryItem(name: "continuationToken", value: continuationToken))
-        }
-
-        components.queryItems = queryItems
-
-        var request = URLRequest(url: components.url!)
-        request.httpMethod = "GET"
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.allHTTPHeaderFields = try await getHeaders()
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw CloudStorageError.listFailed
-        }
-
-        return try JSONDecoder().decode(ChatListResponse.self, from: data)
     }
 }
 
-// MARK: - Cloud Storage Errors
+// MARK: - Errors
 
 enum CloudStorageError: LocalizedError {
     case authenticationRequired
     case invalidResponse
-    case uploadFailed
     case downloadFailed
-    case listFailed
-    case deleteFailed
-    case metadataUpdateFailed
-    case encryptionFailed
-    case decryptionFailed
 
     var errorDescription: String? {
         switch self {
@@ -618,20 +642,16 @@ enum CloudStorageError: LocalizedError {
             return "Authentication required for cloud storage"
         case .invalidResponse:
             return "Invalid response from server"
-        case .uploadFailed:
-            return "Failed to upload chat to cloud"
         case .downloadFailed:
             return "Failed to download chat from cloud"
-        case .listFailed:
-            return "Failed to list chats from cloud"
-        case .deleteFailed:
-            return "Failed to delete chat from cloud"
-        case .metadataUpdateFailed:
-            return "Failed to update chat metadata"
-        case .encryptionFailed:
-            return "Failed to encrypt chat data"
-        case .decryptionFailed:
-            return "Failed to decrypt chat data"
         }
     }
+}
+
+private extension ISO8601DateFormatter {
+    static let enclaveFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 }

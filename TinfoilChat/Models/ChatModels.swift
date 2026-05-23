@@ -39,9 +39,8 @@ struct Chat: Identifiable, Codable {
     // For handling encrypted chats that failed to decrypt
     var decryptionFailed: Bool = false
     var dataCorrupted: Bool = false
-    var encryptedData: String?
-    
-    // Format version: 0=legacy JSON, 1=gzip+binary
+
+    // Format version: 2=plaintext (enclave-unsealed)
     var formatVersion: Int?
 
     // Local-only flag: when true, chat is never synced to cloud
@@ -88,7 +87,7 @@ struct Chat: Identifiable, Codable {
         id: String = Chat.generateReverseId(),
         title: String = Chat.placeholderTitle,
         titleState: TitleState? = nil,
-        messages: [Message] = [], 
+        messages: [Message] = [],
         createdAt: Date = Date(),
         modelType: ModelType,
         language: String? = nil,
@@ -99,7 +98,6 @@ struct Chat: Identifiable, Codable {
         updatedAt: Date? = nil,
         decryptionFailed: Bool = false,
         dataCorrupted: Bool = false,
-        encryptedData: String? = nil,
         formatVersion: Int? = nil,
         isLocalOnly: Bool = false,
         projectId: String? = nil)
@@ -120,7 +118,6 @@ struct Chat: Identifiable, Codable {
         self.updatedAt = updatedAt ?? createdAt
         self.decryptionFailed = decryptionFailed
         self.dataCorrupted = dataCorrupted
-        self.encryptedData = encryptedData
         self.formatVersion = formatVersion
         self.isLocalOnly = isLocalOnly
         self.projectId = projectId
@@ -173,7 +170,7 @@ struct Chat: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, title, titleState, messages, createdAt, modelType, language, userId
         case syncVersion, syncedAt, locallyModified, updatedAt
-        case decryptionFailed, dataCorrupted, encryptedData, formatVersion, isLocalOnly, projectId
+        case decryptionFailed, dataCorrupted, formatVersion, isLocalOnly, projectId
     }
 
     init(from decoder: Decoder) throws {
@@ -199,7 +196,6 @@ struct Chat: Identifiable, Codable {
         // Encryption fields
         decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed) ?? false
         dataCorrupted = try container.decodeIfPresent(Bool.self, forKey: .dataCorrupted) ?? false
-        encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
         formatVersion = try container.decodeIfPresent(Int.self, forKey: .formatVersion)
         isLocalOnly = try container.decodeIfPresent(Bool.self, forKey: .isLocalOnly) ?? false
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
@@ -226,7 +222,6 @@ struct Chat: Identifiable, Codable {
         // Encryption fields
         try container.encode(decryptionFailed, forKey: .decryptionFailed)
         try container.encode(dataCorrupted, forKey: .dataCorrupted)
-        try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
         try container.encodeIfPresent(formatVersion, forKey: .formatVersion)
         try container.encode(isLocalOnly, forKey: .isLocalOnly)
         try container.encodeIfPresent(projectId, forKey: .projectId)

@@ -86,6 +86,15 @@ enum Constants {
         }
     }
 
+    enum SyncEnclave {
+        static let url = "https://sync.tinfoil.sh"
+        static let configRepo = "tinfoilsh/confidential-sync"
+        static let chatListLimit = 100
+        static let projectListLimit = 100
+        static let projectChatListLimit = 100
+        static let migrationBatchLimit = 100
+    }
+
 
     enum Legal {
         static let termsOfServiceURL = URL(string: "https://www.tinfoil.sh/terms")!
@@ -173,12 +182,10 @@ enum Constants {
         static let rpName = "Tinfoil Chat"
         static let prfSalt = Data("tinfoil-chat-key-encryption".utf8)
         static let hkdfInfo = Data("tinfoil-chat-kek-v1".utf8)
-        static let credentialsEndpoint = "/api/passkey-credentials/"
         static let challengeByteCount = 32
         static let kekByteCount = 32
         static let prfCacheKeychainAccount = "sh.tinfoil.passkey-prf-cache"
         static let syncCheckIntervalSeconds: TimeInterval = 30
-        static let credentialSaveMaxAttempts = 3
     }
 
     // MARK: - Centralized UserDefaults Storage Keys
@@ -254,14 +261,33 @@ enum Constants {
         // MARK: - Secret / Sensitive
         enum Secret {
             static let encryptionKeySetUp = "tinfoil-secret-encryption-key-set-up"
-            static let passkeyBackedUp = "tinfoil-secret-passkey-backed-up"
-            static let passkeySyncVersion = "tinfoil-secret-passkey-sync-version"
-            static let passkeyBundleVersion = "tinfoil-secret-passkey-bundle-version"
+            static let passkeyEnclaveKeyId = "tinfoil-secret-passkey-enclave-key-id"
+            static let passkeyEnclaveCredentialId = "tinfoil-secret-passkey-enclave-credential-id"
 
             static func cloudKeyAuthorization(userId: String) -> String {
                 "tinfoil-secret-cloud-key-authorization-\(userId)"
             }
         }
+
+        // MARK: - One-shot migration flags
+        enum Migration {
+            /// Set the first time a build evicts locally-cached cloud chats
+            /// that the legacy v0/v1 decrypt path used to handle. The enclave
+            /// rewraps any orphan rows server-side; the next sync repopulates.
+            static let legacyCloudChatsEvicted = "tinfoil-migration-legacy-cloud-chats-evicted"
+        }
+
+        /// Legacy UserDefaults keys that should be purged on app
+        /// launch. These named the v1 sync state (passkey JSONB
+        /// version counters, the now-removed `passkeyBackedUp`
+        /// hint) and have no replacement in the v2 architecture.
+        static let legacyKeysToRemove: [String] = [
+            "tinfoil-secret-passkey-backed-up",
+            "tinfoil-secret-passkey-sync-version",
+            "tinfoil-secret-passkey-bundle-version",
+            "tinfoil-passkey-backed-up",
+            "tinfoil-passkey-sync-version",
+        ]
     }
 
     enum AppReview {
@@ -324,9 +350,7 @@ enum StorageKeysMigration {
             ("tinfoil-all-chats-sync-status", Constants.StorageKeys.Sync.allChatsStatus),
             // Secret / Passkey
             ("encryptionKeyWasSetUp", Constants.StorageKeys.Secret.encryptionKeySetUp),
-            ("tinfoil-passkey-backed-up", Constants.StorageKeys.Secret.passkeyBackedUp),
             ("has_seen_passkey_intro", Constants.StorageKeys.Settings.hasSeenPasskeyIntro),
-            ("tinfoil-passkey-sync-version", Constants.StorageKeys.Secret.passkeySyncVersion),
         ]
 
         for (old, new) in migrations where old != new {
@@ -334,6 +358,10 @@ enum StorageKeysMigration {
                 UserDefaults.standard.set(value, forKey: new)
                 UserDefaults.standard.removeObject(forKey: old)
             }
+        }
+
+        for key in Constants.StorageKeys.legacyKeysToRemove {
+            UserDefaults.standard.removeObject(forKey: key)
         }
 
         UserDefaults.standard.set(true, forKey: migrationCompleteKey)

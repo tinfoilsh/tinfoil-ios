@@ -15,12 +15,6 @@ struct EncryptedData: Codable {
     let data: String  // Base64 encoded encrypted data
 }
 
-/// Represents the result of a decryption attempt
-struct DecryptionResult<T> {
-    let value: T
-    let usedFallbackKey: Bool
-}
-
 /// Service for handling end-to-end encryption of chat data
 class EncryptionService: ObservableObject, @unchecked Sendable {
     static let shared = EncryptionService()
@@ -112,6 +106,48 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         return (primary: loadKeyFromKeychain(), alternatives: loadKeyHistory())
     }
 
+    /// Return the raw 32-byte CEK for the primary key. Throws when no
+    /// primary key is loaded. Used by the sync-enclave wire which
+    /// expects a base64-encoded raw CEK on every push / pull / delete.
+    func getKeyBytesOrThrow() throws -> Data {
+        guard let key = loadKeyFromKeychain() else {
+            throw EncryptionError.keyNotInitialized
+        }
+        let (_, bytes) = try normalizeKeyInput(key)
+        return bytes
+    }
+
+    /// Decode an arbitrary `key_xxx` alphanumeric string to its raw
+    /// bytes. Used by the migration-sweep path which iterates over the
+    /// primary + every alternative key.
+    func getAlternativeKeyBytes(_ key: String) throws -> Data {
+        let (_, bytes) = try normalizeKeyInput(key)
+        return bytes
+    }
+
+    /// Set the primary key from a fresh CEK provided as raw 32 bytes,
+    /// e.g. one minted server-side by the enclave or recovered from a
+    /// passkey bundle. Encodes the bytes back into the alphanumeric
+    /// keychain format so the rest of the app keeps working unchanged.
+    func setKeyBytes(_ bytes: Data) async throws {
+        let alphanumeric = "key_" + bytesToAlphanumeric(bytes)
+        try await setKey(alphanumeric)
+    }
+
+    /// Number of historical "alternative" decryption keys currently
+    /// stored. Used by the enclave-driven legacy migration to report
+    /// progress and to confirm cleanup is needed.
+    func getFallbackKeyCount() -> Int {
+        return loadKeyHistory().count
+    }
+
+    /// Drop every historical decryption key, leaving only the primary
+    /// in place. Called once `migrate-all` confirms every legacy row
+    /// has been re-sealed under the primary CEK.
+    func clearFallbackKeys() {
+        try? saveKeyHistory([])
+    }
+
     /// Add a decryption-only fallback key without changing the primary key.
     func addDecryptionKey(_ keyString: String) throws {
         let (normalizedKey, _) = try normalizeKeyInput(keyString)
@@ -184,40 +220,6 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         UserDefaults.standard.removeObject(forKey: encryptionKeySetupFlagKey)
     }
     
-    // MARK: - Encryption/Decryption
-    
-    /// Encrypt data
-    func encrypt<T: Encodable>(_ data: T) async throws -> EncryptedData {
-        // Don't set date encoding - let StoredChat handle its own format
-        let jsonData = try JSONEncoder().encode(data)
-        return try await encryptData(jsonData)
-    }
-    
-    /// Decrypt data
-    func decrypt<T: Decodable>(_ encryptedData: EncryptedData, as type: T.Type) async throws -> DecryptionResult<T> {
-        let (data, usedFallback) = try await decryptDataWithFallbackInfo(encryptedData)
-        let value = try JSONDecoder().decode(type, from: data)
-        return DecryptionResult(value: value, usedFallbackKey: usedFallback)
-    }
-
-    // MARK: - V1 Binary Encryption/Decryption
-
-    /// Encrypt data using v1 format: JSON → gzip → AES-GCM → raw binary.
-    func encryptV1<T: Encodable>(_ data: T) throws -> Data {
-        guard let key = encryptionKey else {
-            throw EncryptionError.keyNotInitialized
-        }
-        return try BinaryCodec.compressAndEncrypt(data, using: key)
-    }
-
-    /// Decrypt v1 binary data, trying the primary key then falling back to key history.
-    func decryptV1<T: Decodable>(_ binary: Data, as type: T.Type) throws -> DecryptionResult<T> {
-        let (value, usedFallback) = try decryptWithKeyFallback { key in
-            try BinaryCodec.decryptAndDecompress(binary, using: key, as: type)
-        }
-        return DecryptionResult(value: value, usedFallbackKey: usedFallback)
-    }
-
     // MARK: - Helper Methods
 
     /// Try the primary key first, then iterate through key history on failure.
@@ -461,31 +463,11 @@ extension EncryptionService: ChatEncryptor {
     }
 
     func decryptData(_ encrypted: EncryptedData) async throws -> Data {
-        let (data, _) = try await decryptDataWithFallbackInfo(encrypted)
-        return data
-    }
-
-    /// Decrypt to raw bytes, exposing whether a fallback key was used.
-    /// Used by the cloud-key preflight to answer "does this key work?" without
-    /// requiring the decrypted payload to conform to a specific Swift schema.
-    func decryptRawWithFallbackInfo(_ encrypted: EncryptedData) async throws -> (Data, Bool) {
-        return try await decryptDataWithFallbackInfo(encrypted)
-    }
-
-    /// Decrypt v1 binary content to raw bytes, exposing whether a fallback key was used.
-    func decryptRawV1WithFallbackInfo(_ binary: Data) throws -> (Data, Bool) {
-        return try decryptWithKeyFallback { key in
-            try BinaryCodec.decryptRaw(binary, using: key)
-        }
-    }
-
-    /// Shared decryption that tries the primary key, then falls back to key history.
-    /// Returns the decrypted data and whether a fallback key was used.
-    private func decryptDataWithFallbackInfo(_ encrypted: EncryptedData) async throws -> (Data, Bool) {
         let sealedBox = try AESGCMHelper.parseSealedBox(from: encrypted)
-        return try decryptWithKeyFallback { key in
+        let (data, _) = try decryptWithKeyFallback { key in
             try AES.GCM.open(sealedBox, using: key)
         }
+        return data
     }
 }
 

@@ -81,7 +81,32 @@ struct TinfoilChatApp: App {
                                         print("Failed to initialize CloudSyncService: \(error)")
                                         #endif
                                     }
-                                    
+
+                                    // Pre-warm the sync-enclave attestation handshake
+                                    // so the first sync-driven request doesn't pay
+                                    // the cold-start latency.
+                                    Task.detached(priority: .utility) {
+                                        do {
+                                            try await SyncEnclaveClient.shared.ready()
+                                        } catch {
+                                            #if DEBUG
+                                            print("Failed to pre-warm sync enclave: \(error)")
+                                            #endif
+                                        }
+                                    }
+
+                                    // Opportunistically rewrap any legacy v0/v1
+                                    // rows under the current primary CEK so the
+                                    // alternative-keys list can eventually drain,
+                                    // then drop any stale ciphertext-only chats
+                                    // that the removed v0/v1 client decrypt path
+                                    // used to handle.
+                                    let activeUserId = Clerk.shared.user?.id
+                                    Task.detached(priority: .background) {
+                                        _ = await LegacyBlobMigration.runAndFinalize()
+                                        await LegacyChatEviction.runIfNeeded(userId: activeUserId)
+                                    }
+
                                     // Initialize ProfileManager to start auto-sync
                                     _ = ProfileManager.shared
                                     // Kick off an initial profile sync now that auth and token getter are ready

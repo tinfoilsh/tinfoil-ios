@@ -289,7 +289,7 @@ class CloudSyncService: ObservableObject {
         
         
         // Don't sync blank, empty, or decryption failure chats
-        if chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed || chat.encryptedData != nil {
+        if chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed {
             return
         }
 
@@ -318,7 +318,7 @@ class CloudSyncService: ObservableObject {
         // Filter out blank, empty, decryption failure, and streaming chats
         var chatsToSync: [Chat] = []
         for chat in unsyncedChats {
-            if !chat.isBlankChat && !chat.messages.isEmpty && !chat.decryptionFailed && chat.encryptedData == nil {
+            if !chat.isBlankChat && !chat.messages.isEmpty && !chat.decryptionFailed {
                 let isStreaming = streamingTracker.isStreaming(chat.id)
                 if !isStreaming {
                     chatsToSync.append(chat)
@@ -409,10 +409,7 @@ class CloudSyncService: ObservableObject {
                 if let decrypted = await decryptRemoteChat(remoteChat, content: content) {
                     downloadedChats.append(decrypted.chat)
                 } else {
-                    let placeholder = createEncryptedPlaceholder(
-                        remoteChat: remoteChat,
-                        encryptedContent: content
-                    )
+                    let placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
                     downloadedChats.append(placeholder)
                 }
             }
@@ -479,43 +476,32 @@ class CloudSyncService: ObservableObject {
         )
     }
     
-    /// Decrypt a remote chat's content, apply server metadata dates, and set a default model if needed.
-    /// Returns the decrypted `StoredChat` and whether a fallback key was used (indicating reencryption is needed).
-    /// Returns `nil` on failure — callers are responsible for creating an encrypted placeholder.
+    /// Apply server metadata dates and set a default model on a chat
+    /// the enclave already unsealed for us. `content` is the StoredChat
+    /// JSON returned by `/v1/sync/pull` (format-version 2).
+    /// Returns `nil` on a malformed body — callers create an encrypted
+    /// placeholder in that case.
     struct DecryptedChatResult {
         var chat: StoredChat
-        let usedFallbackKey: Bool
     }
 
     private func decryptRemoteChat(
         _ remoteChat: RemoteChat,
         content: String
     ) async -> DecryptedChatResult? {
-        let formatVersion = remoteChat.formatVersion ?? 0
+        guard let plaintextData = content.data(using: .utf8) else { return nil }
 
         do {
-            let decryptionResult: DecryptionResult<StoredChat>
-
-            if formatVersion == 1 {
-                // v1: content is base64-encoded binary
-                guard let binaryData = Data(base64Encoded: content) else { return nil }
-                decryptionResult = try encryptionService.decryptV1(binaryData, as: StoredChat.self)
-            } else {
-                // v0: content is a JSON-encoded EncryptedData envelope
-                guard let contentData = content.data(using: .utf8) else { return nil }
-                let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
-                decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
-            }
-
-            var decryptedChat = decryptionResult.value
-            decryptedChat.formatVersion = formatVersion
+            var decryptedChat = try JSONDecoder().decode(StoredChat.self, from: plaintextData)
+            decryptedChat.formatVersion = 2
             if let remoteProjectId = remoteChat.projectId {
                 decryptedChat.projectId = remoteProjectId
             }
 
-            // Prefer blob's createdAt (matches React's `decrypted.createdAt ?? remote.createdAt`).
-            // StoredChat decoder falls back to Date() on parse failure — detect that
-            // by checking if the blob date is within the last few seconds.
+            // Prefer the blob's createdAt over the remote metadata.
+            // StoredChat falls back to `Date()` on parse failure — when
+            // the blob date is within the last few seconds it's almost
+            // certainly that fallback, so prefer the server timestamp.
             let blobCreatedAt = decryptedChat.createdAt
             let blobLooksLikeFallback = abs(blobCreatedAt.timeIntervalSinceNow) < Constants.Sync.createdAtFallbackThresholdSeconds
             if blobLooksLikeFallback, let createdDate = parseISODate(remoteChat.createdAt) {
@@ -528,23 +514,20 @@ class CloudSyncService: ObservableObject {
                 decryptedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
             }
 
-            return DecryptedChatResult(chat: decryptedChat, usedFallbackKey: decryptionResult.usedFallbackKey)
+            return DecryptedChatResult(chat: decryptedChat)
         } catch {
             return nil
         }
     }
 
-    /// Create encrypted placeholder for chats that failed to decrypt
-    private func createEncryptedPlaceholder(
-        remoteChat: RemoteChat,
-        encryptedContent: String
-    ) -> StoredChat {
+    /// Create a placeholder for a chat the enclave declined to unseal
+    /// (e.g. UNKNOWN_KEY). The ciphertext stays server-side; the local
+    /// row is purely a "this chat exists but cannot be read" badge.
+    private func createEncryptedPlaceholder(remoteChat: RemoteChat) -> StoredChat {
         StoredChat.encryptedPlaceholder(
             id: remoteChat.id,
             createdAt: parseISODate(remoteChat.createdAt) ?? Date(),
-            updatedAt: parseISODate(remoteChat.updatedAt) ?? Date(),
-            formatVersion: remoteChat.formatVersion ?? 0,
-            encryptedData: encryptedContent
+            updatedAt: parseISODate(remoteChat.updatedAt) ?? Date()
         )
     }
     
@@ -700,10 +683,7 @@ class CloudSyncService: ObservableObject {
                             // the remote was re-encrypted with a key we don't have yet).
                             let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
                             if !hasValidLocal {
-                                let placeholder = createEncryptedPlaceholder(
-                                    remoteChat: remoteChat,
-                                    encryptedContent: content
-                                )
+                                let placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
                                 await saveChatToStorage(placeholder)
                                 result = SyncResult(
                                     uploaded: result.uploaded,
@@ -892,10 +872,7 @@ class CloudSyncService: ObservableObject {
                             let localChat = localChatMap[remoteChat.id]
                             let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
                             if !hasValidLocal {
-                                let placeholder = createEncryptedPlaceholder(
-                                    remoteChat: remoteChat,
-                                    encryptedContent: content
-                                )
+                                let placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
                                 await saveChatToStorage(placeholder)
                                 result = SyncResult(
                                     uploaded: result.uploaded,
@@ -1217,10 +1194,7 @@ class CloudSyncService: ObservableObject {
                 let localChat = localChatMap[remoteChat.id]
                 let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
                 if !hasValidLocal {
-                    var placeholder = createEncryptedPlaceholder(
-                        remoteChat: remoteChat,
-                        encryptedContent: content
-                    )
+                    var placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
                     placeholder.projectId = projectId
                     await saveChatToStorage(placeholder)
                     return (1, [])
@@ -1251,7 +1225,6 @@ class CloudSyncService: ObservableObject {
             guard !chat.isBlankChat,
                   !chat.messages.isEmpty,
                   !chat.decryptionFailed,
-                  chat.encryptedData == nil,
                   !streamingTracker.isStreaming(chat.id) else {
                 continue
             }
@@ -1395,10 +1368,7 @@ class CloudSyncService: ObservableObject {
                             await saveChatToStorage(decrypted.chat)
                             await markChatAsSynced(decrypted.chat.id, version: decrypted.chat.syncVersion)
                         } else {
-                            var placeholder = createEncryptedPlaceholder(
-                                remoteChat: remoteChat,
-                                encryptedContent: content
-                            )
+                            var placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
                             placeholder.projectId = remoteProjectId
                             await saveChatToStorage(placeholder)
                         }
@@ -1491,14 +1461,15 @@ class CloudSyncService: ObservableObject {
         await Chat.saveChat(chatToSave, userId: userId)
     }
 
-    /// Upload a chat to cloud and mark it as synced with an incremented version.
-    /// Encapsulates the two-step "upload current version, increment after success" protocol.
+    /// Upload a chat to cloud and mark it as synced with the enclave's
+    /// authoritative version (the new etag), or `chat.syncVersion + 1`
+    /// when the enclave didn't return a parseable etag.
     private func uploadAndMarkSynced(_ chat: Chat) async throws {
         guard !streamingTracker.isStreaming(chat.id) else { return }
 
         let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion)
-        try await cloudStorage.uploadChat(storedChat)
-        await markChatAsSynced(chat.id, version: chat.syncVersion + 1)
+        let newVersion = try await cloudStorage.uploadChat(storedChat) ?? chat.syncVersion + 1
+        await markChatAsSynced(chat.id, version: newVersion)
     }
 
     private func markChatAsSynced(_ chatId: String, version: Int) async {
@@ -1573,94 +1544,32 @@ class CloudSyncService: ObservableObject {
     
     // MARK: - Retry Decryption Methods
 
-    /// Retry decryption for chats that failed to decrypt
+    /// Drop locally-stored placeholders for chats that previously failed to
+    /// decrypt and re-pull them from the enclave. The legacy-blob migration
+    /// runner is expected to have already rewrapped any server-side rows that
+    /// were stuck on a key the client no longer has.
     func retryDecryptionWithNewKey(
         onProgress: ((Int, Int) -> Void)? = nil,
         batchSize: Int = 5
     ) async -> Int {
-        var decryptedCount = 0
+        let failedChats = await getAllChatsFromStorage().filter { $0.decryptionFailed }
+        if failedChats.isEmpty { return 0 }
 
-        // Get all chats that have encrypted data
-        let chatsWithEncryptedData = await getChatsWithEncryptedData()
+        for (index, chat) in failedChats.enumerated() {
+            await deleteChatFromStorage(chat.id)
 
-        // Process chats sequentially to avoid connection exhaustion
-        for (index, chat) in chatsWithEncryptedData.enumerated() {
-            guard let encryptedData = chat.encryptedData else { continue }
-
-            do {
-                let decryptionResult: DecryptionResult<StoredChat>
-
-                if chat.formatVersion == 1 {
-                    // v1: encryptedData is base64-encoded binary
-                    guard let binaryData = Data(base64Encoded: encryptedData) else {
-                        throw CloudSyncError.invalidBase64
-                    }
-                    decryptionResult = try encryptionService.decryptV1(binaryData, as: StoredChat.self)
-                } else {
-                    // v0: encryptedData is a JSON-encoded EncryptedData envelope
-                    guard let contentData = encryptedData.data(using: .utf8) else {
-                        throw CloudSyncError.invalidBase64
-                    }
-                    let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
-                    decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
-                }
-
-                let decryptedData = decryptionResult.value
-
-                // Get a model type for decrypted chat (use existing or get default)
-                let modelForChat: ModelType
-                if let existingModel = decryptedData.modelType {
-                    modelForChat = existingModel
-                } else {
-                    guard let defaultModel = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first else {
-                        continue
-                    }
-                    modelForChat = defaultModel
-                }
-
-                // Use decrypted content but preserve metadata dates and format version
-                let updatedChat = StoredChat(
-                    from: Chat(
-                        id: chat.id,
-                        title: decryptedData.title,
-                        messages: decryptedData.messages,
-                        createdAt: chat.createdAt,
-                        modelType: modelForChat,
-                        language: decryptedData.language,
-                        userId: decryptedData.userId,
-                        syncVersion: chat.syncVersion,
-                        syncedAt: chat.syncedAt,
-                        locallyModified: false,
-                        updatedAt: chat.updatedAt,
-                        decryptionFailed: false,
-                        encryptedData: nil,
-                        formatVersion: chat.formatVersion,
-                        isLocalOnly: chat.isLocalOnly
-                    )
-                )
-
-                await saveChatToStorage(updatedChat)
-                decryptedCount += 1
-            } catch {
-                // Continue to next chat on failure
-            }
-
-            // Report progress periodically
-            if (index + 1) % batchSize == 0 || index == chatsWithEncryptedData.count - 1 {
-                onProgress?(index + 1, chatsWithEncryptedData.count)
-                // Yield to the event loop
-                try? await Task.sleep(nanoseconds: 1_000_000) // 1ms
+            if (index + 1) % batchSize == 0 || index == failedChats.count - 1 {
+                onProgress?(index + 1, failedChats.count)
+                try? await Task.sleep(nanoseconds: 1_000_000)
             }
         }
-        
-        return decryptedCount
+
+        _ = await smartSync()
+
+        let stillFailing = await getAllChatsFromStorage().filter { $0.decryptionFailed }.count
+        return max(0, failedChats.count - stillFailing)
     }
-    
-    /// Get all chats that have encrypted data stored
-    private func getChatsWithEncryptedData() async -> [Chat] {
-        let allChats = await getAllChatsFromStorage()
-        return allChats.filter { $0.decryptionFailed && $0.encryptedData != nil }
-    }
+
     
     /// Re-encrypt all local chats with new key and upload to cloud
     func reencryptAndUploadChats() async -> (reencrypted: Int, uploaded: Int, errors: [String]) {
@@ -1712,27 +1621,4 @@ class CloudSyncService: ObservableObject {
 
 }
 
-// MARK: - Cloud Sync Errors
 
-enum CloudSyncError: LocalizedError {
-    case syncInProgress
-    case authenticationRequired
-    case invalidBase64
-    case encryptionFailed
-    case decryptionFailed
-    
-    var errorDescription: String? {
-        switch self {
-        case .syncInProgress:
-            return "Sync already in progress"
-        case .authenticationRequired:
-            return "Authentication required for sync"
-        case .invalidBase64:
-            return "Invalid base64 data"
-        case .encryptionFailed:
-            return "Failed to encrypt data"
-        case .decryptionFailed:
-            return "Failed to decrypt data"
-        }
-    }
-}
