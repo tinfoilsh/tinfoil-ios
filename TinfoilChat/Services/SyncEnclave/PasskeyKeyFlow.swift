@@ -336,7 +336,7 @@ enum PasskeyKeyFlow {
         _ = try await SyncEnclaveAPI.removeBundle(
             EnclaveRemoveBundleRequest(
                 keyId: keyIdHex,
-                key: ***********************(),
+                key: cek.base64EncodedString(),
                 credentialId: credentialId,
                 idempotencyKey: newSyncEnclaveIdempotencyKey()
             )

@@ -227,9 +227,9 @@ class CloudSyncService: ObservableObject {
         }
         
         // Set token getter for both R2 storage and ProfileSync
-        cloudStorage.setTokenGetter(tokenGetter)
-        ProfileSyncService.shared.setTokenGetter(tokenGetter)
-        ProjectStorageService.shared.setTokenGetter(tokenGetter)
+        await cloudStorage.setTokenGetter(tokenGetter)
+        await ProfileSyncService.shared.setTokenGetter(tokenGetter)
+        await ProjectStorageService.shared.setTokenGetter(tokenGetter)
         
     }
     
@@ -1555,6 +1555,8 @@ class CloudSyncService: ObservableObject {
         let failedChats = await getAllChatsFromStorage().filter { $0.decryptionFailed }
         if failedChats.isEmpty { return 0 }
 
+        let failedIds = Set(failedChats.map { $0.id })
+
         for (index, chat) in failedChats.enumerated() {
             await deleteChatFromStorage(chat.id)
 
@@ -1571,8 +1573,12 @@ class CloudSyncService: ObservableObject {
         // left nothing in their place.
         _ = await syncAllChats()
 
-        let stillFailing = await getAllChatsFromStorage().filter { $0.decryptionFailed }.count
-        return max(0, failedChats.count - stillFailing)
+        // Only count chats that were actually re-fetched and decrypted
+        // successfully. Chats that were deleted upstream stay gone and
+        // must not be reported as "recovered".
+        let afterSync = await getAllChatsFromStorage()
+        let recovered = afterSync.filter { failedIds.contains($0.id) && !$0.decryptionFailed }
+        return recovered.count
     }
 
     

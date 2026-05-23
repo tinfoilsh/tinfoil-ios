@@ -27,21 +27,19 @@ final class ProjectStorageService: ObservableObject {
 
     // MARK: - Configuration
 
-    func setTokenGetter(_ tokenGetter: @escaping () async -> String?) {
+    func setTokenGetter(_ tokenGetter: @escaping () async -> String?) async {
         self.getToken = tokenGetter
         let captured = tokenGetter
-        Task {
-            await SyncEnclaveClient.shared.setTokenGetter { await captured() }
-        }
+        await SyncEnclaveClient.shared.setTokenGetter { await captured() }
     }
 
     private func defaultTokenGetter() async -> String? {
         do {
-            guard !Clerk.shared.publishableKey.isEmpty else { return nil }
-            if !Clerk.shared.isLoaded {
+            guard await !Clerk.shared.publishableKey.isEmpty else { return nil }
+            if await !Clerk.shared.isLoaded {
                 try await Clerk.shared.refreshClient()
             }
-            if let session = Clerk.shared.session {
+            if let session = await Clerk.shared.session {
                 if let token = try? await session.getToken() {
                     return token
                 }
@@ -512,15 +510,30 @@ final class ProjectStorageService: ObservableObject {
                     keys: keys
                 )
             )
-            return response.items.compactMap { item -> ProjectDocument? in
+            return response.items.map { item -> ProjectDocument in
+                let docId = documentIdFromWireId(item.id)
+                let updateMatch = scoped.first(where: { $0.id == item.id })
                 guard item.ok,
                       let b64 = item.plaintext,
                       let plaintext = Data(base64Encoded: b64),
                       let decoded = try? JSONDecoder().decode(ProjectDocumentPayload.self, from: plaintext) else {
-                    return nil
+                    // Surface the row as a decrypt-failed placeholder so
+                    // the UI can render it and the user can take action
+                    // (retry with another key, delete it, etc.) instead
+                    // of silently dropping the document.
+                    return ProjectDocument(
+                        id: docId,
+                        projectId: projectId,
+                        filename: "",
+                        contentType: "",
+                        sizeBytes: 0,
+                        syncVersion: etagToSyncVersion(updateMatch?.etag),
+                        createdAt: createdAtFromReverseId(docId),
+                        updatedAt: updateMatch?.updatedAt ?? isoNow(),
+                        content: nil,
+                        decryptionFailed: true
+                    )
                 }
-                let docId = documentIdFromWireId(item.id)
-                let updateMatch = scoped.first(where: { $0.id == item.id })
                 return ProjectDocument(
                     id: docId,
                     projectId: projectId,
@@ -530,7 +543,8 @@ final class ProjectStorageService: ObservableObject {
                     syncVersion: etagToSyncVersion(updateMatch?.etag),
                     createdAt: createdAtFromReverseId(docId),
                     updatedAt: updateMatch?.updatedAt ?? isoNow(),
-                    content: decoded.content
+                    content: decoded.content,
+                    decryptionFailed: false
                 )
             }
         }
@@ -546,7 +560,8 @@ final class ProjectStorageService: ObservableObject {
                 syncVersion: etagToSyncVersion(update.etag),
                 createdAt: createdAtFromReverseId(docId),
                 updatedAt: update.updatedAt,
-                content: nil
+                content: nil,
+                decryptionFailed: false
             )
         }
     }

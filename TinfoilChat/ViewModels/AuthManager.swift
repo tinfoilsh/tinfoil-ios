@@ -188,7 +188,7 @@ class AuthManager: ObservableObject {
                 // User was authenticated but Clerk confirms they're no longer signed in.
                 // clearAuthState calls handleSignOut first (while auth is still true)
                 // so that local chats can be saved to disk before clearing.
-                clearAuthState()
+                await clearAuthState()
                 await RevenueCatManager.shared.logoutUser()
             } else {
                 isAuthenticated = false
@@ -199,7 +199,7 @@ class AuthManager: ObservableObject {
         isLoading = false
     }
     
-    private func clearAuthState() {
+    private func clearAuthState() async {
         // Handle chat state BEFORE clearing auth so the view model can still
         // save the current chat (hasChatAccess depends on isAuthenticated).
         chatViewModel?.handleSignOut()
@@ -207,7 +207,7 @@ class AuthManager: ObservableObject {
         // Drop the cloud CEK and device key so a different user signing in
         // on the same device cannot inherit the previous user's keys.
         EncryptionService.shared.clearKey()
-        DeviceEncryptionService.shared.clearKey()
+        await DeviceEncryptionService.shared.clearKey()
 
         localUserData = nil
         isAuthenticated = false
@@ -227,7 +227,7 @@ class AuthManager: ObservableObject {
             let clerk = self.clerk ?? Clerk.shared
             try await clerk.auth.signOut()
             
-            clearAuthState()
+            await clearAuthState()
             
         } catch {
         }
@@ -313,7 +313,7 @@ class AuthManager: ObservableObject {
             try await user.delete()
             
             // Clear local state
-            clearAuthState()
+            await clearAuthState()
             
         } catch {
             throw error

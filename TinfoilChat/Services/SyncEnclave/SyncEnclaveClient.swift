@@ -130,6 +130,8 @@ actor SyncEnclaveClient {
         let response: SecureResponse
         do {
             response = try await client.post(url: url, headers: headers, body: bodyData)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             throw SyncEnclaveError(
                 message: "Sync enclave request failed: \(error.localizedDescription)",
@@ -151,6 +153,8 @@ actor SyncEnclaveClient {
         let response: SecureResponse
         do {
             response = try await client.get(url: url, headers: headers)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             throw SyncEnclaveError(
                 message: "Sync enclave request failed: \(error.localizedDescription)",

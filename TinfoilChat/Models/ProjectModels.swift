@@ -57,6 +57,7 @@ struct ProjectDocument: Codable, Identifiable, Equatable {
     var createdAt: String
     var updatedAt: String
     var content: String?
+    var decryptionFailed: Bool?
 }
 
 struct ProjectDocumentPayload: Codable, Equatable {

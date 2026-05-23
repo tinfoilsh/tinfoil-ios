@@ -218,7 +218,21 @@ final class PasskeyManager: ObservableObject {
     func checkPasskeyStateForExistingKey() async {
         do {
             let state = try await SyncEnclaveAPI.keyCurrent()
-            if state.keyId != nil && !state.bundles.isEmpty {
+            if let remoteKeyId = state.keyId, !state.bundles.isEmpty {
+                // Persist the keyId now so the periodic sync check has
+                // a baseline. Without this, a normal app launch (with
+                // a valid local CEK that matches the remote) would
+                // look like a `start_fresh` rotation on the next
+                // refresh tick and force the user through recovery.
+                if cachedKeyIdHex() == nil,
+                   let cek = try? EncryptionService.shared.getKeyBytesOrThrow(),
+                   let localKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek),
+                   localKeyId == remoteKeyId {
+                    UserDefaults.standard.set(
+                        remoteKeyId,
+                        forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId
+                    )
+                }
                 passkeyActive = true
                 startSyncCheck()
                 return

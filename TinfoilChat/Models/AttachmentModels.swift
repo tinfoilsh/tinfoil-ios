@@ -20,7 +20,7 @@ enum AttachmentProcessingState: String, Codable, Equatable {
 }
 
 struct Attachment: Identifiable, Equatable {
-    let id: String
+    var id: String
     let type: AttachmentType
     let fileName: String
     var mimeType: String?

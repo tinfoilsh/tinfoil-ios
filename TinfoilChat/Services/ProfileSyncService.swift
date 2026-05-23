@@ -34,13 +34,14 @@ class ProfileSyncService: ObservableObject {
     // MARK: - Configuration
 
     /// Set the token getter function for authentication. Wires the
-    /// same closure into the shared sync enclave client.
-    func setTokenGetter(_ tokenGetter: @escaping () async -> String?) {
+    /// same closure into the shared sync enclave client. Returns once
+    /// the actor-isolated client has accepted the getter so callers
+    /// can't race the first authenticated request against an empty
+    /// token cache.
+    func setTokenGetter(_ tokenGetter: @escaping () async -> String?) async {
         self.getToken = tokenGetter
         let captured = tokenGetter
-        Task {
-            await SyncEnclaveClient.shared.setTokenGetter { await captured() }
-        }
+        await SyncEnclaveClient.shared.setTokenGetter { await captured() }
     }
 
     private func defaultTokenGetter() async -> String? {
@@ -122,12 +123,7 @@ class ProfileSyncService: ObservableObject {
     /// Save profile to cloud through the enclave.
     func saveProfile(_ profile: ProfileData) async throws -> (success: Bool, version: Int?) {
         guard await isAuthenticated() else { return (false, nil) }
-        let keyB64: String
-        do {
-            keyB64 = try CEKEncoding.requirePrimaryKeyB64()
-        } catch {
-            return (false, nil)
-        }
+        let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
 
         var profileWithMetadata = profile
         profileWithMetadata.updatedAt = Self.iso8601Formatter.string(from: Date())
