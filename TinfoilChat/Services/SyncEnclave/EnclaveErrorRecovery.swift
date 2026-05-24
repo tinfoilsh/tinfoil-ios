@@ -231,7 +231,12 @@ enum EnclaveErrorRecovery {
 
     /// True for URLSession-level transport failures we know retry
     /// can plausibly heal. URLError bridges to NSError under
-    /// NSURLErrorDomain so both casts are checked.
+    /// NSURLErrorDomain so both casts are checked. TLS/cert
+    /// failures are intentionally excluded — they are almost
+    /// always persistent (misconfigured server, expired cert,
+    /// pinning failure) and retrying just burns the budget; they
+    /// fall through to the terminal default so the recovery
+    /// dispatcher surfaces them.
     private static func isTransientNetwork(_ error: Error) -> Bool {
         let transientURLCodes: Set<Int> = [
             NSURLErrorTimedOut,
@@ -245,7 +250,6 @@ enum EnclaveErrorRecovery {
             NSURLErrorCallIsActive,
             NSURLErrorDataNotAllowed,
             NSURLErrorRequestBodyStreamExhausted,
-            NSURLErrorSecureConnectionFailed,
         ]
         if let urlError = error as? URLError {
             return transientURLCodes.contains(urlError.errorCode)

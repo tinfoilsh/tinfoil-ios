@@ -209,6 +209,26 @@ struct EnclaveErrorRecoveryTests {
         #expect(decision.action == .abort(reason: .unknown))
     }
 
+    @Test func urlErrorSecureConnectionFailedIsNotTransient() {
+        // TLS/cert failures are almost always persistent (expired
+        // cert, hostname mismatch, pinning failure). Treating them
+        // as transient would burn the retry budget against a server
+        // that is misconfigured.
+        let decision = EnclaveErrorRecovery.decide(URLError(.secureConnectionFailed))
+        #expect(decision.action == .abort(reason: .unknown))
+        #expect(decision.classification.kind == .terminal)
+    }
+
+    @Test func nsErrorSecureConnectionFailedIsNotTransient() {
+        let nsError = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorSecureConnectionFailed,
+            userInfo: [NSLocalizedDescriptionKey: "TLS handshake failed"]
+        )
+        let decision = EnclaveErrorRecovery.decide(nsError)
+        #expect(decision.action == .abort(reason: .unknown))
+    }
+
     // MARK: - Unknown codes still produce a decision
 
     @Test func unknownEnclaveCodeFallsBackToStatusOrTerminal() {
