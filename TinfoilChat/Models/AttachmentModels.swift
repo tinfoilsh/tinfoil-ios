@@ -29,9 +29,12 @@ struct Attachment: Identifiable, Equatable {
     var textContent: String?
     var description: String?
     var fileSize: Int64
-    // v1 format: per-attachment AES-256 key as standard base64 (32 raw bytes → 44 chars).
+    // Per-attachment AES-256 key as standard base64 (32 raw bytes → 44 chars).
     // Cross-platform contract: iOS uses Data.base64EncodedString(), React uses btoa().
-    // The encrypted blob (nonce || ciphertext || tag) is stored separately at /api/storage/attachment/:id.
+    // v2 attachments live in buckets and are addressed through the sync enclave
+    // (`/v1/attachment/get` with this key as the slot key); legacy v0/v1 rows
+    // were stored at controlplane's `/api/storage/attachment/:id` and are
+    // migrated to v2 by the rewrap cascade.
     var encryptionKey: String?
     var processingState: AttachmentProcessingState
 
@@ -69,6 +72,9 @@ extension Attachment: Codable {
         case id, type, fileName, mimeType, base64, thumbnailBase64
         case textContent, description, fileSize
         case encryptionKey
+        // Oldest chats serialized the per-attachment key under `key`.
+        // Decode reads both; encode always writes `encryptionKey`.
+        case key
     }
 
     init(from decoder: Decoder) throws {
@@ -78,11 +84,13 @@ extension Attachment: Codable {
         fileName = try container.decode(String.self, forKey: .fileName)
         mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType)
         base64 = try container.decodeIfPresent(String.self, forKey: .base64)
-        thumbnailBase64 = try container.decodeIfPresent(String.self, forKey: .thumbnailBase64)
+        thumbnailBase64 = try container.decodeIfPresent(String.self, forKey: ****************)
         textContent = try container.decodeIfPresent(String.self, forKey: .textContent)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         fileSize = try container.decodeIfPresent(Int64.self, forKey: .fileSize) ?? 0
-        encryptionKey = try container.decodeIfPresent(String.self, forKey: .encryptionKey)
+        let modernKey = try container.decodeIfPresent(String.self, forKey: .encryptionKey)
+        let legacyKey = try container.decodeIfPresent(String.self, forKey: .key)
+        encryptionKey = modernKey ?? legacyKey
         // processingState is transient UI state — always reset to completed on decode
         processingState = .completed
     }
