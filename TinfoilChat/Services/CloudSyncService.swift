@@ -326,7 +326,15 @@ class CloudSyncService: ObservableObject {
         case .retry:
             throw error
         case .refreshCurrentKeyAndRetry:
+            // Notify so a listener (e.g. PasskeyManager) refreshes
+            // the canonical enclave key, then re-throw so the
+            // coalescer retries under the same idempotency key.
+            // The retry replays after the listener (hopefully) has
+            // rotated the key; if it hasn't yet, the retry fails
+            // and the chat stays locallyModified for the next sync
+            // cycle.
             postSyncEvent(.tinfoilSyncKeyRefreshNeeded)
+            throw error
         case .surfaceConflict:
             postSyncEvent(.tinfoilSyncConflictDetected, userInfo: ["chatId": chatId])
             await resolveConflictByPullingRemote(chatId)
@@ -339,9 +347,15 @@ class CloudSyncService: ObservableObject {
         case .blockAllSync:
             postSyncEvent(.tinfoilSyncAttestationFailed)
         case .migrateLegacyAndRetry(let scope):
+            // Notify so the legacy migration runs, then re-throw so
+            // the coalescer retries the write. Same trade-off as
+            // refreshCurrentKeyAndRetry: if migration completes
+            // before retries exhaust, the upload succeeds;
+            // otherwise the chat waits for the next sync cycle.
             var info: [String: Any] = [:]
             if let scope { info["scope"] = scope }
             postSyncEvent(.tinfoilSyncLegacyMigrationNeeded, userInfo: info.isEmpty ? nil : info)
+            throw error
         case .abort(let reason):
             postSyncEvent(
                 .tinfoilSyncUploadAborted,
