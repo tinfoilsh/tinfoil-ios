@@ -111,6 +111,20 @@ enum EnclaveErrorRecovery {
             return classifyEnclave(enclaveErr)
         }
         let message = (error as NSError).localizedDescription
+        // Transient transport failures (timeouts, dropped
+        // connections, DNS hiccups) routinely bubble up as raw
+        // URLErrors from URLSession or the TinfoilAI SDK without a
+        // SyncEnclaveError wrapper. They are retryable; falling
+        // through to the terminal default would silently abort
+        // every offline upload.
+        if isTransientNetwork(error) {
+            return EnclaveErrorClassification(
+                kind: .retryableTransient,
+                code: .network,
+                status: nil,
+                message: message
+            )
+        }
         if isAttestation(error) {
             return EnclaveErrorClassification(
                 kind: .terminal,
@@ -213,6 +227,34 @@ enum EnclaveErrorRecovery {
             || msg.contains("enclave verification")
             || msg.contains("verification document")
             || msg.contains("verifier")
+    }
+
+    /// True for URLSession-level transport failures we know retry
+    /// can plausibly heal. URLError bridges to NSError under
+    /// NSURLErrorDomain so both casts are checked.
+    private static func isTransientNetwork(_ error: Error) -> Bool {
+        let transientURLCodes: Set<Int> = [
+            NSURLErrorTimedOut,
+            NSURLErrorCannotFindHost,
+            NSURLErrorCannotConnectToHost,
+            NSURLErrorNetworkConnectionLost,
+            NSURLErrorNotConnectedToInternet,
+            NSURLErrorDNSLookupFailed,
+            NSURLErrorResourceUnavailable,
+            NSURLErrorInternationalRoamingOff,
+            NSURLErrorCallIsActive,
+            NSURLErrorDataNotAllowed,
+            NSURLErrorRequestBodyStreamExhausted,
+            NSURLErrorSecureConnectionFailed,
+        ]
+        if let urlError = error as? URLError {
+            return transientURLCodes.contains(urlError.errorCode)
+        }
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            return transientURLCodes.contains(nsError.code)
+        }
+        return false
     }
 }
 

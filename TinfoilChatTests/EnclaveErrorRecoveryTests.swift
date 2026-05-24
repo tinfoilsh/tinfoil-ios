@@ -175,6 +175,40 @@ struct EnclaveErrorRecoveryTests {
         #expect(decision.action == .abort(reason: .unknown))
     }
 
+    // MARK: - Transient network errors
+
+    @Test func urlErrorTimedOutIsRetryableTransient() {
+        let decision = EnclaveErrorRecovery.decide(URLError(.timedOut))
+        #expect(decision.action == .retry(reason: .network))
+        #expect(decision.classification.kind == .retryableTransient)
+        #expect(decision.classification.code == .network)
+    }
+
+    @Test func urlErrorNotConnectedIsRetryableTransient() {
+        let decision = EnclaveErrorRecovery.decide(URLError(.notConnectedToInternet))
+        #expect(decision.action == .retry(reason: .network))
+    }
+
+    @Test func urlErrorNetworkConnectionLostIsRetryableTransient() {
+        let decision = EnclaveErrorRecovery.decide(URLError(.networkConnectionLost))
+        #expect(decision.action == .retry(reason: .network))
+    }
+
+    @Test func nsErrorBridgedFromURLDomainIsRetryableTransient() {
+        let nsError = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorTimedOut,
+            userInfo: [NSLocalizedDescriptionKey: "timed out"]
+        )
+        let decision = EnclaveErrorRecovery.decide(nsError)
+        #expect(decision.action == .retry(reason: .network))
+    }
+
+    @Test func urlErrorBadURLIsNotConsideredTransient() {
+        let decision = EnclaveErrorRecovery.decide(URLError(.badURL))
+        #expect(decision.action == .abort(reason: .unknown))
+    }
+
     // MARK: - Unknown codes still produce a decision
 
     @Test func unknownEnclaveCodeFallsBackToStatusOrTerminal() {
