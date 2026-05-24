@@ -32,9 +32,41 @@ actor EncryptedFileStorage {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
+    // Single-writer lock that serializes mutating operations.
+    // Swift actors release isolation at each `await` suspension, so
+    // two concurrent saveChat/deleteChat/updateSyncMetadata calls
+    // can interleave around their async hops (encryptData,
+    // loadIndex, saveIndex) and stomp on each other's index
+    // updates. Public mutating methods acquire this lock before
+    // any work and release it when they finish, so the
+    // load-mutate-save sequence is atomic relative to other writers.
+    // Reads (loadChat, loadIndex on a healthy cache, loadAllChats)
+    // do not take the lock.
+    private var writeLockHeld = false
+    private var writeLockWaiters: [CheckedContinuation<Void, Never>] = []
+
     private init(encryptor: any ChatEncryptor, subdirectory: String?) {
         self.encryptor = encryptor
         self.subdirectory = subdirectory
+    }
+
+    private func acquireWriteLock() async {
+        if !writeLockHeld {
+            writeLockHeld = true
+            return
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            writeLockWaiters.append(continuation)
+        }
+    }
+
+    private func releaseWriteLock() {
+        if writeLockWaiters.isEmpty {
+            writeLockHeld = false
+        } else {
+            let next = writeLockWaiters.removeFirst()
+            next.resume()
+        }
     }
 
     // MARK: - Directory / Path Helpers
@@ -157,6 +189,12 @@ actor EncryptedFileStorage {
     // MARK: - Chat Operations
 
     func saveChat(_ chat: Chat, userId: String) async throws {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+        try await performSaveChat(chat, userId: userId)
+    }
+
+    private func performSaveChat(_ chat: Chat, userId: String) async throws {
         let isCorrupted = chat.decryptionFailed || chat.dataCorrupted
 
         let data = try encoder.encode(chat)
@@ -250,6 +288,12 @@ actor EncryptedFileStorage {
     }
 
     func deleteChat(chatId: String, userId: String) async throws {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+        try await performDeleteChat(chatId: chatId, userId: userId)
+    }
+
+    private func performDeleteChat(chatId: String, userId: String) async throws {
         let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
         if fileManager.fileExists(atPath: encPath.path) {
             try fileManager.removeItem(at: encPath)
@@ -270,7 +314,10 @@ actor EncryptedFileStorage {
         try await saveIndex(entries, userId: userId)
     }
 
-    func deleteAllChats(userId: String) throws {
+    func deleteAllChats(userId: String) async throws {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+
         let dir = try chatsDirectory(userId: userId)
         guard fileManager.fileExists(atPath: dir.path) else { return }
 
@@ -291,6 +338,24 @@ actor EncryptedFileStorage {
     /// overlays it onto the chat on read, so concurrent saveChat calls
     /// can never clobber an in-flight sync metadata update.
     func updateSyncMetadata(
+        chatId: String,
+        userId: String,
+        syncVersion: Int,
+        syncedAt: Date,
+        locallyModified: Bool
+    ) async throws {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+        try await performUpdateSyncMetadata(
+            chatId: chatId,
+            userId: userId,
+            syncVersion: syncVersion,
+            syncedAt: syncedAt,
+            locallyModified: locallyModified
+        )
+    }
+
+    private func performUpdateSyncMetadata(
         chatId: String,
         userId: String,
         syncVersion: Int,
