@@ -304,10 +304,78 @@ class CloudSyncService: ObservableObject {
             return
         }
         
-        try await uploadAndMarkSynced(chat, idempotencyKey: idempotencyKey)
-        
+        do {
+            try await uploadAndMarkSynced(chat, idempotencyKey: idempotencyKey)
+        } catch {
+            try await handleUploadFailure(chatId: chatId, error: error)
+        }
     }
-    
+
+    /// Dispatch a sync-enclave error to the matching recovery
+    /// surface. Re-throws for retryable cases so the coalescer can
+    /// retry under the same idempotency key; swallows for
+    /// non-retryable cases after posting a notification so the
+    /// chat stays locallyModified and is picked up on the next
+    /// natural sync cycle without burning the retry budget.
+    private func handleUploadFailure(chatId: String, error: Error) async throws {
+        let decision = EnclaveErrorRecovery.decide(error)
+        #if DEBUG
+        print("[CloudSync] upload recovery decision chat=\(chatId) action=\(decision.action) code=\(decision.classification.code?.rawValue ?? "nil")")
+        #endif
+        switch decision.action {
+        case .retry:
+            throw error
+        case .refreshCurrentKeyAndRetry:
+            postSyncEvent(.tinfoilSyncKeyRefreshNeeded)
+        case .surfaceConflict:
+            postSyncEvent(.tinfoilSyncConflictDetected, userInfo: ["chatId": chatId])
+            await resolveConflictByPullingRemote(chatId)
+        case .surfaceExistingDataUnderOtherKey:
+            postSyncEvent(.tinfoilSyncExistingDataUnderOtherKey)
+        case .surfaceNotFound:
+            postSyncEvent(.tinfoilSyncChatNotFound, userInfo: ["chatId": chatId])
+        case .triggerRecoveryWizard:
+            postSyncEvent(.tinfoilSyncRecoveryNeeded)
+        case .blockAllSync:
+            postSyncEvent(.tinfoilSyncAttestationFailed)
+        case .migrateLegacyAndRetry(let scope):
+            var info: [String: Any] = [:]
+            if let scope { info["scope"] = scope }
+            postSyncEvent(.tinfoilSyncLegacyMigrationNeeded, userInfo: info.isEmpty ? nil : info)
+        case .abort(let reason):
+            postSyncEvent(
+                .tinfoilSyncUploadAborted,
+                userInfo: ["chatId": chatId, "reason": reason.rawValue]
+            )
+        }
+    }
+
+    private func postSyncEvent(_ name: Notification.Name, userInfo: [String: Any]? = nil) {
+        NotificationCenter.default.post(name: name, object: nil, userInfo: userInfo)
+    }
+
+    /// Last-write-wins conflict resolution. Pulls the remote chat
+    /// fresh from the enclave and overwrites the local copy so the
+    /// chat exits the stuck-row retry loop. If the pull itself
+    /// fails the chat stays locallyModified and the next sync
+    /// cycle retries.
+    private func resolveConflictByPullingRemote(_ chatId: String) async {
+        do {
+            guard var downloadedChat = try await cloudStorage.downloadChat(chatId) else {
+                return
+            }
+            if downloadedChat.modelType == nil {
+                downloadedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+            }
+            await saveChatToStorage(downloadedChat)
+            await markChatAsSynced(downloadedChat.id, version: downloadedChat.syncVersion)
+        } catch {
+            #if DEBUG
+            print("[CloudSync] resolveConflictByPullingRemote failed for \(chatId): \(error)")
+            #endif
+        }
+    }
+
     // MARK: - Bulk Sync Operations
     
     /// Backup all unsynced chats
