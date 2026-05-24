@@ -49,9 +49,9 @@ private actor UploadCoalescer {
     }
 
     private var states: [String: ChatUploadState] = [:]
-    private let uploadFn: @Sendable (String) async throws -> Void
+    private let uploadFn: @Sendable (String, String) async throws -> Void
 
-    init(uploadFn: @escaping @Sendable (String) async throws -> Void) {
+    init(uploadFn: @escaping @Sendable (String, String) async throws -> Void) {
         self.uploadFn = uploadFn
     }
 
@@ -93,7 +93,13 @@ private actor UploadCoalescer {
         while states[chatId]?.dirty == true {
             states[chatId]?.dirty = false
 
-            terminalError = await uploadWithRetry(chatId)
+            // Mint one idempotency key per logical write. All HTTP
+            // retries inside uploadWithRetry replay under the same
+            // key so the enclave collapses them to a single
+            // committed effect, even when a previous attempt
+            // already committed and we lost the response.
+            let idempotencyKey = newSyncEnclaveIdempotencyKey()
+            terminalError = await uploadWithRetry(chatId, idempotencyKey: idempotencyKey)
         }
 
         // Notify waiters and clean up in a single access
@@ -121,12 +127,12 @@ private actor UploadCoalescer {
         }
     }
 
-    private func uploadWithRetry(_ chatId: String) async -> Error? {
+    private func uploadWithRetry(_ chatId: String, idempotencyKey: String) async -> Error? {
         var lastError: Error?
 
         for attempt in 0...Constants.Sync.uploadMaxRetries {
             do {
-                try await uploadFn(chatId)
+                try await uploadFn(chatId, idempotencyKey)
                 states[chatId]?.failureCount = 0
                 return nil
             } catch {
@@ -169,8 +175,8 @@ class CloudSyncService: ObservableObject {
     
     // MARK: - Private Properties
     private lazy var uploadCoalescer: UploadCoalescer = {
-        UploadCoalescer { [weak self] chatId in
-            try await self?.doBackupChat(chatId)
+        UploadCoalescer { [weak self] chatId, idempotencyKey in
+            try await self?.doBackupChat(chatId, idempotencyKey: idempotencyKey)
         }
     }()
     private var streamingCallbacks: Set<String> = []
@@ -253,7 +259,7 @@ class CloudSyncService: ObservableObject {
         }
     }
     
-    private func doBackupChat(_ chatId: String) async throws {
+    private func doBackupChat(_ chatId: String, idempotencyKey: String) async throws {
         guard canWriteToCloud() else { return }
 
         // Check if chat is currently streaming
@@ -298,7 +304,7 @@ class CloudSyncService: ObservableObject {
             return
         }
         
-        try await uploadAndMarkSynced(chat)
+        try await uploadAndMarkSynced(chat, idempotencyKey: idempotencyKey)
         
     }
     
@@ -1464,11 +1470,11 @@ class CloudSyncService: ObservableObject {
     /// Upload a chat to cloud and mark it as synced with the enclave's
     /// authoritative version (the new etag), or `chat.syncVersion + 1`
     /// when the enclave didn't return a parseable etag.
-    private func uploadAndMarkSynced(_ chat: Chat) async throws {
+    private func uploadAndMarkSynced(_ chat: Chat, idempotencyKey: String) async throws {
         guard !streamingTracker.isStreaming(chat.id) else { return }
 
         let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion)
-        let result = try await cloudStorage.uploadChat(storedChat)
+        let result = try await cloudStorage.uploadChat(storedChat, idempotencyKey: idempotencyKey)
         let newVersion = result.syncVersion ?? chat.syncVersion + 1
         if !result.rewrites.isEmpty {
             // Persist the enclave-minted attachment ids before marking

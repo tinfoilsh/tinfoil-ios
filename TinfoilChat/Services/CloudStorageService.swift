@@ -112,9 +112,8 @@ class CloudStorageService: ObservableObject {
     /// the caller can persist them against the freshest local copy
     /// without mutating the chat object passed in.
     @discardableResult
-    func uploadChat(_ chat: StoredChat) async throws -> UploadChatResult {
+    func uploadChat(_ chat: StoredChat, idempotencyKey: String) async throws -> UploadChatResult {
         var chatToUpload = chat
-        let idempotencyKey = newSyncEnclaveIdempotencyKey()
         let rewrites = try await encryptAndUploadAttachments(
             &chatToUpload,
             idempotencyKey: idempotencyKey
