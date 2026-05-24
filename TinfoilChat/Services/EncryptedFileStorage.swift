@@ -40,8 +40,9 @@ actor EncryptedFileStorage {
     // updates. Public mutating methods acquire this lock before
     // any work and release it when they finish, so the
     // load-mutate-save sequence is atomic relative to other writers.
-    // Reads (loadChat, loadIndex on a healthy cache, loadAllChats)
-    // do not take the lock.
+    // Pure reads (loadIndex on a healthy cache, loadAllChats) skip
+    // the lock; loadChat acquires it only on its rare stale-index
+    // cleanup branch.
     private var writeLockHeld = false
     private var writeLockWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -277,7 +278,32 @@ actor EncryptedFileStorage {
             return nil
         }
 
-        // Neither exists — remove stale index entry if present
+        // Neither file exists — clean up any stale index entry.
+        // This is a write, so it must hold the write lock to avoid
+        // racing a concurrent saveChat that's mid-flight under the
+        // same chatId.
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+
+        // Re-check under the lock: a concurrent saveChat may have
+        // created the file between the existence check above and
+        // the lock acquisition. If so, load it normally instead of
+        // erroneously deleting its fresh index entry.
+        if fileManager.fileExists(atPath: encPath.path) {
+            if var chat = try await loadChatFromFile(encPath, isRaw: false) {
+                overlaySyncSidecar(&chat, userId: userId)
+                return chat
+            }
+            return nil
+        }
+        if fileManager.fileExists(atPath: rawPath.path) {
+            if var chat = try await loadChatFromFile(rawPath, isRaw: true) {
+                overlaySyncSidecar(&chat, userId: userId)
+                return chat
+            }
+            return nil
+        }
+
         var entries = (try? await loadIndex(userId: userId)) ?? []
         if entries.contains(where: { $0.id == chatId }) {
             entries.removeAll { $0.id == chatId }
