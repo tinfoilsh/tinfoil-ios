@@ -426,11 +426,21 @@ struct EnclaveMigrateAllResponse: Decodable {
     /// pick up where it left off.
     let partial: Bool
     let scopes: [EnclaveMigrateAllScopeReport]
+    /// Background-job status emitted by the async migrate-all path.
+    /// "running" while the coordinator is still draining, "completed"
+    /// once the job ended successfully, or "failed" when the coordinator
+    /// aborted. Older enclave builds omit the field — treat absence as
+    /// "completed" so the legacy synchronous response keeps working.
+    let status: String?
+    let jobId: String?
+    let errorMessage: String?
 
     enum CodingKeys: String, CodingKey {
-        case migrated, partial, scopes
+        case migrated, partial, scopes, status
         case retryableRemaining = "retryable_remaining"
         case blockedUnmigrated = "blocked_unmigrated"
+        case jobId = "job_id"
+        case errorMessage = "error"
     }
 
     // The enclave may return null for scopes when it had nothing to
@@ -443,8 +453,17 @@ struct EnclaveMigrateAllResponse: Decodable {
         blockedUnmigrated = try c.decode(Int.self, forKey: .blockedUnmigrated)
         partial = try c.decode(Bool.self, forKey: .partial)
         scopes = try c.decodeIfPresent([EnclaveMigrateAllScopeReport].self, forKey: .scopes) ?? []
+        status = try c.decodeIfPresent(String.self, forKey: .status)
+        jobId = try c.decodeIfPresent(String.self, forKey: .jobId)
+        errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
     }
 }
+
+/// Empty body used by `/v1/blobs/migrate-status`. The enclave reads
+/// the user identity off the authenticated session, so no payload is
+/// needed; we still send `{}` to keep the POST contract consistent
+/// with the rest of the sync API.
+struct EnclaveEmptyRequest: Encodable {}
 
 // MARK: - Attachments
 
@@ -610,6 +629,17 @@ enum SyncEnclaveAPI {
 
     static func migrateAll(_ request: EnclaveMigrateAllRequest) async throws -> EnclaveMigrateAllResponse {
         try await SyncEnclaveClient.shared.post(path: "/v1/blobs/migrate-all", body: request)
+    }
+
+    /// Polls the background-migration coordinator without kicking a
+    /// new pass. Returns the same response shape as migrate-all so the
+    /// migration loop can keep aggregating scope tallies as the job
+    /// progresses.
+    static func migrateStatus() async throws -> EnclaveMigrateAllResponse {
+        try await SyncEnclaveClient.shared.post(
+            path: "/v1/blobs/migrate-status",
+            body: EnclaveEmptyRequest()
+        )
     }
 
     // MARK: Attachments

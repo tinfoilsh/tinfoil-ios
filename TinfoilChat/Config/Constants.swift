@@ -131,6 +131,12 @@ enum Constants {
         static let uploadBaseDelaySeconds: TimeInterval = 1.0
         static let uploadMaxDelaySeconds: TimeInterval = 8.0
         static let uploadMaxRetries: Int = 3
+
+        // Poll cadence and deadline for the enclave's async
+        // migrate-all coordinator. Mirrors the webapp constants so
+        // both clients keep the same drain budget.
+        static let migrationPollIntervalSeconds: TimeInterval = 2.0
+        static let migrationPollTimeoutSeconds: TimeInterval = 15 * 60.0
     }
 
     enum Verification {

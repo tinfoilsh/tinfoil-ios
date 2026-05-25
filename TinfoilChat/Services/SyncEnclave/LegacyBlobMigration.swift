@@ -9,10 +9,12 @@
 //  Without this loop, dropping `alternative` decryption keys would
 //  strand any row that still needs an old key to unseal.
 //
-//  Pagination lives entirely inside the enclave. The client makes
-//  one call; if the enclave hits its wall-clock budget before
-//  draining every scope it sets `partial: true` and we re-invoke
-//  once to pick up where it left off.
+//  Pagination and rate-limiting live entirely inside the enclave.
+//  The client kicks one detached job, then polls migrate-status
+//  every few seconds until the coordinator reports a terminal
+//  state. Each poll tick returns the running totals so the loop
+//  takes a snapshot of the latest response rather than accumulating
+//  deltas — the enclave already owns the global counter.
 //
 
 import Foundation
@@ -45,11 +47,14 @@ struct MigrationReport {
 }
 
 enum LegacyBlobMigration {
-    private static let maxPasses = 2
 
-    /// Run the enclave-driven migration. Re-invokes the migrate-all
-    /// endpoint until it reports `partial: false` or the pass budget
-    /// is exhausted.
+    /// Run the enclave-driven migration. Kicks off the detached
+    /// migration job, then polls migrate-status until the
+    /// coordinator reaches a terminal state (`partial:false` or
+    /// `status == "completed" | "failed"`) or the local poll
+    /// deadline elapses. Cancelling the app mid-poll only stops the
+    /// local loop — the enclave job keeps draining and the next
+    /// launch resumes polling against the same coordinator entry.
     static func run() async -> MigrationReport {
         let targetKeyB64: String
         do {
@@ -58,37 +63,62 @@ enum LegacyBlobMigration {
             return .empty
         }
         let keys = CEKEncoding.migrationKeys()
+        let startedAt = Date()
+        let pollInterval = Constants.Sync.migrationPollIntervalSeconds
+        let pollTimeout = Constants.Sync.migrationPollTimeoutSeconds
 
-        var accumulator: [SyncScope: ScopeMigrationResult] = [:]
-        var lastResponse: EnclaveMigrateAllResponse? = nil
-
-        for _ in 0..<maxPasses {
-            do {
-                let resp = try await SyncEnclaveAPI.migrateAll(
-                    EnclaveMigrateAllRequest(
-                        keys: keys,
-                        target: EnclaveMigrateRequestTarget(key: targetKeyB64)
-                    )
+        var lastResponse: EnclaveMigrateAllResponse?
+        do {
+            lastResponse = try await SyncEnclaveAPI.migrateAll(
+                EnclaveMigrateAllRequest(
+                    keys: keys,
+                    target: EnclaveMigrateRequestTarget(key: targetKeyB64)
                 )
-                lastResponse = resp
-                merge(scopes: resp.scopes, into: &accumulator)
-                if !resp.partial { break }
+            )
+        } catch {
+            #if DEBUG
+            print("[LegacyBlobMigration] migrate-all kickoff failed: \(error)")
+            #endif
+            return .empty
+        }
+
+        while shouldKeepPolling(lastResponse) {
+            if Date().timeIntervalSince(startedAt) > pollTimeout {
+                #if DEBUG
+                print("[LegacyBlobMigration] poll timeout — bailing")
+                #endif
+                break
+            }
+            try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
+            do {
+                lastResponse = try await SyncEnclaveAPI.migrateStatus()
             } catch {
                 #if DEBUG
-                print("[LegacyBlobMigration] migrate-all failed: \(error)")
+                print("[LegacyBlobMigration] migrate-status poll failed: \(error)")
                 #endif
                 break
             }
         }
 
-        var report = toReport(accumulator)
-        if lastResponse?.partial == true {
+        let snapshot = lastResponse.map { snapshotScopes($0.scopes) } ?? [:]
+        var report = toReport(snapshot)
+        if lastResponse?.partial != false {
             report.fullyMigrated = false
         }
-        if accumulator.isEmpty {
+        // Freshly-keyed user with nothing to migrate — Layer C must
+        // still be allowed to clear the alternative-keys list even
+        // though no scopes were touched.
+        if snapshot.isEmpty {
             if let last = lastResponse, !last.partial {
-                report.fullyMigrated = true
+                return MigrationReport(
+                    scopes: [],
+                    totalMigrated: 0,
+                    totalRemaining: 0,
+                    totalBlocked: 0,
+                    fullyMigrated: true
+                )
             }
+            return .empty
         }
         return report
     }
@@ -110,24 +140,33 @@ enum LegacyBlobMigration {
 
     // MARK: - Private
 
-    private static func merge(
-        scopes: [EnclaveMigrateAllScopeReport],
-        into acc: inout [SyncScope: ScopeMigrationResult]
-    ) {
+    private static func shouldKeepPolling(_ resp: EnclaveMigrateAllResponse?) -> Bool {
+        guard let resp = resp else { return false }
+        if !resp.partial { return false }
+        // Older enclave builds that pre-date the async coordinator
+        // omit the status field; treat absence as "still running"
+        // so the loop respects the partial flag.
+        let status = resp.status ?? "running"
+        return status == "running"
+    }
+
+    /// Convert the latest response's scopes into per-scope results.
+    /// The async coordinator already aggregates totals server-side,
+    /// so each tick supersedes the previous one — the client
+    /// snapshots rather than accumulates.
+    private static func snapshotScopes(
+        _ scopes: [EnclaveMigrateAllScopeReport]
+    ) -> [SyncScope: ScopeMigrationResult] {
+        var out: [SyncScope: ScopeMigrationResult] = [:]
         for s in scopes {
-            var prev = acc[s.scope] ?? ScopeMigrationResult(
+            out[s.scope] = ScopeMigrationResult(
                 scope: s.scope,
-                migrated: 0,
-                remaining: 0,
-                blocked: []
+                migrated: s.migrated,
+                remaining: s.retryableRemaining,
+                blocked: s.blocked ?? []
             )
-            prev.migrated += s.migrated
-            prev.remaining = s.retryableRemaining
-            if let blocked = s.blocked {
-                prev.blocked.append(contentsOf: blocked)
-            }
-            acc[s.scope] = prev
         }
+        return out
     }
 
     private static func toReport(_ scopes: [SyncScope: ScopeMigrationResult]) -> MigrationReport {
