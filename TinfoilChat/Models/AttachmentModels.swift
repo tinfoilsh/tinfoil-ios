@@ -84,7 +84,7 @@ extension Attachment: Codable {
         fileName = try container.decode(String.self, forKey: .fileName)
         mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType)
         base64 = try container.decodeIfPresent(String.self, forKey: .base64)
-        thumbnailBase64 = try container.decodeIfPresent(String.self, forKey: ****************)
+        thumbnailBase64 = try container.decodeIfPresent(String.self, forKey: .thumbnailBase64)
         textContent = try container.decodeIfPresent(String.self, forKey: .textContent)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         fileSize = try container.decodeIfPresent(Int64.self, forKey: .fileSize) ?? 0
