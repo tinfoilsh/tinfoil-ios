@@ -867,6 +867,30 @@ class CloudSyncService: ObservableObject {
                     )
                 }
 
+                // Detect the disk-lost-rows case after the more
+                // precise remote-side signals above. The cached
+                // count tracks the server, not what is actually on
+                // disk — so a chat that 404s during decrypt, an
+                // eviction sweep, or any other path that silently
+                // drops rows can leave the watermark intact even
+                // though the user can no longer see those chats.
+                // When the live local count drops below the
+                // snapshot we last persisted, force a full pull.
+                // Older cached entries (no `localCount`) keep the
+                // legacy behaviour to avoid spurious sync storms on
+                // first upgrade.
+                if let cachedLocal = cached.localCount {
+                    let liveLocal = await safeReadLocalChatCount() ?? cachedLocal
+                    if liveLocal < cachedLocal {
+                        return SyncStatusResult(
+                            needsSync: true,
+                            reason: .countChanged,
+                            remoteCount: remoteStatus.count,
+                            remoteLastUpdated: remoteStatus.lastUpdated
+                        )
+                    }
+                }
+
                 return SyncStatusResult(
                     needsSync: false,
                     reason: .noChanges,
@@ -1353,11 +1377,26 @@ class CloudSyncService: ObservableObject {
         return try? JSONDecoder().decode(ChatSyncStatus.self, from: data)
     }
 
-    private func saveSyncStatus(count: Int, lastUpdated: String) {
-        let status = ChatSyncStatus(count: count, lastUpdated: lastUpdated)
+    private func saveSyncStatus(count: Int, lastUpdated: String, localCount: Int?) {
+        let status = ChatSyncStatus(
+            count: count,
+            lastUpdated: lastUpdated,
+            localCount: localCount
+        )
         if let data = try? JSONEncoder().encode(status) {
             UserDefaults.standard.set(data, forKey: syncStatusKey)
         }
+    }
+
+    /// Count cloud-eligible chats currently on disk. Used to detect
+    /// post-eviction drift in checkSyncStatus and recorded alongside
+    /// the cached remote watermark so a future check can spot rows
+    /// disappearing from local storage. Returns nil when the storage
+    /// read fails so save sites can omit the field rather than
+    /// poisoning the cache with a misleading zero.
+    private func safeReadLocalChatCount() async -> Int? {
+        let chats = await getAllChatsFromStorage()
+        return chats.filter { !$0.isLocalOnly }.count
     }
 
     private func getCachedProjectChatSyncStatus(_ projectId: String) -> ChatSyncStatus? {
@@ -1378,7 +1417,12 @@ class CloudSyncService: ObservableObject {
     private func refreshSyncStatusCache() async {
         if let remoteStatus = try? await cloudStorage.getChatSyncStatus(),
            let lastUpdated = remoteStatus.lastUpdated {
-            saveSyncStatus(count: remoteStatus.count, lastUpdated: lastUpdated)
+            let localCount = await safeReadLocalChatCount()
+            saveSyncStatus(
+                count: remoteStatus.count,
+                lastUpdated: lastUpdated,
+                localCount: localCount
+            )
         }
     }
 

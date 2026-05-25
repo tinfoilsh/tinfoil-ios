@@ -365,6 +365,20 @@ struct ProfileData: Codable {
 struct ChatSyncStatus: Codable {
     let count: Int
     let lastUpdated: String?
+    /// Snapshot of how many cloud-eligible chats were actually on
+    /// disk when this status was cached. smartSync compares it to a
+    /// live count on every check so that an eviction sweep or any
+    /// other path that silently drops rows triggers a fresh pull
+    /// instead of being masked by a stale watermark. Optional for
+    /// backwards compatibility with snapshots written before the
+    /// field was introduced.
+    let localCount: Int?
+
+    init(count: Int, lastUpdated: String?, localCount: Int? = nil) {
+        self.count = count
+        self.lastUpdated = lastUpdated
+        self.localCount = localCount
+    }
 }
 
 /// Profile sync status from server (for efficient sync checking)
