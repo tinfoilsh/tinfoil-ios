@@ -142,6 +142,15 @@ struct EnclavePullResponse: Decodable {
         case items
         case nextCursor = "next_cursor"
     }
+
+    // Go marshals an empty slice as JSON null, which JSONDecoder
+    // would otherwise reject as a corrupt array. Normalize to [] so
+    // callers can iterate without guards.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        items = try c.decodeIfPresent([EnclavePullItem].self, forKey: .items) ?? []
+        nextCursor = try c.decodeIfPresent(String.self, forKey: .nextCursor)
+    }
 }
 
 struct EnclaveListStatusRequest: Encodable {
@@ -194,6 +203,16 @@ struct EnclaveListStatusResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case updates, deletes
         case nextCursor = "next_cursor"
+    }
+
+    // Both arrays land as JSON null when the server has nothing to
+    // report for the page; normalize so iteration in CloudStorage /
+    // ProfileSync stays branchless.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        updates = try c.decodeIfPresent([EnclaveListStatusUpdate].self, forKey: .updates) ?? []
+        deletes = try c.decodeIfPresent([EnclaveListStatusDelete].self, forKey: .deletes) ?? []
+        nextCursor = try c.decodeIfPresent(String.self, forKey: .nextCursor)
     }
 }
 
@@ -335,6 +354,23 @@ struct EnclaveKeyCurrentResponse: Decodable {
     }
 }
 
+// A first-time user has no registered bundles, which Go encodes
+// as a null map; default to an empty map so callers can index
+// and enumerate without guards. Lives in an extension to keep the
+// auto-synthesized memberwise initializer for the 404 fallback.
+extension EnclaveKeyCurrentResponse {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            keyId: try c.decodeIfPresent(String.self, forKey: .keyId),
+            etag: try c.decodeIfPresent(String.self, forKey: .etag),
+            bundles: try c.decodeIfPresent([String: EnclaveKeyCurrentBundle].self, forKey: .bundles) ?? [:],
+            createdVia: try c.decodeIfPresent(String.self, forKey: .createdVia),
+            createdAt: try c.decodeIfPresent(String.self, forKey: .createdAt)
+        )
+    }
+}
+
 // MARK: - Migration
 
 struct EnclaveMigrateRequestTarget: Encodable {
@@ -395,6 +431,18 @@ struct EnclaveMigrateAllResponse: Decodable {
         case migrated, partial, scopes
         case retryableRemaining = "retryable_remaining"
         case blockedUnmigrated = "blocked_unmigrated"
+    }
+
+    // The enclave may return null for scopes when it had nothing to
+    // migrate this pass; normalize to [] so the migration loop can
+    // aggregate without crashing.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        migrated = try c.decode(Int.self, forKey: .migrated)
+        retryableRemaining = try c.decode(Int.self, forKey: .retryableRemaining)
+        blockedUnmigrated = try c.decode(Int.self, forKey: .blockedUnmigrated)
+        partial = try c.decode(Bool.self, forKey: .partial)
+        scopes = try c.decodeIfPresent([EnclaveMigrateAllScopeReport].self, forKey: .scopes) ?? []
     }
 }
 
