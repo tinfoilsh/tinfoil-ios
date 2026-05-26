@@ -159,9 +159,20 @@ struct EnclaveListStatusRequest: Encodable {
     let limit: Int?
     /// Optional server-side project filter for chat scope.
     let projectId: String?
+    /// Sort order: `nil`/`"asc"` walks oldest -> newest (default),
+    /// `"desc"` walks newest -> oldest.
+    let direction: String?
+
+    init(scope: SyncScope, cursor: String? = nil, limit: Int? = nil, projectId: String? = nil, direction: String? = nil) {
+        self.scope = scope
+        self.cursor = cursor
+        self.limit = limit
+        self.projectId = projectId
+        self.direction = direction
+    }
 
     enum CodingKeys: String, CodingKey {
-        case scope, cursor, limit
+        case scope, cursor, limit, direction
         case projectId = "project_id"
     }
 }

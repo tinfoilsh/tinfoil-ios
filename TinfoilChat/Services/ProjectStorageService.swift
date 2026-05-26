@@ -273,7 +273,8 @@ final class ProjectStorageService: ObservableObject {
                 scope: .project,
                 cursor: continuationToken,
                 limit: pageLimit,
-                projectId: nil
+                projectId: nil,
+                direction: "desc"
             )
         )
         let projects = status.updates.map { update -> ProjectListItem in
