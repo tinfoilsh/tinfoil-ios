@@ -105,6 +105,11 @@ struct TinfoilChatApp: App {
                                     Task.detached(priority: .background) {
                                         _ = await LegacyBlobMigration.runAndFinalize()
                                         await LegacyChatEviction.runIfNeeded(userId: activeUserId)
+                                        // The migration may have promoted a legacy
+                                        // CEK or added a fresh bundle for this device.
+                                        // Nudge the passkey state so the settings UI
+                                        // surfaces the correct row.
+                                        await PasskeyManager.shared.refreshBundleState()
                                     }
 
                                     // Initialize ProfileManager to start auto-sync
