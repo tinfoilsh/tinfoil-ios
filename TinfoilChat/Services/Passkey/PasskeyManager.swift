@@ -104,7 +104,7 @@ final class PasskeyManager: ObservableObject {
 
         let result = await PasskeyKeyFlow.unlockFromServer()
         switch result {
-        case .success(let cek, let keyIdHex, let credentialId, _):
+        case .success(let cek, let keyIdHex, _, _):
             do {
                 try await applyRecoveredCek(cek: cek)
             } catch {
@@ -114,7 +114,7 @@ final class PasskeyManager: ObservableObject {
                 showPasskeyRecoveryChoice = true
                 return .recoveryFailed
             }
-            persistEnclaveKeyState(keyIdHex: keyIdHex, credentialId: credentialId)
+            persistEnclaveKeyId(keyIdHex)
             activatePasskey()
             return .success
         case .failure(let reason, _):
@@ -141,14 +141,14 @@ final class PasskeyManager: ObservableObject {
             createdVia: createdVia
         )
         switch result {
-        case .success(let cek, let keyIdHex, let credentialId, _):
+        case .success(let cek, let keyIdHex, _, _):
             do {
                 try await applyFreshCek(cek: cek)
                 guard CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: authorizationMode) else {
                     EncryptionService.shared.clearKey()
                     throw CloudKeyAuthorizationError.authorizationUnavailable
                 }
-                persistEnclaveKeyState(keyIdHex: keyIdHex, credentialId: credentialId)
+                persistEnclaveKeyId(keyIdHex)
                 activatePasskey()
                 return true
             } catch {
@@ -178,13 +178,13 @@ final class PasskeyManager: ObservableObject {
 
         let result = await PasskeyKeyFlow.unlockFromServer()
         switch result {
-        case .success(let cek, let keyIdHex, let credentialId, _):
+        case .success(let cek, let keyIdHex, _, _):
             do {
                 try await applyRecoveredCek(cek: cek)
             } catch {
                 return false
             }
-            persistEnclaveKeyState(keyIdHex: keyIdHex, credentialId: credentialId)
+            persistEnclaveKeyId(keyIdHex)
             activatePasskey()
             showPasskeyRecoveryChoice = false
             onRecoveryComplete?()
@@ -314,8 +314,8 @@ final class PasskeyManager: ObservableObject {
                     user: user,
                     createdVia: .recovery
                 )
-                if case .success(_, _, let credentialId, _) = result {
-                    persistEnclaveKeyState(keyIdHex: keyIdHex, credentialId: credentialId)
+                if case .success = result {
+                    persistEnclaveKeyId(keyIdHex)
                     activatePasskey()
                 }
                 return
@@ -327,8 +327,8 @@ final class PasskeyManager: ObservableObject {
                 keyIdHex: keyIdHex,
                 user: user
             )
-            if case .success(_, _, let credentialId, _) = result {
-                persistEnclaveKeyState(keyIdHex: keyIdHex, credentialId: credentialId)
+            if case .success = result {
+                persistEnclaveKeyId(keyIdHex)
                 activatePasskey()
             }
         } catch {
@@ -411,9 +411,13 @@ final class PasskeyManager: ObservableObject {
         )
     }
 
-    private func persistEnclaveKeyState(keyIdHex: String, credentialId: String) {
+    /// The enclave key_id is the SHA-256 of the local CEK — it's
+    /// safe to cache locally and lets the periodic sync check
+    /// detect a remote `start_fresh` rotation. The credential id is
+    /// persisted separately by `PasskeyService` after a successful
+    /// WebAuthn ceremony, gated on `.platform` attachment.
+    private func persistEnclaveKeyId(_ keyIdHex: String) {
         UserDefaults.standard.set(keyIdHex, forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId)
-        UserDefaults.standard.set(credentialId, forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId)
     }
 
     private func cachedKeyIdHex() -> String? {
@@ -463,10 +467,10 @@ final class PasskeyManager: ObservableObject {
             let result = await PasskeyKeyFlow.unlockFromServer(
                 prefer: UserDefaults.standard.string(forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId)
             )
-            if case .success(let cek, let keyIdHex, let credentialId, _) = result {
+            if case .success(let cek, let keyIdHex, _, _) = result {
                 do {
                     try await applyRecoveredCek(cek: cek)
-                    persistEnclaveKeyState(keyIdHex: keyIdHex, credentialId: credentialId)
+                    persistEnclaveKeyId(keyIdHex)
                     onKeyRefreshedFromBackup?()
                 } catch {
                     showPasskeyRecoveryChoice = true
