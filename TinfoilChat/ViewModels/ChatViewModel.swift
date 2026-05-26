@@ -251,7 +251,7 @@ class ChatViewModel: ObservableObject {
         guard let projectId = activeProject?.id else { return [] }
         return chats
             .filter { $0.projectId == projectId && !$0.isTemporary && !$0.isBlankChat }
-            .sorted { $0.createdAt > $1.createdAt }
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
     
     // Computed property to check if user has premium access
@@ -1030,7 +1030,7 @@ class ChatViewModel: ObservableObject {
                 chats.append(projectChat)
             }
         }
-        chats.sort { $0.createdAt > $1.createdAt }
+        chats.sort { $0.updatedAt > $1.updatedAt }
     }
 
     private func loadProjectChatsFromStorage(projectId: String) async -> [Chat] {
@@ -1041,10 +1041,10 @@ class ChatViewModel: ObservableObject {
                 $0.projectId == projectId &&
                 ($0.messageCount > 0 || $0.decryptionFailed || $0.titleState != .placeholder)
             }
-            .sorted { $0.createdAt > $1.createdAt }
+            .sorted { $0.updatedAt > $1.updatedAt }
             .map(\.id)
         return await Chat.loadChats(chatIds: ids, userId: userId)
-            .sorted { $0.createdAt > $1.createdAt }
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
 
     /// Toggles temporary (incognito) chat mode. When enabled, the current chat
@@ -3540,7 +3540,7 @@ class ChatViewModel: ObservableObject {
     private func loadAllLocalChats(userId: String?) async -> [Chat] {
         guard let userId = userId else { return [] }
         return ((try? await EncryptedFileStorage.local.loadAllChats(userId: userId)) ?? [])
-            .sorted { $0.createdAt > $1.createdAt }
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
 
     private func loadFirstPageOfChats(
@@ -3553,11 +3553,11 @@ class ChatViewModel: ObservableObject {
         let filtered = index
             .filter { !excludedIds.contains($0.id) }
             .filter { filter?($0) ?? true }
-            .sorted { $0.createdAt > $1.createdAt }
+            .sorted { $0.updatedAt > $1.updatedAt }
         let firstPageIds = filtered.prefix(Constants.Pagination.chatsPerPage).map(\.id)
 
         let chats = await Chat.loadChats(chatIds: firstPageIds, userId: userId)
-            .sorted { $0.createdAt > $1.createdAt }
+            .sorted { $0.updatedAt > $1.updatedAt }
 
         return (chats, filtered.count)
     }
@@ -3652,7 +3652,7 @@ class ChatViewModel: ObservableObject {
         let result = await loadFirstPageOfChats(userId: userId, excluding: locallyModifiedIds, filter: \.isCloudDisplayable)
 
         // Combine: locally modified chats + synced chats from files
-        let sortedChats = (locallyModifiedChats + result.chats).sorted { $0.createdAt > $1.createdAt }
+        let sortedChats = (locallyModifiedChats + result.chats).sorted { $0.updatedAt > $1.updatedAt }
 
         // Keep track of currently loaded chat IDs to preserve pagination
         let currentlyLoadedIds = Set(chats.map { $0.id })
@@ -3699,11 +3699,11 @@ class ChatViewModel: ObservableObject {
             updatedChats.append(contentsOf: syncedChatsToShow)
         }
         
-        // Sort non-blank chats by createdAt before normalization
+        // Sort non-blank chats by latest activity before normalization
         updatedChats.sort { chat1, chat2 in
             if chat1.isBlankChat { return true }
             if chat2.isBlankChat { return false }
-            return chat1.createdAt > chat2.createdAt
+            return chat1.updatedAt > chat2.updatedAt
         }
 
         // Set chats and normalize to ensure exactly one blank chat at position 0

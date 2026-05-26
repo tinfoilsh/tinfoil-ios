@@ -502,8 +502,9 @@ class CloudSyncService: ObservableObject {
                 }
             }
 
-            // Sort by creation date (newest first)
-            downloadedChats.sort { $0.createdAt > $1.createdAt }
+            // Sort by latest activity (newest first), matching the server's
+            // direction=desc list-status pagination.
+            downloadedChats.sort { $0.updatedAt > $1.updatedAt }
             
             return PaginatedChatsResult(
                 chats: downloadedChats,
@@ -530,8 +531,9 @@ class CloudSyncService: ObservableObject {
     ) async -> PaginatedChatsResult {
         let allChats = await getAllChatsFromStorage()
         
-        // Sort by creation date (newest first)
-        let sortedChats = allChats.sorted { $0.createdAt > $1.createdAt }
+        // Sort by latest activity (newest first), matching the server's
+        // direction=desc list-status pagination.
+        let sortedChats = allChats.sorted { $0.updatedAt > $1.updatedAt }
         
         // Parse continuation token as offset
         let offset = Int(continuationToken ?? "0") ?? 0

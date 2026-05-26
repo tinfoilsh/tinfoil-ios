@@ -328,7 +328,8 @@ class CloudStorageService: ObservableObject {
                 scope: .chat,
                 cursor: continuationToken,
                 limit: effectiveLimit,
-                projectId: nil
+                projectId: nil,
+                direction: "desc"
             )
         )
         var conversations = status.updates.map(remoteChatFromStatus)
