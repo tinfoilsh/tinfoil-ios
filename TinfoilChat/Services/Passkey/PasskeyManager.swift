@@ -31,6 +31,12 @@ final class PasskeyManager: ObservableObject {
 
     @Published var passkeyActive: Bool = false
     @Published var passkeySetupAvailable: Bool = false
+    /// True when the user's key has bundle(s) on the enclave but
+    /// none of them belong to this device's last-known credential id.
+    /// Surfaces a "Set Up Passkey on This Device" prompt so the user
+    /// can enroll a second authenticator (e.g. Touch ID after already
+    /// having Windows Hello on another device).
+    @Published var passkeyAddDeviceAvailable: Bool = false
     @Published var showPasskeyRecoveryChoice: Bool = false
 
     // MARK: - Callbacks
@@ -56,6 +62,7 @@ final class PasskeyManager: ObservableObject {
     func reset() {
         passkeyActive = false
         passkeySetupAvailable = false
+        passkeyAddDeviceAvailable = false
         showPasskeyRecoveryChoice = false
         onRecoveryComplete = nil
         onKeyRefreshedFromBackup = nil
@@ -233,7 +240,29 @@ final class PasskeyManager: ObservableObject {
                         forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId
                     )
                 }
-                passkeyActive = true
+
+                // The bundle map is keyed by credential id. If this
+                // device's last-known credential id is among the
+                // bundles, the device has its own backup and we can
+                // light up the "passkey active" UI. Otherwise the
+                // user has bundles on *other* devices but none here
+                // yet — surface the add-this-device prompt instead.
+                let localCredentialId = UserDefaults.standard.string(
+                    forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId
+                )
+                let hasBundleForThisDevice = localCredentialId.flatMap { id in
+                    state.bundles.values.contains { $0.credentialId == id }
+                } ?? false
+
+                if hasBundleForThisDevice {
+                    passkeyActive = true
+                    passkeyAddDeviceAvailable = false
+                    passkeySetupAvailable = false
+                } else {
+                    passkeyActive = false
+                    passkeyAddDeviceAvailable = true
+                    passkeySetupAvailable = false
+                }
                 startSyncCheck()
                 return
             }
@@ -241,6 +270,16 @@ final class PasskeyManager: ObservableObject {
             // fall through to "setup available"
         }
         passkeySetupAvailable = true
+        passkeyAddDeviceAvailable = false
+    }
+
+    /// Re-evaluate per-device bundle state without prompting any
+    /// passkey UI. Safe to call any time the enclave's bundle map
+    /// may have changed (e.g. legacy-blob migration completed,
+    /// another device just added a bundle).
+    func refreshBundleState() async {
+        guard EncryptionService.shared.hasEncryptionKey() else { return }
+        await checkPasskeyStateForExistingKey()
     }
 
     /// Create a passkey bundle for the user's existing CEK. Used by
@@ -310,6 +349,8 @@ final class PasskeyManager: ObservableObject {
     private func activatePasskey() {
         SettingsManager.shared.isCloudSyncEnabled = true
         passkeyActive = true
+        passkeyAddDeviceAvailable = false
+        passkeySetupAvailable = false
         startSyncCheck()
     }
 

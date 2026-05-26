@@ -479,6 +479,27 @@ struct SettingsView: View {
                         .padding(.top, 2)
                     }
                     .padding(.vertical, 2)
+                } else if passkeyManager.passkeyAddDeviceAvailable && EncryptionService.shared.hasEncryptionKey() {
+                    Button(action: {
+                        Task {
+                            await passkeyManager.createPasskeyBackup()
+                        }
+                    }) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "person.badge.key.fill")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                Text("Set Up Passkey on This Device")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                            }
+                            Text("Your other devices use a passkey already. Add one here for one-tap access.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
                 } else if passkeyManager.passkeySetupAvailable && EncryptionService.shared.hasEncryptionKey() {
                     Button(action: {
                         Task {
