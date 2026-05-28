@@ -295,7 +295,14 @@ enum PasskeyKeyFlow {
         let credentialIds = entries.map(\.id)
         let passkey: PrfPasskeyResult
         do {
-            passkey = try await PasskeyService.shared.authenticatePasskey(credentialIds: credentialIds)
+            // Use only locally-available credentials so the system does not
+            // surface its cross-device "Use a Device Nearby" QR sheet. When
+            // the legacy passkey isn't on this device, this fails fast and we
+            // fall through to manual recovery (scan the webapp QR / paste key).
+            passkey = try await PasskeyService.shared.authenticatePasskey(
+                credentialIds: credentialIds,
+                silent: true
+            )
         } catch let err {
             return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
         }
