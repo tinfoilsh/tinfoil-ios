@@ -88,21 +88,59 @@ final class PasskeyManager: ObservableObject {
             return .recoveryFailed
         }
 
-        if state.keyId == nil || state.bundles.isEmpty {
-            switch await CloudKeyPreflightValidator.shared.inspectRemoteState() {
-            case .empty:
-                let created = await attemptNewUserPasskeySetup()
-                if !created {
-                    passkeySetupAvailable = true
-                }
-                return created ? .newUserSetupDone : .manualSetupRequired
-            case .exists, .unknown:
+        // When the enclave already has a usable v2 bundle, unlock
+        // straight from the server.
+        if state.keyId != nil, !state.bundles.isEmpty {
+            return await applyUnlockResult(
+                await PasskeyKeyFlow.unlockFromServer(),
+                label: "unlockFromServer"
+            )
+        }
+
+        // No usable v2 bundle. A brand-new user (no enclave key and no
+        // remote data) gets the auto-generate flow.
+        let remoteState = await CloudKeyPreflightValidator.shared.inspectRemoteState()
+        if state.keyId == nil, remoteState == .empty {
+            let created = await attemptNewUserPasskeySetup()
+            if !created {
                 passkeySetupAvailable = true
-                return .manualRecoveryRequired
+            }
+            return created ? .newUserSetupDone : .manualSetupRequired
+        }
+
+        // Remote data exists (or an enclave key exists with no bundle for
+        // this device). Before any manual entry, try a passkey registered
+        // on the pre-enclave webapp — that's still the primary recovery
+        // path. Manual entry is only surfaced when no legacy passkey can
+        // recover the CEK.
+        let legacy = await LegacyPasskeyCredentials.fetch()
+        if !legacy.isEmpty {
+            let legacyResult = await PasskeyKeyFlow.recoverFromLegacyPasskey(
+                entries: legacy,
+                enclaveKeyId: state.keyId
+            )
+            switch legacyResult {
+            case .success:
+                return await applyUnlockResult(legacyResult, label: "recoverFromLegacyPasskey")
+            case .failure(let reason, _):
+                #if DEBUG
+                print("[PasskeyManager] legacy passkey recovery failed: \(reason)")
+                #endif
+                // Fall through to manual recovery below.
             }
         }
 
-        let result = await PasskeyKeyFlow.unlockFromServer()
+        passkeySetupAvailable = true
+        return .manualRecoveryRequired
+    }
+
+    /// Apply a successful passkey unlock/recovery result to local state,
+    /// or surface a recovery failure. Shared by the v2 server-unlock and
+    /// legacy-passkey recovery paths.
+    private func applyUnlockResult(
+        _ result: PasskeyFlowResult,
+        label: String
+    ) async -> PasskeyRecoveryResult {
         switch result {
         case .success(let cek, let keyIdHex, _, _):
             do {
@@ -119,7 +157,7 @@ final class PasskeyManager: ObservableObject {
             return .success
         case .failure(let reason, _):
             #if DEBUG
-            print("[PasskeyManager] unlockFromServer failed: \(reason)")
+            print("[PasskeyManager] \(label) failed: \(reason)")
             #endif
             showPasskeyRecoveryChoice = true
             return .recoveryFailed

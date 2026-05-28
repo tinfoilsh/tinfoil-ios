@@ -79,6 +79,10 @@ enum Constants {
     enum API {
         static let chatCompletionsEndpoint = "/v1/chat/completions"
         static let baseURL = "https://api.tinfoil.sh"
+        /// Read-only recovery endpoint for passkeys registered on the
+        /// pre-enclave (v1) webapp. Consulted only when the enclave key
+        /// registry has no usable bundle for this device.
+        static let legacyPasskeyCredentialsPath = "/api/passkey-credentials/"
         static let sessionTokenExpiryBufferSeconds: TimeInterval = 300  // 5 minutes
 
         enum ErrorCode {
