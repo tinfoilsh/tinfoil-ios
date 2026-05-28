@@ -3816,8 +3816,6 @@ class ChatViewModel: ObservableObject {
             let previousKeys = EncryptionService.shared.getAllKeys()
 
             switch mode {
-            case .addRecoveryKey:
-                try EncryptionService.shared.addDecryptionKey(key)
             case .recoverExisting:
                 _ = try await CloudKeyAuthorizationStore.shared.applyPrimaryKeyWithValidation(key)
             case .explicitStartFresh:
@@ -3874,10 +3872,6 @@ class ChatViewModel: ObservableObject {
             }
             throw error  // Re-throw to let caller handle it
         }
-    }
-
-    func addRecoveryKey(_ key: String) async throws {
-        try await setEncryptionKey(key, mode: .addRecoveryKey)
     }
     
     /// Retry decryption of failed chats with the current key
