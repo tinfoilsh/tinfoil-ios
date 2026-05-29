@@ -662,7 +662,7 @@ struct SettingsView: View {
             return (a.createdAt ?? "") > (b.createdAt ?? "")
         }
         return VStack(alignment: .leading, spacing: 8) {
-            Text("Registered devices (\(sorted.count))")
+            Text("Registered platforms (\(sorted.count))")
                 .font(.caption)
                 .fontWeight(.medium)
                 .foregroundColor(.secondary)
@@ -670,7 +670,7 @@ struct SettingsView: View {
             ForEach(sorted, id: \.credentialId) { bundle in
                 passkeyBundleRow(
                     bundle: bundle,
-                    isThisDevice: bundle.credentialId == localCredentialId
+                    isCurrentPlatform: bundle.credentialId == localCredentialId
                 )
             }
         }
@@ -679,7 +679,7 @@ struct SettingsView: View {
 
     private func passkeyBundleRow(
         bundle: EnclaveKeyCurrentBundle,
-        isThisDevice: Bool
+        isCurrentPlatform: Bool
     ) -> some View {
         let credLabel = bundle.credentialId.count <= 12
             ? bundle.credentialId
@@ -687,7 +687,10 @@ struct SettingsView: View {
         let dateLabel: String
         if let created = bundle.createdAt, !created.isEmpty {
             let formatter = ISO8601DateFormatter()
-            if let date = formatter.date(from: created) {
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let date = formatter.date(from: created)
+                ?? ISO8601DateFormatter().date(from: created)
+            if let date {
                 let display = DateFormatter()
                 display.dateStyle = .medium
                 dateLabel = display.string(from: date)
@@ -704,7 +707,7 @@ struct SettingsView: View {
                     Image(systemName: "person.badge.key.fill")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text(isThisDevice ? "This device" : "Other device")
+                    Text(isCurrentPlatform ? "This platform" : "Other platform")
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .foregroundColor(.primary)
