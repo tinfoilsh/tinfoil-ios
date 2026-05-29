@@ -395,9 +395,7 @@ enum PasskeyKeyFlow {
                     )
                 )
             } catch {
-                #if DEBUG
-                print("[PasskeyKeyFlow] legacy add-bundle promotion failed: \(error)")
-                #endif
+                // Non-fatal — the CEK is already recovered locally.
             }
         }
 

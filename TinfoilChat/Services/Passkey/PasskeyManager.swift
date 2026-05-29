@@ -81,9 +81,6 @@ final class PasskeyManager: ObservableObject {
         do {
             state = try await SyncEnclaveAPI.keyCurrent()
         } catch {
-            #if DEBUG
-            print("[PasskeyManager] keyCurrent failed: \(error)")
-            #endif
             showPasskeyRecoveryChoice = true
             return .recoveryFailed
         }
@@ -92,8 +89,7 @@ final class PasskeyManager: ObservableObject {
         // straight from the server.
         if state.keyId != nil, !state.bundles.isEmpty {
             return await applyUnlockResult(
-                await PasskeyKeyFlow.unlockFromServer(),
-                label: "unlockFromServer"
+                await PasskeyKeyFlow.unlockFromServer()
             )
         }
 
@@ -121,12 +117,10 @@ final class PasskeyManager: ObservableObject {
             )
             switch legacyResult {
             case .success:
-                return await applyUnlockResult(legacyResult, label: "recoverFromLegacyPasskey")
-            case .failure(let reason, _):
-                #if DEBUG
-                print("[PasskeyManager] legacy passkey recovery failed: \(reason)")
-                #endif
+                return await applyUnlockResult(legacyResult)
+            case .failure:
                 // Fall through to manual recovery below.
+                break
             }
         }
 
@@ -138,27 +132,20 @@ final class PasskeyManager: ObservableObject {
     /// or surface a recovery failure. Shared by the v2 server-unlock and
     /// legacy-passkey recovery paths.
     private func applyUnlockResult(
-        _ result: PasskeyFlowResult,
-        label: String
+        _ result: PasskeyFlowResult
     ) async -> PasskeyRecoveryResult {
         switch result {
         case .success(let cek, let keyIdHex, _, _):
             do {
                 try await applyRecoveredCek(cek: cek)
             } catch {
-                #if DEBUG
-                print("[PasskeyManager] Apply recovered CEK failed: \(error)")
-                #endif
                 showPasskeyRecoveryChoice = true
                 return .recoveryFailed
             }
             persistEnclaveKeyId(keyIdHex)
             activatePasskey()
             return .success
-        case .failure(let reason, _):
-            #if DEBUG
-            print("[PasskeyManager] \(label) failed: \(reason)")
-            #endif
+        case .failure:
             showPasskeyRecoveryChoice = true
             return .recoveryFailed
         }
