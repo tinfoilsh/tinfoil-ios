@@ -2,10 +2,23 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>sh.tinfoil.TinfoilChat</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>sh.tinfoil.tinfoilchat</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Tinfoil needs access to your camera to take photos and scan QR codes.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Tinfoil needs access to your microphone for voice dictation.</string>
+	<key>TINFOIL_OAUTH_CLIENT_ID</key>
+	<string></string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UILaunchScreen</key>

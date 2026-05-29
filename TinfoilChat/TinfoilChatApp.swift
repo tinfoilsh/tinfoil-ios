@@ -46,6 +46,10 @@ struct TinfoilChatApp: App {
                                 .environmentObject(authManager)
                         }
                             .onOpenURL { url in
+                                if url.scheme == Constants.OAuth.redirectScheme {
+                                    return
+                                }
+
                                 // Handle URL redirects from authentication
                                 // Immediately check auth state when app reopens from OAuth
                                 Task {

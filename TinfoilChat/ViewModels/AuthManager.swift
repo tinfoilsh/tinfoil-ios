@@ -213,11 +213,14 @@ class AuthManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: authStateKey)
         UserDefaults.standard.removeObject(forKey: userDataKey)
         UserDefaults.standard.removeObject(forKey: subscriptionKey)
+        OAuthTokenManager.shared.clearTokens()
 
     }
     
     func signOut() async {
         do {
+            await OAuthTokenManager.shared.revokeAndClearTokens()
+
             // If we have a Clerk instance, use it, otherwise fall back to Clerk.shared
             let clerk = self.clerk ?? Clerk.shared
             try await clerk.auth.signOut()
@@ -306,6 +309,8 @@ class AuthManager: ObservableObject {
             
             // Delete the user's account
             try await user.delete()
+
+            await OAuthTokenManager.shared.revokeAndClearTokens()
             
             // Clear local state
             clearAuthState()

@@ -1133,6 +1133,11 @@ class SessionTokenManager {
 
     private init() {}
 
+    private func shouldUseOAuthSessionToken() -> Bool {
+        OAuthTokenManager.shared.isConfigured &&
+        (OAuthTokenManager.shared.hasRefreshToken || UserDefaults.standard.bool(forKey: Constants.StorageKeys.Auth.subscription))
+    }
+
     /// Retrieves the session token, returning the cached value if still valid
     /// - Returns: Session token string or empty string if unavailable
     func getSessionToken() async -> String {
@@ -1168,6 +1173,19 @@ class SessionTokenManager {
                             try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
                         }
                         continue
+                    }
+
+                    if shouldUseOAuthSessionToken() {
+                        do {
+                            if let oauthToken = try await OAuthTokenManager.shared.getAccessToken() {
+                                self.sessionToken = oauthToken.value
+                                self.sessionTokenExpiresAt = oauthToken.expiresAt
+                                self.rateLimitInfo = nil
+                                return oauthToken.value
+                            }
+                        } catch {
+                            return ""
+                        }
                     }
 
                     // Try fetching the session key with this JWT
@@ -1308,5 +1326,6 @@ class SessionTokenManager {
         sessionToken = nil
         sessionTokenExpiresAt = nil
         rateLimitInfo = nil
+        OAuthTokenManager.shared.clearAccessToken()
     }
 }

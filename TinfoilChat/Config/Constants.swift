@@ -86,6 +86,18 @@ enum Constants {
         }
     }
 
+    enum OAuth {
+        static let clientID = Bundle.main.object(forInfoDictionaryKey: "TINFOIL_OAUTH_CLIENT_ID") as? String ?? ""
+        static let authorizeURL = URL(string: "https://dash.tinfoil.sh/oauth/authorize")!
+        static let tokenURL = URL(string: "\(Constants.API.baseURL)/oauth/token")!
+        static let revokeURL = URL(string: "\(Constants.API.baseURL)/oauth/revoke")!
+        static let redirectScheme = "sh.tinfoil.tinfoilchat"
+        static let redirectURI = "\(redirectScheme)://oauth/callback"
+        static let scope = "inference:chat offline_access"
+        static let accessTokenExpiryBufferSeconds: TimeInterval = 60
+        static let codeVerifierByteCount = 32
+        static let stateByteCount = 16
+    }
 
     enum Legal {
         static let termsOfServiceURL = URL(string: "https://www.tinfoil.sh/terms")!
@@ -257,6 +269,7 @@ enum Constants {
             static let passkeyBackedUp = "tinfoil-secret-passkey-backed-up"
             static let passkeySyncVersion = "tinfoil-secret-passkey-sync-version"
             static let passkeyBundleVersion = "tinfoil-secret-passkey-bundle-version"
+            static let oauthRefreshToken = "tinfoil-secret-oauth-refresh-token"
 
             static func cloudKeyAuthorization(userId: String) -> String {
                 "tinfoil-secret-cloud-key-authorization-\(userId)"
