@@ -60,6 +60,10 @@ final class OAuthTokenManager: NSObject, ASWebAuthenticationPresentationContextP
     static let shared = OAuthTokenManager()
 
     private let keychain = KeychainHelper.shared
+    // Guards `accessToken` and `inFlightTask`, which may be touched concurrently
+    // by callers on different threads. `webAuthenticationSession` is only ever
+    // mutated on the main actor and so does not need the lock.
+    private let stateLock = NSLock()
     private var accessToken: OAuthAccessToken?
     private var webAuthenticationSession: ASWebAuthenticationSession?
     private var inFlightTask: Task<OAuthAccessToken?, Error>?
@@ -80,26 +84,18 @@ final class OAuthTokenManager: NSObject, ASWebAuthenticationPresentationContextP
             return nil
         }
 
-        if let accessToken, !isExpiring(accessToken.expiresAt) {
-            return accessToken
+        if let cached = validCachedToken() {
+            return cached
         }
 
         // Coalesce concurrent callers so a rotating refresh token is only spent
         // once and only a single authorization session is ever presented.
-        if let inFlightTask {
-            return try await inFlightTask.value
-        }
-
-        let task = Task { try await self.resolveAccessToken() }
-        inFlightTask = task
-        defer { inFlightTask = nil }
-
-        return try await task.value
+        return try await currentFetchTask().value
     }
 
     private func resolveAccessToken() async throws -> OAuthAccessToken? {
-        if let accessToken, !isExpiring(accessToken.expiresAt) {
-            return accessToken
+        if let cached = validCachedToken() {
+            return cached
         }
 
         if hasRefreshToken {
@@ -115,17 +111,65 @@ final class OAuthTokenManager: NSObject, ASWebAuthenticationPresentationContextP
         return try await authorize()
     }
 
+    private func currentFetchTask() -> Task<OAuthAccessToken?, Error> {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+
+        if let inFlightTask {
+            return inFlightTask
+        }
+
+        let task = Task { [weak self] () throws -> OAuthAccessToken? in
+            guard let self = self else { return nil }
+            defer { self.clearFetchTask() }
+            return try await self.resolveAccessToken()
+        }
+        inFlightTask = task
+        return task
+    }
+
+    private func clearFetchTask() {
+        stateLock.lock()
+        inFlightTask = nil
+        stateLock.unlock()
+    }
+
+    private func validCachedToken() -> OAuthAccessToken? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard let accessToken, !isExpiring(accessToken.expiresAt) else {
+            return nil
+        }
+        return accessToken
+    }
+
+    private func setAccessToken(_ token: OAuthAccessToken) {
+        stateLock.lock()
+        accessToken = token
+        stateLock.unlock()
+    }
+
+    private func currentAccessTokenValue() -> String? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return accessToken?.value
+    }
+
     func clearAccessToken() {
+        stateLock.lock()
         accessToken = nil
+        stateLock.unlock()
     }
 
     func clearTokens() {
+        stateLock.lock()
         accessToken = nil
+        stateLock.unlock()
         keychain.delete(for: Constants.StorageKeys.Secret.oauthRefreshToken)
     }
 
     func revokeAndClearTokens() async {
-        let tokenToRevoke = loadRefreshToken() ?? accessToken?.value
+        let tokenToRevoke = loadRefreshToken() ?? currentAccessTokenValue()
 
         defer {
             clearTokens()
@@ -278,7 +322,7 @@ final class OAuthTokenManager: NSObject, ASWebAuthenticationPresentationContextP
             value: tokenResponse.accessToken,
             expiresAt: Date().addingTimeInterval(TimeInterval(tokenResponse.expiresIn))
         )
-        accessToken = token
+        setAccessToken(token)
 
         if let refreshToken = tokenResponse.refreshToken, !refreshToken.isEmpty {
             keychain.save(refreshToken, for: Constants.StorageKeys.Secret.oauthRefreshToken)
