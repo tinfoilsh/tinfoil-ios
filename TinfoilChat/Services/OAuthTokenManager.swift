@@ -62,6 +62,7 @@ final class OAuthTokenManager: NSObject, ASWebAuthenticationPresentationContextP
     private let keychain = KeychainHelper.shared
     private var accessToken: OAuthAccessToken?
     private var webAuthenticationSession: ASWebAuthenticationSession?
+    private var inFlightTask: Task<OAuthAccessToken?, Error>?
     private let decoder = JSONDecoder()
 
     private override init() {}
@@ -79,6 +80,24 @@ final class OAuthTokenManager: NSObject, ASWebAuthenticationPresentationContextP
             return nil
         }
 
+        if let accessToken, !isExpiring(accessToken.expiresAt) {
+            return accessToken
+        }
+
+        // Coalesce concurrent callers so a rotating refresh token is only spent
+        // once and only a single authorization session is ever presented.
+        if let inFlightTask {
+            return try await inFlightTask.value
+        }
+
+        let task = Task { try await self.resolveAccessToken() }
+        inFlightTask = task
+        defer { inFlightTask = nil }
+
+        return try await task.value
+    }
+
+    private func resolveAccessToken() async throws -> OAuthAccessToken? {
         if let accessToken, !isExpiring(accessToken.expiresAt) {
             return accessToken
         }
