@@ -125,32 +125,55 @@ class ProfileSyncService: ObservableObject {
         guard await isAuthenticated() else { return (false, nil) }
         let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
 
-        var profileWithMetadata = profile
-        profileWithMetadata.updatedAt = Self.iso8601Formatter.string(from: Date())
-        profileWithMetadata.version = (profile.version ?? 0) + 1
+        // Push the local profile under a given base version. The
+        // controlplane treats a missing/zero version as create-only and
+        // any positive version as a CAS update gated on the row's etag.
+        func pushAtVersion(_ baseVersion: Int) async throws -> (success: Bool, version: Int?) {
+            var profileWithMetadata = profile
+            profileWithMetadata.updatedAt = Self.iso8601Formatter.string(from: Date())
+            profileWithMetadata.version = baseVersion + 1
 
-        let plaintext = try JSONEncoder().encode(profileWithMetadata)
-        let ifMatch: String? = (profile.version ?? 0) > 0 ? String(profile.version!) : nil
+            let plaintext = try JSONEncoder().encode(profileWithMetadata)
+            let ifMatch: String? = baseVersion > 0 ? String(baseVersion) : nil
 
-        let metadata: [String: AnyCodable] = [
-            "version": AnyCodable(profileWithMetadata.version ?? 1)
-        ]
-        let response = try await SyncEnclaveAPI.push(
-            EnclavePushRequest(
-                scope: profileScope,
-                id: profileRowId,
-                key: keyB64,
-                plaintext: plaintext.base64EncodedString(),
-                ifMatch: ifMatch,
-                idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                metadata: metadata
+            let metadata: [String: AnyCodable] = [
+                "version": AnyCodable(profileWithMetadata.version ?? 1)
+            ]
+            let response = try await SyncEnclaveAPI.push(
+                EnclavePushRequest(
+                    scope: profileScope,
+                    id: profileRowId,
+                    key: keyB64,
+                    plaintext: plaintext.base64EncodedString(),
+                    ifMatch: ifMatch,
+                    idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                    metadata: metadata
+                )
             )
-        )
-        if let etagVersion = Int(response.etag) {
-            profileWithMetadata.version = etagVersion
+            if let etagVersion = Int(response.etag) {
+                profileWithMetadata.version = etagVersion
+            }
+            self.cachedProfile = profileWithMetadata
+            return (true, profileWithMetadata.version)
         }
-        self.cachedProfile = profileWithMetadata
-        return (true, profileWithMetadata.version)
+
+        do {
+            return try await pushAtVersion(profile.version ?? 0)
+        } catch let error as SyncEnclaveError where Self.isStaleBlobConflict(error) {
+            // Optimistic-concurrency conflict: our base version is
+            // behind the server, or we tried to create a profile that
+            // already exists. Re-read the current version and retry once
+            // so local settings win instead of looping on STALE_BLOB.
+            let remote = try await fetchProfile()
+            return try await pushAtVersion(remote?.version ?? 0)
+        }
+    }
+
+    /// A STALE_BLOB (HTTP 412) push means our If-Match version no longer
+    /// matches the server: either the row advanced under another writer
+    /// or we tried to create a profile that already exists.
+    private static func isStaleBlobConflict(_ error: SyncEnclaveError) -> Bool {
+        error.code == WireCodes.staleBlob || error.status == 412
     }
 
     /// Re-attempt a profile fetch after a key change. The enclave
