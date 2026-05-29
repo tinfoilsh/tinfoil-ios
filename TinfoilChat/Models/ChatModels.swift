@@ -1175,17 +1175,17 @@ class SessionTokenManager {
                         continue
                     }
 
+                    // Subscribed users authenticate inference through OAuth only.
+                    // The legacy key endpoint is reserved for anonymous/free users,
+                    // so never fall back to it once OAuth is in use.
                     if shouldUseOAuthSessionToken() {
-                        do {
-                            if let oauthToken = try await OAuthTokenManager.shared.getAccessToken() {
-                                self.sessionToken = oauthToken.value
-                                self.sessionTokenExpiresAt = oauthToken.expiresAt
-                                self.rateLimitInfo = nil
-                                return oauthToken.value
-                            }
-                        } catch {
+                        guard let oauthToken = try? await OAuthTokenManager.shared.getAccessToken() else {
                             return ""
                         }
+                        self.sessionToken = oauthToken.value
+                        self.sessionTokenExpiresAt = oauthToken.expiresAt
+                        self.rateLimitInfo = nil
+                        return oauthToken.value
                     }
 
                     // Try fetching the session key with this JWT
