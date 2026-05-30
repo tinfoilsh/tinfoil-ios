@@ -3096,8 +3096,8 @@ class ChatViewModel: ObservableObject {
         passkeyManager.reset()
 
         // Clear cloud chats and create a new empty one with the free model.
-        // Local chats are only cleared from memory — files on disk are preserved
-        // and will be reloaded on next sign-in via handleSignIn/loadAllLocalChats.
+        // On-disk local chats are wiped immediately after this by clearAuthState's
+        // full sign-out cleanup, so no content persists across accounts.
         chats = []
         localChats = []
         activeStorageTab = .cloud
@@ -3133,7 +3133,15 @@ class ChatViewModel: ObservableObject {
         // Clear encryption key reference
         encryptionKey = nil
     }
-    
+
+    /// Erase on-disk chats for the signed-out user during sign-out cleanup.
+    /// The in-memory blank chat created by handleSignOut is left intact so the
+    /// signed-out session still has a usable chat. Must run before the auth
+    /// manager clears its authenticated state so currentUserId still resolves.
+    func wipeLocalChatsForSignOut() async {
+        await Chat.deleteAllChatsFromStorage(userId: currentUserId)
+    }
+
     /// Handle sign-in by loading user's saved chats and triggering sync
     func handleSignIn() {
         #if DEBUG

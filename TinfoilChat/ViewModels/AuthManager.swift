@@ -204,11 +204,15 @@ class AuthManager: ObservableObject {
         // save the current chat (hasChatAccess depends on isAuthenticated).
         chatViewModel?.handleSignOut()
 
-        // Drop only the cloud CEK on sign-out; the device key is keychain-bound
-        // and required to read local-only chats if the same user signs back in.
-        // Full device wipe (including the device key) happens via the Settings
-        // "Delete all data" flow, never automatically on sign-out.
+        // Sign-out performs a full local wipe so that no content, encryption
+        // keys, or personalization bleed into the next account on a shared
+        // device. This runs before isAuthenticated is cleared below so the
+        // view model can still resolve the signing-out user's id for the wipe.
         EncryptionService.shared.clearKey()
+        await DeviceEncryptionService.shared.clearKey()
+        await chatViewModel?.wipeLocalChatsForSignOut()
+        SettingsManager.shared.clearAllSettings()
+        ProfileManager.shared.clearProfile()
 
         localUserData = nil
         isAuthenticated = false
