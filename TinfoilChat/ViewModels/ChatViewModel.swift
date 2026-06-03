@@ -3821,22 +3821,28 @@ class ChatViewModel: ObservableObject {
         mode: CloudKeyActivationMode = .recoverExisting
     ) async throws {
         do {
-            let previousKeys = EncryptionService.shared.getAllKeys()
-
             switch mode {
             case .recoverExisting:
                 _ = try await CloudKeyAuthorizationStore.shared.applyPrimaryKeyWithValidation(key)
             case .explicitStartFresh:
-                try await EncryptionService.shared.setKey(key)
+                // Stage the key in memory so the enclave handshake runs
+                // against it without writing it to the Keychain first. Only
+                // after the enclave registers the start-fresh key (or
+                // confirms the remote is empty / already bound to this key)
+                // do we persist it. If the enclave can't be reached we throw
+                // and discard the staged key, so a new key is never stranded
+                // locally while the enclave keeps the old one.
+                try await EncryptionService.shared.setKey(key, persist: false)
+                do {
+                    try await CloudKeyAuthorizationStore.shared.registerStartFreshKeyIfNeeded()
+                    try EncryptionService.shared.persistCurrentKeyState()
+                } catch {
+                    EncryptionService.shared.discardStagedKeyState()
+                    throw error
+                }
                 guard CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh) else {
-                    do {
-                        try EncryptionService.shared.replaceKeyBundle(
-                            primary: previousKeys.primary,
-                            alternatives: previousKeys.alternatives
-                        )
-                    } catch {
-                        EncryptionService.shared.clearKey()
-                    }
+                    EncryptionService.shared.clearKey()
+                    CloudKeyAuthorizationStore.shared.clearAuthorization()
                     throw CloudKeyAuthorizationError.authorizationUnavailable
                 }
             }
