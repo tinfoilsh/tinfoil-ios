@@ -1052,6 +1052,20 @@ class CloudSyncService: ObservableObject {
         let statusCheck = await checkSyncStatus()
 
         if !statusCheck.needsSync {
+            // A deletion from another device can be absorbed into the status
+            // cache (the count matches again) on the same tick its tombstone
+            // was missed locally, after which the count gate never reopens and
+            // the orphan lingers until a full reload. Re-run the tombstone
+            // reconciliation here so a missed deletion self-heals on the next
+            // tick. The pass is idempotent and only reports chats actually
+            // removed locally, so it triggers a UI reload only when needed.
+            if let cachedStatus = getCachedSyncStatus(),
+               let lastUpdated = cachedStatus.lastUpdated {
+                let reconciled = await deleteRemotelyDeletedChats(since: lastUpdated)
+                if reconciled > 0 {
+                    return SyncResult(deleted: reconciled)
+                }
+            }
             return SyncResult()
         }
 
@@ -1670,11 +1684,28 @@ class CloudSyncService: ObservableObject {
     private func deleteRemotelyDeletedChats(since: String) async -> Int {
         do {
             let deleted = try await cloudStorage.getDeletedChatsSince(since: since)
+            guard !deleted.deletedIds.isEmpty,
+                  let userId = await getCurrentUserId() else {
+                return 0
+            }
+            var removedCount = 0
             for id in deleted.deletedIds {
+                // Skip chats already absent locally (a prior reconciliation
+                // pass handled them, or they were never stored here). This
+                // keeps repeated passes idempotent so they never report a
+                // phantom deletion and trigger a needless UI reload. A
+                // local-only chat lives outside cloud storage, so loadChat
+                // returns nil and it is preserved.
+                let existing = try? await EncryptedFileStorage.cloud.loadChat(
+                    chatId: id,
+                    userId: userId
+                )
+                guard existing != nil else { continue }
                 deletedChatsTracker.markAsDeleted(id)
                 await deleteChatFromStorage(id)
+                removedCount += 1
             }
-            return deleted.deletedIds.count
+            return removedCount
         } catch {
             // Non-fatal: continue even if deletion check fails
             return 0
