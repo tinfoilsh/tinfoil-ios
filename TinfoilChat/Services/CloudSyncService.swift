@@ -190,8 +190,42 @@ class CloudSyncService: ObservableObject {
 
     private init() {}
 
-    private func canWriteToCloud() -> Bool {
-        CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey()
+    /// The enclave is the source of truth for write authority: the local
+    /// CEK may write only when it derives the key id the enclave currently
+    /// has registered, or when the remote has no key yet (the first sealed
+    /// write registers it lazily). A local authorization hint is never
+    /// sufficient on its own — another device may have rotated or reset the
+    /// key, leaving this device's hint stale.
+    private func canWriteToCloud() async -> Bool {
+        let cek: Data
+        do {
+            cek = try EncryptionService.shared.getKeyBytesOrThrow()
+        } catch {
+            return false
+        }
+
+        let response: EnclaveKeyCurrentResponse
+        do {
+            response = try await SyncEnclaveAPI.keyCurrent()
+        } catch {
+            // Can't verify right now (offline / attestation / 5xx): defer the
+            // write to a later sync cycle rather than risk writing under a
+            // key the enclave no longer recognizes.
+            return false
+        }
+
+        guard let remoteKeyId = response.keyId else {
+            return true
+        }
+
+        let localKeyId: String
+        do {
+            localKeyId = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+        } catch {
+            return false
+        }
+
+        return localKeyId == remoteKeyId
     }
     
     // MARK: - Initialization
@@ -248,7 +282,7 @@ class CloudSyncService: ObservableObject {
             return
         }
 
-        guard canWriteToCloud() else {
+        guard await canWriteToCloud() else {
             return
         }
 
@@ -260,7 +294,7 @@ class CloudSyncService: ObservableObject {
     }
     
     private func doBackupChat(_ chatId: String, idempotencyKey: String) async throws {
-        guard canWriteToCloud() else { return }
+        guard await canWriteToCloud() else { return }
 
         // Check if chat is currently streaming
         if streamingTracker.isStreaming(chatId) {
@@ -396,7 +430,7 @@ class CloudSyncService: ObservableObject {
     func backupUnsyncedChats() async -> SyncResult {
         var result = SyncResult()
 
-        guard canWriteToCloud() else {
+        guard await canWriteToCloud() else {
             return result
         }
         
@@ -1124,7 +1158,7 @@ class CloudSyncService: ObservableObject {
     }
 
     func updateChatProject(_ chatId: String, projectId: String?) async throws {
-        guard canWriteToCloud() else { return }
+        guard await canWriteToCloud() else { return }
         try await cloudStorage.updateChatProject(chatId: chatId, projectId: projectId)
     }
 
@@ -1342,7 +1376,7 @@ class CloudSyncService: ObservableObject {
     private func backupUnsyncedProjectChats(_ projectId: String) async -> SyncResult {
         var result = SyncResult()
 
-        guard canWriteToCloud() else {
+        guard await canWriteToCloud() else {
             return result
         }
 
@@ -1798,7 +1832,7 @@ class CloudSyncService: ObservableObject {
     func reencryptAndUploadChats() async -> (reencrypted: Int, uploaded: Int, errors: [String]) {
         var result = (reencrypted: 0, uploaded: 0, errors: [String]())
 
-        guard canWriteToCloud() else {
+        guard await canWriteToCloud() else {
             return result
         }
         
