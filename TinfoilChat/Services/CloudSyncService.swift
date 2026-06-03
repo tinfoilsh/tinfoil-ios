@@ -328,8 +328,10 @@ class CloudSyncService: ObservableObject {
         }
         
         
-        // Don't sync blank, empty, or decryption failure chats
-        if chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed {
+        // Don't sync blank, empty, decryption-failure, or local-only chats.
+        // Local-only chats are the user's explicit choice to keep a chat off
+        // the cloud, so they must never be uploaded.
+        if chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed || chat.isLocalOnly {
             return
         }
 
@@ -1617,7 +1619,9 @@ class CloudSyncService: ObservableObject {
         let userId = await getCurrentUserId()
         guard let userId = userId else { return [] }
         let index = (try? await EncryptedFileStorage.cloud.loadIndex(userId: userId)) ?? []
-        let unsyncedIds = index.filter { $0.locallyModified || $0.syncedAt == nil }.map(\.id)
+        let unsyncedIds = index.filter {
+            ($0.locallyModified || $0.syncedAt == nil) && !$0.isLocalOnly
+        }.map(\.id)
         return (try? await EncryptedFileStorage.cloud.loadChats(chatIds: unsyncedIds, userId: userId)) ?? []
     }
 
