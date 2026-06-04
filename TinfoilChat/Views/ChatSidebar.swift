@@ -179,7 +179,7 @@ struct ChatSidebar: View {
             .applyAlwaysBounceIfAvailable()
             .refreshable {
                 await authManager.initializeAuthState()
-                await viewModel.performFullSync()
+                await viewModel.performFullSync(deep: true)
             }
             .frame(maxHeight: .infinity)
 

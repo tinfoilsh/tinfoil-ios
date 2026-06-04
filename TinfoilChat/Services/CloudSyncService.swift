@@ -696,7 +696,7 @@ class CloudSyncService: ObservableObject {
     }
 
     /// Sync all chats (upload local changes, download remote changes)
-    func syncAllChats() async -> SyncResult {
+    func syncAllChats(deep: Bool = false) async -> SyncResult {
         guard !isSyncing else {
             return SyncResult()
         }
@@ -709,12 +709,12 @@ class CloudSyncService: ObservableObject {
             lastSyncDate = Date()
         }
 
-        let result = await doSyncAllChats()
+        let result = await doSyncAllChats(deep: deep)
         syncErrors = result.errors
         return result
     }
 
-    private func doSyncAllChats() async -> SyncResult {
+    private func doSyncAllChats(deep: Bool = false) async -> SyncResult {
         var result = SyncResult()
 
         // Delete local chats that were deleted on another device
@@ -735,11 +735,6 @@ class CloudSyncService: ObservableObject {
 
         // Then, get list of remote chats with content
         do {
-            let remoteList = try await cloudStorage.listChats(
-                limit: Constants.Pagination.chatsPerPage,
-                includeContent: true
-            )
-
             let localChats = await getAllChatsFromStorage()
 
             // Initialize encryption if available; continue even without a key so we can at least
@@ -748,9 +743,21 @@ class CloudSyncService: ObservableObject {
 
             // Create maps for easy lookup
             let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
-            let remoteConversations = remoteList.conversations
 
-            // Process remote chats sequentially to avoid connection exhaustion
+            // A deep sync (pull-to-refresh) keeps paging through the rest of
+            // the remote history so older chats that predate this device's
+            // local copy are pulled down too. The periodic and launch syncs
+            // stay first-page-only for bandwidth.
+            var continuationToken: String? = nil
+            repeat {
+                let remoteList = try await cloudStorage.listChats(
+                    limit: Constants.Pagination.chatsPerPage,
+                    continuationToken: continuationToken,
+                    includeContent: true
+                )
+                let remoteConversations = remoteList.conversations
+
+                // Process remote chats sequentially to avoid connection exhaustion
             for remoteChat in remoteConversations {
                 // First validate if this remote chat should be processed
                 if !(await shouldProcessRemoteChat(remoteChat)) {
@@ -840,6 +847,12 @@ class CloudSyncService: ObservableObject {
                     }
                 }
             }
+
+                let nextToken = remoteList.nextContinuationToken?.isEmpty == false
+                    ? remoteList.nextContinuationToken
+                    : nil
+                continuationToken = (deep && remoteList.hasMore) ? nextToken : nil
+            } while continuationToken != nil
 
             // Refresh cached sync status so subsequent smart-syncs have up-to-date info
             await refreshSyncStatusCache()
