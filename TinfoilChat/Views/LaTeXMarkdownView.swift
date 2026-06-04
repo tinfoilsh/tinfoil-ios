@@ -1072,6 +1072,9 @@ struct LaTeXView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Math equation")
+            .accessibilityValue(latex)
         } else {
             MathView(
                 latex: latex,
@@ -1081,6 +1084,9 @@ struct LaTeXView: View {
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 2)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Math equation")
+            .accessibilityValue(latex)
         }
     }
 }
@@ -1156,6 +1162,7 @@ struct StreamingIndicatorDot: View {
                 width: Constants.UI.streamingIndicatorIconColumnWidth,
                 alignment: .center
             )
+            .accessibilityHidden(true)
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     isPulsing = true

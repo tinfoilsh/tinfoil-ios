@@ -105,6 +105,17 @@ struct MessageAttachmentIndicator: View {
         .padding(.bottom, 4)
     }
 
+    private func openImageViewer(for attachment: Attachment) {
+        let allImages = (viewModel.currentChat?.messages ?? [])
+            .flatMap { $0.attachments }
+            .filter { $0.type == .image && $0.base64 != nil }
+        if let index = allImages.firstIndex(where: { $0.id == attachment.id }) {
+            viewModel.imageViewerImages = allImages
+            viewModel.imageViewerIndex = index
+            viewModel.showImageViewer = true
+        }
+    }
+
     @ViewBuilder
     private var imageGrid: some View {
         let size = Constants.Attachments.messageThumbnailSize
@@ -115,16 +126,12 @@ struct MessageAttachmentIndicator: View {
                 HStack(spacing: 4) {
                     ForEach(row) { attachment in
                         ImageThumbnail(attachment: attachment, size: size)
-                            .onTapGesture {
-                                let allImages = (viewModel.currentChat?.messages ?? [])
-                                    .flatMap { $0.attachments }
-                                    .filter { $0.type == .image && $0.base64 != nil }
-                                if let index = allImages.firstIndex(where: { $0.id == attachment.id }) {
-                                    viewModel.imageViewerImages = allImages
-                                    viewModel.imageViewerIndex = index
-                                    viewModel.showImageViewer = true
-                                }
-                            }
+                            .onTapGesture { openImageViewer(for: attachment) }
+                            .accessibilityElement()
+                            .accessibilityLabel("Image attachment")
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityHint("Opens full screen")
+                            .accessibilityAction { openImageViewer(for: attachment) }
                     }
                 }
             }
@@ -153,6 +160,8 @@ private struct AttachmentChip: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(isDarkMode ? Color.white.opacity(0.08) : Color.black.opacity(0.06))
         )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Attachment, \(attachment.fileName)")
     }
 
     private var iconName: String {
@@ -257,6 +266,7 @@ struct ImageViewerOverlay: View {
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
                             .background(.ultraThinMaterial, in: Capsule())
+                            .accessibilityLabel("Image \(currentIndex + 1) of \(images.count)")
                     }
 
                     Spacer()
@@ -268,6 +278,7 @@ struct ImageViewerOverlay: View {
                             .font(.system(size: 30))
                             .foregroundStyle(.white.opacity(0.8))
                     }
+                    .accessibilityLabel("Close image viewer")
                 }
                 .padding()
 
@@ -286,6 +297,7 @@ struct ImageViewerOverlay: View {
                                 .foregroundStyle(.white.opacity(currentIndex > 0 ? 0.7 : 0.2))
                         }
                         .disabled(currentIndex == 0)
+                        .accessibilityLabel("Previous image")
 
                         Spacer()
 
@@ -299,6 +311,7 @@ struct ImageViewerOverlay: View {
                                 .foregroundStyle(.white.opacity(currentIndex < images.count - 1 ? 0.7 : 0.2))
                         }
                         .disabled(currentIndex == images.count - 1)
+                        .accessibilityLabel("Next image")
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 40)
@@ -337,6 +350,7 @@ struct ZoomableImagePage: View {
                 Image(uiImage: decodedImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
+                    .accessibilityLabel("Image")
                     .scaleEffect(scale)
                     .gesture(
                         MagnifyGesture()

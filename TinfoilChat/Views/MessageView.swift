@@ -624,6 +624,8 @@ struct MessageView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .accessibilityLabel("Copy")
+                        .accessibleHitTarget()
 
                         // Regenerate button - only on the last assistant message
                         if isLastMessage && !viewModel.isLoading && messageIndex > 0 {
@@ -637,6 +639,8 @@ struct MessageView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(PlainButtonStyle())
+                            .accessibilityLabel("Regenerate response")
+                            .accessibleHitTarget()
                         }
 
                         // Share button - only on the last assistant message
@@ -651,6 +655,8 @@ struct MessageView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(PlainButtonStyle())
+                            .accessibilityLabel("Share")
+                            .accessibleHitTarget()
                         }
 
                         Spacer()
@@ -723,6 +729,10 @@ struct MessageView: View {
             }
         }
         .padding(.horizontal, 4)
+        // Announce who is speaking while keeping inner controls (links, tool
+        // calls, action buttons, text selection) individually accessible.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(message.role == .user ? "You said" : "Assistant said")
         .sheet(isPresented: $showLongMessageSheet) {
             LongMessageDetailView(
                 message: message
@@ -1318,6 +1328,7 @@ struct CollapsibleThinkingBox: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(NoHighlightButtonStyle())
+        .accessibilityHint("Shows the full reasoning")
     }
 }
 
@@ -1398,6 +1409,8 @@ struct LoadingDotsView: View {
             }
         }
         .foregroundColor(isDarkMode ? .white : .black)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Generating response")
     }
 }
 
@@ -1413,6 +1426,7 @@ struct InlineLoadingDotsView: View {
             }
         }
         .foregroundColor(isDarkMode ? .white.opacity(0.8) : Color.black.opacity(0.7))
+        .accessibilityHidden(true)
     }
 }
 
@@ -1881,6 +1895,9 @@ private struct SourcesButton: View {
         }
         .buttonStyle(PlainButtonStyle())
         .foregroundColor(isDarkMode ? .white : .black)
+        .accessibilityLabel("Sources")
+        .accessibilityValue("\(sources.count) source\(sources.count == 1 ? "" : "s")")
+        .accessibilityHint("Shows web sources")
     }
 }
 
