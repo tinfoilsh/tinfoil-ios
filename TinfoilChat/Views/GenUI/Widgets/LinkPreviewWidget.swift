@@ -109,6 +109,10 @@ private struct LinkPreviewView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(displayTitle), \(displaySiteName)")
+        .accessibilityHint("Opens link")
+        .accessibilityAddTraits(.isLink)
         .task(id: args.url) {
             await MainActor.run { metadata = nil }
             do {

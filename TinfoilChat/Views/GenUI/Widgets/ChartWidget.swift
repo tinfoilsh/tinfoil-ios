@@ -199,6 +199,22 @@ private struct ChartEntry: Identifiable {
     let value: Double
 }
 
+private func formatChartValue(_ value: Double) -> String {
+    if value.truncatingRemainder(dividingBy: 1) == 0 {
+        return String(Int(value))
+    }
+    return String(value)
+}
+
+private func chartAccessibilityLabel(kind: String, title: String?, entries: [ChartEntry]) -> String {
+    var parts: [String] = []
+    if let title, !title.isEmpty { parts.append(title) }
+    parts.append(kind)
+    let points = entries.map { "\($0.label) \(formatChartValue($0.value))" }
+    if !points.isEmpty { parts.append(points.joined(separator: ", ")) }
+    return parts.joined(separator: ". ")
+}
+
 /// Shared categorical X-axis modifier so bar and line charts use the
 /// same downsampling and label formatting.
 private struct CategoricalXAxisModifier: ViewModifier {
@@ -263,6 +279,8 @@ private struct BarChartView: View {
             }
             .categoricalXAxis(labels: resolved.entries.map(\.label))
             .frame(height: GenUIStyle.chartHeight)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(chartAccessibilityLabel(kind: "Bar chart", title: args.title, entries: resolved.entries))
         }
         .genUICard(isDarkMode: isDarkMode)
     }
@@ -298,6 +316,8 @@ private struct LineChartView: View {
             }
             .categoricalXAxis(labels: resolved.entries.map(\.label))
             .frame(height: GenUIStyle.chartHeight)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(chartAccessibilityLabel(kind: "Line chart", title: args.title, entries: resolved.entries))
         }
         .genUICard(isDarkMode: isDarkMode)
     }
@@ -340,6 +360,7 @@ private struct PieChartView: View {
                     .cornerRadius(2)
                 }
                 .frame(width: 180, height: 180)
+                .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(slices) { slice in
@@ -356,6 +377,7 @@ private struct PieChartView: View {
                                 .font(.caption.weight(.medium))
                                 .foregroundColor(GenUIStyle.mutedText(isDarkMode))
                         }
+                        .accessibilityElement(children: .combine)
                     }
                 }
             }
