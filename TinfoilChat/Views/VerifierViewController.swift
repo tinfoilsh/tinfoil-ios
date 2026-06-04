@@ -206,6 +206,7 @@ struct VerifierView: View {
                 let status = tabStatus(tab, doc: doc)
                 tabCard(tab: tab, status: status, isSelected: selectedTab == tab)
                     .onTapGesture { selectedTab = tab }
+                    .accessibilityAddTraits(.isButton)
                 if tab != .runtime {
                     Spacer(minLength: 12)
                 }
@@ -243,6 +244,18 @@ struct VerifierView: View {
         .overlay(alignment: .topTrailing) {
             statusBadge(status)
                 .offset(x: 6, y: -6)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(tab.label), \(statusAccessibilityText(status))")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func statusAccessibilityText(_ status: VerifierStatus) -> String {
+        switch status {
+        case .pending: return "pending"
+        case .loading: return "verifying"
+        case .success: return "verified"
+        case .error: return "failed"
         }
     }
 
