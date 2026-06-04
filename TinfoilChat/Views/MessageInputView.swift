@@ -166,7 +166,18 @@ struct MessageInputView: View {
     /// Small label shown above the input when remaining free requests are low
     @ViewBuilder
     private var rateLimitLabel: some View {
-        if let rl = viewModel.rateLimit, rl.remaining <= Constants.RateLimit.warningThreshold {
+        if let rl = viewModel.rateLimit, rl.kind == .hourly {
+            Text("Hourly limit reached")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.orange)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(Color.orange.opacity(0.15))
+                )
+                .transition(.opacity)
+        } else if let rl = viewModel.rateLimit, rl.remaining <= Constants.RateLimit.warningThreshold {
             Text(rl.remaining <= 0
                  ? "No requests left"
                  : "\(rl.remaining) request\(rl.remaining == 1 ? "" : "s") left")

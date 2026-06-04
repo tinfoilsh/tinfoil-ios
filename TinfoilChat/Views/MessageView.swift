@@ -591,8 +591,9 @@ struct MessageView: View {
                         isDarkMode: isDarkMode,
                         isRequestError: message.isRequestError,
                         isRateLimitError: message.isRateLimitError,
+                        isHourlyLimit: message.isHourlyLimitError,
                         onRegenerate: isLastMessage ? { viewModel.regenerateLastResponse() } : nil,
-                        onUpgrade: message.isRateLimitError ? { viewModel.showRateLimitPaywall = true } : nil
+                        onUpgrade: (message.isRateLimitError && !message.isHourlyLimitError) ? { viewModel.showRateLimitPaywall = true } : nil
                     )
                     .padding(.top, message.content.isEmpty && message.thoughts == nil ? 0 : 8)
                 }
@@ -1628,6 +1629,7 @@ struct ErrorMessageView: View {
     let isDarkMode: Bool
     var isRequestError: Bool = false
     var isRateLimitError: Bool = false
+    var isHourlyLimit: Bool = false
     var onRegenerate: (() -> Void)? = nil
     var onUpgrade: (() -> Void)? = nil
 
@@ -1647,6 +1649,7 @@ struct ErrorMessageView: View {
     }
 
     private var headerText: String {
+        if isHourlyLimit { return "Hourly Limit Reached" }
         if isRateLimitError { return "Rate Limit Reached" }
         if isConnectionError { return "Connection Lost" }
         return "Something Went Wrong"
@@ -1666,7 +1669,12 @@ struct ErrorMessageView: View {
                 Spacer()
             }
 
-            if isRateLimitError {
+            if isHourlyLimit {
+                Text("You've reached your hourly usage limit. Please try again in a little while — it resets at the top of the hour.")
+                    .font(.subheadline)
+                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
+                    .multilineTextAlignment(.leading)
+            } else if isRateLimitError {
                 Text("You've reached your daily limit of free requests. Your limit will reset tomorrow, or you can upgrade to Premium for unlimited access.")
                     .font(.subheadline)
                     .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
@@ -1679,7 +1687,7 @@ struct ErrorMessageView: View {
             }
 
             HStack(spacing: 8) {
-                if let onRegenerate = onRegenerate, !isRateLimitError {
+                if let onRegenerate = onRegenerate, !isRateLimitError || isHourlyLimit {
                     Button(action: onRegenerate) {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.clockwise")
@@ -1698,7 +1706,7 @@ struct ErrorMessageView: View {
                     .buttonStyle(PlainButtonStyle())
                 }
 
-                if let onUpgrade = onUpgrade, isRateLimitError {
+                if let onUpgrade = onUpgrade, isRateLimitError, !isHourlyLimit {
                     Button(action: onUpgrade) {
                         Text("Upgrade to Premium")
                             .font(.subheadline.weight(.medium))
