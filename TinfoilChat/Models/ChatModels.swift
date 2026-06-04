@@ -1109,6 +1109,7 @@ class SessionTokenManager {
     private var sessionToken: String?
     private var sessionTokenExpiresAt: Date?
     private let sessionTokenEndpoint = "\(Constants.API.baseURL)/api/keys/chat"
+    private let chatTokenEndpoint = "\(Constants.API.baseURL)/api/chat/token"
 
     /// Current rate limit info for free-tier users (nil for premium)
     private(set) var rateLimitInfo: RateLimitInfo? {
@@ -1170,8 +1171,9 @@ class SessionTokenManager {
                         continue
                     }
 
-                    // Try fetching the session key with this JWT
-                    let result = await fetchSessionKey(jwt: jwt)
+                    // Resolve a token with this JWT: subscribers mint a stateless
+                    // JWT inference token, everyone else falls back to an opaque key.
+                    let result = await fetchAuthenticatedSessionToken(jwt: jwt)
 
                     if let key = result {
                         return key
@@ -1189,7 +1191,7 @@ class SessionTokenManager {
                     _ = try? await Clerk.shared.refreshClient()
                     let refreshedSession = await Clerk.shared.session
                     if let refreshedToken = try? await refreshedSession?.getToken() {
-                        if let key = await fetchSessionKey(jwt: refreshedToken) {
+                        if let key = await fetchAuthenticatedSessionToken(jwt: refreshedToken) {
                             return key
                         }
                     }
@@ -1264,6 +1266,76 @@ class SessionTokenManager {
             return nil
         } catch {
             return nil
+        }
+    }
+
+    /// Outcome of attempting to mint a stateless JWT inference token.
+    private enum ChatJWTResult {
+        case token(key: String, expiresAt: Date?)
+        case rateLimited
+        case unavailable
+    }
+
+    /// Resolves a usable inference token for an authenticated user. Subscribers
+    /// mint a stateless JWT via /api/chat/token; everyone else falls back to an
+    /// opaque key from /api/keys/chat. Returns nil only when no definitive answer
+    /// was reached, so the caller can retry with a refreshed Clerk JWT.
+    private func fetchAuthenticatedSessionToken(jwt: String) async -> String? {
+        switch await fetchChatJWT(jwt: jwt) {
+        case .token(let key, let expiresAt):
+            self.sessionToken = key
+            self.sessionTokenExpiresAt = expiresAt
+                ?? Date().addingTimeInterval(Constants.API.sessionTokenExpiryBufferSeconds * 2)
+            // Subscribers are not subject to the free-tier daily limit.
+            self.rateLimitInfo = nil
+            return key
+        case .rateLimited:
+            // Subscriber over the per-account hourly cap. Do not fall back to the
+            // opaque /api/keys/chat path, which is not subject to the cap and would
+            // let the limit be bypassed. Keep any still-valid cached token so an
+            // in-flight session is not dropped.
+            return sessionToken ?? ""
+        case .unavailable:
+            return await fetchSessionKey(jwt: jwt)
+        }
+    }
+
+    /// Mints a stateless JWT inference token for a subscribed user via
+    /// /api/chat/token. Returns `.unavailable` on any non-rate-limit failure
+    /// (no subscription, endpoint disabled, network error) so the caller falls
+    /// back to the opaque /api/keys/chat path.
+    private func fetchChatJWT(jwt: String) async -> ChatJWTResult {
+        do {
+            var request = URLRequest(url: URL(string: chatTokenEndpoint)!)
+            request.httpMethod = "GET"
+            request.addValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .unavailable
+            }
+
+            if httpResponse.statusCode == 200 {
+                guard let responseDict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let key = responseDict["key"] as? String,
+                      !key.isEmpty else {
+                    return .unavailable
+                }
+                var expiresAt: Date? = nil
+                if let expiresAtString = responseDict["expires_at"] as? String {
+                    expiresAt = ISO8601DateFormatter().date(from: expiresAtString)
+                }
+                return .token(key: key, expiresAt: expiresAt)
+            }
+
+            if httpResponse.statusCode == 429 {
+                return .rateLimited
+            }
+
+            return .unavailable
+        } catch {
+            return .unavailable
         }
     }
 
