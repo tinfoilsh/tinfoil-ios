@@ -277,13 +277,13 @@ class AuthManager: ObservableObject {
                         NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
                     }
 
-                    // If subscription became active, clear cached session token to force refetch
+                    // If subscription became active, swap the free-tier key for a
+                    // subscriber token. Refetch in place rather than clearing first so
+                    // in-flight requests keep using the still-valid key until the new
+                    // token is stored, instead of briefly sending an empty bearer.
                     if self.hasActiveSubscription && !wasActive {
-                        SessionTokenManager.shared.clearSessionToken()
-
-                        // Proactively fetch new session token
                         Task {
-                            let _ = await SessionTokenManager.shared.getSessionToken()
+                            let _ = await SessionTokenManager.shared.fetchFreshSessionToken()
                         }
                     }
                 }
