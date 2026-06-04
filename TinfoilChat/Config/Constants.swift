@@ -83,6 +83,9 @@ enum Constants {
 
         enum ErrorCode {
             static let invalidAPIKey = "invalid_api_key"
+            /// Wire code returned with a 429 when a subscriber exceeds the
+            /// per-account hourly inference-token cap.
+            static let hourlyLimitReached = "HOURLY_LIMIT_REACHED"
         }
     }
 

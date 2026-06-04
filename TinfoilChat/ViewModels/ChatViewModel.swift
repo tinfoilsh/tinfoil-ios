@@ -1398,7 +1398,10 @@ class ChatViewModel: ObservableObject {
             print("[Chat] sendMessage: no rate limit info (premium or not yet fetched)")
         }
         #endif
-        if let rl = rateLimit, rl.remaining <= 0 {
+        // The free-tier daily limit blocks sending and offers an upgrade; the
+        // subscriber hourly cap is transient, so it neither blocks input nor
+        // shows the paywall.
+        if let rl = rateLimit, rl.remaining <= 0, rl.kind != .hourly {
             showRateLimitPaywall = true
             return
         }
@@ -1598,6 +1601,15 @@ class ChatViewModel: ObservableObject {
                     throw NSError(domain: "TinfoilChat", code: 1,
                                 userInfo: [NSLocalizedDescriptionKey: "Service temporarily unavailable. Please try again."])
                 }
+
+                // Acquire the inference token before streaming. The per-account
+                // hourly cap is enforced when the token is minted, not on the
+                // inference request, so surfacing it here lets us abort cleanly
+                // instead of firing a request that can only fail. The retry pass
+                // forces a fresh mint to bypass a stale cached token.
+                try await SessionTokenManager.shared.acquireTokenForSend(
+                    forceRefresh: hasRetriedWithFreshKey
+                )
 
                 // Create the stream with proper parameters
                 let modelId = currentModel.modelName
@@ -2464,7 +2476,8 @@ class ChatViewModel: ObservableObject {
 
                 if shouldRetry {
                     hasRetriedWithFreshKey = true
-                    await self.refreshSessionTokenForRetry()
+                    // The token is reminted by acquireTokenForSend at the top of
+                    // the retry pass (forceRefresh), so no separate refresh here.
                     if await MainActor.run(body: { self.client != nil }) {
                         continue retryLoop
                     }
@@ -2509,9 +2522,20 @@ class ChatViewModel: ObservableObject {
 
                             // Set the stream error - the ErrorMessageView will display it nicely
                             // Keep any partial content that was received
+                            // The hourly cap is surfaced deterministically at
+                            // token acquisition (the inference path never checks
+                            // it), so the only signal here is that typed error —
+                            // no inference-failure heuristic.
+                            let hitHourlyCap: Bool
+                            if case SessionTokenError.hourlyLimitReached = error {
+                                hitHourlyCap = true
+                            } else {
+                                hitHourlyCap = false
+                            }
                             chat.messages[lastIndex].isRequestError = self.isRequestError(error)
                             chat.messages[lastIndex].streamError = userFriendlyError
-                            chat.messages[lastIndex].isRateLimitError = self.isRateLimitError(error)
+                            chat.messages[lastIndex].isRateLimitError = self.isRateLimitError(error) || hitHourlyCap
+                            chat.messages[lastIndex].isHourlyLimitError = hitHourlyCap
 
                             self.updateChat(chat)
                         }

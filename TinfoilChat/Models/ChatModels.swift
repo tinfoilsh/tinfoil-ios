@@ -649,6 +649,10 @@ struct Message: Identifiable, Codable, Equatable {
     var streamError: String? = nil
     var isRequestError: Bool = false
     var isRateLimitError: Bool = false
+    /// True when the rate-limit error is the subscriber hourly usage cap rather
+    /// than the free-tier daily limit, so the UI shows a transient
+    /// "try again shortly" message instead of an upgrade prompt.
+    var isHourlyLimitError: Bool = false
     var generationTimeSeconds: Double? = nil
     var contentChunks: [ContentChunk] = []
     var thinkingChunks: [ThinkingChunk] = []
@@ -744,7 +748,7 @@ struct Message: Identifiable, Codable, Equatable {
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, isRateLimitError, generationTimeSeconds, webSearchState
+        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, isRateLimitError, isHourlyLimitError, generationTimeSeconds, webSearchState
         case webSearch // Alternative key used by React app
         case urlFetches
         case attachments
@@ -782,6 +786,7 @@ struct Message: Identifiable, Codable, Equatable {
         streamError = try container.decodeIfPresent(String.self, forKey: .streamError)
         isRequestError = try container.decodeIfPresent(Bool.self, forKey: .isRequestError) ?? false
         isRateLimitError = try container.decodeIfPresent(Bool.self, forKey: .isRateLimitError) ?? false
+        isHourlyLimitError = try container.decodeIfPresent(Bool.self, forKey: .isHourlyLimitError) ?? false
         generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)
         // contentChunks and thinkingChunks are transient UI rendering state — never decoded from storage
         contentChunks = []
@@ -949,6 +954,7 @@ struct Message: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(streamError, forKey: .streamError)
         if isRequestError { try container.encode(isRequestError, forKey: .isRequestError) }
         if isRateLimitError { try container.encode(isRateLimitError, forKey: .isRateLimitError) }
+        if isHourlyLimitError { try container.encode(isHourlyLimitError, forKey: .isHourlyLimitError) }
         try container.encodeIfPresent(generationTimeSeconds, forKey: .generationTimeSeconds)
         // contentChunks is transient UI rendering state — never encode it
         // Encode as "webSearch" for React app compatibility
@@ -1093,14 +1099,40 @@ enum HapticFeedback {
 
 // MARK: - Rate Limit Info
 
-/// Rate limit information returned by the backend for free-tier users
+/// Rate limit information surfaced to the UI.
 struct RateLimitInfo {
+    /// Distinguishes the anonymous/free-tier daily request limit from the
+    /// per-account hourly usage cap that subscribers hit. Both flow through the
+    /// same channel but render differently: the hourly cap is transient, does
+    /// not block input, and offers no upgrade (the user already subscribes).
+    enum Kind {
+        case freeDaily
+        case hourly
+    }
+
     var maxRequests: Int
     var remaining: Int
     var resetsAt: String
+    var kind: Kind = .freeDaily
 }
 
 // MARK: - Session Token Management
+
+/// Errors surfaced while acquiring a session/inference token for a send.
+enum SessionTokenError: Error, LocalizedError {
+    /// The signed-in subscriber is over the per-account hourly usage cap. The
+    /// cap is enforced when the inference token is minted (the inference path
+    /// never checks it), so it is surfaced at acquisition before any request
+    /// is sent rather than inferred from a downstream failure.
+    case hourlyLimitReached(resetsAt: String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .hourlyLimitReached:
+            return "You have reached your hourly usage limit."
+        }
+    }
+}
 
 /// Manages session token retrieval and rate limit tracking
 class SessionTokenManager {
@@ -1205,6 +1237,22 @@ class SessionTokenManager {
         }
 
         return await fetchFreshSessionToken()
+    }
+
+    /// Acquires a usable inference token for an outgoing send, mirroring the web
+    /// client: a subscriber over the per-account hourly cap is surfaced here and
+    /// the call throws, so the caller aborts before firing a request the
+    /// inference path cannot satisfy (the cap is a mint-time decision and is
+    /// never checked on inference). Coasting on a still-valid cached token is
+    /// preserved; the throw happens only when no usable token could be obtained
+    /// because the cap was hit.
+    /// - Parameter forceRefresh: bypass the cached token (used on a 401 retry).
+    func acquireTokenForSend(forceRefresh: Bool) async throws {
+        let token = forceRefresh ? await fetchFreshSessionToken() : await getSessionToken()
+        if !token.isEmpty { return }
+        if rateLimitInfo?.kind == .hourly {
+            throw SessionTokenError.hourlyLimitReached(resetsAt: rateLimitInfo?.resetsAt)
+        }
     }
 
     /// Forces a fresh session token fetch, ignoring any cached value
@@ -1316,7 +1364,8 @@ class SessionTokenManager {
                     self.rateLimitInfo = RateLimitInfo(
                         maxRequests: maxRequests,
                         remaining: remaining,
-                        resetsAt: resetsAt
+                        resetsAt: resetsAt,
+                        kind: .freeDaily
                     )
                 } else {
                     self.rateLimitInfo = nil
@@ -1334,7 +1383,7 @@ class SessionTokenManager {
     /// Outcome of attempting to mint a stateless JWT inference token.
     private enum ChatJWTResult {
         case token(key: String, expiresAt: Date?)
-        case rateLimited
+        case rateLimited(resetsAt: String?)
         case unavailable
     }
 
@@ -1350,12 +1399,20 @@ class SessionTokenManager {
             // Subscribers are not subject to the free-tier daily limit.
             self.rateLimitInfo = nil
             return key
-        case .rateLimited:
-            // Subscriber over the per-account hourly cap. Do not fall back to the
-            // opaque /api/keys/chat path, which is not subject to the cap and would
-            // let the limit be bypassed. Reuse the cached token only while it is
-            // still valid so an in-flight session is not dropped; once it has
-            // expired there is no usable token to return.
+        case .rateLimited(let resetsAt):
+            // Subscriber over the per-account hourly cap. Surface it through the
+            // shared rate-limit channel so the UI can show an hourly-limit
+            // indicator, and do not fall back to the opaque /api/keys/chat path,
+            // which is not subject to the cap and would let it be bypassed.
+            // Reuse the cached token only while it is still valid so an in-flight
+            // session is not dropped; once it has expired there is no usable
+            // token to return.
+            self.rateLimitInfo = RateLimitInfo(
+                maxRequests: 0,
+                remaining: 0,
+                resetsAt: resetsAt ?? "",
+                kind: .hourly
+            )
             let snapshot = tokenSnapshot()
             if let token = snapshot.token,
                let expiresAt = snapshot.expiresAt,
@@ -1397,8 +1454,11 @@ class SessionTokenManager {
                 return .token(key: key, expiresAt: expiresAt)
             }
 
-            if httpResponse.statusCode == 429 {
-                return .rateLimited
+            let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let isHourlyLimit = httpResponse.statusCode == 429
+                || (body?["code"] as? String) == Constants.API.ErrorCode.hourlyLimitReached
+            if isHourlyLimit {
+                return .rateLimited(resetsAt: body?["resets_at"] as? String)
             }
 
             return .unavailable
