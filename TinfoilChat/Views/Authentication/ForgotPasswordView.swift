@@ -39,6 +39,7 @@ struct ForgotPasswordView: View {
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(Color(.systemGray))
                     }
+                    .accessibilityLabel("Close")
                 }
                 .padding(.horizontal)
                 

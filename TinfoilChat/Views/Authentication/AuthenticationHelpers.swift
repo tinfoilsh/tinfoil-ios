@@ -132,6 +132,7 @@ struct UIKitTextField: UIViewRepresentable {
         let textField = UITextField()
         textField.delegate = context.coordinator
         textField.placeholder = placeholder
+        textField.accessibilityLabel = placeholder
         textField.keyboardType = keyboardType
         textField.isSecureTextEntry = isSecure
         textField.backgroundColor = .systemBackground
