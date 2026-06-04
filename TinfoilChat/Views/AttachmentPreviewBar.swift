@@ -84,6 +84,8 @@ private struct AttachmentPreviewChip: View {
                 .fill(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
         )
         .frame(maxWidth: Constants.Attachments.previewMaxWidth)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Attachment, \(attachment.fileName), \(accessibilityStatus)")
         .padding(.top, 6)
         .padding(.trailing, 6)
         .overlay(alignment: .topTrailing) {
@@ -92,7 +94,14 @@ private struct AttachmentPreviewChip: View {
                     .font(.system(size: 16))
                     .foregroundColor(.secondary)
             }
+            .accessibilityLabel("Remove attachment")
         }
+    }
+
+    private var accessibilityStatus: String {
+        if attachment.processingState == .processing { return "Processing" }
+        if attachment.processingState == .failed { return "Failed" }
+        return formattedFileSize
     }
 
     @ViewBuilder
