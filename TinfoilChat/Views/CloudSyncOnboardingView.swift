@@ -104,6 +104,7 @@ struct CloudSyncOnboardingView: View {
                 HStack {
                     Button(action: { handleClose() }) {
                         Image(systemName: "xmark")
+                            .accessibilityLabel("Close")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundColor(.secondary)
                             .frame(width: 30, height: 30)
@@ -253,6 +254,7 @@ struct CloudSyncOnboardingView: View {
                     Toggle("", isOn: $cloudSyncToggle)
                         .labelsHidden()
                         .tint(Color.accentPrimary)
+                        .accessibilityLabel("Enable Cloud Sync")
                 }
                 .padding()
                 .background(
@@ -421,6 +423,7 @@ struct CloudSyncOnboardingView: View {
                                 .background(Color(UIColor.tertiarySystemBackground))
                                 .cornerRadius(8)
                         }
+                        .accessibilityLabel("Save to Files")
 
                         // Copy button
                         Button(action: { copyKeyToClipboard() }) {
@@ -431,6 +434,7 @@ struct CloudSyncOnboardingView: View {
                                 .background(isCopied ? Color.green : Color(UIColor.tertiarySystemBackground))
                                 .cornerRadius(8)
                         }
+                        .accessibilityLabel(isCopied ? "Key copied" : "Copy key")
                     }
                     .padding()
                     .background(
@@ -511,6 +515,7 @@ struct CloudSyncOnboardingView: View {
                             .background(Color(UIColor.secondarySystemBackground))
                             .cornerRadius(14)
                     }
+                    .accessibilityLabel("Import key from file")
                 }
                 .padding(.horizontal, 24)
 

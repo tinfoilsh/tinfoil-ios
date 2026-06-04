@@ -559,10 +559,12 @@ struct SettingsView: View {
                     }
                     .buttonStyle(BorderlessButtonStyle())
                     .disabled(settings.maxMessages <= 1)
+                    .accessibilityLabel("Decrease messages in context")
 
                     Text("\(settings.maxMessages)")
                         .frame(minWidth: 40)
                         .font(.system(.body, design: .monospaced))
+                        .accessibilityLabel("Messages in context: \(settings.maxMessages)")
 
                     Button(action: {
                         if settings.maxMessages < Constants.Context.maxMessagesLimit {
@@ -575,6 +577,7 @@ struct SettingsView: View {
                     }
                     .buttonStyle(BorderlessButtonStyle())
                     .disabled(settings.maxMessages >= Constants.Context.maxMessagesLimit)
+                    .accessibilityLabel("Increase messages in context")
                 }
             }
             .padding(.vertical, 4)
@@ -596,6 +599,7 @@ struct SettingsView: View {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.caption)
                             .foregroundColor(.green)
+                            .accessibilityLabel("Enabled")
                     }
                 }
             }
@@ -614,6 +618,7 @@ struct SettingsView: View {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.caption)
                             .foregroundColor(.green)
+                            .accessibilityLabel("Enabled")
                     }
                 }
             }
@@ -740,6 +745,7 @@ struct SettingsView: View {
                         Image(systemName: "xmark")
                             .font(.system(size: 18, weight: .medium))
                     }
+                    .accessibilityLabel("Close")
                 }
             }
         }
@@ -950,6 +956,7 @@ struct LanguagePickerView: View {
                 }
             }
             .foregroundColor(.primary)
+            .accessibilityAddTraits(selectedLanguage == language ? .isSelected : [])
             .listRowBackground(Color.cardSurface(for: colorScheme))
         }
         .scrollContentBackground(.hidden)
@@ -1135,6 +1142,7 @@ struct CustomSystemPromptView: View {
                     TextEditor(text: $editingPrompt)
                         .font(.system(.body, design: .monospaced))
                         .frame(minHeight: 200)
+                        .accessibilityLabel("Custom prompt")
                 } header: {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Custom Prompt")

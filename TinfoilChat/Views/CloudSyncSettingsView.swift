@@ -170,6 +170,7 @@ struct CloudSyncSettingsView: View {
                                     Image(systemName: copiedToClipboard ? "checkmark.circle.fill" : "doc.on.doc")
                                         .foregroundColor(copiedToClipboard ? .adaptiveAccent : .primary)
                                 }
+                                .accessibilityLabel(copiedToClipboard ? "Key copied" : "Copy key")
                             }
                             .padding(8)
                             .frame(maxWidth: .infinity)
