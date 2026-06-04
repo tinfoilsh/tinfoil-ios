@@ -1292,9 +1292,15 @@ class SessionTokenManager {
         case .rateLimited:
             // Subscriber over the per-account hourly cap. Do not fall back to the
             // opaque /api/keys/chat path, which is not subject to the cap and would
-            // let the limit be bypassed. Keep any still-valid cached token so an
-            // in-flight session is not dropped.
-            return sessionToken ?? ""
+            // let the limit be bypassed. Reuse the cached token only while it is
+            // still valid so an in-flight session is not dropped; once it has
+            // expired there is no usable token to return.
+            if let token = sessionToken,
+               let expiresAt = sessionTokenExpiresAt,
+               expiresAt.timeIntervalSinceNow > 0 {
+                return token
+            }
+            return ""
         case .unavailable:
             return await fetchSessionKey(jwt: jwt)
         }

@@ -1572,6 +1572,15 @@ class ChatViewModel: ObservableObject {
             var hasRetriedWithFreshKey = false
 
             retryLoop: do {
+                // Proactively refresh the session token and client when the
+                // cached token is expired or near expiry, so the request isn't
+                // sent with a stale token and forced through a 401 retry.
+                // Stateless JWTs are short-lived, so this happens routinely
+                // during a long session.
+                if client != nil, !isClientInitializing, SessionTokenManager.shared.needsRefresh {
+                    await refreshClientForRetry()
+                }
+
                 // Wait for client initialization if needed
                 if client == nil || isClientInitializing {
                     // If client setup hasn't started, start it
