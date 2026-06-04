@@ -1296,14 +1296,15 @@ class SessionTokenManager {
 
             if let responseDict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let key = responseDict["key"] as? String {
-                self.sessionToken = key
+                let expiresAt: Date
                 if let expiresAtString = responseDict["expires_at"] as? String,
                    let parsed = ISO8601DateFormatter().date(from: expiresAtString) {
-                    self.sessionTokenExpiresAt = parsed
+                    expiresAt = parsed
                 } else {
                     // Fallback: assume a conservative expiry so we don't refetch on every call
-                    self.sessionTokenExpiresAt = Date().addingTimeInterval(Constants.API.sessionTokenExpiryBufferSeconds * 2)
+                    expiresAt = Date().addingTimeInterval(Constants.API.sessionTokenExpiryBufferSeconds * 2)
                 }
+                storeToken(key, expiresAt: expiresAt)
 
                 // Parse rate limit info for free-tier users
                 let isFreeTier = responseDict["is_free_tier"] as? Bool ?? false
@@ -1344,9 +1345,8 @@ class SessionTokenManager {
     private func fetchAuthenticatedSessionToken(jwt: String) async -> String? {
         switch await fetchChatJWT(jwt: jwt) {
         case .token(let key, let expiresAt):
-            self.sessionToken = key
-            self.sessionTokenExpiresAt = expiresAt
-                ?? Date().addingTimeInterval(Constants.API.sessionTokenExpiryBufferSeconds * 2)
+            storeToken(key, expiresAt: expiresAt
+                ?? Date().addingTimeInterval(Constants.API.sessionTokenExpiryBufferSeconds * 2))
             // Subscribers are not subject to the free-tier daily limit.
             self.rateLimitInfo = nil
             return key
@@ -1356,8 +1356,9 @@ class SessionTokenManager {
             // let the limit be bypassed. Reuse the cached token only while it is
             // still valid so an in-flight session is not dropped; once it has
             // expired there is no usable token to return.
-            if let token = sessionToken,
-               let expiresAt = sessionTokenExpiresAt,
+            let snapshot = tokenSnapshot()
+            if let token = snapshot.token,
+               let expiresAt = snapshot.expiresAt,
                expiresAt.timeIntervalSinceNow > 0 {
                 return token
             }
@@ -1444,8 +1445,7 @@ class SessionTokenManager {
 
     /// Clears the cached session token and rate limit info
     func clearSessionToken() {
-        sessionToken = nil
-        sessionTokenExpiresAt = nil
+        storeToken(nil, expiresAt: nil)
         rateLimitInfo = nil
     }
 }

@@ -524,11 +524,13 @@ class ChatViewModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            // Proactively refresh the session token and recreate the client
-            // if the token is expired or near expiry, so requests don't fail.
+            // Proactively refresh the session token if it is expired or near
+            // expiry so the first request after returning to the foreground
+            // doesn't have to fail and retry. The attested client persists and
+            // picks up the new token through its provider.
             Task { @MainActor in
                 if SessionTokenManager.shared.needsRefresh {
-                    await self?.refreshClientForRetry()
+                    await self?.refreshSessionTokenForRetry()
                 }
             }
 
@@ -614,10 +616,14 @@ class ChatViewModel: ObservableObject {
         Task {
             do {
                 await AppConfig.shared.waitForInitialization()
-                let sessionToken = await AppConfig.shared.getSessionToken()
+                // Pre-warm the cached token so the first request has a bearer.
+                // The client then reads the live token per request via the
+                // provider, so the bearer can rotate without rebuilding the
+                // attested client or re-running enclave verification.
+                _ = await AppConfig.shared.getSessionToken()
 
                 client = try await TinfoilAI.create(
-                    apiKey: sessionToken,
+                    apiKeyProvider: { SessionTokenManager.shared.currentToken },
                     // Opt into the router's inline progress markers so
                     // live web search and URL-fetch status drives the
                     // same WebSearchState / URLFetchState UI the app
@@ -1572,15 +1578,6 @@ class ChatViewModel: ObservableObject {
             var hasRetriedWithFreshKey = false
 
             retryLoop: do {
-                // Proactively refresh the session token and client when the
-                // cached token is expired or near expiry, so the request isn't
-                // sent with a stale token and forced through a 401 retry.
-                // Stateless JWTs are short-lived, so this happens routinely
-                // during a long session.
-                if client != nil, !isClientInitializing, SessionTokenManager.shared.needsRefresh {
-                    await refreshClientForRetry()
-                }
-
                 // Wait for client initialization if needed
                 if client == nil || isClientInitializing {
                     // If client setup hasn't started, start it
@@ -2467,7 +2464,7 @@ class ChatViewModel: ObservableObject {
 
                 if shouldRetry {
                     hasRetriedWithFreshKey = true
-                    await self.refreshClientForRetry()
+                    await self.refreshSessionTokenForRetry()
                     if await MainActor.run(body: { self.client != nil }) {
                         continue retryLoop
                     }
@@ -2615,17 +2612,11 @@ class ChatViewModel: ObservableObject {
         return false
     }
 
-    /// Refreshes the session token and recreates the client
-    private func refreshClientForRetry() async {
-        SessionTokenManager.shared.clearSessionToken()
-        setupTinfoilClient()
-
-        // Wait for client initialization to complete
-        let maxWaitTime = Constants.Sync.clientInitTimeoutSeconds
-        let startTime = Date()
-        while isClientInitializing && Date().timeIntervalSince(startTime) < maxWaitTime {
-            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-        }
+    /// Mints a fresh session token in place for a retry. The attested client
+    /// reads the bearer through its provider, so the token can rotate without
+    /// rebuilding the client or re-running enclave verification.
+    private func refreshSessionTokenForRetry() async {
+        _ = await SessionTokenManager.shared.fetchFreshSessionToken()
     }
 
     /// Cancels the current message generation
@@ -4021,7 +4012,7 @@ extension ChatViewModel {
         } catch {
             // Retry once with a fresh token if the error is an auth failure
             if ChatViewModel.isAuthenticationError(error) {
-                await refreshClientForRetry()
+                await refreshSessionTokenForRetry()
                 if let retryClient = self.client {
                     do {
                         let transcription = try await AudioRecordingService.shared.transcribe(
