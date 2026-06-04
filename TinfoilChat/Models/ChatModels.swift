@@ -1111,6 +1111,14 @@ class SessionTokenManager {
     private let sessionTokenEndpoint = "\(Constants.API.baseURL)/api/keys/chat"
     private let chatTokenEndpoint = "\(Constants.API.baseURL)/api/chat/token"
 
+    /// Serializes access to `sessionToken` / `sessionTokenExpiresAt` so the
+    /// synchronous `currentToken` provider can be read from the SDK's
+    /// request-building thread while async refreshes update it.
+    private let stateLock = NSLock()
+
+    /// Deduplicates background refreshes kicked off from `currentToken`.
+    private var backgroundRefreshInFlight = false
+
     /// Current rate limit info for free-tier users (nil for premium)
     private(set) var rateLimitInfo: RateLimitInfo? {
         didSet { onRateLimitChanged?(rateLimitInfo) }
@@ -1127,20 +1135,73 @@ class SessionTokenManager {
 
     /// Returns true if the cached token is expired or near expiry and needs refresh
     var needsRefresh: Bool {
-        guard sessionToken != nil else { return true }
-        guard let expiresAt = sessionTokenExpiresAt else { return true }
+        let snapshot = tokenSnapshot()
+        guard snapshot.token != nil, let expiresAt = snapshot.expiresAt else { return true }
         return expiresAt.timeIntervalSinceNow <= Constants.API.sessionTokenExpiryBufferSeconds
     }
 
     private init() {}
 
+    /// Thread-safe write of the cached token and its expiry.
+    private func storeToken(_ token: String?, expiresAt: Date?) {
+        stateLock.lock()
+        sessionToken = token
+        sessionTokenExpiresAt = expiresAt
+        stateLock.unlock()
+    }
+
+    /// Thread-safe read of the cached token and its expiry.
+    private func tokenSnapshot() -> (token: String?, expiresAt: Date?) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return (sessionToken, sessionTokenExpiresAt)
+    }
+
+    /// Synchronous, thread-safe accessor for the freshest cached token. Used as
+    /// the SDK's dynamic token provider so the bearer can rotate per request
+    /// without rebuilding the attested client. When the cached token is missing
+    /// or near expiry a background refresh is kicked off (deduplicated) and the
+    /// current value is returned for the in-flight request; the reactive 401
+    /// retry covers the rare case where it has already hard-expired.
+    var currentToken: String {
+        let snapshot = tokenSnapshot()
+        let isStale = snapshot.expiresAt.map {
+            $0.timeIntervalSinceNow <= Constants.API.sessionTokenExpiryBufferSeconds
+        } ?? true
+        if isStale {
+            triggerBackgroundRefresh()
+        }
+        return snapshot.token ?? ""
+    }
+
+    /// Kicks off a single background token refresh, coalescing concurrent
+    /// callers so a burst of requests does not trigger a stampede of fetches.
+    private func triggerBackgroundRefresh() {
+        stateLock.lock()
+        if backgroundRefreshInFlight {
+            stateLock.unlock()
+            return
+        }
+        backgroundRefreshInFlight = true
+        stateLock.unlock()
+
+        Task { [weak self] in
+            guard let self else { return }
+            _ = await self.fetchFreshSessionToken()
+            self.stateLock.lock()
+            self.backgroundRefreshInFlight = false
+            self.stateLock.unlock()
+        }
+    }
+
     /// Retrieves the session token, returning the cached value if still valid
     /// - Returns: Session token string or empty string if unavailable
     func getSessionToken() async -> String {
-        if let existingToken = sessionToken,
-           let expiresAt = sessionTokenExpiresAt,
+        let snapshot = tokenSnapshot()
+        if let token = snapshot.token,
+           let expiresAt = snapshot.expiresAt,
            expiresAt.timeIntervalSinceNow > Constants.API.sessionTokenExpiryBufferSeconds {
-            return existingToken
+            return token
         }
 
         return await fetchFreshSessionToken()
