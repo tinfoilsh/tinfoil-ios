@@ -200,7 +200,10 @@ private struct ChartEntry: Identifiable {
 }
 
 private func formatChartValue(_ value: Double) -> String {
-    if value.truncatingRemainder(dividingBy: 1) == 0 {
+    if value.isFinite,
+       value >= Double(Int.min),
+       value <= Double(Int.max),
+       value.truncatingRemainder(dividingBy: 1) == 0 {
         return String(Int(value))
     }
     return String(value)
