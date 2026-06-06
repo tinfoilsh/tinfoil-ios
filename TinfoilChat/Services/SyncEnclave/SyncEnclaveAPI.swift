@@ -356,12 +356,18 @@ struct EnclaveKeyCurrentResponse: Decodable {
     let bundles: [String: EnclaveKeyCurrentBundle]
     let createdVia: String?
     let createdAt: String?
+    /// True when the user owns encrypted blobs not sealed under the
+    /// reported key. With `keyId == nil` this means legacy (pre-enclave)
+    /// data exists, so the client must route to recovery instead of
+    /// first-time setup. Absent on older enclaves (decoded as false).
+    let hasData: Bool
 
     enum CodingKeys: String, CodingKey {
         case keyId = "key_id"
         case etag, bundles
         case createdVia = "created_via"
         case createdAt = "created_at"
+        case hasData = "has_data"
     }
 }
 
@@ -377,7 +383,8 @@ extension EnclaveKeyCurrentResponse {
             etag: try c.decodeIfPresent(String.self, forKey: .etag),
             bundles: try c.decodeIfPresent([String: EnclaveKeyCurrentBundle].self, forKey: .bundles) ?? [:],
             createdVia: try c.decodeIfPresent(String.self, forKey: .createdVia),
-            createdAt: try c.decodeIfPresent(String.self, forKey: .createdAt)
+            createdAt: try c.decodeIfPresent(String.self, forKey: .createdAt),
+            hasData: try c.decodeIfPresent(Bool.self, forKey: .hasData) ?? false
         )
     }
 }
@@ -627,7 +634,8 @@ enum SyncEnclaveAPI {
                 etag: nil,
                 bundles: [:],
                 createdVia: nil,
-                createdAt: nil
+                createdAt: nil,
+                hasData: false
             )
         }
     }

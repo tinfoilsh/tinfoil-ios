@@ -94,9 +94,12 @@ final class PasskeyManager: ObservableObject {
         }
 
         // No usable v2 bundle. A brand-new user (no enclave key and no
-        // remote data) gets the auto-generate flow.
+        // remote data) gets the auto-generate flow. A legacy user whose
+        // chats predate the key registry reports no key but has_data, so
+        // exclude them here and let them fall through to recovery — a
+        // fresh key would strand their un-migrated data.
         let remoteState = await CloudKeyPreflightValidator.shared.inspectRemoteState()
-        if state.keyId == nil, remoteState == .empty {
+        if state.keyId == nil, !state.hasData, remoteState == .empty {
             let created = await attemptNewUserPasskeySetup()
             if !created {
                 passkeySetupAvailable = true
