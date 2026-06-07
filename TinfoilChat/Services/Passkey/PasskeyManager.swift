@@ -86,11 +86,30 @@ final class PasskeyManager: ObservableObject {
         }
 
         // When the enclave already has a usable v2 bundle, unlock
-        // straight from the server.
+        // straight from the server. Use a silent ceremony so a device
+        // that holds none of the registered bundles fails fast instead
+        // of detouring through the cross-device QR sheet.
         if state.keyId != nil, !state.bundles.isEmpty {
-            return await applyUnlockResult(
-                await PasskeyKeyFlow.unlockFromServer()
-            )
+            let serverResult = await PasskeyKeyFlow.unlockFromServer(silent: true)
+            if case .success = serverResult {
+                return await applyUnlockResult(serverResult)
+            }
+            // This device holds none of the registered bundles. Before
+            // surfacing the recovery chooser, try this device's own
+            // pre-enclave passkey: it unlocks the same CEK and enrolls
+            // itself as a new bundle so future sessions use the v2 wire.
+            let legacy = await LegacyPasskeyCredentials.fetch()
+            if !legacy.isEmpty {
+                let legacyResult = await PasskeyKeyFlow.recoverFromLegacyPasskey(
+                    entries: legacy,
+                    enclaveKeyId: state.keyId
+                )
+                if case .success = legacyResult {
+                    return await applyUnlockResult(legacyResult)
+                }
+            }
+            showPasskeyRecoveryChoice = true
+            return .recoveryFailed
         }
 
         // No usable v2 bundle. A brand-new user (no enclave key and no

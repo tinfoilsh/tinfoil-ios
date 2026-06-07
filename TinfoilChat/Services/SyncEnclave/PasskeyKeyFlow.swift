@@ -160,7 +160,7 @@ enum PasskeyKeyFlow {
     /// End-to-end "returning user" unlock against the enclave. Wraps
     /// keyCurrent() + unlockWithPasskey() + the key_id binding check
     /// into a single call.
-    static func unlockFromServer(prefer: String? = nil) async -> PasskeyFlowResult {
+    static func unlockFromServer(prefer: String? = nil, silent: Bool = false) async -> PasskeyFlowResult {
         let state: EnclaveKeyCurrentResponse
         do {
             state = try await SyncEnclaveAPI.keyCurrent()
@@ -175,7 +175,7 @@ enum PasskeyKeyFlow {
         }
 
         let candidates = state.bundles.values.sorted { $0.credentialId < $1.credentialId }
-        let result = await unlockWithPasskey(candidates: candidates, prefer: prefer)
+        let result = await unlockWithPasskey(candidates: candidates, prefer: prefer, silent: silent)
         guard case .success(let cek, let derivedKeyIdHex, let credentialId, _) = result else {
             return result
         }
@@ -200,7 +200,8 @@ enum PasskeyKeyFlow {
     /// typically from a fresh `keyCurrent()` probe.
     static func unlockWithPasskey(
         candidates: [EnclaveKeyCurrentBundle],
-        prefer: String? = nil
+        prefer: String? = nil,
+        silent: Bool = false
     ) async -> PasskeyFlowResult {
         guard !candidates.isEmpty else {
             return .failure(.noRemoteBundle)
@@ -215,7 +216,7 @@ enum PasskeyKeyFlow {
 
         let passkey: PrfPasskeyResult
         do {
-            passkey = try await PasskeyService.shared.authenticatePasskey(credentialIds: ordered)
+            passkey = try await PasskeyService.shared.authenticatePasskey(credentialIds: ordered, silent: silent)
         } catch let err {
             return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
         }
