@@ -72,7 +72,7 @@ struct EnclaveErrorRecoveryTests {
         let decision = EnclaveErrorRecovery.decide(
             SyncEnclaveError(message: "legacy", status: 410, code: "LEGACY_BLOB_NOT_MIGRATED")
         )
-        #expect(decision.action == .migrateLegacyAndRetry(scope: nil))
+        #expect(decision.action == .migrateLegacyAndRetry)
         #expect(decision.classification.kind == .retryableRefresh)
     }
 

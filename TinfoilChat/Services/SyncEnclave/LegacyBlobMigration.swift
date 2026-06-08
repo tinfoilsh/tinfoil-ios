@@ -62,6 +62,28 @@ enum LegacyBlobMigration {
         } catch {
             return .empty
         }
+
+        // Hold migration until the local CEK is the enclave's
+        // registered current key. Kicking migrate-all before the key
+        // is registered — e.g. a legacy user who still has no passkey
+        // and no `user_keys` row — only earns a guaranteed
+        // no-current-key 409 and can never make progress. Once the key
+        // is adopted (recovery / passkey setup), the next pass clears
+        // the gate. Mirrors the webapp's registered-key migration gate.
+        do {
+            let cek = try EncryptionService.shared.getKeyBytesOrThrow()
+            let localKeyId = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+            let current = try await SyncEnclaveAPI.keyCurrent()
+            guard current.keyId == localKeyId else {
+                #if DEBUG
+                print("[LegacyBlobMigration] skip: local key is not the registered current key")
+                #endif
+                return .empty
+            }
+        } catch {
+            return .empty
+        }
+
         let keys = CEKEncoding.migrationKeys()
         let startedAt = Date()
         let pollInterval = Constants.Sync.migrationPollIntervalSeconds

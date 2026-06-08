@@ -57,7 +57,7 @@ struct EnclaveErrorClassification: Equatable {
 enum RecoveryAction: Equatable {
     case retry(reason: RetryReason)
     case refreshCurrentKeyAndRetry
-    case migrateLegacyAndRetry(scope: String?)
+    case migrateLegacyAndRetry
     case surfaceConflict(reason: ConflictReason)
     case surfaceExistingDataUnderOtherKey
     case surfaceNotFound
@@ -207,7 +207,7 @@ enum EnclaveErrorRecovery {
         case .unknownKey:
             return .triggerRecoveryWizard(reason: .unknownKey)
         case .legacyBlobNotMigrated:
-            return .migrateLegacyAndRetry(scope: nil)
+            return .migrateLegacyAndRetry
         case .attestationFailed:
             return .blockAllSync(reason: .attestationFailed)
         case .auth:
@@ -272,7 +272,6 @@ extension Notification.Name {
     static let tinfoilSyncAttestationFailed         = Notification.Name("tinfoil.sync.attestationFailed")
     static let tinfoilSyncExistingDataUnderOtherKey = Notification.Name("tinfoil.sync.existingDataUnderOtherKey")
     static let tinfoilSyncChatNotFound              = Notification.Name("tinfoil.sync.chatNotFound")
-    static let tinfoilSyncLegacyMigrationNeeded     = Notification.Name("tinfoil.sync.legacyMigrationNeeded")
     static let tinfoilSyncUploadAborted             = Notification.Name("tinfoil.sync.uploadAborted")
     static let tinfoilSyncConflictDetected          = Notification.Name("tinfoil.sync.conflictDetected")
 }

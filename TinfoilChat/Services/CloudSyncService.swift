@@ -382,15 +382,13 @@ class CloudSyncService: ObservableObject {
             postSyncEvent(.tinfoilSyncRecoveryNeeded)
         case .blockAllSync:
             postSyncEvent(.tinfoilSyncAttestationFailed)
-        case .migrateLegacyAndRetry(let scope):
-            // Notify so the legacy migration runs, then re-throw so
-            // the coalescer retries the write. Same trade-off as
-            // refreshCurrentKeyAndRetry: if migration completes
-            // before retries exhaust, the upload succeeds;
-            // otherwise the chat waits for the next sync cycle.
-            var info: [String: Any] = [:]
-            if let scope { info["scope"] = scope }
-            postSyncEvent(.tinfoilSyncLegacyMigrationNeeded, userInfo: info.isEmpty ? nil : info)
+        case .migrateLegacyAndRetry:
+            // Re-throw so the coalescer retries the write. The legacy
+            // re-seal runs out of band — on the next launch and right
+            // after the key is adopted (see PasskeyManager) — both
+            // gated on the key being the registered current key. If
+            // that completes before retries exhaust the upload
+            // succeeds; otherwise the chat waits for the next cycle.
             throw error
         case .abort(let reason):
             postSyncEvent(

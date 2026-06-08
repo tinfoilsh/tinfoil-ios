@@ -364,6 +364,15 @@ final class PasskeyManager: ObservableObject {
                 if case .success = result {
                     persistEnclaveKeyId(keyIdHex)
                     activatePasskey()
+                    // Adopting the existing CEK just registered it as
+                    // the current key, so the migration gate that the
+                    // launch-time pass tripped over now clears. Re-seal
+                    // any legacy rows now instead of waiting for the
+                    // next launch.
+                    Task.detached(priority: .background) {
+                        _ = await LegacyBlobMigration.runAndFinalize()
+                        await PasskeyManager.shared.refreshBundleState()
+                    }
                 }
                 return
             }
