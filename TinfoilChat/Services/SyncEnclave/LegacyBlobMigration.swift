@@ -73,7 +73,24 @@ enum LegacyBlobMigration {
         do {
             let cek = try EncryptionService.shared.getKeyBytesOrThrow()
             let localKeyId = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
-            let current = try await SyncEnclaveAPI.keyCurrent()
+            var current = try await SyncEnclaveAPI.keyCurrent()
+            // A v1->v2 user can hold legacy data and a local CEK without
+            // ever registering it as the current key — e.g. they have no
+            // passkey, so none of the passkey/recovery flows that register
+            // the key ever run, and nothing else would migrate them. Adopt
+            // the local CEK as the current key here (bundleless, recovery)
+            // so the gate below passes. Guarded on the user having no
+            // passkey credential anywhere so a recoverable passkey is never
+            // hidden behind a bundleless key. Mirrors the webapp's
+            // passkey-less migration adoption.
+            if current.keyId == nil, current.hasData,
+                await adoptLocalKeyForPasskeylessMigration(
+                    keyB64: targetKeyB64,
+                    current: current
+                )
+            {
+                current = try await SyncEnclaveAPI.keyCurrent()
+            }
             guard current.keyId == localKeyId else {
                 #if DEBUG
                 print("[LegacyBlobMigration] skip: local key is not the registered current key")
@@ -161,6 +178,46 @@ enum LegacyBlobMigration {
     }
 
     // MARK: - Private
+
+    /// Register the local primary CEK as the enclave's current key for a
+    /// user who has legacy data but no registered key and no passkey to
+    /// recover with. Without this a passkey-less v1->v2 user could never
+    /// migrate: nothing registers their CEK, so every rewrap is gated out.
+    ///
+    /// The key is registered bundleless with created_via=recovery, which
+    /// the controlplane accepts non-destructively over legacy (key_id NULL)
+    /// rows. Guarded on the user having no passkey credential anywhere — an
+    /// enclave bundle or a legacy passkey — so a recoverable passkey is
+    /// never hidden behind a bundleless key. Returns true when the key was
+    /// adopted. Mirrors the webapp's passkey-less migration adoption.
+    private static func adoptLocalKeyForPasskeylessMigration(
+        keyB64: String,
+        current: EnclaveKeyCurrentResponse
+    ) async -> Bool {
+        guard current.bundles.isEmpty else { return false }
+        let legacy = await LegacyPasskeyCredentials.fetch()
+        guard legacy.isEmpty else { return false }
+        do {
+            _ = try await SyncEnclaveAPI.registerKey(
+                EnclaveKeyRegisterRequest(
+                    key: keyB64,
+                    ifMatch: IfMatchSentinels.anyKey,
+                    createdVia: SyncEnclaveCreatedVia.recovery.rawValue,
+                    idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                    initialBundle: nil
+                )
+            )
+        } catch {
+            #if DEBUG
+            print("[LegacyBlobMigration] passkey-less key adoption failed: \(error)")
+            #endif
+            return false
+        }
+        #if DEBUG
+        print("[LegacyBlobMigration] adopted local key as current to enable migration without a passkey")
+        #endif
+        return true
+    }
 
     private static func shouldKeepPolling(_ resp: EnclaveMigrateAllResponse?) -> Bool {
         guard let resp = resp else { return false }
