@@ -75,6 +75,50 @@ struct SyncEnclaveKeyBundleTests {
         #expect(unwrapped == cek)
     }
 
+    @Test func unwrapsLegacyEnvelopeWithKeyBase36Primary() throws {
+        let kek = makeKek()
+        let iv = makeIv()
+        let cek = Data((0..<32).map { UInt8($0 + 7) })
+        let altCek = Data((0..<32).map { UInt8($0 + 50) })
+        let primaryKeyString = EncryptionService.shared.encodeKeyFromBytes(cek)
+        let altKeyString = EncryptionService.shared.encodeKeyFromBytes(altCek)
+        let envelope: [String: Any] = [
+            "primary": primaryKeyString,
+            "alternatives": [altKeyString, "garbage-entry"],
+        ]
+        let plaintext = try JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys])
+        let bundle = try encryptPlaintext(plaintext, with: kek, iv: iv)
+
+        let unwrapped = try SyncEnclaveKeyBundle.unwrapCekDetailed(
+            kek: kek,
+            kekIvHex: bundle.kekIvHex,
+            wrappedKeyHex: bundle.wrappedKeyHex
+        )
+        #expect(unwrapped.cek == cek)
+        #expect(unwrapped.legacyAlternativeKeys == [altKeyString])
+    }
+
+    @Test func legacyEnvelopeAlternativesExcludePrimaryAndMalformedEntries() throws {
+        let kek = makeKek()
+        let iv = makeIv()
+        let cek = Data((0..<32).map { UInt8($0 + 9) })
+        let primaryKeyString = EncryptionService.shared.encodeKeyFromBytes(cek)
+        let envelope: [String: Any] = [
+            "primary": primaryKeyString,
+            "alternatives": [primaryKeyString, "key_short", ""],
+        ]
+        let plaintext = try JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys])
+        let bundle = try encryptPlaintext(plaintext, with: kek, iv: iv)
+
+        let unwrapped = try SyncEnclaveKeyBundle.unwrapCekDetailed(
+            kek: kek,
+            kekIvHex: bundle.kekIvHex,
+            wrappedKeyHex: bundle.wrappedKeyHex
+        )
+        #expect(unwrapped.cek == cek)
+        #expect(unwrapped.legacyAlternativeKeys.isEmpty)
+    }
+
     @Test func throwsWhenBundleIsNeitherShape() throws {
         let kek = makeKek()
         let iv = makeIv()

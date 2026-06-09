@@ -127,11 +127,29 @@ enum PasskeyKeyFlow {
             return .failure(.bundleDecryptFailed, message: error.localizedDescription)
         }
 
+        // `If-Match: *` is create-only: the controlplane rejects it
+        // whenever a key row already exists. A start-fresh over an
+        // existing key must instead CAS on the current etag so the
+        // wipe-and-replace lands (the recovery chooser shows the
+        // start-fresh option precisely when a key is registered).
+        var ifMatch = IfMatchSentinels.anyKey
+        if createdVia == .startFresh {
+            do {
+                let current = try await SyncEnclaveAPI.keyCurrent()
+                if current.keyId != nil, let etag = current.etag {
+                    ifMatch = etag
+                }
+            } catch {
+                // Fall through with '*': correct for the no-key case,
+                // and fails closed (409) when a key actually exists.
+            }
+        }
+
         do {
             _ = try await SyncEnclaveAPI.registerKey(
                 EnclaveKeyRegisterRequest(
                     key: cek.base64EncodedString(),
-                    ifMatch: IfMatchSentinels.anyKey,
+                    ifMatch: ifMatch,
                     createdVia: createdVia.rawValue,
                     idempotencyKey: newSyncEnclaveIdempotencyKey(),
                     initialBundle: EnclaveKeyRegisterBundleInput(
@@ -228,7 +246,13 @@ enum PasskeyKeyFlow {
         let kek = PasskeyService.deriveKeyEncryptionKey(from: passkey.prfOutput)
         let cek: Data
         do {
-            cek = try SyncEnclaveKeyBundle.unwrapCek(kek: kek, bundle: bundle)
+            let unwrapped = try SyncEnclaveKeyBundle.unwrapCekDetailed(
+                kek: kek,
+                kekIvHex: bundle.kekIv,
+                wrappedKeyHex: bundle.encryptedKeys
+            )
+            cek = unwrapped.cek
+            retainLegacyAlternatives(unwrapped.legacyAlternativeKeys)
         } catch {
             return .failure(.bundleDecryptFailed, message: error.localizedDescription)
         }
@@ -246,6 +270,16 @@ enum PasskeyKeyFlow {
             credentialId: passkey.credentialId,
             createdVia: nil
         )
+    }
+
+    /// Keep historical CEKs carried by a legacy bundle envelope as
+    /// decrypt-only fallbacks so the migration sweep can unseal rows
+    /// still sealed under a rotated-away key. Additive and idempotent;
+    /// never touches the primary key.
+    private static func retainLegacyAlternatives(_ keys: [String]) {
+        for key in keys {
+            try? EncryptionService.shared.addDecryptionKey(key)
+        }
     }
 
     // MARK: - First-time backup: register the existing local CEK
@@ -320,11 +354,13 @@ enum PasskeyKeyFlow {
         let kek = PasskeyService.deriveKeyEncryptionKey(from: passkey.prfOutput)
         let cek: Data
         do {
-            cek = try SyncEnclaveKeyBundle.unwrapCek(
+            let unwrapped = try SyncEnclaveKeyBundle.unwrapCekDetailed(
                 kek: kek,
                 kekIvHex: dataToHex(ivData),
                 wrappedKeyHex: dataToHex(ciphertextData)
             )
+            cek = unwrapped.cek
+            retainLegacyAlternatives(unwrapped.legacyAlternativeKeys)
         } catch {
             return .failure(.bundleDecryptFailed, message: error.localizedDescription)
         }

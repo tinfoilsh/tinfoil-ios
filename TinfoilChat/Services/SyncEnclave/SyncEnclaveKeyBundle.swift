@@ -40,6 +40,16 @@ enum SyncEnclaveKeyBundleError: LocalizedError {
     }
 }
 
+/// Result of unwrapping a bundle that turned out to carry the legacy
+/// pre-v2 JSON envelope instead of raw CEK bytes. Besides the primary
+/// CEK, the envelope can list historical `key_<base36>` alternatives
+/// that older rows may still be sealed under; callers feed those into
+/// the decrypt-only key history so the migration sweep can unseal them.
+struct SyncEnclaveUnwrappedCek {
+    let cek: Data
+    let legacyAlternativeKeys: [String]
+}
+
 enum SyncEnclaveKeyBundle {
 
     static let cekByteCount = 32
@@ -93,6 +103,23 @@ enum SyncEnclaveKeyBundle {
         kekIvHex: String,
         wrappedKeyHex: String
     ) throws -> Data {
+        return try unwrapCekDetailed(
+            kek: kek,
+            kekIvHex: kekIvHex,
+            wrappedKeyHex: wrappedKeyHex
+        ).cek
+    }
+
+    /// Like `unwrapCek`, but also surfaces the historical alternative
+    /// keys carried by the legacy pre-v2 JSON envelope (empty for v2
+    /// raw-CEK bundles). Callers on the recovery path feed those into
+    /// the decrypt-only key history so legacy rows sealed under
+    /// rotated-away CEKs can still be unsealed by the migration sweep.
+    static func unwrapCekDetailed(
+        kek: SymmetricKey,
+        kekIvHex: String,
+        wrappedKeyHex: String
+    ) throws -> SyncEnclaveUnwrappedCek {
         let iv = try hexToData(kekIvHex)
         guard iv.count == aesGcmIvByteCount else {
             throw SyncEnclaveKeyBundleError.wrongIvLength(iv.count)
@@ -109,33 +136,54 @@ enum SyncEnclaveKeyBundle {
         let sealed = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
         let plaintext = try AES.GCM.open(sealed, using: kek)
         if plaintext.count == cekByteCount {
-            return plaintext
+            return SyncEnclaveUnwrappedCek(cek: plaintext, legacyAlternativeKeys: [])
         }
-        // Pre-v2 webapp bundles wrap a JSON envelope around the CEK
-        // instead of raw bytes. A user who registered their passkey
-        // on that codepath and then signs in on iOS would otherwise
-        // be stuck unable to unlock. Try to recover the primary key
-        // bytes from the legacy shape before giving up.
-        if let legacyCek = legacyJsonPrimaryBytes(plaintext) {
-            return legacyCek
+        // Pre-v2 bundles (webapp and iOS alike) wrap a JSON envelope
+        // around the CEK instead of raw bytes. A user who registered
+        // their passkey on that codepath and then signs in on iOS
+        // would otherwise be stuck unable to unlock. Try to recover
+        // the primary key bytes from the legacy shape before giving up.
+        if let legacy = legacyJsonEnvelopeCek(plaintext) {
+            return legacy
         }
         throw SyncEnclaveKeyBundleError.wrongCekLength(plaintext.count)
     }
 
-    /// Best-effort decode of the legacy `{primary: <base64>, alternatives: [...]}`
-    /// envelope the pre-v2 webapp wrapped before iOS standardised on raw CEK
-    /// bytes. Returns the 32 raw CEK bytes if and only if the plaintext is
-    /// well-formed JSON with a base64 `primary` field that decodes to exactly
-    /// `cekByteCount`. Any deviation returns nil so the caller surfaces the
-    /// original error.
-    private static func legacyJsonPrimaryBytes(_ plaintext: Data) -> Data? {
+    /// Best-effort decode of the legacy `{primary, alternatives: [...]}`
+    /// envelope wrapped before clients standardised on raw CEK bytes.
+    /// `primary` is the `key_<base36>` string every pre-v2 client stored
+    /// (the same codec `EncryptionService` uses for the Keychain); some
+    /// very early builds used base64, so that is tried as a fallback.
+    /// Returns the 32 raw CEK bytes plus any well-formed alternatives,
+    /// or nil so the caller surfaces the original error.
+    private static func legacyJsonEnvelopeCek(_ plaintext: Data) -> SyncEnclaveUnwrappedCek? {
         struct LegacyEnvelope: Decodable {
             let primary: String?
+            let alternatives: [String]?
         }
         guard let envelope = try? JSONDecoder().decode(LegacyEnvelope.self, from: plaintext),
               let primary = envelope.primary,
-              let cek = Data(base64Encoded: primary),
-              cek.count == cekByteCount else {
+              let cek = legacyKeyStringBytes(primary) else {
+            return nil
+        }
+        let alternatives = (envelope.alternatives ?? []).filter {
+            legacyKeyStringBytes($0) != nil && $0 != primary
+        }
+        return SyncEnclaveUnwrappedCek(cek: cek, legacyAlternativeKeys: alternatives)
+    }
+
+    /// Decode one legacy envelope key string to raw CEK bytes.
+    /// Accepts the canonical `key_<base36>` shape and falls back to
+    /// base64 for the earliest envelope format.
+    private static func legacyKeyStringBytes(_ keyString: String) -> Data? {
+        if keyString.hasPrefix("key_") {
+            guard let bytes = try? EncryptionService.shared.getAlternativeKeyBytes(keyString),
+                  bytes.count == cekByteCount else {
+                return nil
+            }
+            return bytes
+        }
+        guard let cek = Data(base64Encoded: keyString), cek.count == cekByteCount else {
             return nil
         }
         return cek

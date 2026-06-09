@@ -163,8 +163,14 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     /// passkey bundle. Encodes the bytes back into the alphanumeric
     /// keychain format so the rest of the app keeps working unchanged.
     func setKeyBytes(_ bytes: Data) async throws {
-        let alphanumeric = "key_" + bytesToAlphanumeric(bytes)
-        try await setKey(alphanumeric)
+        try await setKey(encodeKeyFromBytes(bytes))
+    }
+
+    /// Encode raw CEK bytes into the canonical `key_<base36>` string
+    /// the rest of the app stores and compares. Mirrors the webapp's
+    /// `encodeKeyFromBytes`.
+    func encodeKeyFromBytes(_ bytes: Data) -> String {
+        return "key_" + bytesToAlphanumeric(bytes)
     }
 
     /// Number of historical "alternative" decryption keys currently
