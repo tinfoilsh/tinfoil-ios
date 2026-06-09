@@ -76,18 +76,15 @@ enum LegacyBlobMigration {
             var current = try await SyncEnclaveAPI.keyCurrent()
             // A v1->v2 user can hold legacy data and a local CEK without
             // ever registering it as the current key — e.g. they have no
-            // passkey, so none of the passkey/recovery flows that register
-            // the key ever run, and nothing else would migrate them. Adopt
-            // the local CEK as the current key here (bundleless, recovery)
-            // so the gate below passes. Guarded on the user having no
-            // passkey credential anywhere so a recoverable passkey is never
-            // hidden behind a bundleless key. Mirrors the webapp's
-            // passkey-less migration adoption.
+            // passkey, or only an un-promoted legacy passkey, so none of
+            // the passkey/recovery flows that register the key ever run,
+            // and nothing else would migrate them. Adopt the local CEK as
+            // the current key here (bundleless, recovery) so the gate below
+            // passes. Safe because we already hold the CEK and a legacy
+            // passkey wrapping it stays promotable afterwards. Mirrors the
+            // webapp's migration adoption.
             if current.keyId == nil, current.hasData,
-                await adoptLocalKeyForPasskeylessMigration(
-                    keyB64: targetKeyB64,
-                    current: current
-                )
+                await adoptLocalKeyForMigration(keyB64: targetKeyB64)
             {
                 current = try await SyncEnclaveAPI.keyCurrent()
             }
@@ -180,23 +177,21 @@ enum LegacyBlobMigration {
     // MARK: - Private
 
     /// Register the local primary CEK as the enclave's current key for a
-    /// user who has legacy data but no registered key and no passkey to
-    /// recover with. Without this a passkey-less v1->v2 user could never
-    /// migrate: nothing registers their CEK, so every rewrap is gated out.
+    /// user who has legacy data but no registered key. Without this a
+    /// v1->v2 user who never registered their key — they have no passkey,
+    /// or only an un-promoted legacy passkey — could never migrate:
+    /// nothing registers their CEK, so every rewrap is gated out.
     ///
-    /// The key is registered bundleless with created_via=recovery, which
-    /// the controlplane accepts non-destructively over legacy (key_id NULL)
-    /// rows. Guarded on the user having no passkey credential anywhere — an
-    /// enclave bundle or a legacy passkey — so a recoverable passkey is
-    /// never hidden behind a bundleless key. Returns true when the key was
-    /// adopted. Mirrors the webapp's passkey-less migration adoption.
-    private static func adoptLocalKeyForPasskeylessMigration(
-        keyB64: String,
-        current: EnclaveKeyCurrentResponse
-    ) async -> Bool {
-        guard current.bundles.isEmpty else { return false }
-        let legacy = await LegacyPasskeyCredentials.fetch()
-        guard legacy.isEmpty else { return false }
+    /// Registered bundleless with created_via=recovery, which the
+    /// controlplane accepts non-destructively over legacy (key_id NULL)
+    /// rows. The caller only invokes this when no key is registered
+    /// (key_id == nil) and legacy data exists, so no enclave bundle can
+    /// exist; a legacy passkey wrapping this same CEK stays promotable
+    /// afterwards (recoverFromLegacyPasskey adds its bundle), so adopting
+    /// never strands a backup. register-key's if_match='*' fails safely on
+    /// a concurrent register. Returns true when the key was adopted.
+    /// Mirrors the webapp's migration adoption.
+    private static func adoptLocalKeyForMigration(keyB64: String) async -> Bool {
         do {
             _ = try await SyncEnclaveAPI.registerKey(
                 EnclaveKeyRegisterRequest(
@@ -209,12 +204,12 @@ enum LegacyBlobMigration {
             )
         } catch {
             #if DEBUG
-            print("[LegacyBlobMigration] passkey-less key adoption failed: \(error)")
+            print("[LegacyBlobMigration] local key adoption failed: \(error)")
             #endif
             return false
         }
         #if DEBUG
-        print("[LegacyBlobMigration] adopted local key as current to enable migration without a passkey")
+        print("[LegacyBlobMigration] adopted local key as current to enable migration")
         #endif
         return true
     }
