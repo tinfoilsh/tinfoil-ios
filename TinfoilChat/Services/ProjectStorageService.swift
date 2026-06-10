@@ -309,7 +309,10 @@ final class ProjectStorageService: ObservableObject {
         } while continuationToken != nil && !(continuationToken?.isEmpty ?? true)
 
         let ids = allItems.map(\.id)
-        let projects = (try? await getProjects(ids)) ?? [:]
+        // Let a failed batch fetch propagate: swallowing it here would
+        // dress every project up as a decrypt-failed placeholder when
+        // the real problem was network or auth.
+        let projects = try await getProjects(ids)
         return allItems.map { item -> Project in
             if let p = projects[item.id] {
                 var updated = p
