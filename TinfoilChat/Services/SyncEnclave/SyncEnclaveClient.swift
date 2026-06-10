@@ -257,17 +257,11 @@ actor SyncEnclaveClient {
         )
     }
 
-    private static let absoluteURLProtocolPattern: NSRegularExpression = {
-        // matches schemes like https:, http:, ws+s:, foo-bar+1:
-        try! NSRegularExpression(pattern: "^[a-z][a-z0-9+\\-.]*:", options: [.caseInsensitive])
-    }()
-
+    /// Requiring a single leading slash already rules out absolute
+    /// URLs: a scheme (`https:`, `foo+bar:`) can never start with `/`,
+    /// and `//host` protocol-relative forms are rejected explicitly.
     private static func assertRelativePath(_ path: String) throws {
         if !path.hasPrefix("/") || path.hasPrefix("//") {
-            throw SyncEnclaveError.invalidPath
-        }
-        let range = NSRange(path.startIndex..., in: path)
-        if absoluteURLProtocolPattern.firstMatch(in: path, options: [], range: range) != nil {
             throw SyncEnclaveError.invalidPath
         }
     }
