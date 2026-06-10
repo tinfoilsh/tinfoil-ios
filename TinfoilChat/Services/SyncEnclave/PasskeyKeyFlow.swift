@@ -362,7 +362,6 @@ enum PasskeyKeyFlow {
             )
             cek = unwrapped.cek
             legacyAlternatives = unwrapped.legacyAlternativeKeys
-            retainLegacyAlternatives(legacyAlternatives)
         } catch {
             return .failure(.bundleDecryptFailed, message: error.localizedDescription)
         }
@@ -465,6 +464,12 @@ enum PasskeyKeyFlow {
                 // Non-fatal — the CEK is already recovered locally.
             }
         }
+
+        // Only retain the bundle's historical keys once the recovery is
+        // accepted: a rejected recovery (rotated-away CEK, failed probe)
+        // must not pollute the local key history with alternatives that
+        // were never adopted.
+        retainLegacyAlternatives(legacyAlternatives)
 
         return .success(
             cek: cek,
