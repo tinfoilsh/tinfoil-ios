@@ -544,7 +544,8 @@ final class PasskeyManager: ObservableObject {
             let result = await PasskeyKeyFlow.unlockFromServer(
                 prefer: UserDefaults.standard.string(forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId)
             )
-            if case .success(let cek, let keyIdHex, _, _) = result {
+            switch result {
+            case .success(let cek, let keyIdHex, _, _):
                 do {
                     try await applyRecoveredCek(cek: cek)
                     persistEnclaveKeyId(keyIdHex)
@@ -552,7 +553,13 @@ final class PasskeyManager: ObservableObject {
                 } catch {
                     showPasskeyRecoveryChoice = true
                 }
-            } else {
+            case .failure(.enclaveUnavailable, _):
+                // Transient enclave/network failure — the keyId is
+                // still mismatched, so the next tick retries the
+                // refresh instead of jumping straight to the
+                // recovery / start-fresh prompt.
+                break
+            case .failure:
                 showPasskeyRecoveryChoice = true
             }
         } catch {
