@@ -3852,6 +3852,17 @@ class ChatViewModel: ObservableObject {
                 self.showEncryptionSetup = false
             }
 
+            // A v1 user activating their key on a fresh device has legacy
+            // cloud data but no registered key: the launch-time migration
+            // pass ran before any key existed, so without a re-kick the
+            // key is never adopted and cloud writes stay deferred for the
+            // whole session. Run the migration again now that a key is
+            // active so adoption happens in-session.
+            Task.detached(priority: .background) {
+                _ = await LegacyBlobMigration.runAndFinalize()
+                await PasskeyManager.shared.refreshBundleState()
+            }
+
             await ProfileManager.shared.retryDecryptionWithNewKey()
             await retryDecryptionAndReloadChats()
 
