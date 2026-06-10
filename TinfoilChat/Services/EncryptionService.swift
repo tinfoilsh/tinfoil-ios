@@ -234,24 +234,28 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
             return
         }
 
-        var existingHistory = loadKeyHistory()
+        try mergeAlternativesIntoHistory(alternatives, primary: primary)
+    }
+
+    /// Merge validated alternative keys into the persisted key history,
+    /// skipping the primary, malformed entries, and duplicates. Shared
+    /// by `setAllKeys(...)` and `persistCurrentKeyState()` so the two
+    /// paths cannot drift.
+    private func mergeAlternativesIntoHistory(_ alternatives: [String], primary: String) throws {
+        var history = loadKeyHistory()
         var addedNew = false
 
         for key in alternatives {
             if key == primary { continue }
-            do {
-                _ = try normalizeKeyInput(key)
-            } catch {
-                continue
-            }
-            if !existingHistory.contains(key) {
-                existingHistory.append(key)
+            guard (try? normalizeKeyInput(key)) != nil else { continue }
+            if !history.contains(key) {
+                history.append(key)
                 addedNew = true
             }
         }
 
         if addedNew {
-            try saveKeyHistory(existingHistory)
+            try saveKeyHistory(history)
         }
     }
 
@@ -289,19 +293,7 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         try updateKeyHistory(withNewKey: staged, previousKey: previousKey)
 
         if let alternatives = stagedAlternatives {
-            var existingHistory = loadKeyHistory()
-            var addedNew = false
-            for key in alternatives {
-                if key == staged { continue }
-                guard (try? normalizeKeyInput(key)) != nil else { continue }
-                if !existingHistory.contains(key) {
-                    existingHistory.append(key)
-                    addedNew = true
-                }
-            }
-            if addedNew {
-                try saveKeyHistory(existingHistory)
-            }
+            try mergeAlternativesIntoHistory(alternatives, primary: staged)
         }
 
         stagedPrimaryKey = nil
