@@ -156,6 +156,12 @@ enum SyncEnclaveKeyBundle {
     /// very early builds used base64, so that is tried as a fallback.
     /// Returns the 32 raw CEK bytes plus any well-formed alternatives,
     /// or nil so the caller surfaces the original error.
+    ///
+    /// Alternatives are re-encoded into the canonical `key_<base36>`
+    /// shape regardless of which legacy format carried them: the key
+    /// history they feed (`addDecryptionKey`) only accepts that shape
+    /// and would silently drop a raw base64 string, stranding any
+    /// legacy row still sealed under it.
     private static func legacyJsonEnvelopeCek(_ plaintext: Data) -> SyncEnclaveUnwrappedCek? {
         struct LegacyEnvelope: Decodable {
             let primary: String?
@@ -166,8 +172,14 @@ enum SyncEnclaveKeyBundle {
               let cek = legacyKeyStringBytes(primary) else {
             return nil
         }
-        let alternatives = (envelope.alternatives ?? []).filter {
-            legacyKeyStringBytes($0) != nil && $0 != primary
+        let primaryNormalized = EncryptionService.shared.encodeKeyFromBytes(cek)
+        var seen = Set<String>()
+        var alternatives: [String] = []
+        for alternative in envelope.alternatives ?? [] {
+            guard let bytes = legacyKeyStringBytes(alternative) else { continue }
+            let normalized = EncryptionService.shared.encodeKeyFromBytes(bytes)
+            guard normalized != primaryNormalized, seen.insert(normalized).inserted else { continue }
+            alternatives.append(normalized)
         }
         return SyncEnclaveUnwrappedCek(cek: cek, legacyAlternativeKeys: alternatives)
     }
