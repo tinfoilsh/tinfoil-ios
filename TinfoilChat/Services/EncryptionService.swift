@@ -114,6 +114,15 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         return stagedPrimaryKey ?? loadKeyFromKeychain()
     }
     
+    /// The primary key as committed to the Keychain, ignoring any key
+    /// staged in memory while an activation ceremony awaits enclave
+    /// confirmation. Callers that bind a key server-side outside a
+    /// ceremony (e.g. the lazy empty-remote registration on the write
+    /// gate) must use this so they never register an uncommitted key.
+    func persistedPrimaryKey() -> String? {
+        return loadKeyFromKeychain()
+    }
+
     /// Check if an encryption key exists in the keychain
     /// Returns true if key exists OR if we previously set up a key (to handle temporary keychain failures)
     func hasEncryptionKey() -> Bool {

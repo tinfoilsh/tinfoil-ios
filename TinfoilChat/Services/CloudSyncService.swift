@@ -227,7 +227,19 @@ class CloudSyncService: ObservableObject {
                 // next pass clears this gate.
                 return false
             }
-            return await registerKeyForEmptyRemote(keyB64: dataToBase64(cek))
+            // Only ever bind a key the user has actually committed and
+            // only while cloud sync is on. During an activation ceremony
+            // the new key is staged in memory only; a concurrent
+            // background write must not register it before the ceremony
+            // finishes (a transient failure would roll the client back
+            // while the server stays bound to the discarded key).
+            guard SettingsManager.shared.isCloudSyncEnabled,
+                  let persistedKey = EncryptionService.shared.persistedPrimaryKey(),
+                  let persistedBytes = try? EncryptionService.shared.getAlternativeKeyBytes(persistedKey)
+            else {
+                return false
+            }
+            return await registerKeyForEmptyRemote(keyB64: dataToBase64(persistedBytes))
         }
 
         let localKeyId: String
