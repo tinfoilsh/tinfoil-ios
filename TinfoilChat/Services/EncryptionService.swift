@@ -139,6 +139,19 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         return (primary: loadKeyFromKeychain(), alternatives: loadKeyHistory())
     }
 
+    /// Staged-aware variant of `getAllKeys()`: while a key bundle staged
+    /// via `setKey(_:persist:false)` / `setAllKeys(...:persist:false)`
+    /// awaits enclave confirmation, the staged primary and alternatives
+    /// are the active set the wire operates on, not the Keychain state
+    /// they would replace. Falls back to the persisted bundle when
+    /// nothing is staged.
+    func getActiveKeys() -> (primary: String?, alternatives: [String]) {
+        if let staged = stagedPrimaryKey {
+            return (primary: staged, alternatives: stagedAlternatives ?? [])
+        }
+        return (primary: loadKeyFromKeychain(), alternatives: loadKeyHistory())
+    }
+
     /// Return the raw 32-byte CEK for the primary key. Throws when no
     /// primary key is loaded. Used by the sync-enclave wire which
     /// expects a base64-encoded raw CEK on every push / pull / delete.

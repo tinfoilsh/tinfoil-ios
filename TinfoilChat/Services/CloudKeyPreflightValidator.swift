@@ -27,7 +27,7 @@ enum CloudRemoteState {
 /// Result of probing the local key-set against existing remote rows.
 /// Mirrors the webapp's `LegacyKeyProbeOutcome` so both platforms reach
 /// the same verdict when deciding whether a key may be bound.
-private enum LocalKeyProbeOutcome {
+enum LocalKeyProbeOutcome {
     case decryptable
     case undecryptable
     case noSample
@@ -44,6 +44,7 @@ struct CloudKeyValidationResult {
 final class CloudKeyPreflightValidator {
     static let shared = CloudKeyPreflightValidator()
     static let mismatchMessage = CloudKeyValidationMessages.keyMismatch
+    static let unknownRemoteStateMessage = CloudKeyValidationMessages.unknownRemoteState
 
     private let profileSync = ProfileSyncService.shared
     private let cloudStorage = CloudStorageService.shared
@@ -88,7 +89,7 @@ final class CloudKeyPreflightValidator {
             return unknownResult(message: CloudKeyValidationMessages.noEncryptionKey)
         }
 
-        switch await probeLocalKeysAcrossScopes() {
+        switch await probeKeysAcrossScopes(CEKEncoding.keyValidationProbeKeys()) {
         case .undecryptable:
             return blockedResult()
         case .transientFailure:
@@ -104,16 +105,17 @@ final class CloudKeyPreflightValidator {
         }
     }
 
-    /// Pull a small sample from each data scope with the local key-set
-    /// (primary plus migration alternatives) and classify whether those
-    /// keys can unseal whatever the enclave already holds. The probe
-    /// never short-circuits on the first decryptable row: a single
+    /// Pull a small sample from each data scope with the supplied
+    /// candidate key-set and classify whether those keys can unseal
+    /// whatever the enclave already holds. The probe never
+    /// short-circuits on the first decryptable row: a single
     /// `UNKNOWN_KEY` anywhere is enough to refuse the bind, since binding
     /// a key that cannot open existing rows would strand that data. A
     /// transient pull failure is not proof of mismatch, so it is
     /// reported separately and the caller treats it as retryable.
-    private func probeLocalKeysAcrossScopes() async -> LocalKeyProbeOutcome {
-        let keys = CEKEncoding.migrationKeys()
+    /// Also used by recovery flows that must verify a recovered CEK
+    /// against existing cloud data before binding it to the enclave.
+    func probeKeysAcrossScopes(_ keys: [EnclavePullKey]) async -> LocalKeyProbeOutcome {
         guard !keys.isEmpty else { return .undecryptable }
 
         var sawDecryptable = false
