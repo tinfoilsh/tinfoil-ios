@@ -11,6 +11,7 @@
 //  fresh plaintext from the enclave.
 //
 
+import CryptoKit
 import Foundation
 
 enum LegacyChatEviction {
@@ -38,14 +39,27 @@ enum LegacyChatEviction {
         for entry in entries {
             // Load each chat individually so one unreadable file cannot
             // abort the sweep for everything else. A load failure may be
-            // transient (e.g. data protection while the device is
-            // locked), so never delete on an uncertain read — leave the
-            // one-shot flag unset and retry on the next launch instead.
+            // transient (key not loaded yet, data protection while the
+            // device is locked), so never delete on an uncertain read —
+            // leave the one-shot flag unset and retry on the next launch.
+            // A definitive content failure (no held key opens the
+            // ciphertext, corrupt payload) is exactly the unreadable
+            // legacy row this sweep exists to clear: it can never load
+            // again and would shadow the enclave copy forever, so evict
+            // it like a decryptionFailed placeholder.
             let chat: Chat?
             do {
                 chat = try await storage.loadChat(chatId: entry.id, userId: userId)
             } catch {
-                allDeletesSucceeded = false
+                if isPermanentlyUnreadable(error) {
+                    do {
+                        try await storage.deleteChat(chatId: entry.id, userId: userId)
+                    } catch {
+                        allDeletesSucceeded = false
+                    }
+                } else {
+                    allDeletesSucceeded = false
+                }
                 continue
             }
             guard let chat, shouldEvict(chat) else { continue }
@@ -61,6 +75,23 @@ enum LegacyChatEviction {
         // next launch so the orphan rows don't survive forever.
         if allDeletesSucceeded {
             defaults.set(true, forKey: flagKey)
+        }
+    }
+
+    /// True only when the file content itself is the problem: AES-GCM
+    /// rejected the ciphertext under every held key, or the payload no
+    /// longer decodes. Key-not-loaded and file I/O errors stay false so
+    /// a locked device or a key that arrives after recovery never costs
+    /// a chat. Evicted rows are local caches of cloud chats — the
+    /// enclave still holds them and the next sync repopulates.
+    private static func isPermanentlyUnreadable(_ error: Error) -> Bool {
+        if error is DecodingError { return true }
+        if error is CryptoKitError { return true }
+        switch error {
+        case EncryptionError.invalidEncryptedData, EncryptionError.invalidBase64:
+            return true
+        default:
+            return false
         }
     }
 
