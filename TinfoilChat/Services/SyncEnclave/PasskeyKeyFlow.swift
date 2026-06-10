@@ -33,7 +33,6 @@ import Foundation
 enum PasskeyFlowFailure: String, Sendable {
     case userCancelled
     case prfUnsupported
-    case passkeyTimeout
     case noRemoteBundle
     case noRemoteKey
     case bundleDecryptFailed
