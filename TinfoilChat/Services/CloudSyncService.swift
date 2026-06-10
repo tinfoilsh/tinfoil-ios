@@ -192,10 +192,14 @@ class CloudSyncService: ObservableObject {
 
     /// The enclave is the source of truth for write authority: the local
     /// CEK may write only when it derives the key id the enclave currently
-    /// has registered, or when the remote has no key yet (the first sealed
-    /// write registers it lazily). A local authorization hint is never
-    /// sufficient on its own — another device may have rotated or reset the
-    /// key, leaving this device's hint stale.
+    /// has registered. The enclave never registers a key as a side effect
+    /// of a write — without a `user_keys` row every push is rejected as a
+    /// stale key — so when the remote has no key yet this gate registers
+    /// the local CEK itself (empty remote) or defers the write until the
+    /// legacy-migration path adopts the key (un-migrated legacy data). A
+    /// local authorization hint is never sufficient on its own — another
+    /// device may have rotated or reset the key, leaving this device's
+    /// hint stale.
     private func canWriteToCloud() async -> Bool {
         let cek: Data
         do {
@@ -215,7 +219,15 @@ class CloudSyncService: ObservableObject {
         }
 
         guard let remoteKeyId = response.keyId else {
-            return true
+            if response.hasData {
+                // Un-migrated legacy data with no registered key: pushing
+                // now would only earn a stale-key rejection, and adopting
+                // the key here would bypass the migration path's decrypt
+                // probe. Defer; once the migration adopts the key the
+                // next pass clears this gate.
+                return false
+            }
+            return await registerKeyForEmptyRemote(keyB64: dataToBase64(cek))
         }
 
         let localKeyId: String
@@ -226,6 +238,42 @@ class CloudSyncService: ObservableObject {
         }
 
         return localKeyId == remoteKeyId
+    }
+
+    private var emptyRemoteRegistration: Task<Bool, Never>?
+
+    /// Bind the loaded primary CEK as the enclave's current key when the
+    /// remote is completely empty. The controlplane rejects every push as
+    /// a stale key until a user_keys row exists, and nothing else
+    /// registers a manually generated/imported key on a brand-new
+    /// account, so the write gate performs the registration itself. The
+    /// AnyKey sentinel keeps this race-safe across devices: registration
+    /// only succeeds while no key is registered, and a loss just defers
+    /// the push until the next validation pass sees the winner's key.
+    private func registerKeyForEmptyRemote(keyB64: String) async -> Bool {
+        if let inFlight = emptyRemoteRegistration {
+            return await inFlight.value
+        }
+        let task = Task<Bool, Never> {
+            do {
+                _ = try await SyncEnclaveAPI.registerKey(
+                    EnclaveKeyRegisterRequest(
+                        key: keyB64,
+                        ifMatch: IfMatchSentinels.anyKey,
+                        createdVia: SyncEnclaveCreatedVia.manual.rawValue,
+                        idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                        initialBundle: nil
+                    )
+                )
+                return true
+            } catch {
+                return false
+            }
+        }
+        emptyRemoteRegistration = task
+        let result = await task.value
+        emptyRemoteRegistration = nil
+        return result
     }
     
     // MARK: - Initialization
