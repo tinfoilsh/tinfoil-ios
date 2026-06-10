@@ -50,6 +50,22 @@ class ThinkingTextChunker {
         }
     }
 
+    /// Appends a late fragment of an already-finalized thought to the last
+    /// completed chunk so it continues that paragraph instead of starting a
+    /// new one.
+    func appendTail(_ token: String) {
+        if workingBuffer.isEmpty, !completedChunks.isEmpty {
+            let last = completedChunks[completedChunks.count - 1]
+            completedChunks[completedChunks.count - 1] = ThinkingChunk(
+                id: last.id,
+                content: last.content + token,
+                isComplete: true
+            )
+        } else {
+            appendToken(token)
+        }
+    }
+
     func finalize() {
         if !workingBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let chunkId = "thinking_\(completedChunks.count)"

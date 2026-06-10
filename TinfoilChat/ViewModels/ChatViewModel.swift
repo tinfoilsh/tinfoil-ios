@@ -1932,13 +1932,13 @@ class ChatViewModel: ObservableObject {
                 var thoughtsBuffer = ""
                 var isInThinkingMode = false
                 var isUsingReasoningFormat = false
-                // Reasoning deltas that arrive after the answer started are
-                // held here until they contain substantive text. Routers
-                // interleave trailing punctuation/whitespace crumbs of the
-                // previous reasoning (e.g. ". ") into the content stream,
-                // and re-entering thinking mode for those flickers the
-                // thinking UI mid-reply.
-                var pendingReasoningTail = ""
+                // True while thinking was closed by answer content (not by
+                // a tool boundary). Reasoning arriving in that state is the
+                // late tail of the previous thought — upstreams race the
+                // think-close boundary so the final reasoning fragment can
+                // land after content started — and is merged into the
+                // existing thoughts without re-entering thinking mode.
+                var thinkingClosedByContent = false
                 var didRecordWebSearchBeforeThinking = false
                 var webSearchBeforeThinking: Bool? = nil
                 var initialContentBuffer = ""
@@ -2015,6 +2015,9 @@ class ChatViewModel: ObservableObject {
                         for event in parsed.events {
                             applyWebSearchCallEvent(event)
                         }
+                        if !parsed.events.isEmpty {
+                            thinkingClosedByContent = false
+                        }
                         content = parsed.text
                     }
                     let hasReasoningContent = chunk.choices.first?.delta.reasoning != nil
@@ -2028,6 +2031,7 @@ class ChatViewModel: ObservableObject {
                     // canonical `timeline` so the wire format matches
                     // `TimelineToolCallBlock` exactly.
                     if let deltas = chunk.choices.first?.delta.toolCalls {
+                        thinkingClosedByContent = false
                         for delta in deltas {
                             let index = delta.index ?? 0
                             let existing = streamingToolCalls[index]
@@ -2101,6 +2105,7 @@ class ChatViewModel: ObservableObject {
                         isUsingReasoningFormat = true
                         isInThinkingMode = true
                         isFirstChunk = false
+                        thinkingClosedByContent = false
                         thinkStartTime = Date()
                         if !didRecordWebSearchBeforeThinking {
                             didRecordWebSearchBeforeThinking = true
@@ -2122,6 +2127,7 @@ class ChatViewModel: ObservableObject {
                                 generationTimeSeconds = Date().timeIntervalSince(startTime)
                             }
                             isInThinkingMode = false
+                            thinkingClosedByContent = true
                             thinkStartTime = nil
                             thinkingChunker.finalize()
                             if responseContent.isEmpty {
@@ -2146,33 +2152,39 @@ class ChatViewModel: ObservableObject {
                                         self?.thinkingSummary = summary
                                     }
                                 }
+                            } else if thinkingClosedByContent {
+                                // Late tail of the thought that content
+                                // already closed. Merge it into the existing
+                                // thoughts without re-entering thinking mode,
+                                // so the answer isn't split around a phantom
+                                // thought.
+                                thoughtsBuffer += reasoningContent
+                                thinkingChunker.appendTail(reasoningContent)
+                                currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                                didMutateState = true
                             } else {
-                                pendingReasoningTail += reasoningContent
-                                if pendingReasoningTail.rangeOfCharacter(from: .alphanumerics) != nil {
-                                    isInThinkingMode = true
-                                    thoughtsBuffer += pendingReasoningTail
-                                    thinkingChunker.appendToken(pendingReasoningTail)
-                                    currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                                    pendingReasoningTail = ""
-                                    didMutateState = true
-                                    let currentThoughtsForSummary = thoughtsBuffer
-                                    Task { @MainActor [weak self] in
-                                        ThinkingSummaryService.shared.generateSummary(thoughts: currentThoughtsForSummary) { summary in
-                                            self?.thinkingSummary = summary
-                                        }
+                                // Reasoning resumed after a tool boundary —
+                                // a new thinking phase of the next model turn.
+                                isInThinkingMode = true
+                                thoughtsBuffer += reasoningContent
+                                thinkingChunker.appendToken(reasoningContent)
+                                currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                                didMutateState = true
+                                let currentThoughtsForSummary = thoughtsBuffer
+                                Task { @MainActor [weak self] in
+                                    ThinkingSummaryService.shared.generateSummary(thoughts: currentThoughtsForSummary) { summary in
+                                        self?.thinkingSummary = summary
                                     }
                                 }
                             }
                         }
 
-                        if !content.isEmpty {
-                            pendingReasoningTail = ""
-                        }
                         if !content.isEmpty && isInThinkingMode {
                             if let startTime = thinkStartTime {
                                 generationTimeSeconds = Date().timeIntervalSince(startTime)
                             }
                             isInThinkingMode = false
+                            thinkingClosedByContent = true
                             thinkStartTime = nil
                             thinkingChunker.finalize()
                             currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
