@@ -274,6 +274,7 @@ struct SettingsView: View {
     @State private var accountDeletionError: String? = nil
     @State private var passkeyBundles: [EnclaveKeyCurrentBundle] = []
     @State private var removingPasskeyId: String? = nil
+    @State private var passkeyBundleError: String? = nil
 
     var shouldOpenCloudSync: Bool = false
     
@@ -483,7 +484,7 @@ struct SettingsView: View {
                     .padding(.vertical, 2)
                 }
 
-                if !passkeyBundles.isEmpty {
+                if !passkeyBundles.isEmpty || passkeyBundleError != nil {
                     passkeyBundleInventory
                 }
 
@@ -673,6 +674,11 @@ struct SettingsView: View {
                     isCurrentPlatform: bundle.credentialId == localCredentialId
                 )
             }
+            if let passkeyBundleError {
+                Text(passkeyBundleError)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
         }
         .padding(.vertical, 4)
     }
@@ -736,12 +742,17 @@ struct SettingsView: View {
     private func refreshPasskeyBundles() async {
         guard settings.isCloudSyncEnabled else {
             passkeyBundles = []
+            passkeyBundleError = nil
             return
         }
         do {
             passkeyBundles = try await passkeyManager.listPasskeyBundles()
+            passkeyBundleError = nil
         } catch {
-            passkeyBundles = []
+            // Keep the previous inventory: clearing it would make a
+            // load failure indistinguishable from "no passkeys
+            // registered" for a security-relevant list.
+            passkeyBundleError = "Couldn't load registered passkeys. Please try again later."
         }
     }
 
@@ -752,8 +763,7 @@ struct SettingsView: View {
             try await passkeyManager.removePasskeyBundle(credentialId: credentialId)
             await refreshPasskeyBundles()
         } catch {
-            // Toast / inline error would be nice; for now leave the
-            // row in place and rely on the user retrying.
+            passkeyBundleError = "Couldn't remove the passkey. Please try again."
         }
     }
 
