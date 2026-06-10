@@ -477,10 +477,11 @@ struct EnclaveMigrateAllResponse: Decodable {
     }
 }
 
-/// Empty body used by `/v1/blobs/migrate-status`. The enclave reads
-/// the user identity off the authenticated session, so no payload is
-/// needed; we still send `{}` to keep the POST contract consistent
-/// with the rest of the sync API.
+/// Empty body for endpoints that read the user identity off the
+/// authenticated session (e.g. `/v1/key/current`,
+/// `/v1/blobs/migrate-status`). No payload is needed; we still send
+/// `{}` to keep the POST contract consistent with the rest of the
+/// sync API.
 struct EnclaveEmptyRequest: Encodable {}
 
 // MARK: - Attachments
@@ -625,7 +626,7 @@ enum SyncEnclaveAPI {
         do {
             let response: EnclaveKeyCurrentResponse = try await SyncEnclaveClient.shared.post(
                 path: "/v1/key/current",
-                body: EmptyBody()
+                body: EnclaveEmptyRequest()
             )
             return response
         } catch let error as SyncEnclaveError where error.status == 404 {
@@ -715,8 +716,6 @@ enum SyncEnclaveAPI {
 }
 
 // MARK: - Helpers
-
-private struct EmptyBody: Encodable {}
 
 /// Mint a fresh idempotency key for one logical enclave write. The
 /// key MUST be reused across every HTTP retry of the same logical
