@@ -757,7 +757,6 @@ func dataToHex(_ data: Data) -> String {
 /// non-hex character.
 func hexToData(_ hex: String) throws -> Data {
     guard !hex.isEmpty else { throw SyncEnclaveError(message: "Empty hex string") }
-    guard hex.count % 2 == 0 else { throw SyncEnclaveError(message: "Odd-length hex string") }
     var data = Data(capacity: hex.count / 2)
     var iterator = hex.makeIterator()
     while let high = iterator.next() {
