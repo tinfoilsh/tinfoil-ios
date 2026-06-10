@@ -322,7 +322,7 @@ class CloudStorageService: ObservableObject {
         continuationToken: String? = nil,
         includeContent: Bool = false
     ) async throws -> ChatListResponse {
-        let effectiveLimit = min(limit ?? chatListLimit, 500)
+        let effectiveLimit = min(limit ?? chatListLimit, Constants.SyncEnclave.listStatusPageLimit)
         let status = try await SyncEnclaveAPI.listStatus(
             EnclaveListStatusRequest(
                 scope: .chat,
@@ -392,7 +392,7 @@ class CloudStorageService: ObservableObject {
         var cursor: String? = nil
         repeat {
             let status = try await SyncEnclaveAPI.listStatus(
-                EnclaveListStatusRequest(scope: .chat, cursor: cursor, limit: 500, projectId: nil)
+                EnclaveListStatusRequest(scope: .chat, cursor: cursor, limit: Constants.SyncEnclave.listStatusPageLimit, projectId: nil)
             )
             count += status.updates.count
             for update in status.updates {
@@ -412,7 +412,7 @@ class CloudStorageService: ObservableObject {
         var cursor: String? = since
         repeat {
             let status = try await SyncEnclaveAPI.listStatus(
-                EnclaveListStatusRequest(scope: .chat, cursor: cursor, limit: 500, projectId: nil)
+                EnclaveListStatusRequest(scope: .chat, cursor: cursor, limit: Constants.SyncEnclave.listStatusPageLimit, projectId: nil)
             )
             for entry in status.deletes {
                 deletedIds.append(entry.id)
@@ -448,7 +448,7 @@ class CloudStorageService: ObservableObject {
         var cursor: String? = nil
         repeat {
             let status = try await SyncEnclaveAPI.listStatus(
-                EnclaveListStatusRequest(scope: .chat, cursor: cursor, limit: 500, projectId: nil)
+                EnclaveListStatusRequest(scope: .chat, cursor: cursor, limit: Constants.SyncEnclave.listStatusPageLimit, projectId: nil)
             )
             for update in status.updates {
                 _ = try await SyncEnclaveAPI.deleteRow(
@@ -523,7 +523,7 @@ class CloudStorageService: ObservableObject {
                 EnclaveListStatusRequest(
                     scope: .chat,
                     cursor: cursor,
-                    limit: 500,
+                    limit: Constants.SyncEnclave.listStatusPageLimit,
                     projectId: projectId
                 )
             )

@@ -243,7 +243,7 @@ final class ProjectStorageService: ObservableObject {
         var cursor: String? = nil
         repeat {
             let status = try await SyncEnclaveAPI.listStatus(
-                EnclaveListStatusRequest(scope: .project, cursor: cursor, limit: 500, projectId: nil)
+                EnclaveListStatusRequest(scope: .project, cursor: cursor, limit: Constants.SyncEnclave.listStatusPageLimit, projectId: nil)
             )
             for update in status.updates {
                 _ = try await SyncEnclaveAPI.deleteRow(
@@ -267,7 +267,7 @@ final class ProjectStorageService: ObservableObject {
         continuationToken: String? = nil,
         includeContent: Bool = true
     ) async throws -> ProjectListResponse {
-        let pageLimit = min(limit, 500)
+        let pageLimit = min(limit, Constants.SyncEnclave.listStatusPageLimit)
         let status = try await SyncEnclaveAPI.listStatus(
             EnclaveListStatusRequest(
                 scope: .project,
@@ -342,7 +342,7 @@ final class ProjectStorageService: ObservableObject {
         var cursor: String? = nil
         repeat {
             let status = try await SyncEnclaveAPI.listStatus(
-                EnclaveListStatusRequest(scope: .project, cursor: cursor, limit: 500, projectId: nil)
+                EnclaveListStatusRequest(scope: .project, cursor: cursor, limit: Constants.SyncEnclave.listStatusPageLimit, projectId: nil)
             )
             count += status.updates.count
             for update in status.updates {
@@ -483,7 +483,7 @@ final class ProjectStorageService: ObservableObject {
 
     func listDocuments(projectId: String, includeContent: Bool = true) async throws -> [ProjectDocument] {
         var status = try await SyncEnclaveAPI.listStatus(
-            EnclaveListStatusRequest(scope: .projectDocument, cursor: nil, limit: 500, projectId: nil)
+            EnclaveListStatusRequest(scope: .projectDocument, cursor: nil, limit: Constants.SyncEnclave.listStatusPageLimit, projectId: nil)
         )
         var allUpdates = status.updates
         while hasNextCursor(status.nextCursor) {
@@ -491,7 +491,7 @@ final class ProjectStorageService: ObservableObject {
                 EnclaveListStatusRequest(
                     scope: .projectDocument,
                     cursor: status.nextCursor,
-                    limit: 500,
+                    limit: Constants.SyncEnclave.listStatusPageLimit,
                     projectId: nil
                 )
             )

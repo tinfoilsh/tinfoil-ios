@@ -97,6 +97,9 @@ enum Constants {
         static let projectListLimit = 100
         static let projectChatListLimit = 100
         static let migrationBatchLimit = 100
+        /// Hard per-page cap the enclave's list-status endpoint
+        /// enforces; requests above it are clamped server-side.
+        static let listStatusPageLimit = 500
     }
 
 
