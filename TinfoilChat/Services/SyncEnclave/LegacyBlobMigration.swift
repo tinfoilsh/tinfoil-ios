@@ -48,6 +48,9 @@ struct MigrationReport {
 
 enum LegacyBlobMigration {
 
+    /// Terminal coordinator status for a job that died mid-run.
+    private static let failedJobStatus = "failed"
+
     /// Run the enclave-driven migration. Kicks off the detached
     /// migration job, then polls migrate-status until the
     /// coordinator reaches a terminal state (`partial:false` or
@@ -139,14 +142,21 @@ enum LegacyBlobMigration {
 
         let snapshot = lastResponse.map { snapshotScopes($0.scopes) } ?? [:]
         var report = toReport(snapshot)
-        if lastResponse?.partial != false {
+        // A failed coordinator job can report partial=false: the flag
+        // starts false and only flips when the run hits its budget, so
+        // a job that dies before any scope makes progress finishes as
+        // status=failed + partial=false with empty scopes. Treating
+        // that as a clean drain would clear the alternative keys after
+        // nothing was rewrapped, stranding every legacy row.
+        let jobFailed = lastResponse?.status == failedJobStatus
+        if lastResponse?.partial != false || jobFailed {
             report.fullyMigrated = false
         }
         // Freshly-keyed user with nothing to migrate — Layer C must
         // still be allowed to clear the alternative-keys list even
         // though no scopes were touched.
         if snapshot.isEmpty {
-            if let last = lastResponse, !last.partial {
+            if let last = lastResponse, !last.partial, !jobFailed {
                 return MigrationReport(
                     scopes: [],
                     totalMigrated: 0,
