@@ -206,7 +206,7 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     /// in place. Called once `migrate-all` confirms every legacy row
     /// has been re-sealed under the primary CEK.
     func clearFallbackKeys() {
-        try? saveKeyHistory([])
+        deleteKeyHistoryFromKeychain()
     }
 
     /// Add a decryption-only fallback key without changing the primary key.
