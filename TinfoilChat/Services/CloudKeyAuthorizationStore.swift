@@ -169,21 +169,33 @@ final class CloudKeyAuthorizationStore {
     /// created_via=start_fresh, which atomically drops the old rows and
     /// rebinds the user to this CEK.
     ///
-    /// No-op when the key is already authoritative (an empty remote, a
-    /// matching key id, or a prior ceremony). Throws when the enclave
-    /// can't be reached so the caller surfaces "try again" instead of
-    /// stranding a local-only key the enclave never accepted.
+    /// No-op only when the enclave's registered key already IS this CEK
+    /// (matching key id) — a prior ceremony that registered it must not
+    /// be wiped again. Every other state registers, including an empty
+    /// remote and unregistered legacy data: start-fresh still needs the
+    /// enclave-side key row, or every subsequent push is rejected as a
+    /// stale key. Throws when the enclave can't be reached so the caller
+    /// surfaces "try again" instead of stranding a local-only key the
+    /// enclave never accepted.
     func registerStartFreshKeyIfNeeded() async throws {
-        let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
-        if validation.canWrite { return }
-        guard validation.remoteState == .exists else {
+        let cek = try EncryptionService.shared.getKeyBytesOrThrow()
+        let keyB64 = cek.base64EncodedString()
+
+        let current: EnclaveKeyCurrentResponse
+        do {
+            current = try await SyncEnclaveAPI.keyCurrent()
+        } catch {
             throw CloudKeyAuthorizationError.validationFailed(
-                validation.message ?? CloudKeyPreflightValidator.mismatchMessage
+                CloudKeyPreflightValidator.unknownRemoteStateMessage
             )
         }
 
-        let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
-        let current = try await SyncEnclaveAPI.keyCurrent()
+        if let remoteKeyId = current.keyId,
+           let localKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek),
+           localKeyId == remoteKeyId {
+            return
+        }
+
         _ = try await SyncEnclaveAPI.registerKey(
             EnclaveKeyRegisterRequest(
                 key: keyB64,
