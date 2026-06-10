@@ -739,28 +739,18 @@ struct SettingsView: View {
             return
         }
         do {
-            let state = try await SyncEnclaveAPI.keyCurrent()
-            passkeyBundles = Array(state.bundles.values)
+            passkeyBundles = try await passkeyManager.listPasskeyBundles()
         } catch {
             passkeyBundles = []
         }
     }
 
     private func removeBundle(_ credentialId: String) async {
-        guard let cek = try? EncryptionService.shared.getKeyBytesOrThrow(),
-              let keyIdHex = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek) else {
-            return
-        }
         removingPasskeyId = credentialId
         defer { removingPasskeyId = nil }
         do {
-            try await PasskeyKeyFlow.removeBundleFromCurrentKey(
-                cek: cek,
-                keyIdHex: keyIdHex,
-                credentialId: credentialId
-            )
+            try await passkeyManager.removePasskeyBundle(credentialId: credentialId)
             await refreshPasskeyBundles()
-            await passkeyManager.refreshBundleState()
         } catch {
             // Toast / inline error would be nice; for now leave the
             // row in place and rely on the user retrying.

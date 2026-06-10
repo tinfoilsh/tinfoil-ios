@@ -329,6 +329,27 @@ final class PasskeyManager: ObservableObject {
         await checkPasskeyStateForExistingKey()
     }
 
+    /// Fetch the enclave's bundle inventory for the current key. Used
+    /// by the Settings "Registered platforms" list so the view never
+    /// talks to the enclave wire directly.
+    func listPasskeyBundles() async throws -> [EnclaveKeyCurrentBundle] {
+        let state = try await SyncEnclaveAPI.keyCurrent()
+        return Array(state.bundles.values)
+    }
+
+    /// Remove a passkey bundle from the enclave's current key, then
+    /// re-evaluate the local passkey state.
+    func removePasskeyBundle(credentialId: String) async throws {
+        let cek = try EncryptionService.shared.getKeyBytesOrThrow()
+        let keyIdHex = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+        try await PasskeyKeyFlow.removeBundleFromCurrentKey(
+            cek: cek,
+            keyIdHex: keyIdHex,
+            credentialId: credentialId
+        )
+        await refreshBundleState()
+    }
+
     /// Create a passkey bundle for the user's existing CEK. Used by
     /// "Add this device to passkey backup" in Settings.
     func createPasskeyBackup() async {
