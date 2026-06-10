@@ -250,7 +250,7 @@ class ChatViewModel: ObservableObject {
     var activeProjectChats: [Chat] {
         guard let projectId = activeProject?.id else { return [] }
         return chats
-            .filter { $0.projectId == projectId && !$0.isTemporary && !$0.isBlankChat }
+            .filter { $0.projectId == projectId && !$0.isTemporary && !$0.isBlankChat && !$0.decryptionFailed }
             .sorted { $0.updatedAt > $1.updatedAt }
     }
     
