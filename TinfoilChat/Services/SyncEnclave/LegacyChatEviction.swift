@@ -27,15 +27,28 @@ enum LegacyChatEviction {
         guard !defaults.bool(forKey: flagKey) else { return }
 
         let storage = EncryptedFileStorage.cloud
-        let chats: [Chat]
+        let entries: [ChatIndexEntry]
         do {
-            chats = try await storage.loadAllChats(userId: userId)
+            entries = try await storage.loadIndex(userId: userId)
         } catch {
             return
         }
 
         var allDeletesSucceeded = true
-        for chat in chats where shouldEvict(chat) {
+        for entry in entries {
+            // Load each chat individually so one unreadable file cannot
+            // abort the sweep for everything else. A load failure may be
+            // transient (e.g. data protection while the device is
+            // locked), so never delete on an uncertain read — leave the
+            // one-shot flag unset and retry on the next launch instead.
+            let chat: Chat?
+            do {
+                chat = try await storage.loadChat(chatId: entry.id, userId: userId)
+            } catch {
+                allDeletesSucceeded = false
+                continue
+            }
+            guard let chat, shouldEvict(chat) else { continue }
             do {
                 try await storage.deleteChat(chatId: chat.id, userId: userId)
             } catch {
