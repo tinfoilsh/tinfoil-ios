@@ -58,6 +58,11 @@ enum PasskeyError: LocalizedError {
 private struct PrfCacheEntry: Codable {
     let credentialId: String
     let prfOutput: Data
+    /// Optional for backward compatibility with entries cached before
+    /// the flag was persisted; readers must treat a missing value as
+    /// cross-platform so a cached hybrid credential is never wrongly
+    /// remembered as this device's.
+    var isPlatformAuthenticator: Bool?
 }
 
 /// Handles passkey creation, authentication, and KEK derivation via PRF + HKDF.
@@ -238,7 +243,8 @@ final class PasskeyService: NSObject {
     func cachePrfResult(_ result: PrfPasskeyResult) {
         let entry = PrfCacheEntry(
             credentialId: result.credentialId,
-            prfOutput: result.prfOutput.withUnsafeBytes { Data($0) }
+            prfOutput: result.prfOutput.withUnsafeBytes { Data($0) },
+            isPlatformAuthenticator: result.isPlatformAuthenticator
         )
         guard let data = try? JSONEncoder().encode(entry) else { return }
 
@@ -278,7 +284,7 @@ final class PasskeyService: NSObject {
         return PrfPasskeyResult(
             credentialId: entry.credentialId,
             prfOutput: SymmetricKey(data: entry.prfOutput),
-            isPlatformAuthenticator: true
+            isPlatformAuthenticator: entry.isPlatformAuthenticator ?? false
         )
     }
 
