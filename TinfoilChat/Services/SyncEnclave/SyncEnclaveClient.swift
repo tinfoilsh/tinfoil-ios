@@ -133,10 +133,7 @@ actor SyncEnclaveClient {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            throw SyncEnclaveError(
-                message: "Sync enclave request failed: \(error.localizedDescription)",
-                code: WireCodes.network
-            )
+            throw Self.wrapTransportError(error)
         }
         return try Self.decode(response: response, path: path)
     }
@@ -156,12 +153,22 @@ actor SyncEnclaveClient {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            throw SyncEnclaveError(
-                message: "Sync enclave request failed: \(error.localizedDescription)",
-                code: WireCodes.network
-            )
+            throw Self.wrapTransportError(error)
         }
         return try Self.decode(response: response, path: path)
+    }
+
+    /// Stamp the NETWORK wire code only on transport failures that a
+    /// retry can plausibly heal. Everything else (TLS/cert failures,
+    /// attestation errors, ...) is rethrown untouched so the recovery
+    /// classifier applies its terminal handling instead of retrying a
+    /// persistent failure forever.
+    private static func wrapTransportError(_ error: Error) -> Error {
+        guard EnclaveErrorRecovery.isTransientNetwork(error) else { return error }
+        return SyncEnclaveError(
+            message: "Sync enclave request failed: \(error.localizedDescription)",
+            code: WireCodes.network
+        )
     }
 
     // MARK: - Private

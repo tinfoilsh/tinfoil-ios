@@ -237,7 +237,7 @@ enum EnclaveErrorRecovery {
     /// pinning failure) and retrying just burns the budget; they
     /// fall through to the terminal default so the recovery
     /// dispatcher surfaces them.
-    private static func isTransientNetwork(_ error: Error) -> Bool {
+    static func isTransientNetwork(_ error: Error) -> Bool {
         let transientURLCodes: Set<Int> = [
             NSURLErrorTimedOut,
             NSURLErrorCannotFindHost,
