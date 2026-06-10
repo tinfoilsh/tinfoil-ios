@@ -92,9 +92,8 @@ actor LinkMetadataService {
         if let cached = cache[url] { return cached }
         if let existing = inFlight[url] { return try await existing.value }
 
-        let task = Task<LinkMetadata, Error> { [weak self] in
-            guard let self = self else { throw LinkMetadataError.invalidURL }
-            return try await self.fetch(url: url)
+        let task = Task<LinkMetadata, Error> {
+            try await self.fetch(url: url)
         }
         inFlight[url] = task
 
