@@ -35,6 +35,7 @@ struct TraitSelectionView: View {
                     .foregroundColor(selectedTraits.contains(trait) ? .white : .primary)
                 }
                 .buttonStyle(PlainButtonStyle())
+                .accessibilityAddTraits(selectedTraits.contains(trait) ? .isSelected : [])
             }
         }
     }

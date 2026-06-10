@@ -248,12 +248,17 @@ struct ChatContainer: View {
                             .frame(width: 24, height: 24)
                             .foregroundColor(toolbarContentColor)
                     }
+                    .accessibilityLabel("Back")
+                    .accessibleHitTarget()
                 } else {
                     Button(action: toggleSidebar) {
                         MenuToXButton(isX: isSidebarOpen)
                             .frame(width: 24, height: 24)
                             .foregroundColor(toolbarContentColor)
                     }
+                    .accessibilityLabel(isSidebarOpen ? "Close menu" : "Open menu")
+                    .accessibilityHint(isSidebarOpen ? "" : "Shows chats, projects and settings")
+                    .accessibleHitTarget()
                 }
             }
             ToolbarItem(placement: .principal) {
@@ -263,10 +268,13 @@ struct ChatContainer: View {
                         .scaledToFit()
                         .frame(height: 22)
                         .opacity(isSidebarOpen && viewModel.activeProject == nil ? 1 : 0)
+                        .accessibilityLabel("Tinfoil")
+                        .accessibilityHidden(!(isSidebarOpen && viewModel.activeProject == nil))
 
                     if !viewModel.isTemporaryMode && viewModel.activeProject == nil && authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled && viewModel.activeStorageTab == .local {
                         chatStorageLabel
                             .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
+                            .accessibilityHidden(isSidebarOpen || isVerificationBadgeExpanded)
                     }
 
                     if let activeProject = viewModel.activeProject {
@@ -281,6 +289,9 @@ struct ChatContainer: View {
                                 .foregroundColor(.accentColor)
                         }
                         .opacity(isVerificationBadgeExpanded ? 0 : 1)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Project: \(activeProject.name)")
+                        .accessibilityHidden(isVerificationBadgeExpanded)
                     }
 
                     if viewModel.isTemporaryMode && viewModel.activeProject == nil {
@@ -292,6 +303,9 @@ struct ChatContainer: View {
                                 .foregroundColor(.accentColor)
                         }
                         .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Temporary chat")
+                        .accessibilityHidden(isSidebarOpen || isVerificationBadgeExpanded)
                     }
                 }
                 .offset(x: (isSidebarOpen && UIDevice.current.userInterfaceIdiom == .pad) ? sidebarWidth / 2 : 0)
@@ -317,6 +331,7 @@ struct ChatContainer: View {
                         )
                     }
                     .accessibilityLabel(viewModel.isTemporaryMode ? "Exit temporary chat" : "Start temporary chat")
+                    .accessibleHitTarget()
                 }
             }
             // Only show new chat button when chat has messages (not a new/blank chat)
@@ -327,6 +342,8 @@ struct ChatContainer: View {
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(toolbarContentColor)
                     }
+                    .accessibilityLabel("New chat")
+                    .accessibleHitTarget()
                 }
             }
             if !authManager.isAuthenticated {
@@ -527,6 +544,8 @@ struct ChatContainer: View {
             .foregroundColor(.secondary)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(isLocal ? "Local storage" : "Cloud storage")
+        .accessibilityHint("Switches between local and cloud chats")
     }
     
     /// Shows the memory view
@@ -1023,6 +1042,16 @@ struct VerificationStatusIndicator: View {
         }
     }
 
+    private var verificationAccessibilityLabel: String {
+        if viewModel.isVerified && viewModel.verificationError == nil {
+            return "Privacy verified"
+        } else if viewModel.isVerifying {
+            return "Verifying privacy"
+        } else {
+            return "Verification failed"
+        }
+    }
+
 
     var body: some View {
         Button(action: { viewModel.showVerifier() }) {
@@ -1054,6 +1083,8 @@ struct VerificationStatusIndicator: View {
             }
             .animation(.easeInOut(duration: 0.35), value: isCollapsed)
         }
+        .accessibilityLabel(verificationAccessibilityLabel)
+        .accessibilityHint("Shows verification details")
         .onAppear {
             if viewModel.isVerified && viewModel.verificationError == nil {
                 isBadgeExpanded = true
@@ -1123,6 +1154,8 @@ struct ModelPicker: View {
                 .scaledToFit()
                 .frame(width: 22, height: 22)
         }
+        .accessibilityLabel("Select model")
+        .accessibilityValue(viewModel.currentModel.displayName)
     }
 }
 

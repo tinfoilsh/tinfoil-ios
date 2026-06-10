@@ -335,6 +335,8 @@ private struct RecipeCardView: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(checked ? .isSelected : [])
+        .accessibilityHint(checked ? "Mark as not done" : "Mark as done")
     }
 
     private func ingredientText(_ ingredient: RecipeCardWidget.Ingredient, checked: Bool) -> Text {
@@ -412,6 +414,8 @@ private struct RecipeCardView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(done ? .isSelected : [])
+        .accessibilityHint(done ? "Mark step as not done" : "Mark step as done")
     }
 
     @ViewBuilder

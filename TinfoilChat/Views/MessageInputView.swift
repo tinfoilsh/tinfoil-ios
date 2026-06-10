@@ -328,6 +328,9 @@ struct MessageInputView: View {
                             isPulsing = isRecording
                         }
                         .disabled(viewModel.isLoading || viewModel.isTranscribing)
+                        .accessibleHitTarget()
+                        .accessibilityLabel(viewModel.isRecording ? "Stop recording" : "Voice input")
+                        .accessibilityValue(viewModel.isTranscribing ? "Transcribing" : "")
                         .padding(.trailing, 4)
                     }
 
@@ -342,6 +345,7 @@ struct MessageInputView: View {
                     .glassEffect(.regular.interactive(), in: .circle)
                     .clipShape(.circle)
                     .tint(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
+                    .accessibilityLabel(viewModel.isLoading ? "Stop generating" : "Send message")
                     .padding(.trailing, 8)
                 }
                 .padding(.vertical, 8)
@@ -431,6 +435,9 @@ struct MessageInputView: View {
                             isPulsing = isRecording
                         }
                         .disabled(viewModel.isLoading || viewModel.isTranscribing)
+                        .accessibleHitTarget()
+                        .accessibilityLabel(viewModel.isRecording ? "Stop recording" : "Voice input")
+                        .accessibilityValue(viewModel.isTranscribing ? "Transcribing" : "")
                         .padding(.trailing, 4)
                     }
 
@@ -445,6 +452,8 @@ struct MessageInputView: View {
                                 .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
                         }
                     }
+                    .accessibilityLabel(viewModel.isLoading ? "Stop generating" : "Send message")
+                    .accessibleHitTarget()
                     .padding(.trailing, 8)
                 }
                 .padding(.vertical, 8)
@@ -480,6 +489,8 @@ struct MessageInputView: View {
                 .frame(width: 24, height: 24)
         }
         .disabled(viewModel.isLoading || viewModel.isProcessingAttachment)
+        .accessibilityLabel("Add attachment")
+        .accessibleHitTarget()
         .padding(.leading, 8)
     }
 
@@ -501,6 +512,9 @@ struct MessageInputView: View {
             .clipShape(Capsule())
         }
         .disabled(viewModel.isLoading)
+        .accessibilityLabel("Model")
+        .accessibilityValue(viewModel.currentModel.displayName)
+        .accessibilityHint("Changes the AI model")
         .padding(.leading, 4)
     }
 
@@ -613,6 +627,7 @@ struct AddToSheetView: View {
                         Image(systemName: "xmark")
                             .font(.system(size: 18, weight: .medium))
                     }
+                    .accessibilityLabel("Close")
                 }
             }
         }
@@ -683,6 +698,7 @@ struct ModelSelectorSheetView: View {
                     .padding(.vertical, 4)
                 }
                 .listRowBackground(Color.clear)
+                .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
             }
             .listStyle(.plain)
             .navigationTitle("Select Model")
@@ -695,6 +711,7 @@ struct ModelSelectorSheetView: View {
                         Image(systemName: "xmark")
                             .font(.system(size: 18, weight: .medium))
                     }
+                    .accessibilityLabel("Close")
                 }
             }
         }
@@ -724,6 +741,8 @@ struct CustomTextEditor: UIViewRepresentable {
         textView.textContainerInset = UIEdgeInsets(top: 16, left: 2, bottom: 8, right: 5)
         textView.textContainer.lineFragmentPadding = 0
         textView.tintColor = UIColor.systemBlue
+        textView.adjustsFontForContentSizeCategory = true
+        textView.accessibilityLabel = "Message"
 
         // Initialize with placeholder or actual text
         if text.isEmpty {
@@ -735,7 +754,8 @@ struct CustomTextEditor: UIViewRepresentable {
                 return traitCollection.userInterfaceStyle == .dark ? .white : .black
             }
         }
-        
+
+        context.coordinator.refreshAccessibility(textView)
         return textView
     }
     
@@ -777,6 +797,7 @@ struct CustomTextEditor: UIViewRepresentable {
         }
 
         uiView.isEditable = true
+        context.coordinator.refreshAccessibility(uiView)
 
         let size = uiView.sizeThatFits(CGSize(width: uiView.frame.width, height: CGFloat.greatestFiniteMagnitude))
         let newHeight = min(MessageInputView.Layout.maximumHeight, max(MessageInputView.Layout.minimumHeight, size.height))
@@ -800,7 +821,16 @@ struct CustomTextEditor: UIViewRepresentable {
         init(_ parent: CustomTextEditor) {
             self.parent = parent
         }
-        
+
+        /// Keeps VoiceOver from reading the gray placeholder as if it were
+        /// entered text: the field always reports a stable "Message" label and
+        /// only exposes a value once real text has been typed.
+        func refreshAccessibility(_ textView: UITextView) {
+            textView.accessibilityLabel = "Message"
+            let isShowingPlaceholder = textView.textColor == .lightGray
+            textView.accessibilityValue = isShowingPlaceholder ? "" : textView.text
+        }
+
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
             // Check if Enter key was pressed (without Shift)
             if text == "\n" {
@@ -855,6 +885,7 @@ struct CustomTextEditor: UIViewRepresentable {
                     parent.textHeight = newHeight
                 }
             }
+            refreshAccessibility(textView)
         }
         
         func textViewDidBeginEditing(_ textView: UITextView) {
@@ -866,6 +897,7 @@ struct CustomTextEditor: UIViewRepresentable {
                     return traitCollection.userInterfaceStyle == .dark ? .white : .black
                 }
             }
+            refreshAccessibility(textView)
         }
         
         func textViewDidEndEditing(_ textView: UITextView) {
@@ -875,6 +907,7 @@ struct CustomTextEditor: UIViewRepresentable {
                 textView.text = parent.placeholderText
                 textView.textColor = .lightGray
             }
+            refreshAccessibility(textView)
         }
     }
 } 

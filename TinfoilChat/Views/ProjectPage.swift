@@ -161,6 +161,7 @@ struct ProjectPage: View {
                     .foregroundColor(.secondary)
             }
         }
+        .accessibilityHint("Opens chat")
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
                 deletingChatId = chat.id
@@ -262,6 +263,7 @@ struct ProjectDetailsView: View {
                     }
                 }
                 .disabled(!hasPendingChanges || project == nil || isSaving)
+                .accessibilityLabel("Save")
             }
         }
         .onAppear(perform: syncEditingState)
@@ -338,6 +340,7 @@ struct ProjectDocumentsView: View {
                     Image(systemName: "plus")
                 }
                 .disabled(viewModel.isUploadingProjectDocument)
+                .accessibilityLabel("Add document")
             }
         }
         .sheet(isPresented: $showDocumentPicker) {

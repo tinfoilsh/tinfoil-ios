@@ -113,6 +113,8 @@ private struct ArtifactPreviewView: View {
             .genUICard(isDarkMode: isDarkMode, padding: 14)
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens preview")
         .sheet(isPresented: $showSheet) {
             ArtifactDetailSheet(args: args, isDarkMode: isDarkMode)
         }

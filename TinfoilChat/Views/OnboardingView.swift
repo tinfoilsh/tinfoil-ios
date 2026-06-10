@@ -291,6 +291,9 @@ private struct OnboardingPrivacyPage: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isPrivateOn ? .isSelected : [])
+        .accessibilityHint(isPrivateOn ? "" : "Enables privacy")
         .padding(.horizontal, 24)
     }
 
@@ -556,6 +559,8 @@ private struct OnboardingModelsPage: View {
                                     selectedModelIndex = index
                                 }
                             }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityAddTraits(index == selectedModelIndex ? [.isButton, .isSelected] : .isButton)
                     }
                 }
                 .padding(.horizontal, 24)

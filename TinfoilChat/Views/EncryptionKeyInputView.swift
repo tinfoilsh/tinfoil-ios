@@ -69,6 +69,7 @@ struct EncryptionKeyInputView: View {
                             .autocapitalization(.none)
                             .disableAutocorrection(true)
                             .font(.system(.body, design: .monospaced))
+                            .accessibilityLabel("Encryption key")
                             .focused($isKeyFieldFocused)
                             .onChange(of: keyInput) { _, newValue in
                                 validateKey(newValue)
@@ -97,6 +98,7 @@ struct EncryptionKeyInputView: View {
                                     .background(Color(UIColor.secondarySystemBackground))
                                     .cornerRadius(12)
                             }
+                            .accessibilityLabel(isKeyVisible ? "Hide key" : "Show key")
                         }
                         
                         if let error = keyError {

@@ -82,7 +82,19 @@ private struct StatCardsView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .genUICard(isDarkMode: isDarkMode, padding: 12)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(statAccessibilityLabel(stat))
             }
         }
+    }
+
+    private func statAccessibilityLabel(_ stat: StatCardsWidget.Stat) -> String {
+        var label = "\(stat.label), \(stat.value.stringValue)"
+        if stat.trend == "up" {
+            label += ", trending up"
+        } else if stat.trend == "down" {
+            label += ", trending down"
+        }
+        return label
     }
 }

@@ -703,6 +703,8 @@ struct ObservableMessageCell: View {
                 }
                 .padding(.vertical, 16)
                 .padding(.horizontal, 24)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Older messages above are archived")
             }
 
             ZStack(alignment: .topLeading) {

@@ -355,6 +355,9 @@ struct ChatSidebar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Projects")
+            .accessibilityValue(isProjectsExpanded ? "Expanded" : "Collapsed")
+            .accessibilityHint(isProjectsExpanded ? "Collapses the projects list" : "Expands the projects list")
 
             if isProjectsExpanded {
                 Button {
@@ -397,6 +400,8 @@ struct ChatSidebar: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(project.decryptionFailed == true)
+                    .accessibilityLabel(project.decryptionFailed == true ? "\(project.name), encrypted, unavailable" : project.name)
+                    .accessibilityHint(project.decryptionFailed == true ? "" : "Opens the project")
                 }
             }
         }
@@ -440,6 +445,9 @@ struct ChatSidebar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Chats")
+        .accessibilityValue(isChatsExpanded ? "Expanded" : "Collapsed")
+        .accessibilityHint(isChatsExpanded ? "Collapses the chat list" : "Expands the chat list")
     }
     
     private var cloudLocalTabSwitcher: some View {
@@ -464,6 +472,8 @@ struct ChatSidebar: View {
                 .foregroundColor(activeTab == .cloud ? .primary : .secondary)
             }
             .buttonStyle(PlainButtonStyle())
+            .accessibilityLabel("Cloud chats")
+            .accessibilityAddTraits(activeTab == .cloud ? .isSelected : [])
 
             Button(action: { switchTab(to: .local) }) {
                 HStack(spacing: 4) {
@@ -485,6 +495,8 @@ struct ChatSidebar: View {
                 .foregroundColor(activeTab == .local ? .primary : .secondary)
             }
             .buttonStyle(PlainButtonStyle())
+            .accessibilityLabel("Local chats")
+            .accessibilityAddTraits(activeTab == .local ? .isSelected : [])
         }
         .padding(4)
         .background(
@@ -551,6 +563,7 @@ struct ChatListItem: View {
                             .onSubmit {
                                 onEdit()
                             }
+                            .accessibilityLabel("Chat title")
                         
                         // Save and Cancel buttons for editing mode
                         HStack(spacing: 12) {
@@ -558,10 +571,12 @@ struct ChatListItem: View {
                                 Image(systemName: "checkmark")
                                     .foregroundColor(.primary)
                             }
+                            .accessibilityLabel("Save title")
                             Button(action: { editingTitle = chat.title; onEdit() }) {
                                 Image(systemName: "xmark")
                                     .foregroundColor(.primary)
                             }
+                            .accessibilityLabel("Cancel editing")
                         }
                     } else {
                         HStack(spacing: 4) {
@@ -631,5 +646,42 @@ struct ChatListItem: View {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(Color.gray.opacity(0.1), lineWidth: 1)
         )
+        // Collapse the row into a single VoiceOver element when not editing so
+        // the title, timestamp and state read as one item; the nested edit and
+        // delete buttons are surfaced as custom actions instead of becoming
+        // unreachable elements inside the row button.
+        .accessibilityElement(children: isEditing ? .contain : .ignore)
+        .accessibilityLabel(rowAccessibilityLabel)
+        .accessibilityAddTraits(rowAccessibilityTraits)
+        .accessibilityHint(rowAccessibilityHint)
+        .if(showEditDelete && !chat.isBlankChat && !chat.decryptionFailed && !isEditing) { view in
+            view
+                .accessibilityAction(named: Text("Rename")) { onEdit() }
+                .accessibilityAction(named: Text("Delete")) { onDelete() }
+        }
+    }
+
+    private var rowAccessibilityLabel: String {
+        if chat.decryptionFailed {
+            return "Encrypted chat. Failed to decrypt, wrong key."
+        }
+        var components = [chat.title.isEmpty ? "Untitled chat" : chat.title]
+        if chat.isBlankChat {
+            components.append("New chat")
+        } else if !timeString.isEmpty {
+            components.append(timeString)
+        }
+        return components.joined(separator: ", ")
+    }
+
+    private var rowAccessibilityTraits: AccessibilityTraits {
+        isSelected ? [.isButton, .isSelected] : .isButton
+    }
+
+    private var rowAccessibilityHint: String {
+        if isEditing || chat.decryptionFailed {
+            return ""
+        }
+        return "Opens the conversation"
     }
 }
