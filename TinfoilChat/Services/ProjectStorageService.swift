@@ -457,7 +457,7 @@ final class ProjectStorageService: ObservableObject {
         guard let item = response.items.first else { return nil }
         if !item.ok {
             if item.code == WireCodes.notFound { return nil }
-            return nil
+            throw CloudStorageError.invalidResponse
         }
         guard let b64 = item.plaintext,
               let plaintext = Data(base64Encoded: b64),
