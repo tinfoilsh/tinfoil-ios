@@ -154,9 +154,12 @@ final class CloudKeyAuthorizationStore {
             EncryptionService.shared.discardStagedKeyState()
             throw CloudKeyAuthorizationError.authorizationUnavailable
         }
+        // The mode hint is best-effort local state: failing to stamp
+        // it (e.g. no resolvable user id during a session blip) must
+        // never destroy the key the enclave just accepted and the
+        // Keychain just persisted. Without the hint, writes stay
+        // gated until a later preflight validation re-stamps it.
         guard authorizeCurrentPrimaryKey(mode: mode) else {
-            EncryptionService.shared.clearKey()
-            clearAuthorization()
             throw CloudKeyAuthorizationError.authorizationUnavailable
         }
         return mode
