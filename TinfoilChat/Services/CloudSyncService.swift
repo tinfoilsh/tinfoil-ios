@@ -1889,10 +1889,11 @@ class CloudSyncService: ObservableObject {
 
         // Bypass the status-cache short-circuit in smartSync(): the
         // remote rows themselves haven't changed, only our local
-        // placeholders. A full pull is required to actually refetch
-        // them, otherwise we've just deleted the failed chats and
-        // left nothing in their place.
-        _ = await syncAllChats()
+        // placeholders. A deep pull is required to actually refetch
+        // them — the default first-page sync would leave any failed
+        // chat older than the first page deleted locally with nothing
+        // in its place until the user happens to paginate that far.
+        _ = await syncAllChats(deep: true)
 
         // Only count chats that were actually re-fetched and decrypted
         // successfully. Chats that were deleted upstream stay gone and
