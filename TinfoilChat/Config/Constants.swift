@@ -338,6 +338,14 @@ enum StorageKeysMigration {
     private static let migrationCompleteKey = "tinfoil-settings-storage-keys-migrated"
 
     static func migrateIfNeeded() {
+        // Purge outside the one-shot guard: users who completed the
+        // key-rename migration before this list existed would
+        // otherwise keep the stale v1 entries forever. Removing an
+        // absent key is a no-op, so re-running every launch is cheap.
+        for key in Constants.StorageKeys.legacyKeysToRemove {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+
         guard !UserDefaults.standard.bool(forKey: migrationCompleteKey) else { return }
 
         let migrations: [(old: String, new: String)] = [
@@ -376,10 +384,6 @@ enum StorageKeysMigration {
                 UserDefaults.standard.set(value, forKey: new)
                 UserDefaults.standard.removeObject(forKey: old)
             }
-        }
-
-        for key in Constants.StorageKeys.legacyKeysToRemove {
-            UserDefaults.standard.removeObject(forKey: key)
         }
 
         UserDefaults.standard.set(true, forKey: migrationCompleteKey)
