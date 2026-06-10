@@ -1932,6 +1932,13 @@ class ChatViewModel: ObservableObject {
                 var thoughtsBuffer = ""
                 var isInThinkingMode = false
                 var isUsingReasoningFormat = false
+                // Reasoning deltas that arrive after the answer started are
+                // held here until they contain substantive text. Routers
+                // interleave trailing punctuation/whitespace crumbs of the
+                // previous reasoning (e.g. ". ") into the content stream,
+                // and re-entering thinking mode for those flickers the
+                // thinking UI mid-reply.
+                var pendingReasoningTail = ""
                 var didRecordWebSearchBeforeThinking = false
                 var webSearchBeforeThinking: Bool? = nil
                 var initialContentBuffer = ""
@@ -2107,22 +2114,60 @@ class ChatViewModel: ObservableObject {
                         Task { @MainActor in
                             ThinkingSummaryService.shared.reset()
                         }
+                        // Some routers attach content to the same chunk as
+                        // the first reasoning delta; close the thinking
+                        // session and emit it so the text isn't dropped.
+                        if !content.isEmpty {
+                            if let startTime = thinkStartTime {
+                                generationTimeSeconds = Date().timeIntervalSince(startTime)
+                            }
+                            isInThinkingMode = false
+                            thinkStartTime = nil
+                            thinkingChunker.finalize()
+                            if responseContent.isEmpty {
+                                responseContent = content
+                            } else {
+                                responseContent += content
+                            }
+                            chunker.appendToken(content)
+                            appendText(content)
+                        }
                     } else if isUsingReasoningFormat {
                         if !reasoningContent.isEmpty {
-                            thoughtsBuffer += reasoningContent
-                            thinkingChunker.appendToken(reasoningContent)
-                            currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                            isInThinkingMode = true
-                            didMutateState = true
-                            // Generate thinking summary (reuse existing client)
-                            let currentThoughtsForSummary = thoughtsBuffer
-                            Task { @MainActor [weak self] in
-                                ThinkingSummaryService.shared.generateSummary(thoughts: currentThoughtsForSummary) { summary in
-                                    self?.thinkingSummary = summary
+                            if isInThinkingMode {
+                                thoughtsBuffer += reasoningContent
+                                thinkingChunker.appendToken(reasoningContent)
+                                currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                                didMutateState = true
+                                // Generate thinking summary (reuse existing client)
+                                let currentThoughtsForSummary = thoughtsBuffer
+                                Task { @MainActor [weak self] in
+                                    ThinkingSummaryService.shared.generateSummary(thoughts: currentThoughtsForSummary) { summary in
+                                        self?.thinkingSummary = summary
+                                    }
+                                }
+                            } else {
+                                pendingReasoningTail += reasoningContent
+                                if pendingReasoningTail.rangeOfCharacter(from: .alphanumerics) != nil {
+                                    isInThinkingMode = true
+                                    thoughtsBuffer += pendingReasoningTail
+                                    thinkingChunker.appendToken(pendingReasoningTail)
+                                    currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                                    pendingReasoningTail = ""
+                                    didMutateState = true
+                                    let currentThoughtsForSummary = thoughtsBuffer
+                                    Task { @MainActor [weak self] in
+                                        ThinkingSummaryService.shared.generateSummary(thoughts: currentThoughtsForSummary) { summary in
+                                            self?.thinkingSummary = summary
+                                        }
+                                    }
                                 }
                             }
                         }
 
+                        if !content.isEmpty {
+                            pendingReasoningTail = ""
+                        }
                         if !content.isEmpty && isInThinkingMode {
                             if let startTime = thinkStartTime {
                                 generationTimeSeconds = Date().timeIntervalSince(startTime)
