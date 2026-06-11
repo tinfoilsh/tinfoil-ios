@@ -3501,6 +3501,29 @@ class ChatViewModel: ObservableObject {
     
     // MARK: - Cloud Sync Methods
 
+    /// Permanently deletes every chat, mirroring the webapp: the cloud
+    /// bulk-delete runs first so a failure leaves local state untouched and
+    /// the user can retry without partial-deletion side effects.
+    @MainActor
+    func deleteAllChats() async throws {
+        let localIds = chats.map(\.id) + localChats.map(\.id)
+
+        if authManager?.isAuthenticated == true && EncryptionService.shared.hasEncryptionKey() {
+            try await cloudSync.deleteAllFromCloud()
+        }
+
+        // Tombstone so an in-flight sync pass can't resurrect wiped chats
+        for id in localIds {
+            DeletedChatsTracker.shared.markAsDeleted(id)
+        }
+
+        await clearAllChatsFromDevice()
+        // The device wipe clears the in-memory key reference; restore it so
+        // newly created chats keep syncing.
+        reloadEncryptionKey()
+        createNewChat()
+    }
+
     /// Removes all cloud (non-local) chats from the device
     @MainActor
     func deleteNonLocalChats() async {

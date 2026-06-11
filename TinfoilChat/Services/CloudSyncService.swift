@@ -1652,6 +1652,17 @@ class CloudSyncService: ObservableObject {
     // MARK: - Delete Operations
     
     /// Delete a chat from cloud storage
+    /// Bulk-delete every chat the user owns from cloud storage. Returns the
+    /// number of rows deleted. Callers are responsible for tombstoning local
+    /// IDs only after this succeeds, mirroring the webapp's ordering.
+    @discardableResult
+    func deleteAllFromCloud() async throws -> Int {
+        guard await cloudStorage.isAuthenticated() else {
+            throw CloudStorageError.authenticationRequired
+        }
+        return try await cloudStorage.deleteAllChats()
+    }
+
     func deleteFromCloud(_ chatId: String) async throws {
         // Mark as deleted locally first
         deletedChatsTracker.markAsDeleted(chatId)

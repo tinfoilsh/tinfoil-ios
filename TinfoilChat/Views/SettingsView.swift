@@ -255,6 +255,14 @@ struct SettingsView: View {
     @State private var showSignOutConfirmation = false
     @State private var showPremiumModal = false
     @State private var accountDeletionError: String? = nil
+    @State private var showDeleteAllChatsConfirm = false
+    @State private var deleteAllChatsConfirmText = ""
+    @State private var isDeletingAllChats = false
+    @State private var deleteAllChatsResult: String? = nil
+
+    /// Typed confirmation phrase gating the bulk chat deletion, matching the
+    /// webapp's safeguard for the same feature.
+    private static let deleteAllChatsConfirmPhrase = "delete all chats"
 
     var shouldOpenCloudSync: Bool = false
     
@@ -572,6 +580,74 @@ struct SettingsView: View {
         .listRowBackground(Color.cardSurface(for: colorScheme))
     }
 
+    private var dataSection: some View {
+        Section {
+            Button(action: {
+                showDeleteAllChatsConfirm = true
+            }) {
+                HStack {
+                    Text("Delete All Chats")
+                        .foregroundColor(.red)
+                    Spacer()
+                    if isDeletingAllChats {
+                        ProgressView()
+                    }
+                }
+            }
+            .disabled(isDeletingAllChats)
+        } header: {
+            Text("Data")
+        } footer: {
+            Text(authManager.isAuthenticated
+                 ? "Permanently delete every chat from this device and your encrypted cloud backup. This cannot be undone."
+                 : "Permanently delete every chat from this device. This cannot be undone.")
+                .font(.caption)
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
+        .alert("Delete All Chats", isPresented: $showDeleteAllChatsConfirm) {
+            TextField(Self.deleteAllChatsConfirmPhrase, text: $deleteAllChatsConfirmText)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            Button("Cancel", role: .cancel) {
+                deleteAllChatsConfirmText = ""
+            }
+            Button("Delete", role: .destructive) {
+                confirmDeleteAllChats()
+            }
+        } message: {
+            Text("This permanently deletes every chat and cannot be undone. Type \"\(Self.deleteAllChatsConfirmPhrase)\" to confirm.")
+        }
+        .alert("Delete All Chats", isPresented: Binding(
+            get: { deleteAllChatsResult != nil },
+            set: { if !$0 { deleteAllChatsResult = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(deleteAllChatsResult ?? "")
+        }
+    }
+
+    /// Re-checks the typed phrase before deleting, mirroring the webapp's
+    /// defense-in-depth gate on the same action.
+    private func confirmDeleteAllChats() {
+        let typed = deleteAllChatsConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        deleteAllChatsConfirmText = ""
+        guard typed == Self.deleteAllChatsConfirmPhrase else {
+            deleteAllChatsResult = "Deletion cancelled: the confirmation phrase didn't match."
+            return
+        }
+        isDeletingAllChats = true
+        Task {
+            do {
+                try await chatViewModel.deleteAllChats()
+                deleteAllChatsResult = "All chats have been deleted."
+            } catch {
+                deleteAllChatsResult = "Failed to delete all chats. Please try again."
+            }
+            isDeletingAllChats = false
+        }
+    }
+
     private var subscriptionSection: some View {
         Section {
             if authManager.hasActiveSubscription {
@@ -679,6 +755,7 @@ struct SettingsView: View {
                 subscriptionSection
                 chatSettingsSection
                 preferencesSection
+                dataSection
                 contactSection
                 legalSection
             }
