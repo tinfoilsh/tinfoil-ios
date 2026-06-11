@@ -20,6 +20,7 @@ import Foundation
 final class ProjectStorageService: ObservableObject {
     static let shared = ProjectStorageService()
 
+    private let enclaveStore = SyncEnclaveProjectStore()
     private let projectListLimit = Constants.SyncEnclave.projectListLimit
     private var getToken: (() async -> String?)? = nil
 
@@ -93,28 +94,8 @@ final class ProjectStorageService: ObservableObject {
     // MARK: - Project CRUD
 
     func createProject(_ data: CreateProjectData) async throws -> Project {
-        let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
         let idResponse = try await generateProjectId()
-        let payload = ProjectData(
-            name: data.name,
-            description: data.description,
-            systemInstructions: data.systemInstructions,
-            memory: []
-        )
-        let plaintext = try JSONEncoder().encode(payload)
-
-        let response = try await SyncEnclaveAPI.push(
-            EnclavePushRequest(
-                scope: .project,
-                id: idResponse.projectId,
-                key: keyB64,
-                plaintext: plaintext.base64EncodedString(),
-                ifMatch: nil,
-                idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                metadata: nil
-            )
-        )
-
+        let (payload, syncVersion) = try await enclaveStore.createProject(id: idResponse.projectId, data: data)
         let now = isoNow()
         return Project(
             id: idResponse.projectId,
@@ -124,56 +105,19 @@ final class ProjectStorageService: ObservableObject {
             memory: payload.memory,
             createdAt: now,
             updatedAt: now,
-            syncVersion: etagToSyncVersion(response.etag)
+            syncVersion: syncVersion
         )
     }
 
     func updateProject(_ projectId: String, data: UpdateProjectData) async throws {
-        let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
         guard let existing = try await getProject(projectId) else {
             throw CloudStorageError.invalidResponse
         }
-        let payload = ProjectData(
-            name: data.name ?? existing.name,
-            description: data.description ?? existing.description,
-            systemInstructions: data.systemInstructions ?? existing.systemInstructions,
-            memory: data.memory ?? existing.memory
-        )
-        let plaintext = try JSONEncoder().encode(payload)
-
-        _ = try await SyncEnclaveAPI.push(
-            EnclavePushRequest(
-                scope: .project,
-                id: projectId,
-                key: keyB64,
-                plaintext: plaintext.base64EncodedString(),
-                ifMatch: String(existing.syncVersion),
-                idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                metadata: nil
-            )
-        )
+        try await enclaveStore.updateProject(id: projectId, data: data, existing: existing)
     }
 
     func getProject(_ projectId: String) async throws -> Project? {
-        guard let keys = CEKEncoding.pullKeysIfAvailable() else { return nil }
-        let response = try await SyncEnclaveAPI.pull(
-            EnclavePullRequest(
-                scope: .project,
-                ids: [projectId],
-                all: nil,
-                cursor: nil,
-                limit: nil,
-                keys: keys
-            )
-        )
-        guard let item = response.items.first else { return nil }
-        if !item.ok {
-            if item.code == WireCodes.notFound { return nil }
-            throw CloudStorageError.invalidResponse
-        }
-        guard let b64 = item.plaintext,
-              let plaintext = Data(base64Encoded: b64) else { return nil }
-        let decoded = try JSONDecoder().decode(ProjectData.self, from: plaintext)
+        guard let (decoded, syncVersion) = try await enclaveStore.getProject(id: projectId) else { return nil }
         let now = isoNow()
         return Project(
             id: projectId,
@@ -183,83 +127,37 @@ final class ProjectStorageService: ObservableObject {
             memory: decoded.memory,
             createdAt: now,
             updatedAt: now,
-            syncVersion: etagToSyncVersion(item.etag)
+            syncVersion: syncVersion
         )
     }
 
     func getProjects(_ projectIds: [String]) async throws -> [String: Project] {
         guard !projectIds.isEmpty else { return [:] }
-        guard let keys = CEKEncoding.pullKeysIfAvailable() else { return [:] }
-        let response = try await SyncEnclaveAPI.pull(
-            EnclavePullRequest(
-                scope: .project,
-                ids: projectIds,
-                all: nil,
-                cursor: nil,
-                limit: nil,
-                keys: keys
-            )
-        )
+        let decodedProjects = try await enclaveStore.getProjects(ids: projectIds)
         var out: [String: Project] = [:]
-        for item in response.items {
-            guard item.ok,
-                  let b64 = item.plaintext,
-                  let plaintext = Data(base64Encoded: b64),
-                  let decoded = try? JSONDecoder().decode(ProjectData.self, from: plaintext) else {
-                continue
-            }
+        for (id, decoded) in decodedProjects {
             let now = isoNow()
-            out[item.id] = Project(
-                id: item.id,
-                name: decoded.name,
-                description: decoded.description,
-                systemInstructions: decoded.systemInstructions,
-                memory: decoded.memory,
+            out[id] = Project(
+                id: id,
+                name: decoded.0.name,
+                description: decoded.0.description,
+                systemInstructions: decoded.0.systemInstructions,
+                memory: decoded.0.memory,
                 createdAt: now,
                 updatedAt: now,
-                syncVersion: etagToSyncVersion(item.etag)
+                syncVersion: decoded.1
             )
         }
         return out
     }
 
     func deleteProject(_ projectId: String) async throws {
-        let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
-        _ = try await SyncEnclaveAPI.deleteRow(
-            EnclaveDeleteRequest(
-                scope: .project,
-                id: projectId,
-                ifMatch: nil,
-                idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                key: keyB64
-            )
-        )
+        try await enclaveStore.deleteProject(id: projectId)
     }
 
     @discardableResult
     func deleteAllProjects() async throws -> Int {
-        let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
-        var deleted = 0
-        var cursor: String? = nil
-        repeat {
-            let status = try await SyncEnclaveAPI.listStatus(
-                EnclaveListStatusRequest(scope: .project, cursor: cursor, limit: Constants.SyncEnclave.listStatusPageLimit, projectId: nil)
-            )
-            for update in status.updates {
-                _ = try await SyncEnclaveAPI.deleteRow(
-                    EnclaveDeleteRequest(
-                        scope: .project,
-                        id: update.id,
-                        ifMatch: nil,
-                        idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                        key: keyB64
-                    )
-                )
-                deleted += 1
-            }
-            cursor = status.nextCursor
-        } while hasNextCursor(cursor)
-        return deleted
+        try await enclaveStore.deleteAllProjects()
     }
 
     func listProjects(
@@ -406,67 +304,34 @@ final class ProjectStorageService: ObservableObject {
         contentType: String,
         content: String
     ) async throws -> ProjectDocument {
-        let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
         let idResponse = try await generateDocumentId(projectId: projectId)
-        let payload = ProjectDocumentPayload(content: content, filename: filename, contentType: contentType)
-        let plaintext = try JSONEncoder().encode(payload)
-
-        let metadata: [String: AnyCodable] = [
-            "filename": AnyCodable(filename),
-            "contentType": AnyCodable(contentType),
-            "projectId": AnyCodable(projectId)
-        ]
-
-        let response = try await SyncEnclaveAPI.push(
-            EnclavePushRequest(
-                scope: .projectDocument,
-                id: projectDocumentId(projectId: projectId, documentId: idResponse.documentId),
-                key: keyB64,
-                plaintext: plaintext.base64EncodedString(),
-                ifMatch: nil,
-                idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                metadata: metadata
-            )
-        )
-
-        let now = isoNow()
-        let size = content.data(using: .utf8)?.count ?? content.count
-        return ProjectDocument(
-            id: idResponse.documentId,
+        let wireId = projectDocumentId(projectId: projectId, documentId: idResponse.documentId)
+        let (payload, syncVersion) = try await enclaveStore.uploadDocument(
+            id: wireId,
             projectId: projectId,
             filename: filename,
             contentType: contentType,
+            content: content
+        )
+
+        let now = isoNow()
+        let size = payload.content.data(using: .utf8)?.count ?? payload.content.count
+        return ProjectDocument(
+            id: idResponse.documentId,
+            projectId: projectId,
+            filename: payload.filename,
+            contentType: payload.contentType,
             sizeBytes: size,
-            syncVersion: etagToSyncVersion(response.etag),
+            syncVersion: syncVersion,
             createdAt: now,
             updatedAt: now,
-            content: content
+            content: payload.content
         )
     }
 
     func getDocument(projectId: String, documentId: String) async throws -> ProjectDocument? {
-        guard let keys = CEKEncoding.pullKeysIfAvailable() else { return nil }
         let wireId = projectDocumentId(projectId: projectId, documentId: documentId)
-        let response = try await SyncEnclaveAPI.pull(
-            EnclavePullRequest(
-                scope: .projectDocument,
-                ids: [wireId],
-                all: nil,
-                cursor: nil,
-                limit: nil,
-                keys: keys
-            )
-        )
-        guard let item = response.items.first else { return nil }
-        if !item.ok {
-            if item.code == WireCodes.notFound { return nil }
-            throw CloudStorageError.invalidResponse
-        }
-        guard let b64 = item.plaintext,
-              let plaintext = Data(base64Encoded: b64),
-              let decoded = try? JSONDecoder().decode(ProjectDocumentPayload.self, from: plaintext) else {
-            return nil
-        }
+        guard let (decoded, syncVersion) = try await enclaveStore.getDocument(id: wireId) else { return nil }
         let now = isoNow()
         return ProjectDocument(
             id: documentId,
@@ -474,7 +339,7 @@ final class ProjectStorageService: ObservableObject {
             filename: decoded.filename,
             contentType: decoded.contentType,
             sizeBytes: decoded.content.data(using: .utf8)?.count ?? decoded.content.count,
-            syncVersion: etagToSyncVersion(item.etag),
+            syncVersion: syncVersion,
             createdAt: now,
             updatedAt: now,
             content: decoded.content
@@ -503,12 +368,14 @@ final class ProjectStorageService: ObservableObject {
 
         if includeContent {
             let ids = scoped.map { $0.id }
-            guard let keys = CEKEncoding.pullKeysIfAvailable() else {
-                // No keys to unseal with: surface every known row as a
-                // decrypt-failed placeholder so the documents don't
-                // silently vanish from the list until a key arrives.
-                return scoped.map { update in
-                    let docId = documentIdFromWireId(update.id)
+            let documents = try await enclaveStore.getDocuments(ids: ids)
+            return scoped.map { update -> ProjectDocument in
+                let docId = documentIdFromWireId(update.id)
+                guard let decoded = documents[update.id] else {
+                    // Surface the row as a decrypt-failed placeholder so
+                    // the UI can render it and the user can take action
+                    // (retry with another key, delete it, etc.) instead
+                    // of silently dropping the document.
                     return ProjectDocument(
                         id: docId,
                         projectId: projectId,
@@ -522,51 +389,16 @@ final class ProjectStorageService: ObservableObject {
                         decryptionFailed: true
                     )
                 }
-            }
-            let response = try await SyncEnclaveAPI.pull(
-                EnclavePullRequest(
-                    scope: .projectDocument,
-                    ids: ids,
-                    all: nil,
-                    cursor: nil,
-                    limit: nil,
-                    keys: keys
-                )
-            )
-            return response.items.map { item -> ProjectDocument in
-                let docId = documentIdFromWireId(item.id)
-                let updateMatch = scoped.first(where: { $0.id == item.id })
-                guard item.ok,
-                      let b64 = item.plaintext,
-                      let plaintext = Data(base64Encoded: b64),
-                      let decoded = try? JSONDecoder().decode(ProjectDocumentPayload.self, from: plaintext) else {
-                    // Surface the row as a decrypt-failed placeholder so
-                    // the UI can render it and the user can take action
-                    // (retry with another key, delete it, etc.) instead
-                    // of silently dropping the document.
-                    return ProjectDocument(
-                        id: docId,
-                        projectId: projectId,
-                        filename: "",
-                        contentType: "",
-                        sizeBytes: 0,
-                        syncVersion: etagToSyncVersion(updateMatch?.etag),
-                        createdAt: createdAtFromReverseId(docId),
-                        updatedAt: updateMatch?.updatedAt ?? isoNow(),
-                        content: nil,
-                        decryptionFailed: true
-                    )
-                }
                 return ProjectDocument(
                     id: docId,
                     projectId: projectId,
-                    filename: decoded.filename,
-                    contentType: decoded.contentType,
-                    sizeBytes: decoded.content.data(using: .utf8)?.count ?? decoded.content.count,
-                    syncVersion: etagToSyncVersion(updateMatch?.etag),
+                    filename: decoded.0.filename,
+                    contentType: decoded.0.contentType,
+                    sizeBytes: decoded.0.content.data(using: .utf8)?.count ?? decoded.0.content.count,
+                    syncVersion: decoded.1,
                     createdAt: createdAtFromReverseId(docId),
-                    updatedAt: updateMatch?.updatedAt ?? isoNow(),
-                    content: decoded.content,
+                    updatedAt: update.updatedAt,
+                    content: decoded.0.content,
                     decryptionFailed: false
                 )
             }
@@ -590,17 +422,8 @@ final class ProjectStorageService: ObservableObject {
     }
 
     func deleteDocument(projectId: String, documentId: String) async throws {
-        let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
         let wireId = projectDocumentId(projectId: projectId, documentId: documentId)
-        _ = try await SyncEnclaveAPI.deleteRow(
-            EnclaveDeleteRequest(
-                scope: .projectDocument,
-                id: wireId,
-                ifMatch: nil,
-                idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                key: keyB64
-            )
-        )
+        try await enclaveStore.deleteDocument(id: wireId)
     }
 
     func getDocumentSyncStatus(projectId: String) async throws -> ProjectDocumentSyncStatus {

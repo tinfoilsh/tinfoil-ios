@@ -307,16 +307,16 @@ struct DeletedChatsResponse: Codable {
 /// Remote chat metadata from API
 struct RemoteChat: Codable {
     let id: String
-    var key: String?
-    var createdAt: String
-    var updatedAt: String
-    var title: String?  // Optional - encrypted chats don't have readable titles
-    var messageCount: Int?  // Optional - might not be present
-    var syncVersion: Int?  // Optional - for version tracking
-    var size: Int?  // Optional - file size
-    var content: String?  // Plaintext envelope-v2 chat content (optional in list)
-    var formatVersion: Int?  // 0=legacy JSON, 1=gzip+binary, 2=plaintext (enclave-unsealed)
-    var projectId: String?  // Project association (returned by all-updated-since)
+    let key: String?
+    let createdAt: String
+    let updatedAt: String
+    let title: String?  // Optional - encrypted chats don't have readable titles
+    let messageCount: Int?  // Optional - might not be present
+    let syncVersion: Int?  // Optional - for version tracking
+    let size: Int?  // Optional - file size
+    let content: String?  // Plaintext envelope-v2 chat content (optional in list)
+    let formatVersion: Int?  // 0=legacy JSON, 1=gzip+binary, 2=plaintext (enclave-unsealed)
+    let projectId: String?  // Project association (returned by all-updated-since)
 }
 
 /// Request for generating conversation ID

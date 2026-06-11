@@ -596,13 +596,21 @@ class CloudStorageService: ObservableObject {
                 pulledById[item.id] = (content, etagToSyncVersion(item.etag))
             }
             for index in conversations.indices {
-                let id = conversations[index].id
-                guard let pulled = pulledById[id] else { continue }
-                conversations[index].content = pulled.content
-                conversations[index].formatVersion = 2
-                if let sync = pulled.syncVersion {
-                    conversations[index].syncVersion = sync
-                }
+                let existing = conversations[index]
+                guard let pulled = pulledById[existing.id] else { continue }
+                conversations[index] = RemoteChat(
+                    id: existing.id,
+                    key: existing.key,
+                    createdAt: existing.createdAt,
+                    updatedAt: existing.updatedAt,
+                    title: existing.title,
+                    messageCount: existing.messageCount,
+                    syncVersion: pulled.syncVersion ?? existing.syncVersion,
+                    size: existing.size,
+                    content: pulled.content,
+                    formatVersion: 2,
+                    projectId: existing.projectId
+                )
             }
         } catch {
             // Listing succeeded; surface only metadata when content

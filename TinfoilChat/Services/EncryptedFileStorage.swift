@@ -122,6 +122,11 @@ actor EncryptedFileStorage {
 
     private func syncMetadataPath(chatId: String, userId: String) throws -> URL {
         let dir = try chatsDirectory(userId: userId)
+        return dir.appendingPathComponent("\(sanitizePathComponent(chatId)).sync.enc")
+    }
+
+    private func legacySyncMetadataPath(chatId: String, userId: String) throws -> URL {
+        let dir = try chatsDirectory(userId: userId)
         return dir.appendingPathComponent("\(sanitizePathComponent(chatId)).sync.json")
     }
 
@@ -131,30 +136,45 @@ actor EncryptedFileStorage {
         let locallyModified: Bool
     }
 
-    private func readSyncSidecar(chatId: String, userId: String) -> SyncMetadataSidecar? {
-        guard
-            let path = try? syncMetadataPath(chatId: chatId, userId: userId),
-            fileManager.fileExists(atPath: path.path),
-            let data = try? Data(contentsOf: path),
-            let meta = try? decoder.decode(SyncMetadataSidecar.self, from: data)
-        else {
-            return nil
+    private func readSyncSidecar(chatId: String, userId: String) async -> SyncMetadataSidecar? {
+        if let path = try? syncMetadataPath(chatId: chatId, userId: userId),
+           fileManager.fileExists(atPath: path.path),
+           let data = try? Data(contentsOf: path),
+           let encrypted = try? decoder.decode(EncryptedData.self, from: data),
+           let decrypted = try? await encryptor.decryptData(encrypted),
+           let meta = try? decoder.decode(SyncMetadataSidecar.self, from: decrypted) {
+            return meta
         }
-        return meta
+
+        if let path = try? legacySyncMetadataPath(chatId: chatId, userId: userId),
+           fileManager.fileExists(atPath: path.path),
+           let data = try? Data(contentsOf: path),
+           let meta = try? decoder.decode(SyncMetadataSidecar.self, from: data) {
+            return meta
+        }
+
+        return nil
     }
 
     private func writeSyncSidecar(
         chatId: String,
         userId: String,
         _ meta: SyncMetadataSidecar
-    ) throws {
+    ) async throws {
         let path = try syncMetadataPath(chatId: chatId, userId: userId)
         let data = try encoder.encode(meta)
-        try data.write(to: path, options: [.atomic, .completeFileProtection])
+        let encrypted = try await encryptor.encryptData(data)
+        let encryptedData = try encoder.encode(encrypted)
+        try encryptedData.write(to: path, options: [.atomic, .completeFileProtection])
+
+        let legacyPath = try legacySyncMetadataPath(chatId: chatId, userId: userId)
+        if fileManager.fileExists(atPath: legacyPath.path) {
+            try? fileManager.removeItem(at: legacyPath)
+        }
     }
 
-    private func overlaySyncSidecar(_ chat: inout Chat, userId: String) {
-        guard let meta = readSyncSidecar(chatId: chat.id, userId: userId) else { return }
+    private func overlaySyncSidecar(_ chat: inout Chat, userId: String) async {
+        guard let meta = await readSyncSidecar(chatId: chat.id, userId: userId) else { return }
         chat.syncVersion = meta.syncVersion
         chat.syncedAt = meta.syncedAt
         chat.locallyModified = meta.locallyModified
@@ -231,10 +251,10 @@ actor EncryptedFileStorage {
         // snapshot is at least as fresh as what's already on disk,
         // otherwise a load-modify-save that overlapped a concurrent
         // updateSyncMetadata would silently regress the version.
-        let existingSidecar = readSyncSidecar(chatId: chat.id, userId: userId)
+        let existingSidecar = await readSyncSidecar(chatId: chat.id, userId: userId)
         let sidecarIsNewer = existingSidecar.map { chat.syncVersion < $0.syncVersion } ?? false
         if !sidecarIsNewer {
-            try writeSyncSidecar(
+            try await writeSyncSidecar(
                 chatId: chat.id,
                 userId: userId,
                 SyncMetadataSidecar(
@@ -271,7 +291,7 @@ actor EncryptedFileStorage {
         let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
         if fileManager.fileExists(atPath: encPath.path) {
             if var chat = try await loadChatFromFile(encPath, isRaw: false) {
-                overlaySyncSidecar(&chat, userId: userId)
+                await overlaySyncSidecar(&chat, userId: userId)
                 return chat
             }
             return nil
@@ -281,7 +301,7 @@ actor EncryptedFileStorage {
         let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
         if fileManager.fileExists(atPath: rawPath.path) {
             if var chat = try await loadChatFromFile(rawPath, isRaw: true) {
-                overlaySyncSidecar(&chat, userId: userId)
+                await overlaySyncSidecar(&chat, userId: userId)
                 return chat
             }
             return nil
@@ -300,14 +320,14 @@ actor EncryptedFileStorage {
         // erroneously deleting its fresh index entry.
         if fileManager.fileExists(atPath: encPath.path) {
             if var chat = try await loadChatFromFile(encPath, isRaw: false) {
-                overlaySyncSidecar(&chat, userId: userId)
+                await overlaySyncSidecar(&chat, userId: userId)
                 return chat
             }
             return nil
         }
         if fileManager.fileExists(atPath: rawPath.path) {
             if var chat = try await loadChatFromFile(rawPath, isRaw: true) {
-                overlaySyncSidecar(&chat, userId: userId)
+                await overlaySyncSidecar(&chat, userId: userId)
                 return chat
             }
             return nil
@@ -360,7 +380,7 @@ actor EncryptedFileStorage {
             return true
         }
         guard var chat = loaded else { return false }
-        overlaySyncSidecar(&chat, userId: userId)
+        await overlaySyncSidecar(&chat, userId: userId)
         guard shouldEvict(chat) else { return false }
         try await performDeleteChat(chatId: chatId, userId: userId)
         return true
@@ -380,6 +400,10 @@ actor EncryptedFileStorage {
         let sidecarPath = try syncMetadataPath(chatId: chatId, userId: userId)
         if fileManager.fileExists(atPath: sidecarPath.path) {
             try? fileManager.removeItem(at: sidecarPath)
+        }
+        let legacySidecarPath = try legacySyncMetadataPath(chatId: chatId, userId: userId)
+        if fileManager.fileExists(atPath: legacySidecarPath.path) {
+            try? fileManager.removeItem(at: legacySidecarPath)
         }
 
         var entries = (try? await loadIndex(userId: userId)) ?? []
@@ -435,7 +459,7 @@ actor EncryptedFileStorage {
         syncedAt: Date,
         locallyModified: Bool
     ) async throws {
-        try writeSyncSidecar(
+        try await writeSyncSidecar(
             chatId: chatId,
             userId: userId,
             SyncMetadataSidecar(
@@ -490,7 +514,7 @@ actor EncryptedFileStorage {
             guard chatId != "index" else { continue }
 
             if var chat = try? await loadChatFromFile(fileURL, isRaw: ext == "raw") {
-                overlaySyncSidecar(&chat, userId: userId)
+                await overlaySyncSidecar(&chat, userId: userId)
                 entries.append(ChatIndexEntry(from: chat))
             }
         }
