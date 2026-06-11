@@ -216,9 +216,9 @@ struct ProjectPage: View {
     }
 
     private func timestampString(for chat: Chat) -> String {
-        let created = relativeTimeString(from: chat.createdAt).lowercased()
+        let created = relativeTimeString(from: chat.createdAt)
         let updated = relativeTimeString(from: chat.updatedAt).lowercased()
-        return "Created \(created) · Updated \(updated)"
+        return "\(created) · Updated \(updated)"
     }
 }
 
