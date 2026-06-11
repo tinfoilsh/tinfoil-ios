@@ -1255,6 +1255,7 @@ struct MarkdownText: View {
         StructuredText(markdown: content)
             .textual.highlighterTheme(.default)
             .textual.textSelection(.enabled)
+            .textual.thematicBreakStyle(ChatThematicBreakStyle())
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, horizontalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1276,6 +1277,7 @@ struct AdaptiveMarkdownText: View {
     var body: some View {
         StructuredText(markdown: content)
             .textual.highlighterTheme(.default)
+            .textual.thematicBreakStyle(ChatThematicBreakStyle())
             .fixedSize(horizontal: false, vertical: true)
             .padding(.bottom, -16)
             .padding(.horizontal, horizontalPadding)

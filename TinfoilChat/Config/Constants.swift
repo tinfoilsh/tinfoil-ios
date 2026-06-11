@@ -55,6 +55,13 @@ enum Constants {
         /// Individual markdown segments larger than this are split at
         /// paragraph boundaries to bound CoreText measurement time.
         static let maxMarkdownSegmentCharacters = 8_000
+        /// Font-scaled (em) spacing above a markdown horizontal rule.
+        static let thematicBreakTopSpacing: CGFloat = 1.6
+        /// Font-scaled (em) spacing below a markdown horizontal rule.
+        /// Smaller than the top spacing because the following paragraph
+        /// contributes its own 0.8 em top spacing, which makes the
+        /// perceived gap symmetric.
+        static let thematicBreakBottomSpacing: CGFloat = 0.8
     }
 
     enum StreamingBuffer {

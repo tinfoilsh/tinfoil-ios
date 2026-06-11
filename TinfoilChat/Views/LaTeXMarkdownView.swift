@@ -11,6 +11,19 @@ import Textual
 import SwiftMath
 import UIKit
 
+/// Thematic break style with spacing balanced against the default
+/// paragraph style, so horizontal rules sit evenly between blocks.
+struct ChatThematicBreakStyle: StructuredText.ThematicBreakStyle {
+    func makeBody(configuration _: Configuration) -> some View {
+        Divider()
+            .frame(minHeight: 1)
+            .textual.blockSpacing(.fontScaled(
+                top: Constants.Rendering.thematicBreakTopSpacing,
+                bottom: Constants.Rendering.thematicBreakBottomSpacing
+            ))
+    }
+}
+
 private enum SegmentKind: Sendable {
     case markdown(String)
     case latex(String, isDisplay: Bool)
@@ -178,6 +191,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 markdownFallback(content: content)
             }
         }
+        .textual.thematicBreakStyle(ChatThematicBreakStyle())
         .padding(.horizontal, horizontalPadding)
         .frame(maxWidth: horizontalPadding > 0 ? .infinity : nil, alignment: maxWidthAlignment)
         .transaction { transaction in
