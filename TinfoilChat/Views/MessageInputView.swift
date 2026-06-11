@@ -202,6 +202,37 @@ struct MessageInputView: View {
         }
     }
 
+    /// The indicator is hidden on a blank chat, matching the webapp's
+    /// welcome screen behavior.
+    private var showContextIndicator: Bool {
+        !(viewModel.currentChat?.messages.isEmpty ?? true)
+    }
+
+    /// Estimated context usage for the conversation: non-archived messages
+    /// plus the draft input and pending attachments, against the current
+    /// model's token budget. Mirrors the webapp's calculation.
+    private var contextUsage: ContextUsage {
+        let limitTokens = TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow)
+        var usedTokens = TokenEstimation.estimateTokenCount(messageText)
+
+        let messages = viewModel.messages
+        let startIndex = TokenEstimation.findContextStartIndex(messages: messages, budgetTokens: limitTokens)
+        for i in startIndex..<messages.count {
+            usedTokens += TokenEstimation.estimateMessageTokens(messages[i])
+        }
+
+        for attachment in viewModel.pendingAttachments {
+            usedTokens += TokenEstimation.estimateTokenCount(attachment.textContent)
+            usedTokens += TokenEstimation.estimateTokenCount(attachment.description)
+        }
+
+        return ContextUsage(
+            percentage: Double(usedTokens) / Double(limitTokens) * 100,
+            usedTokens: usedTokens,
+            limitTokens: limitTokens
+        )
+    }
+
     /// When the latest assistant message ends in an input-surface
     /// GenUI tool call, the chat input is replaced by the widget.
     private var pendingInputToolCall: PendingInputToolCall? {
@@ -295,6 +326,11 @@ struct MessageInputView: View {
                             thinkingEnabled: $viewModel.thinkingEnabled
                         )
                         .padding(.leading, 4)
+                    }
+
+                    if showContextIndicator {
+                        ContextUsageIndicator(usage: contextUsage)
+                            .padding(.leading, 4)
                     }
 
                     Spacer()
@@ -402,6 +438,11 @@ struct MessageInputView: View {
                             thinkingEnabled: $viewModel.thinkingEnabled
                         )
                         .padding(.leading, 4)
+                    }
+
+                    if showContextIndicator {
+                        ContextUsageIndicator(usage: contextUsage)
+                            .padding(.leading, 4)
                     }
 
                     Spacer()
