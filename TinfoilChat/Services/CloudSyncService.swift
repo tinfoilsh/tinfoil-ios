@@ -1874,8 +1874,13 @@ class CloudSyncService: ObservableObject {
         onProgress: ((Int, Int) -> Void)? = nil,
         batchSize: Int = 5
     ) async -> Int {
-        let failedChats = await getAllChatsFromStorage().filter { $0.decryptionFailed }
-        if failedChats.isEmpty { return 0 }
+        guard let userId = await getCurrentUserId() else { return 0 }
+        // The index alone knows which chats are placeholders; loading
+        // and decrypting every chat file just to read the flag would
+        // make each retry pass O(n) in disk and crypto work.
+        let index = (try? await EncryptedFileStorage.cloud.loadIndex(userId: userId)) ?? []
+        let failedChatIds = index.filter(\.decryptionFailed).map(\.id)
+        if failedChatIds.isEmpty { return 0 }
 
         // Without keys every pull would come back empty; bail before
         // touching any placeholder so nothing is mistaken for an
@@ -1883,7 +1888,7 @@ class CloudSyncService: ObservableObject {
         guard CEKEncoding.pullKeysIfAvailable() != nil else { return 0 }
 
         var recovered = 0
-        for (index, chat) in failedChats.enumerated() {
+        for (offset, chatId) in failedChatIds.enumerated() {
             // Re-pull each failed chat by id and replace the local
             // placeholder only once the enclave hands back plaintext.
             // A transient failure leaves the placeholder in place, so
@@ -1892,21 +1897,21 @@ class CloudSyncService: ObservableObject {
             // drop their placeholder and stay gone; they must not be
             // reported as "recovered".
             do {
-                if let fresh = try await cloudStorage.downloadChat(chat.id) {
+                if let fresh = try await cloudStorage.downloadChat(chatId) {
                     if fresh.decryptionFailed != true {
                         await saveChatToStorage(fresh)
                         await markChatAsSynced(fresh.id, version: fresh.syncVersion)
                         recovered += 1
                     }
                 } else {
-                    await deleteChatFromStorage(chat.id)
+                    await deleteChatFromStorage(chatId)
                 }
             } catch {
                 // Keep the placeholder; a later pass retries.
             }
 
-            if (index + 1) % batchSize == 0 || index == failedChats.count - 1 {
-                onProgress?(index + 1, failedChats.count)
+            if (offset + 1) % batchSize == 0 || offset == failedChatIds.count - 1 {
+                onProgress?(offset + 1, failedChatIds.count)
                 try? await Task.sleep(nanoseconds: 1_000_000)
             }
         }
