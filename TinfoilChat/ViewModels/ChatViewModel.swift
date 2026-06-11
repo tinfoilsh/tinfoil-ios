@@ -3214,6 +3214,13 @@ class ChatViewModel: ObservableObject {
             // Start auto-sync timer now that user is authenticated
             // (This also handles the case where someone signs in after app launch)
             setupAutoSyncTimer()
+
+            // One-shot legacy cleanup for users who sign in after launch;
+            // the launch-time pass only covers an already-signed-in user.
+            // Flag-gated per user, so re-running is cheap.
+            Task.detached(priority: .background) {
+                await LegacyChatEviction.runIfNeeded(userId: userId)
+            }
             
             // Check if we need to set up encryption first
             // IMPORTANT: Do NOT auto-generate a key here; allow UI to prompt the user

@@ -319,6 +319,44 @@ actor EncryptedFileStorage {
         try await performDeleteChat(chatId: chatId, userId: userId)
     }
 
+    /// Re-read a chat and delete it in one critical section. Holding the
+    /// write lock across both the load and the delete means a concurrent
+    /// saveChat cannot replace the file between the eviction check and
+    /// the removal, so a fresh write is never deleted off a stale read.
+    /// `shouldEvict` judges a successfully loaded chat; load errors the
+    /// caller classifies as evictable delete the file, all others are
+    /// rethrown. Returns true when the chat was deleted.
+    func deleteChatIfEvictable(
+        chatId: String,
+        userId: String,
+        shouldEvict: @Sendable (Chat) -> Bool,
+        shouldEvictOnLoadError: @Sendable (Error) -> Bool
+    ) async throws -> Bool {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+
+        let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
+        let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
+        let hasEnc = fileManager.fileExists(atPath: encPath.path)
+        guard hasEnc || fileManager.fileExists(atPath: rawPath.path) else {
+            return false
+        }
+
+        let loaded: Chat?
+        do {
+            loaded = try await loadChatFromFile(hasEnc ? encPath : rawPath, isRaw: !hasEnc)
+        } catch {
+            guard shouldEvictOnLoadError(error) else { throw error }
+            try await performDeleteChat(chatId: chatId, userId: userId)
+            return true
+        }
+        guard var chat = loaded else { return false }
+        overlaySyncSidecar(&chat, userId: userId)
+        guard shouldEvict(chat) else { return false }
+        try await performDeleteChat(chatId: chatId, userId: userId)
+        return true
+    }
+
     private func performDeleteChat(chatId: String, userId: String) async throws {
         let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
         if fileManager.fileExists(atPath: encPath.path) {

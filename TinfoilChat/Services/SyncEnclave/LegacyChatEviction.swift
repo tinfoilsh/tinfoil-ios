@@ -37,7 +37,7 @@ enum LegacyChatEviction {
 
         var allDeletesSucceeded = true
         for entry in entries {
-            // Load each chat individually so one unreadable file cannot
+            // Check each chat individually so one unreadable file cannot
             // abort the sweep for everything else. A load failure may be
             // transient (key not loaded yet, data protection while the
             // device is locked), so never delete on an uncertain read —
@@ -46,25 +46,17 @@ enum LegacyChatEviction {
             // ciphertext, corrupt payload) is exactly the unreadable
             // legacy row this sweep exists to clear: it can never load
             // again and would shadow the enclave copy forever, so evict
-            // it like a decryptionFailed placeholder.
-            let chat: Chat?
+            // it like a decryptionFailed placeholder. The storage layer
+            // performs the re-read and the delete in one critical
+            // section, so a sync write landing mid-sweep is never
+            // deleted based on the pre-sync state of the chat.
             do {
-                chat = try await storage.loadChat(chatId: entry.id, userId: userId)
-            } catch {
-                if isPermanentlyUnreadable(error) {
-                    do {
-                        try await storage.deleteChat(chatId: entry.id, userId: userId)
-                    } catch {
-                        allDeletesSucceeded = false
-                    }
-                } else {
-                    allDeletesSucceeded = false
-                }
-                continue
-            }
-            guard let chat, shouldEvict(chat) else { continue }
-            do {
-                try await storage.deleteChat(chatId: chat.id, userId: userId)
+                _ = try await storage.deleteChatIfEvictable(
+                    chatId: entry.id,
+                    userId: userId,
+                    shouldEvict: shouldEvict,
+                    shouldEvictOnLoadError: isPermanentlyUnreadable
+                )
             } catch {
                 allDeletesSucceeded = false
             }
