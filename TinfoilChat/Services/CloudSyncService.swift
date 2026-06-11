@@ -762,7 +762,7 @@ class CloudSyncService: ObservableObject {
     }
 
     /// Sync all chats (upload local changes, download remote changes)
-    func syncAllChats(deep: Bool = false) async -> SyncResult {
+    func syncAllChats() async -> SyncResult {
         guard !isSyncing else {
             return SyncResult()
         }
@@ -775,12 +775,12 @@ class CloudSyncService: ObservableObject {
             lastSyncDate = Date()
         }
 
-        let result = await doSyncAllChats(deep: deep)
+        let result = await doSyncAllChats()
         syncErrors = result.errors
         return result
     }
 
-    private func doSyncAllChats(deep: Bool = false) async -> SyncResult {
+    private func doSyncAllChats() async -> SyncResult {
         var result = SyncResult()
 
         // Delete local chats that were deleted on another device
@@ -810,134 +810,120 @@ class CloudSyncService: ObservableObject {
             // Create maps for easy lookup
             let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
 
-            // A deep sync (pull-to-refresh) keeps paging through the rest of
-            // the remote history so older chats that predate this device's
-            // local copy are pulled down too. The periodic and launch syncs
-            // stay first-page-only for bandwidth.
-            //
-            // Pages carry metadata only; content is pulled afterwards for
-            // just the chats that need processing. Pulling content for every
-            // listed chat made a deep refresh O(history) in round trips and
-            // payload, which left pull-to-refresh spinning for minutes on
-            // large accounts. Metadata pages use the server's maximum page
-            // size for the same reason: tombstone-heavy histories paginate
-            // by deletes too, and small pages multiply the round trips.
-            var continuationToken: String? = nil
-            repeat {
-                let remoteList = try await cloudStorage.listChats(
-                    limit: deep ? Constants.SyncEnclave.listStatusPageLimit : Constants.Pagination.chatsPerPage,
-                    continuationToken: continuationToken,
-                    includeContent: false
-                )
-                let remoteConversations = remoteList.conversations
+            // Every entry point (pull-to-refresh, Sync Now, periodic and
+            // launch syncs) syncs the first page only, like the webapp.
+            // Older history is reachable through chat-list pagination, so
+            // refresh work stays bounded regardless of account size. The
+            // page carries metadata only; content is pulled afterwards for
+            // just the chats that need processing.
+            let remoteList = try await cloudStorage.listChats(
+                limit: Constants.Pagination.chatsPerPage,
+                continuationToken: nil,
+                includeContent: false
+            )
+            let remoteConversations = remoteList.conversations
 
-                // First pass: decide which chats need processing.
-                var chatsToProcess: [RemoteChat] = []
-                for remoteChat in remoteConversations {
-                    // First validate if this remote chat should be processed
-                    if !(await shouldProcessRemoteChat(remoteChat)) {
-                        // Clean up invalid chats from cloud
-                        cleanupInvalidRemoteChat(remoteChat)
+            // First pass: decide which chats need processing.
+            var chatsToProcess: [RemoteChat] = []
+            for remoteChat in remoteConversations {
+                // First validate if this remote chat should be processed
+                if !(await shouldProcessRemoteChat(remoteChat)) {
+                    // Clean up invalid chats from cloud
+                    cleanupInvalidRemoteChat(remoteChat)
+                    continue
+                }
+
+                let localChat = localChatMap[remoteChat.id]
+
+                // Process if:
+                // 1. Chat doesn't exist locally
+                // 2. Remote is newer (based on updatedAt > syncedAt) AND chat is not locally modified
+                // 3. Chat failed decryption (to retry with new key)
+                // 4. Never overwrite if chat has active stream or is locally modified
+                let remoteTimestamp = parseISODate(remoteChat.updatedAt)?.timeIntervalSince1970 ?? 0
+
+                // Skip if chat is locally modified or has active stream
+                if let localChat = localChat {
+                    if localChat.locallyModified || localChat.hasActiveStream {
                         continue
                     }
 
-                    let localChat = localChatMap[remoteChat.id]
-
-                    // Process if:
-                    // 1. Chat doesn't exist locally
-                    // 2. Remote is newer (based on updatedAt > syncedAt) AND chat is not locally modified
-                    // 3. Chat failed decryption (to retry with new key)
-                    // 4. Never overwrite if chat has active stream or is locally modified
-                    let remoteTimestamp = parseISODate(remoteChat.updatedAt)?.timeIntervalSince1970 ?? 0
-
-                    // Skip if chat is locally modified or has active stream
-                    if let localChat = localChat {
-                        if localChat.locallyModified || localChat.hasActiveStream {
-                            continue
-                        }
-
-                        // Also check if chat is currently streaming using the tracker
-                        if streamingTracker.isStreaming(localChat.id) {
-                            continue
-                        }
-                    }
-
-                    let shouldProcess = localChat == nil ||
-                        (!remoteTimestamp.isNaN && remoteTimestamp > (localChat?.syncedAt?.timeIntervalSince1970 ?? 0)) ||
-                        (localChat?.decryptionFailed == true)
-
-                    if shouldProcess {
-                        chatsToProcess.append(remoteChat)
+                    // Also check if chat is currently streaming using the tracker
+                    if streamingTracker.isStreaming(localChat.id) {
+                        continue
                     }
                 }
 
-                // Fetch content only for the chats that passed the checks.
-                await cloudStorage.attachInlineContent(&chatsToProcess)
+                let shouldProcess = localChat == nil ||
+                    (!remoteTimestamp.isNaN && remoteTimestamp > (localChat?.syncedAt?.timeIntervalSince1970 ?? 0)) ||
+                    (localChat?.decryptionFailed == true)
 
-                // Process sequentially to avoid connection exhaustion
-                for remoteChat in chatsToProcess {
-                    let localChat = localChatMap[remoteChat.id]
+                if shouldProcess {
+                    chatsToProcess.append(remoteChat)
+                }
+            }
 
-                    if let content = remoteChat.content {
-                        if let decrypted = await decryptRemoteChat(remoteChat, content: content) {
-                            // Validate the content
-                            if decrypted.chat.messages.isEmpty {
-                                cleanupInvalidRemoteChat(remoteChat)
-                                continue
-                            }
+            // Fetch content only for the chats that passed the checks.
+            await cloudStorage.attachInlineContent(&chatsToProcess)
 
-                            await saveChatToStorage(decrypted.chat)
-                            await markChatAsSynced(decrypted.chat.id, version: decrypted.chat.syncVersion)
-                            result = SyncResult(
-                                uploaded: result.uploaded,
-                                downloaded: result.downloaded + 1,
-                                deleted: result.deleted,
-                                errors: result.errors
-                            )
-                        } else {
-                            // Only save a placeholder if there is no valid local copy.
-                            // When a good local version exists (non-empty messages, not
-                            // already failed), preserve it to avoid replacing decrypted
-                            // content with an empty encrypted placeholder (e.g. after
-                            // the remote was re-encrypted with a key we don't have yet).
-                            let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
-                            if !hasValidLocal {
-                                let placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
-                                await saveChatToStorage(placeholder)
-                                result = SyncResult(
-                                    uploaded: result.uploaded,
-                                    downloaded: result.downloaded + 1,
-                                    deleted: result.deleted,
-                                    errors: result.errors
-                                )
-                            }
+            // Process sequentially to avoid connection exhaustion
+            for remoteChat in chatsToProcess {
+                let localChat = localChatMap[remoteChat.id]
+
+                if let content = remoteChat.content {
+                    if let decrypted = await decryptRemoteChat(remoteChat, content: content) {
+                        // Validate the content
+                        if decrypted.chat.messages.isEmpty {
+                            cleanupInvalidRemoteChat(remoteChat)
+                            continue
                         }
+
+                        await saveChatToStorage(decrypted.chat)
+                        await markChatAsSynced(decrypted.chat.id, version: decrypted.chat.syncVersion)
+                        result = SyncResult(
+                            uploaded: result.uploaded,
+                            downloaded: result.downloaded + 1,
+                            deleted: result.deleted,
+                            errors: result.errors
+                        )
                     } else {
-                        // No inline content - fetch via downloadChat (handles its own decryption)
-                        do {
-                            try await downloadAndSaveRemoteChat(remoteChat)
+                        // Only save a placeholder if there is no valid local copy.
+                        // When a good local version exists (non-empty messages, not
+                        // already failed), preserve it to avoid replacing decrypted
+                        // content with an empty encrypted placeholder (e.g. after
+                        // the remote was re-encrypted with a key we don't have yet).
+                        let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
+                        if !hasValidLocal {
+                            let placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
+                            await saveChatToStorage(placeholder)
                             result = SyncResult(
                                 uploaded: result.uploaded,
                                 downloaded: result.downloaded + 1,
                                 deleted: result.deleted,
                                 errors: result.errors
                             )
-                        } catch {
-                            result = SyncResult(
-                                uploaded: result.uploaded,
-                                downloaded: result.downloaded,
-                                deleted: result.deleted,
-                                errors: result.errors + ["Failed to download chat \(remoteChat.id): \(error.localizedDescription)"]
-                            )
                         }
                     }
+                } else {
+                    // No inline content - fetch via downloadChat (handles its own decryption)
+                    do {
+                        try await downloadAndSaveRemoteChat(remoteChat)
+                        result = SyncResult(
+                            uploaded: result.uploaded,
+                            downloaded: result.downloaded + 1,
+                            deleted: result.deleted,
+                            errors: result.errors
+                        )
+                    } catch {
+                        result = SyncResult(
+                            uploaded: result.uploaded,
+                            downloaded: result.downloaded,
+                            deleted: result.deleted,
+                            errors: result.errors + ["Failed to download chat \(remoteChat.id): \(error.localizedDescription)"]
+                        )
+                    }
                 }
-
-                let nextToken = remoteList.nextContinuationToken?.isEmpty == false
-                    ? remoteList.nextContinuationToken
-                    : nil
-                continuationToken = (deep && remoteList.hasMore) ? nextToken : nil
-            } while continuationToken != nil
+            }
 
             // Refresh cached sync status so subsequent smart-syncs have up-to-date info
             await refreshSyncStatusCache()

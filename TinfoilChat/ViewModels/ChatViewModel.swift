@@ -3945,7 +3945,7 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Perform a full sync with the cloud
-    func performFullSync(deep: Bool = false) async {
+    func performFullSync() async {
         // Gate sync when cloud sync is disabled
         if !SettingsManager.shared.isCloudSyncEnabled {
             return
@@ -3961,7 +3961,7 @@ class ChatViewModel: ObservableObject {
             self.syncErrors = []
         }
         
-        let result = await cloudSync.syncAllChats(deep: deep)
+        let result = await cloudSync.syncAllChats()
         
         // Update chats if there were changes (await this before marking sync complete)
         if result.downloaded > 0 || result.uploaded > 0 || result.deleted > 0 {
