@@ -22,7 +22,6 @@ struct LinkMetadata: Equatable, Sendable {
     let siteName: String?
     let image: String?
     let faviconBytes: Data?
-    let faviconContentType: String?
     let cached: Bool
 }
 
@@ -37,7 +36,6 @@ private struct MetadataResponse: Decodable {
     let site_name: String?
     let image: String?
     let favicon_bytes: Data?
-    let favicon_content_type: String?
     let cached: Bool?
 }
 
@@ -51,6 +49,10 @@ actor LinkMetadataService {
     static let shared = LinkMetadataService()
 
     private var cache: [String: LinkMetadata] = [:]
+    /// Insertion order of cache keys, oldest first, so the cache can
+    /// evict instead of growing without bound (entries carry raw
+    /// favicon bytes).
+    private var cacheOrder: [String] = []
     private var inFlight: [String: Task<LinkMetadata, Error>] = [:]
 
     private var client: SecureClient?
@@ -99,8 +101,19 @@ actor LinkMetadataService {
 
         defer { inFlight[url] = nil }
         let result = try await task.value
-        cache[url] = result
+        storeInCache(result, for: url)
         return result
+    }
+
+    private func storeInCache(_ metadata: LinkMetadata, for url: String) {
+        if cache[url] == nil {
+            cacheOrder.append(url)
+        }
+        cache[url] = metadata
+        while cacheOrder.count > Constants.Metadata.cacheEntryLimit {
+            let evicted = cacheOrder.removeFirst()
+            cache[evicted] = nil
+        }
     }
 
     private func fetch(url: String) async throws -> LinkMetadata {
@@ -126,7 +139,6 @@ actor LinkMetadataService {
                 siteName: decoded.site_name,
                 image: decoded.image,
                 faviconBytes: decoded.favicon_bytes,
-                faviconContentType: decoded.favicon_content_type,
                 cached: decoded.cached ?? false
             )
         } catch {

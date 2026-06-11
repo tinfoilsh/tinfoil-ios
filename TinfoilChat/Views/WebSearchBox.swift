@@ -205,6 +205,10 @@ struct FaviconImage: View {
             loadFailed = false
             do {
                 let metadata = try await LinkMetadataService.shared.metadata(for: url)
+                // The shared in-flight fetch doesn't observe this
+                // task's cancellation, so a superseded task can reach
+                // this point; bail before stomping the new task's state.
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
                     if let bytes = metadata.faviconBytes, let image = UIImage(data: bytes) {
                         iconImage = image

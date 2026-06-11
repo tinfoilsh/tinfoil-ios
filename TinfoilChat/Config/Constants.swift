@@ -159,6 +159,9 @@ enum Constants {
     enum Metadata {
         static let enclaveURL = "https://opengraph-metadata.tinfoil.sh"
         static let configRepo = "tinfoilsh/confidential-website-metadata-fetcher"
+        /// Cap on cached link-metadata entries; favicon bytes ride along
+        /// in each entry, so an unbounded cache would grow steadily.
+        static let cacheEntryLimit = 200
     }
 
     enum DocumentProcessing {
