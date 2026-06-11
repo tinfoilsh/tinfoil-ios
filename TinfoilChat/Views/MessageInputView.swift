@@ -307,8 +307,11 @@ struct MessageInputView: View {
                                  placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
                                  shouldFocusInput: viewModel.shouldFocusInput,
                                  isLoading: viewModel.isLoading,
+                                 allowsImagePaste: viewModel.currentModel.isMultimodal,
                                  onFocusHandled: { viewModel.shouldFocusInput = false },
-                                 onSendMessage: { text in viewModel.sendMessage(text: text) })
+                                 onSendMessage: { text in viewModel.sendMessage(text: text) },
+                                 onPasteImage: { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
+                                 onPasteFile: { url, fileName in viewModel.addDocumentAttachment(url: url, fileName: fileName) })
                     .frame(height: textHeight)
                     .padding(.horizontal)
 
@@ -419,8 +422,11 @@ struct MessageInputView: View {
                                  placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
                                  shouldFocusInput: viewModel.shouldFocusInput,
                                  isLoading: viewModel.isLoading,
+                                 allowsImagePaste: viewModel.currentModel.isMultimodal,
                                  onFocusHandled: { viewModel.shouldFocusInput = false },
-                                 onSendMessage: { text in viewModel.sendMessage(text: text) })
+                                 onSendMessage: { text in viewModel.sendMessage(text: text) },
+                                 onPasteImage: { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
+                                 onPasteFile: { url, fileName in viewModel.addDocumentAttachment(url: url, fileName: fileName) })
                     .frame(height: textHeight)
                     .padding(.horizontal)
 
@@ -773,11 +779,17 @@ struct CustomTextEditor: UIViewRepresentable {
     var placeholderText: String
     var shouldFocusInput: Bool
     var isLoading: Bool
+    var allowsImagePaste: Bool = false
     var onFocusHandled: () -> Void
     var onSendMessage: (String) -> Void
+    var onPasteImage: ((Data, String) -> Void)? = nil
+    var onPasteFile: ((URL, String) -> Void)? = nil
 
     func makeUIView(context: Context) -> UITextView {
-        let textView = UITextView()
+        let textView = PastingTextView()
+        textView.allowsImagePaste = allowsImagePaste
+        textView.onPasteImage = onPasteImage
+        textView.onPasteFile = onPasteFile
         textView.delegate = context.coordinator
         textView.font = UIFont.preferredFont(forTextStyle: .body)
         textView.backgroundColor = .clear
@@ -809,6 +821,11 @@ struct CustomTextEditor: UIViewRepresentable {
     
     func updateUIView(_ uiView: UITextView, context: Context) {
         context.coordinator.parent = self
+        if let pastingView = uiView as? PastingTextView {
+            pastingView.allowsImagePaste = allowsImagePaste
+            pastingView.onPasteImage = onPasteImage
+            pastingView.onPasteFile = onPasteFile
+        }
         let isCurrentlyEditing = context.coordinator.isEditing
 
         if shouldFocusInput && !context.coordinator.hasFocusedFromFlag {
@@ -956,6 +973,81 @@ struct CustomTextEditor: UIViewRepresentable {
                 textView.textColor = .lightGray
             }
             refreshAccessibility(textView)
+        }
+    }
+}
+
+/// UITextView that accepts images and file URLs from the pasteboard in
+/// addition to plain text, turning them into attachments.
+final class PastingTextView: UITextView {
+    var allowsImagePaste = false
+    var onPasteImage: ((Data, String) -> Void)?
+    var onPasteFile: ((URL, String) -> Void)?
+
+    private var pasteboardFileURLs: [URL] {
+        guard !UIPasteboard.general.hasStrings else { return [] }
+        return UIPasteboard.general.urls?.filter { $0.isFileURL } ?? []
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)) {
+            if allowsImagePaste && UIPasteboard.general.hasImages && onPasteImage != nil {
+                return true
+            }
+            if !pasteboardFileURLs.isEmpty && onPasteFile != nil {
+                return true
+            }
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        let pasteboard = UIPasteboard.general
+
+        if allowsImagePaste, pasteboard.hasImages,
+           let onPasteImage, let images = pasteboard.images, !images.isEmpty {
+            for (index, image) in images.enumerated() {
+                guard let data = image.jpegData(
+                    compressionQuality: CGFloat(Constants.Attachments.imageCompressionQuality)
+                ) else { continue }
+                let fileName = images.count > 1 ? "Pasted Image \(index + 1).jpg" : "Pasted Image.jpg"
+                onPasteImage(data, fileName)
+            }
+            return
+        }
+
+        if let onPasteFile {
+            let fileURLs = pasteboardFileURLs
+            if !fileURLs.isEmpty {
+                for url in fileURLs {
+                    importPastedFile(url: url, onPasteFile: onPasteFile)
+                }
+                return
+            }
+        }
+
+        super.paste(sender)
+    }
+
+    /// Copies a pasted file into the app's temp directory so the attachment
+    /// pipeline can read it after the pasteboard's access window closes.
+    private func importPastedFile(url: URL, onPasteFile: (URL, String) -> Void) {
+        let fileName = url.lastPathComponent
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString + "_" + fileName)
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+        do {
+            try FileManager.default.copyItem(at: url, to: tempURL)
+            onPasteFile(tempURL, fileName)
+        } catch {
+            guard let data = try? Data(contentsOf: url) else { return }
+            do {
+                try data.write(to: tempURL)
+                onPasteFile(tempURL, fileName)
+            } catch {
+                return
+            }
         }
     }
 } 
