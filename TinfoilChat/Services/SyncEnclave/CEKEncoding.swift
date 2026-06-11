@@ -74,15 +74,18 @@ enum CEKEncoding {
     /// target. Once the one-shot sweep reports `fullyMigrated`, the
     /// alternatives are cleared from local state and this helper
     /// collapses to the same shape as `pullKeysIfAvailable()`.
+    /// Returns an empty array when the primary is missing or
+    /// unreadable so callers never see alternatives without the
+    /// primary at `keys[0]`.
     static func migrationKeys() -> [EnclavePullKey] {
-        var out: [EnclavePullKey] = []
         let allKeys = EncryptionService.shared.getAllKeys()
-        if let primary = allKeys.primary,
-           let primaryBytes = try? EncryptionService.shared.getAlternativeKeyBytes(primary) {
-            out.append(EnclavePullKey(key: primaryBytes.base64EncodedString()))
+        guard let primary = allKeys.primary,
+              let primaryBytes = try? EncryptionService.shared.getAlternativeKeyBytes(primary) else {
+            return []
         }
+        var out = [EnclavePullKey(key: primaryBytes.base64EncodedString())]
         for alt in allKeys.alternatives {
-            if alt == allKeys.primary { continue }
+            if alt == primary { continue }
             guard let bytes = try? EncryptionService.shared.getAlternativeKeyBytes(alt) else { continue }
             out.append(EnclavePullKey(key: bytes.base64EncodedString()))
         }
