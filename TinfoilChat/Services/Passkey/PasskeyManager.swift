@@ -121,6 +121,9 @@ final class PasskeyManager: ObservableObject {
         if state.keyId == nil, !state.hasData, remoteState == .empty {
             let created = await attemptNewUserPasskeySetup()
             if !created {
+                // No enclave key exists at all, so a leftover
+                // "passkey active" flag from a prior session is stale.
+                passkeyActive = false
                 passkeySetupAvailable = true
             }
             return created ? .newUserSetupDone : .manualSetupRequired
@@ -313,6 +316,10 @@ final class PasskeyManager: ObservableObject {
                 startSyncCheck()
                 return
             }
+            // The enclave definitively reports no registered key or no
+            // bundles at all, so any previously lit "passkey active"
+            // state is stale and must not survive the transition.
+            passkeyActive = false
         } catch {
             // fall through to "setup available"
         }
@@ -541,8 +548,11 @@ final class PasskeyManager: ObservableObject {
                 return
             }
 
+            // Silent ceremony only: this runs from the background sync
+            // loop, which must never pop interactive system passkey UI.
             let result = await PasskeyKeyFlow.unlockFromServer(
-                prefer: UserDefaults.standard.string(forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId)
+                prefer: UserDefaults.standard.string(forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId),
+                silent: true
             )
             switch result {
             case .success(let cek, let keyIdHex, _, _):
