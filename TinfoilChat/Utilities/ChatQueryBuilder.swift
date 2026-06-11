@@ -82,7 +82,6 @@ struct ChatQueryBuilder {
             messages.append(.system(.init(content: .textContent(fullPrompt))))
         }
 
-        // Add conversation history that fits within the model's context budget
         let recentMessages = TokenEstimation.selectMessagesWithinBudget(conversationMessages, contextWindow: contextWindow)
         var hasAddedSystemInstructions = useSystemRole
 
