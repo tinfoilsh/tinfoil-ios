@@ -11,9 +11,9 @@ import TinfoilAI
 // MARK: - Tab Model
 
 private enum VerificationTab: String, CaseIterable, Identifiable {
+    case runtime
     case encryption
     case code
-    case runtime
 
     var id: String { rawValue }
 
@@ -114,7 +114,7 @@ struct VerifierView: View {
             HStack(spacing: 0) {
                 ForEach(VerificationTab.allCases) { tab in
                     tabCard(tab: tab, status: .pending, isSelected: false)
-                    if tab != .runtime {
+                    if tab != .code {
                         Spacer(minLength: 12)
                     }
                 }
@@ -207,7 +207,7 @@ struct VerifierView: View {
                 tabCard(tab: tab, status: status, isSelected: selectedTab == tab)
                     .onTapGesture { selectedTab = tab }
                     .accessibilityAddTraits(.isButton)
-                if tab != .runtime {
+                if tab != .code {
                     Spacer(minLength: 12)
                 }
             }
