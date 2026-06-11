@@ -320,16 +320,6 @@ struct SettingsView: View {
                 NavigationLink(destination: manageAccountPage) {
                     accountSummaryRow
                 }
-
-                Button(action: {
-                    showSignOutConfirmation = true
-                }) {
-                    HStack {
-                        Text("Sign Out")
-                            .foregroundColor(.primary)
-                        Spacer()
-                    }
-                }
             } else {
                 Button(action: {
                     showAuthView = true
@@ -404,6 +394,16 @@ struct SettingsView: View {
                             .foregroundColor(Color(UIColor.quaternaryLabel))
                     }
                 }
+
+                Button(action: {
+                    showSignOutConfirmation = true
+                }) {
+                    HStack {
+                        Text("Sign Out")
+                            .foregroundColor(.primary)
+                        Spacer()
+                    }
+                }
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
@@ -424,6 +424,26 @@ struct SettingsView: View {
         .background(Color.settingsBackground(for: colorScheme))
         .navigationTitle("Manage Account")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Sign Out", isPresented: $showSignOutConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Sign Out") {
+                Task {
+                    await performFullDataCleanup()
+                    await authManager.signOut()
+                    dismiss()
+                }
+            }
+        } message: {
+            if settings.isLocalOnlyModeEnabled {
+                Text(passkeyManager.passkeyActive
+                    ? "All local data will be cleared. You can recover your chats by signing back in.\n\n⚠️ Your local chats will be deleted forever."
+                    : "All local data will be cleared. You will need your encryption key to recover your chats.\n\n⚠️ Your local chats will be deleted forever.")
+            } else {
+                Text(passkeyManager.passkeyActive
+                    ? "All local data will be cleared. You can recover your chats by signing back in."
+                    : "All local data will be cleared. You will need your encryption key to recover your chats.")
+            }
+        }
         .alert("Delete Account", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
@@ -972,26 +992,6 @@ struct SettingsView: View {
             AuthenticationView()
                 .environment(Clerk.shared)
                 .environmentObject(authManager)
-        }
-        .alert("Sign Out", isPresented: $showSignOutConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Sign Out") {
-                Task {
-                    await performFullDataCleanup()
-                    await authManager.signOut()
-                    dismiss()
-                }
-            }
-        } message: {
-            if settings.isLocalOnlyModeEnabled {
-                Text(passkeyManager.passkeyActive
-                    ? "All local data will be cleared. You can recover your chats by signing back in.\n\n⚠️ Your local chats will be deleted forever."
-                    : "All local data will be cleared. You will need your encryption key to recover your chats.\n\n⚠️ Your local chats will be deleted forever.")
-            } else {
-                Text(passkeyManager.passkeyActive
-                    ? "All local data will be cleared. You can recover your chats by signing back in."
-                    : "All local data will be cleared. You will need your encryption key to recover your chats.")
-            }
         }
         .sheet(isPresented: $showPremiumModal) {
             PaywallView(displayCloseButton: true)
