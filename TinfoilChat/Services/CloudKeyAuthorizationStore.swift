@@ -159,9 +159,7 @@ final class CloudKeyAuthorizationStore {
         // never destroy the key the enclave just accepted and the
         // Keychain just persisted. Without the hint, writes stay
         // gated until a later preflight validation re-stamps it.
-        guard authorizeCurrentPrimaryKey(mode: mode) else {
-            throw CloudKeyAuthorizationError.authorizationUnavailable
-        }
+        _ = authorizeCurrentPrimaryKey(mode: mode)
         return mode
     }
 

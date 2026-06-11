@@ -3840,11 +3840,12 @@ class ChatViewModel: ObservableObject {
                     EncryptionService.shared.discardStagedKeyState()
                     throw error
                 }
-                guard CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh) else {
-                    EncryptionService.shared.clearKey()
-                    CloudKeyAuthorizationStore.shared.clearAuthorization()
-                    throw CloudKeyAuthorizationError.authorizationUnavailable
-                }
+                // The enclave has already rebound the account to this key
+                // and the Keychain has persisted it; the local mode stamp
+                // is best-effort. Failing it must not wipe the only copy
+                // of the now-authoritative key, so writes just stay gated
+                // until a later preflight validation re-stamps the hint.
+                _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh)
             }
 
             await MainActor.run {
