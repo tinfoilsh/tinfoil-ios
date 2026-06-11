@@ -15,9 +15,9 @@
 //      initial bundle with the enclave. Treats a 409 from the enclave
 //      as "remote key already exists, fall through to unlock".
 //
-//    - unlockWithPasskey: authenticate a passkey, derive the KEK,
-//      unwrap a bundle that the caller already has on hand (e.g. one
-//      retrieved via `keyCurrent()`).
+//    - unlockFromServer: authenticate a passkey against the bundles
+//      reported by `keyCurrent()`, derive the KEK, unwrap the bundle,
+//      and verify the key_id binding before adopting anything.
 //
 //    - addBundleForCurrentKey: enroll a brand-new passkey for an
 //      existing key (multi-device flow).
@@ -75,11 +75,22 @@ enum PasskeyKeyFlow {
         guard cekRandomStatus == errSecSuccess else {
             return .failure(.registerFailed, message: "Secure random generation failed (status \(cekRandomStatus))")
         }
-        return await registerKeyWithPasskey(
+        let result = await registerKeyWithPasskey(
             user: user,
             cek: Data(cekBytes),
             createdVia: createdVia
         )
+        // A 409 means another device won the register race, so the
+        // documented contract is to fall through to a normal unlock
+        // against whichever key landed (its passkey may already be in
+        // this device's iCloud Keychain). Start-fresh is excluded: the
+        // user explicitly asked to replace the remote key, and silently
+        // adopting it instead would betray that intent.
+        if createdVia != .startFresh,
+           case .failure(.remoteKeyExists, _) = result {
+            return await unlockFromServer()
+        }
+        return result
     }
 
     /// Shared core of the two "register the first CEK + initial
@@ -175,7 +186,7 @@ enum PasskeyKeyFlow {
     // MARK: - Returning user: unlock from server
 
     /// End-to-end "returning user" unlock against the enclave. Wraps
-    /// keyCurrent() + unlockWithPasskey() + the key_id binding check
+    /// keyCurrent() + unlockWithPasskeyDetailed() + the key_id binding check
     /// into a single call.
     static func unlockFromServer(prefer: String? = nil, silent: Bool = false) async -> PasskeyFlowResult {
         let state: EnclaveKeyCurrentResponse
@@ -192,7 +203,11 @@ enum PasskeyKeyFlow {
         }
 
         let candidates = state.bundles.values.sorted { $0.credentialId < $1.credentialId }
-        let result = await unlockWithPasskey(candidates: candidates, prefer: prefer, silent: silent)
+        let (result, legacyAlternatives) = await unlockWithPasskeyDetailed(
+            candidates: candidates,
+            prefer: prefer,
+            silent: silent
+        )
         guard case .success(let cek, let derivedKeyIdHex, let credentialId, _) = result else {
             return result
         }
@@ -204,6 +219,10 @@ enum PasskeyKeyFlow {
         guard derivedKeyIdHex == serverKeyId else {
             return .failure(.keyIdMismatch, message: "keyId \(derivedKeyIdHex) != enclave \(serverKeyId)")
         }
+        // Adopt the bundle's legacy alternatives only after the binding
+        // check accepts it: a rejected bundle must not mutate the local
+        // key history.
+        retainLegacyAlternatives(legacyAlternatives)
         return .success(
             cek: cek,
             keyIdHex: derivedKeyIdHex,
@@ -214,14 +233,17 @@ enum PasskeyKeyFlow {
 
     /// Recover the user's CEK by re-authenticating their passkey and
     /// unwrapping a candidate bundle. The caller supplies the bundles —
-    /// typically from a fresh `keyCurrent()` probe.
-    static func unlockWithPasskey(
+    /// typically from a fresh `keyCurrent()` probe. Legacy alternative
+    /// keys found in the bundle envelope are returned, not retained:
+    /// the caller decides after its own validation (e.g. the key_id
+    /// binding check) whether they may enter the local key history.
+    private static func unlockWithPasskeyDetailed(
         candidates: [EnclaveKeyCurrentBundle],
         prefer: String? = nil,
         silent: Bool = false
-    ) async -> PasskeyFlowResult {
+    ) async -> (PasskeyFlowResult, legacyAlternatives: [String]) {
         guard !candidates.isEmpty else {
-            return .failure(.noRemoteBundle)
+            return (.failure(.noRemoteBundle), [])
         }
         let credIds = candidates.map(\.credentialId)
         let ordered: [String]
@@ -235,15 +257,16 @@ enum PasskeyKeyFlow {
         do {
             passkey = try await PasskeyService.shared.authenticatePasskey(credentialIds: ordered, silent: silent)
         } catch let err {
-            return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
+            return (.failure(failureFromPasskeyError(err), message: err.localizedDescription), [])
         }
 
         guard let bundle = candidates.first(where: { $0.credentialId == passkey.credentialId }) else {
-            return .failure(.noRemoteBundle)
+            return (.failure(.noRemoteBundle), [])
         }
 
         let kek = PasskeyService.deriveKeyEncryptionKey(from: passkey.prfOutput)
         let cek: Data
+        let legacyAlternatives: [String]
         do {
             let unwrapped = try SyncEnclaveKeyBundle.unwrapCekDetailed(
                 kek: kek,
@@ -251,23 +274,26 @@ enum PasskeyKeyFlow {
                 wrappedKeyHex: bundle.encryptedKeys
             )
             cek = unwrapped.cek
-            retainLegacyAlternatives(unwrapped.legacyAlternativeKeys)
+            legacyAlternatives = unwrapped.legacyAlternativeKeys
         } catch {
-            return .failure(.bundleDecryptFailed, message: error.localizedDescription)
+            return (.failure(.bundleDecryptFailed, message: error.localizedDescription), [])
         }
 
         let keyIdHex: String
         do {
             keyIdHex = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
         } catch {
-            return .failure(.bundleDecryptFailed, message: error.localizedDescription)
+            return (.failure(.bundleDecryptFailed, message: error.localizedDescription), [])
         }
 
-        return .success(
-            cek: cek,
-            keyIdHex: keyIdHex,
-            credentialId: passkey.credentialId,
-            createdVia: nil
+        return (
+            .success(
+                cek: cek,
+                keyIdHex: keyIdHex,
+                credentialId: passkey.credentialId,
+                createdVia: nil
+            ),
+            legacyAlternatives
         )
     }
 
