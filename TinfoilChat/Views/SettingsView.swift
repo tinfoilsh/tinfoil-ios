@@ -807,7 +807,7 @@ struct SettingsView: View {
                 }) {
                     HStack {
                         Text("Subscribe to Premium")
-                            .foregroundColor(.primary)
+                            .foregroundColor(Color.tinfoilAccentLight)
                         Spacer()
                         Text("Unlock all models")
                             .font(.caption)
@@ -876,9 +876,9 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 accountSection
-                preferencesSection
-                chatSettingsSection
                 subscriptionSection
+                chatSettingsSection
+                preferencesSection
                 contactSection
                 legalSection
             }
