@@ -985,9 +985,11 @@ final class PastingTextView: UITextView {
     var onPasteFile: ((URL, String) -> Void)?
     var onPasteFileError: ((String) -> Void)?
 
+    /// File URLs win over any string representation on the pasteboard:
+    /// copying a file (e.g. from the Files app) often includes its name as
+    /// plain text, and pasting that name instead of the file would be wrong.
     private var pasteboardFileURLs: [URL] {
-        guard !UIPasteboard.general.hasStrings else { return [] }
-        return UIPasteboard.general.urls?.filter { $0.isFileURL } ?? []
+        UIPasteboard.general.urls?.filter { $0.isFileURL } ?? []
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
