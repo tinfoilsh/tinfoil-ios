@@ -901,6 +901,18 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Permanently deletes every project the user owns, mirroring the
+    /// webapp's bulk action. Throws so callers can surface the failure and
+    /// leave local state untouched for a retry.
+    @MainActor
+    func deleteAllProjects() async throws {
+        _ = try await projectStorage.deleteAllProjects()
+        projects = []
+        if activeProject != nil {
+            exitProject()
+        }
+    }
+
     func deleteActiveProject() async {
         guard let project = activeProject else { return }
 

@@ -199,6 +199,12 @@ enum Constants {
         static let numberOfChannels: Int = 1  // Mono
     }
 
+    enum WebApp {
+        /// Deep link into the web app's settings; the `#settings/export`
+        /// fragment opens the tab hosting chat export.
+        static let exportChatsURL = URL(string: "https://chat.tinfoil.sh/#settings/export")!
+    }
+
     enum Share {
         static let shareBaseURL = "https://chat.tinfoil.sh"
         static let shareAPIPath = "/api/shares"

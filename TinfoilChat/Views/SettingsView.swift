@@ -258,11 +258,15 @@ struct SettingsView: View {
     @State private var showDeleteAllChatsConfirm = false
     @State private var deleteAllChatsConfirmText = ""
     @State private var isDeletingAllChats = false
-    @State private var deleteAllChatsResult: String? = nil
+    @State private var showDeleteAllProjectsConfirm = false
+    @State private var deleteAllProjectsConfirmText = ""
+    @State private var isDeletingAllProjects = false
+    @State private var dataActionMessage: String? = nil
 
-    /// Typed confirmation phrase gating the bulk chat deletion, matching the
-    /// webapp's safeguard for the same feature.
+    /// Typed confirmation phrases gating the bulk deletions, matching the
+    /// webapp's safeguard for the same features.
     private static let deleteAllChatsConfirmPhrase = "delete all chats"
+    private static let deleteAllProjectsConfirmPhrase = "delete all projects"
 
     var shouldOpenCloudSync: Bool = false
     
@@ -574,36 +578,89 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            NavigationLink(destination: manageDataPage) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Manage Data")
+                        .font(.body)
+                    Text("Export or delete your chats and projects")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
         } header: {
             Text("Chat Settings")
         }
         .listRowBackground(Color.cardSurface(for: colorScheme))
     }
 
-    private var dataSection: some View {
-        Section {
-            Button(action: {
-                showDeleteAllChatsConfirm = true
-            }) {
-                HStack {
-                    Text("Delete All Chats")
-                        .foregroundColor(.red)
-                    Spacer()
-                    if isDeletingAllChats {
-                        ProgressView()
+    private var manageDataPage: some View {
+        Form {
+            Section {
+                Button(action: {
+                    UIApplication.shared.open(Constants.WebApp.exportChatsURL)
+                }) {
+                    HStack {
+                        Text("Export Chats")
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Image(systemName: "arrow.up.forward.square")
+                            .font(.footnote)
+                            .foregroundColor(Color(UIColor.tertiaryLabel))
                     }
                 }
+            } header: {
+                Text("Export")
+            } footer: {
+                Text("Chats are exported from the Tinfoil web app. Sign in with the same account to download your conversations.")
+                    .font(.caption)
             }
-            .disabled(isDeletingAllChats)
-        } header: {
-            Text("Data")
-        } footer: {
-            Text(authManager.isAuthenticated
-                 ? "Permanently delete every chat from this device and your encrypted cloud backup. This cannot be undone."
-                 : "Permanently delete every chat from this device. This cannot be undone.")
-                .font(.caption)
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+
+            Section {
+                Button(action: {
+                    showDeleteAllChatsConfirm = true
+                }) {
+                    HStack {
+                        Text("Delete All Chats")
+                            .foregroundColor(.red)
+                        Spacer()
+                        if isDeletingAllChats {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(isDeletingAllChats)
+
+                if authManager.isAuthenticated && settings.isCloudSyncEnabled {
+                    Button(action: {
+                        showDeleteAllProjectsConfirm = true
+                    }) {
+                        HStack {
+                            Text("Delete All Projects")
+                                .foregroundColor(.red)
+                            Spacer()
+                            if isDeletingAllProjects {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isDeletingAllProjects)
+                }
+            } header: {
+                Text("Delete")
+            } footer: {
+                Text(authManager.isAuthenticated
+                     ? "Permanently delete data from this device and your encrypted cloud backup. This cannot be undone."
+                     : "Permanently delete every chat from this device. This cannot be undone.")
+                    .font(.caption)
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
         }
-        .listRowBackground(Color.cardSurface(for: colorScheme))
+        .scrollContentBackground(.hidden)
+        .background(Color.settingsBackground(for: colorScheme))
+        .navigationTitle("Manage Data")
+        .navigationBarTitleDisplayMode(.inline)
         .alert("Delete All Chats", isPresented: $showDeleteAllChatsConfirm) {
             TextField(Self.deleteAllChatsConfirmPhrase, text: $deleteAllChatsConfirmText)
                 .autocorrectionDisabled()
@@ -617,13 +674,26 @@ struct SettingsView: View {
         } message: {
             Text("This permanently deletes every chat and cannot be undone. Type \"\(Self.deleteAllChatsConfirmPhrase)\" to confirm.")
         }
-        .alert("Delete All Chats", isPresented: Binding(
-            get: { deleteAllChatsResult != nil },
-            set: { if !$0 { deleteAllChatsResult = nil } }
+        .alert("Delete All Projects", isPresented: $showDeleteAllProjectsConfirm) {
+            TextField(Self.deleteAllProjectsConfirmPhrase, text: $deleteAllProjectsConfirmText)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            Button("Cancel", role: .cancel) {
+                deleteAllProjectsConfirmText = ""
+            }
+            Button("Delete", role: .destructive) {
+                confirmDeleteAllProjects()
+            }
+        } message: {
+            Text("This permanently deletes every project and cannot be undone. Type \"\(Self.deleteAllProjectsConfirmPhrase)\" to confirm.")
+        }
+        .alert("Manage Data", isPresented: Binding(
+            get: { dataActionMessage != nil },
+            set: { if !$0 { dataActionMessage = nil } }
         )) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text(deleteAllChatsResult ?? "")
+            Text(dataActionMessage ?? "")
         }
     }
 
@@ -633,18 +703,38 @@ struct SettingsView: View {
         let typed = deleteAllChatsConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         deleteAllChatsConfirmText = ""
         guard typed == Self.deleteAllChatsConfirmPhrase else {
-            deleteAllChatsResult = "Deletion cancelled: the confirmation phrase didn't match."
+            dataActionMessage = "Deletion cancelled: the confirmation phrase didn't match."
             return
         }
         isDeletingAllChats = true
         Task {
             do {
                 try await chatViewModel.deleteAllChats()
-                deleteAllChatsResult = "All chats have been deleted."
+                dataActionMessage = "All chats have been deleted."
             } catch {
-                deleteAllChatsResult = "Failed to delete all chats. Please try again."
+                dataActionMessage = "Failed to delete all chats. Please try again."
             }
             isDeletingAllChats = false
+        }
+    }
+
+    /// Same defense-in-depth confirmation gate as `confirmDeleteAllChats`.
+    private func confirmDeleteAllProjects() {
+        let typed = deleteAllProjectsConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        deleteAllProjectsConfirmText = ""
+        guard typed == Self.deleteAllProjectsConfirmPhrase else {
+            dataActionMessage = "Deletion cancelled: the confirmation phrase didn't match."
+            return
+        }
+        isDeletingAllProjects = true
+        Task {
+            do {
+                try await chatViewModel.deleteAllProjects()
+                dataActionMessage = "All projects have been deleted."
+            } catch {
+                dataActionMessage = "Failed to delete all projects. Please try again."
+            }
+            isDeletingAllProjects = false
         }
     }
 
@@ -755,7 +845,6 @@ struct SettingsView: View {
                 subscriptionSection
                 chatSettingsSection
                 preferencesSection
-                dataSection
                 contactSection
                 legalSection
             }
