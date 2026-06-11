@@ -1055,15 +1055,7 @@ final class PastingTextView: UITextView {
             try FileManager.default.copyItem(at: url, to: tempURL)
             onPasteFile(tempURL, fileName)
         } catch {
-            // Memory-mapped so an unexpectedly large file (when the size
-            // probe above fails) is never loaded into RAM wholesale.
-            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return }
-            do {
-                try data.write(to: tempURL)
-                onPasteFile(tempURL, fileName)
-            } catch {
-                return
-            }
+            onPasteFileError?("Couldn't read the pasted file. Try attaching it with the + button instead.")
         }
     }
 } 
