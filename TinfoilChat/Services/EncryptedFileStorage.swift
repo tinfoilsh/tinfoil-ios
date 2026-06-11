@@ -232,7 +232,8 @@ actor EncryptedFileStorage {
         // otherwise a load-modify-save that overlapped a concurrent
         // updateSyncMetadata would silently regress the version.
         let existingSidecar = readSyncSidecar(chatId: chat.id, userId: userId)
-        if existingSidecar == nil || chat.syncVersion >= existingSidecar!.syncVersion {
+        let sidecarIsNewer = existingSidecar.map { chat.syncVersion < $0.syncVersion } ?? false
+        if !sidecarIsNewer {
             try writeSyncSidecar(
                 chatId: chat.id,
                 userId: userId,
@@ -248,7 +249,15 @@ actor EncryptedFileStorage {
         // between this read and the subsequent save (the await on encryptData above
         // is a suspension point where other actor methods could interleave).
         var entries = (try? await loadIndex(userId: userId)) ?? []
-        let newEntry = ChatIndexEntry(from: chat)
+        var newEntry = ChatIndexEntry(from: chat)
+        if sidecarIsNewer, let existingSidecar {
+            // The index must stay in step with the preserved sidecar;
+            // stamping the caller's stale snapshot here would regress
+            // the synced/unsynced decisions made off the index.
+            newEntry.syncVersion = existingSidecar.syncVersion
+            newEntry.syncedAt = existingSidecar.syncedAt
+            newEntry.locallyModified = existingSidecar.locallyModified
+        }
         if let idx = entries.firstIndex(where: { $0.id == chat.id }) {
             entries[idx] = newEntry
         } else {
