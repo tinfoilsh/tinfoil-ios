@@ -732,7 +732,7 @@ struct SettingsView: View {
                     .fontWeight(.medium)
                     .foregroundColor(isRemoving ? .secondary : .red)
             }
-            .disabled(isRemoving)
+            .disabled(removingPasskeyId != nil)
             .buttonStyle(.bordered)
             .controlSize(.small)
         }
@@ -757,6 +757,9 @@ struct SettingsView: View {
     }
 
     private func removeBundle(_ credentialId: String) async {
+        // One removal at a time: the in-flight UI state is single-valued
+        // and concurrent deletes would race it and duplicate requests.
+        guard removingPasskeyId == nil else { return }
         removingPasskeyId = credentialId
         defer { removingPasskeyId = nil }
         do {
@@ -887,10 +890,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .task(id: settings.isCloudSyncEnabled) {
-            await refreshPasskeyBundles()
-        }
-        .task(id: passkeyManager.passkeyActive) {
+        .task(id: [settings.isCloudSyncEnabled, passkeyManager.passkeyActive]) {
             await refreshPasskeyBundles()
         }
         .onAppear {
