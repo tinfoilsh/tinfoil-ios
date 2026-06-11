@@ -210,7 +210,14 @@ class AuthManager: ObservableObject {
         // view model can still resolve the signing-out user's id for the wipe.
         EncryptionService.shared.clearKey()
         await DeviceEncryptionService.shared.clearKey()
-        await chatViewModel?.wipeLocalChatsForSignOut()
+        if let chatViewModel {
+            await chatViewModel.wipeLocalChatsForSignOut()
+        } else {
+            // No chat view model is attached (e.g. sign-out resolved before
+            // the UI wired one up); wipe directly so chat files never
+            // outlive the account on a shared device.
+            await Chat.deleteAllChatsFromStorage(userId: localUserData?["id"] as? String)
+        }
         SettingsManager.shared.clearAllSettings()
         ProfileManager.shared.clearProfile()
 

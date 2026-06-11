@@ -3139,6 +3139,11 @@ class ChatViewModel: ObservableObject {
     /// signed-out session still has a usable chat. Must run before the auth
     /// manager clears its authenticated state so currentUserId still resolves.
     func wipeLocalChatsForSignOut() async {
+        // Drain the queued disk saves first; the queue is chained, so
+        // awaiting the latest task flushes every earlier one. Otherwise a
+        // detached save kicked off by handleSignOut could land after the
+        // wipe and resurrect the signed-out user's chat files.
+        await pendingSaveTask?.value
         await Chat.deleteAllChatsFromStorage(userId: currentUserId)
     }
 
