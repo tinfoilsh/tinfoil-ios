@@ -283,6 +283,24 @@ struct MessageInputView: View {
         }
     }
 
+    /// Shared between the iOS 26 and pre-26 input layouts so the editor's
+    /// growing list of paste/send hooks stays defined in one place.
+    private var messageTextEditor: some View {
+        CustomTextEditor(text: $messageText,
+                         textHeight: $textHeight,
+                         placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
+                         shouldFocusInput: viewModel.shouldFocusInput,
+                         isLoading: viewModel.isLoading,
+                         allowsImagePaste: viewModel.currentModel.isMultimodal,
+                         onFocusHandled: { viewModel.shouldFocusInput = false },
+                         onSendMessage: { text in viewModel.sendMessage(text: text) },
+                         onPasteImage: { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
+                         onPasteFile: { url, fileName in viewModel.addDocumentAttachment(url: url, fileName: fileName) },
+                         onPasteFileError: { message in viewModel.attachmentError = message })
+            .frame(height: textHeight)
+            .padding(.horizontal)
+    }
+
     @ViewBuilder
     private var standardInputContent: some View {
         if #available(iOS 26, *) {
@@ -303,19 +321,7 @@ struct MessageInputView: View {
                 }
 
                 // Text input area
-                CustomTextEditor(text: $messageText,
-                                 textHeight: $textHeight,
-                                 placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
-                                 shouldFocusInput: viewModel.shouldFocusInput,
-                                 isLoading: viewModel.isLoading,
-                                 allowsImagePaste: viewModel.currentModel.isMultimodal,
-                                 onFocusHandled: { viewModel.shouldFocusInput = false },
-                                 onSendMessage: { text in viewModel.sendMessage(text: text) },
-                                 onPasteImage: { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
-                                 onPasteFile: { url, fileName in viewModel.addDocumentAttachment(url: url, fileName: fileName) },
-                                 onPasteFileError: { message in viewModel.attachmentError = message })
-                    .frame(height: textHeight)
-                    .padding(.horizontal)
+                messageTextEditor
 
                 // Bottom row with action buttons
                 HStack {
@@ -414,19 +420,7 @@ struct MessageInputView: View {
                 }
 
                 // Text input area
-                CustomTextEditor(text: $messageText,
-                                 textHeight: $textHeight,
-                                 placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
-                                 shouldFocusInput: viewModel.shouldFocusInput,
-                                 isLoading: viewModel.isLoading,
-                                 allowsImagePaste: viewModel.currentModel.isMultimodal,
-                                 onFocusHandled: { viewModel.shouldFocusInput = false },
-                                 onSendMessage: { text in viewModel.sendMessage(text: text) },
-                                 onPasteImage: { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
-                                 onPasteFile: { url, fileName in viewModel.addDocumentAttachment(url: url, fileName: fileName) },
-                                 onPasteFileError: { message in viewModel.attachmentError = message })
-                    .frame(height: textHeight)
-                    .padding(.horizontal)
+                messageTextEditor
 
                 // Bottom row with action buttons
                 HStack {
