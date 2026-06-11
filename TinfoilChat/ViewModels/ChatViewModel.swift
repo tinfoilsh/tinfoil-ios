@@ -3425,6 +3425,18 @@ class ChatViewModel: ObservableObject {
                         }
                     }
 
+                    // A local key that mismatches the enclave's registered
+                    // key can never sync or migrate. Converge silently via
+                    // passkey when possible; otherwise prompt the user to
+                    // recover so this stale device enters v2.
+                    if SettingsManager.shared.isCloudSyncEnabled,
+                       await self.passkeyManager.resolveKeyMismatchAtLaunch() == .manualRecoveryRequired {
+                        await MainActor.run {
+                            self.cloudSyncOnboardingMode = .recovery
+                            self.showCloudSyncOnboarding = true
+                        }
+                    }
+
                     // Check passkey state for users who already have keys
                     await self.passkeyManager.checkPasskeyStateForExistingKey()
 
