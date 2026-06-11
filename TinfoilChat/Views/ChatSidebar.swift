@@ -79,10 +79,8 @@ struct ChatSidebar: View {
         }
     }
 
-    private func lastUpdatedString(for chat: Chat) -> String {
-        let created = relativeTimeString(from: chat.createdAt)
-        let updated = relativeTimeString(from: chat.updatedAt).lowercased()
-        return "\(created) · Updated \(updated)"
+    private func updatedTimeString(for chat: Chat) -> String {
+        "Updated \(relativeTimeString(from: chat.updatedAt).lowercased())"
     }
     
     var body: some View {
@@ -199,7 +197,8 @@ struct ChatSidebar: View {
                     isSelected: viewModel.currentChat?.id == chat.id,
                     isEditing: editingChatId == chat.id,
                     editingTitle: $editingTitle,
-                    timeString: chat.isBlankChat ? "" : lastUpdatedString(for: chat),
+                    createdTimeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
+                    updatedTimeString: chat.isBlankChat ? "" : updatedTimeString(for: chat),
                     isSyncing: !chat.isBlankChat && cloudSync.pendingUploadChatIds.contains(chat.id),
                     onSelect: {
                         viewModel.selectChat(chat)
@@ -538,7 +537,8 @@ struct ChatListItem: View {
     let isSelected: Bool
     let isEditing: Bool
     @Binding var editingTitle: String
-    let timeString: String
+    let createdTimeString: String
+    let updatedTimeString: String
     var isSyncing: Bool = false
     let onSelect: () -> Void
     let onEdit: () -> Void
@@ -605,11 +605,13 @@ struct ChatListItem: View {
                 
                 // Timestamp inside the cell
                 if !isEditing {
-                    if !timeString.isEmpty {
+                    if !createdTimeString.isEmpty {
                         HStack(spacing: 4) {
-                            Text(timeString)
+                            (Text(createdTimeString)
+                                .foregroundColor(Color(UIColor.secondaryLabel))
+                                + Text(" · \(updatedTimeString)")
+                                .foregroundColor(Color(UIColor.tertiaryLabel)))
                                 .font(.caption)
-                                .foregroundColor(.gray)
                             if isSyncing {
                                 Image(systemName: "icloud.and.arrow.up")
                                     .font(.caption2)
@@ -659,8 +661,9 @@ struct ChatListItem: View {
         var components = [chat.title.isEmpty ? "Untitled chat" : chat.title]
         if chat.isBlankChat {
             components.append("New chat")
-        } else if !timeString.isEmpty {
-            components.append(timeString)
+        } else if !createdTimeString.isEmpty {
+            components.append("Created \(createdTimeString)")
+            components.append(updatedTimeString)
         }
         if isSyncing {
             components.append("Syncing with cloud")

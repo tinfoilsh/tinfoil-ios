@@ -150,9 +150,8 @@ struct ProjectPage: View {
                         .foregroundColor(.primary)
                         .lineLimit(1)
                     if !chat.isBlankChat {
-                        Text(timestampString(for: chat))
+                        timestampText(for: chat)
                             .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 }
                 Spacer()
@@ -215,10 +214,13 @@ struct ProjectPage: View {
         }
     }
 
-    private func timestampString(for chat: Chat) -> String {
+    private func timestampText(for chat: Chat) -> Text {
         let created = relativeTimeString(from: chat.createdAt)
         let updated = relativeTimeString(from: chat.updatedAt).lowercased()
-        return "\(created) · Updated \(updated)"
+        return Text(created)
+            .foregroundColor(Color(UIColor.secondaryLabel))
+            + Text(" · Updated \(updated)")
+            .foregroundColor(Color(UIColor.tertiaryLabel))
     }
 }
 
