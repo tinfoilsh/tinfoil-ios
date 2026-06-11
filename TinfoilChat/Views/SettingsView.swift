@@ -60,13 +60,6 @@ class SettingsManager: ObservableObject {
         }
     }
     
-    // Max messages setting
-    @Published var maxMessages: Int {
-        didSet {
-            UserDefaults.standard.set(maxMessages, forKey: Constants.StorageKeys.Settings.maxPromptMessages)
-        }
-    }
-    
     // Custom system prompt settings
     @Published var isUsingCustomPrompt: Bool {
         didSet {
@@ -125,14 +118,6 @@ class SettingsManager: ObservableObject {
             self.selectedTraits = []
         }
         
-        // Initialize max messages setting
-        if let savedMaxMessages = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.maxPromptMessages) as? Int {
-            self.maxMessages = min(max(savedMaxMessages, 1), Constants.Context.maxMessagesLimit)
-        } else {
-            self.maxMessages = Constants.Context.defaultMaxMessages
-            UserDefaults.standard.set(Constants.Context.defaultMaxMessages, forKey: Constants.StorageKeys.Settings.maxPromptMessages)
-        }
-        
         // Initialize custom system prompt settings
         self.isUsingCustomPrompt = UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled) as? Bool ?? false
         self.customSystemPrompt = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt) ?? ""
@@ -176,7 +161,6 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.profession)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.traits)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.additionalContext)
-        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.maxPromptMessages)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.webSearchEnabled)
@@ -191,7 +175,6 @@ class SettingsManager: ObservableObject {
         profession = ""
         selectedTraits = []
         additionalContext = ""
-        maxMessages = Constants.Context.defaultMaxMessages
         isUsingCustomPrompt = false
         customSystemPrompt = ""
         webSearchEnabled = true
@@ -568,50 +551,6 @@ struct SettingsView: View {
                 }
             }
 
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Messages in Context")
-                        .font(.body)
-                    Text("Maximum number of recent messages sent to the model (1-\(Constants.Context.maxMessagesLimit)). Longer contexts increase network usage and slow down responses.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                HStack(spacing: 8) {
-                    Button(action: {
-                        if settings.maxMessages > 1 {
-                            settings.maxMessages -= 1
-                            ProfileManager.shared.maxPromptMessages = settings.maxMessages
-                        }
-                    }) {
-                        Image(systemName: "minus.circle")
-                            .foregroundColor(settings.maxMessages > 1 ? .accentColor : .gray)
-                    }
-                    .buttonStyle(BorderlessButtonStyle())
-                    .disabled(settings.maxMessages <= 1)
-                    .accessibilityLabel("Decrease messages in context")
-
-                    Text("\(settings.maxMessages)")
-                        .frame(minWidth: 40)
-                        .font(.system(.body, design: .monospaced))
-                        .accessibilityLabel("Messages in context: \(settings.maxMessages)")
-
-                    Button(action: {
-                        if settings.maxMessages < Constants.Context.maxMessagesLimit {
-                            settings.maxMessages += 1
-                            ProfileManager.shared.maxPromptMessages = settings.maxMessages
-                        }
-                    }) {
-                        Image(systemName: "plus.circle")
-                            .foregroundColor(settings.maxMessages < Constants.Context.maxMessagesLimit ? .accentColor : .gray)
-                    }
-                    .buttonStyle(BorderlessButtonStyle())
-                    .disabled(settings.maxMessages >= Constants.Context.maxMessagesLimit)
-                    .accessibilityLabel("Increase messages in context")
-                }
-            }
-            .padding(.vertical, 4)
-
             NavigationLink(destination: CustomSystemPromptView(
                 isUsingCustomPrompt: $settings.isUsingCustomPrompt,
                 customSystemPrompt: $settings.customSystemPrompt
@@ -926,11 +865,6 @@ struct SettingsView: View {
                         settings.selectedLanguage = profileManager.language
                     }
                     
-                    // Update max messages if different
-                    if profileManager.maxPromptMessages > 0 && profileManager.maxPromptMessages != settings.maxMessages {
-                        settings.maxMessages = profileManager.maxPromptMessages
-                    }
-                    
                     // Update custom prompt settings from single source of truth (ProfileManager)
                     settings.isUsingCustomPrompt = profileManager.isUsingCustomPrompt
                     settings.customSystemPrompt = profileManager.customSystemPrompt
@@ -949,11 +883,6 @@ struct SettingsView: View {
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
         // Keep UI settings in sync with ProfileManager when remote changes arrive
-        .onReceive(ProfileManager.shared.$maxPromptMessages) { newValue in
-            if newValue > 0 && settings.maxMessages != newValue {
-                settings.maxMessages = newValue
-            }
-        }
         .onReceive(ProfileManager.shared.$language) { newValue in
             if !newValue.isEmpty && settings.selectedLanguage != newValue {
                 settings.selectedLanguage = newValue
