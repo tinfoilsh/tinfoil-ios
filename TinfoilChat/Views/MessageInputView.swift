@@ -312,7 +312,8 @@ struct MessageInputView: View {
                                  onFocusHandled: { viewModel.shouldFocusInput = false },
                                  onSendMessage: { text in viewModel.sendMessage(text: text) },
                                  onPasteImage: { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
-                                 onPasteFile: { url, fileName in viewModel.addDocumentAttachment(url: url, fileName: fileName) })
+                                 onPasteFile: { url, fileName in viewModel.addDocumentAttachment(url: url, fileName: fileName) },
+                                 onPasteFileError: { message in viewModel.attachmentError = message })
                     .frame(height: textHeight)
                     .padding(.horizontal)
 
@@ -422,7 +423,8 @@ struct MessageInputView: View {
                                  onFocusHandled: { viewModel.shouldFocusInput = false },
                                  onSendMessage: { text in viewModel.sendMessage(text: text) },
                                  onPasteImage: { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
-                                 onPasteFile: { url, fileName in viewModel.addDocumentAttachment(url: url, fileName: fileName) })
+                                 onPasteFile: { url, fileName in viewModel.addDocumentAttachment(url: url, fileName: fileName) },
+                                 onPasteFileError: { message in viewModel.attachmentError = message })
                     .frame(height: textHeight)
                     .padding(.horizontal)
 
@@ -785,12 +787,14 @@ struct CustomTextEditor: UIViewRepresentable {
     var onSendMessage: (String) -> Void
     var onPasteImage: ((Data, String) -> Void)? = nil
     var onPasteFile: ((URL, String) -> Void)? = nil
+    var onPasteFileError: ((String) -> Void)? = nil
 
     func makeUIView(context: Context) -> UITextView {
         let textView = PastingTextView()
         textView.allowsImagePaste = allowsImagePaste
         textView.onPasteImage = onPasteImage
         textView.onPasteFile = onPasteFile
+        textView.onPasteFileError = onPasteFileError
         textView.delegate = context.coordinator
         textView.font = UIFont.preferredFont(forTextStyle: .body)
         textView.backgroundColor = .clear
@@ -826,6 +830,7 @@ struct CustomTextEditor: UIViewRepresentable {
             pastingView.allowsImagePaste = allowsImagePaste
             pastingView.onPasteImage = onPasteImage
             pastingView.onPasteFile = onPasteFile
+            pastingView.onPasteFileError = onPasteFileError
         }
         let isCurrentlyEditing = context.coordinator.isEditing
 
@@ -984,6 +989,7 @@ final class PastingTextView: UITextView {
     var allowsImagePaste = false
     var onPasteImage: ((Data, String) -> Void)?
     var onPasteFile: ((URL, String) -> Void)?
+    var onPasteFileError: ((String) -> Void)?
 
     private var pasteboardFileURLs: [URL] {
         guard !UIPasteboard.general.hasStrings else { return [] }
@@ -1032,17 +1038,30 @@ final class PastingTextView: UITextView {
 
     /// Copies a pasted file into the app's temp directory so the attachment
     /// pipeline can read it after the pasteboard's access window closes.
+    /// Oversized files are rejected up front: the pipeline would refuse them
+    /// anyway, and copying or reading them first would waste disk and memory.
     private func importPastedFile(url: URL, onPasteFile: (URL, String) -> Void) {
         let fileName = url.lastPathComponent
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString + "_" + fileName)
         let didAccess = url.startAccessingSecurityScopedResource()
         defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+
+        if let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           Int64(fileSize) > Constants.Attachments.maxFileSizeBytes {
+            let message = DocumentProcessingService.ProcessingError
+                .fileTooLarge(Int64(fileSize)).errorDescription
+            onPasteFileError?(message ?? "File is too large.")
+            return
+        }
+
         do {
             try FileManager.default.copyItem(at: url, to: tempURL)
             onPasteFile(tempURL, fileName)
         } catch {
-            guard let data = try? Data(contentsOf: url) else { return }
+            // Memory-mapped so an unexpectedly large file (when the size
+            // probe above fails) is never loaded into RAM wholesale.
+            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return }
             do {
                 try data.write(to: tempURL)
                 onPasteFile(tempURL, fileName)
