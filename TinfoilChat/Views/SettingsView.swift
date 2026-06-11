@@ -457,8 +457,15 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
                 Task {
+                    // Require a live Clerk session before wiping anything:
+                    // without it the server-side account would survive while
+                    // local data is destroyed and the user is signed out.
+                    guard let user = clerk.user else {
+                        accountDeletionError = "Couldn't reach your account session. Please sign in again and retry."
+                        return
+                    }
                     do {
-                        try await clerk.user?.delete()
+                        try await user.delete()
                         await performFullDataCleanup()
                         await authManager.signOut()
                         dismiss()
