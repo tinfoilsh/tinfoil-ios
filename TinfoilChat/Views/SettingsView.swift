@@ -744,15 +744,18 @@ struct SettingsView: View {
                     }
                     showPremiumModal = true
                 }) {
-                    HStack {
-                        Text("Subscribe to Premium")
-                            .foregroundColor(Color.tinfoilAccentLight)
+                    HStack(spacing: 8) {
                         Spacer()
-                        Text("Unlock all models")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        Image(systemName: "sparkles")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Subscribe to Premium")
+                            .font(.body.weight(.semibold))
+                        Spacer()
                     }
+                    .foregroundColor(.white)
+                    .padding(.vertical, 4)
                 }
+                .listRowBackground(Color.tinfoilAccentDark)
             }
         } header: {
             Text("Subscription")
