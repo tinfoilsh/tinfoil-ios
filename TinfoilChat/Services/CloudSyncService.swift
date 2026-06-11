@@ -814,50 +814,70 @@ class CloudSyncService: ObservableObject {
             // the remote history so older chats that predate this device's
             // local copy are pulled down too. The periodic and launch syncs
             // stay first-page-only for bandwidth.
+            //
+            // Pages carry metadata only; content is pulled afterwards for
+            // just the chats that need processing. Pulling content for every
+            // listed chat made a deep refresh O(history) in round trips and
+            // payload, which left pull-to-refresh spinning for minutes on
+            // large accounts. Metadata pages use the server's maximum page
+            // size for the same reason: tombstone-heavy histories paginate
+            // by deletes too, and small pages multiply the round trips.
             var continuationToken: String? = nil
             repeat {
                 let remoteList = try await cloudStorage.listChats(
-                    limit: Constants.Pagination.chatsPerPage,
+                    limit: deep ? Constants.SyncEnclave.listStatusPageLimit : Constants.Pagination.chatsPerPage,
                     continuationToken: continuationToken,
-                    includeContent: true
+                    includeContent: false
                 )
                 let remoteConversations = remoteList.conversations
 
-                // Process remote chats sequentially to avoid connection exhaustion
-            for remoteChat in remoteConversations {
-                // First validate if this remote chat should be processed
-                if !(await shouldProcessRemoteChat(remoteChat)) {
-                    // Clean up invalid chats from cloud
-                    cleanupInvalidRemoteChat(remoteChat)
-                    continue
-                }
-
-                let localChat = localChatMap[remoteChat.id]
-
-                // Process if:
-                // 1. Chat doesn't exist locally
-                // 2. Remote is newer (based on updatedAt > syncedAt) AND chat is not locally modified
-                // 3. Chat failed decryption (to retry with new key)
-                // 4. Never overwrite if chat has active stream or is locally modified
-                let remoteTimestamp = parseISODate(remoteChat.updatedAt)?.timeIntervalSince1970 ?? 0
-
-                // Skip if chat is locally modified or has active stream
-                if let localChat = localChat {
-                    if localChat.locallyModified || localChat.hasActiveStream {
+                // First pass: decide which chats need processing.
+                var chatsToProcess: [RemoteChat] = []
+                for remoteChat in remoteConversations {
+                    // First validate if this remote chat should be processed
+                    if !(await shouldProcessRemoteChat(remoteChat)) {
+                        // Clean up invalid chats from cloud
+                        cleanupInvalidRemoteChat(remoteChat)
                         continue
                     }
 
-                    // Also check if chat is currently streaming using the tracker
-                    if streamingTracker.isStreaming(localChat.id) {
-                        continue
+                    let localChat = localChatMap[remoteChat.id]
+
+                    // Process if:
+                    // 1. Chat doesn't exist locally
+                    // 2. Remote is newer (based on updatedAt > syncedAt) AND chat is not locally modified
+                    // 3. Chat failed decryption (to retry with new key)
+                    // 4. Never overwrite if chat has active stream or is locally modified
+                    let remoteTimestamp = parseISODate(remoteChat.updatedAt)?.timeIntervalSince1970 ?? 0
+
+                    // Skip if chat is locally modified or has active stream
+                    if let localChat = localChat {
+                        if localChat.locallyModified || localChat.hasActiveStream {
+                            continue
+                        }
+
+                        // Also check if chat is currently streaming using the tracker
+                        if streamingTracker.isStreaming(localChat.id) {
+                            continue
+                        }
+                    }
+
+                    let shouldProcess = localChat == nil ||
+                        (!remoteTimestamp.isNaN && remoteTimestamp > (localChat?.syncedAt?.timeIntervalSince1970 ?? 0)) ||
+                        (localChat?.decryptionFailed == true)
+
+                    if shouldProcess {
+                        chatsToProcess.append(remoteChat)
                     }
                 }
 
-                let shouldProcess = localChat == nil ||
-                    (!remoteTimestamp.isNaN && remoteTimestamp > (localChat?.syncedAt?.timeIntervalSince1970 ?? 0)) ||
-                    (localChat?.decryptionFailed == true)
+                // Fetch content only for the chats that passed the checks.
+                await cloudStorage.attachInlineContent(&chatsToProcess)
 
-                if shouldProcess {
+                // Process sequentially to avoid connection exhaustion
+                for remoteChat in chatsToProcess {
+                    let localChat = localChatMap[remoteChat.id]
+
                     if let content = remoteChat.content {
                         if let decrypted = await decryptRemoteChat(remoteChat, content: content) {
                             // Validate the content
@@ -912,7 +932,6 @@ class CloudSyncService: ObservableObject {
                         }
                     }
                 }
-            }
 
                 let nextToken = remoteList.nextContinuationToken?.isEmpty == false
                     ? remoteList.nextContinuationToken

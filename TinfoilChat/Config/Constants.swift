@@ -102,6 +102,9 @@ enum Constants {
         /// Hard per-page cap the enclave's list-status endpoint
         /// enforces; requests above it are clamped server-side.
         static let listStatusPageLimit = 500
+        /// How many full chat blobs to request per pull call. Keeps
+        /// individual response payloads bounded when syncing many chats.
+        static let pullBatchSize = 20
     }
 
 
