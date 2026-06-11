@@ -566,6 +566,13 @@ class CloudStorageService: ObservableObject {
             if chats.count >= projectChatListLimit { break }
         } while hasNextCursor(cursor)
 
+        // Hydrate inline content for the whole page in one pull;
+        // without it every changed chat falls back to an individual
+        // download in the delta-sync loop.
+        if !chats.isEmpty {
+            await attachInlineContent(&chats)
+        }
+
         return ProjectChatListResponse(
             chats: chats,
             hasMore: hasNextCursor(nextContinuationToken),
