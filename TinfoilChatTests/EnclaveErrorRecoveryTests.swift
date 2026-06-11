@@ -14,106 +14,50 @@ import Foundation
 import Testing
 @testable import TinfoilChat
 
+/// One row of the coded-error dispatch table: a wire code (with the
+/// status the server pairs it with) and the decision it must map to.
+struct CodedErrorExpectation: CustomTestStringConvertible {
+    let code: EnclaveErrorCode
+    let status: Int?
+    let action: RecoveryAction
+    let kind: EnclaveErrorKind
+    var testDescription: String { code.rawValue }
+}
+
+let codedErrorExpectations: [CodedErrorExpectation] = [
+    .init(code: .staleKey, status: 409, action: .refreshCurrentKeyAndRetry, kind: .retryableRefresh),
+    .init(code: .staleBlob, status: 409, action: .surfaceConflict(reason: .staleBlob), kind: .userDecision),
+    .init(code: .syncConflict, status: 409, action: .surfaceConflict(reason: .syncConflict), kind: .userDecision),
+    .init(code: .idempotencyConflict, status: 409, action: .abort(reason: .idempotencyConflict), kind: .terminal),
+    .init(code: .existingDataUnderOtherKey, status: 409, action: .surfaceExistingDataUnderOtherKey, kind: .userDecision),
+    .init(code: .unknownKey, status: 412, action: .triggerRecoveryWizard(reason: .unknownKey), kind: .terminal),
+    .init(code: .legacyBlobNotMigrated, status: 410, action: .migrateLegacyAndRetry, kind: .retryableRefresh),
+    .init(code: .attestationFailed, status: nil, action: .blockAllSync(reason: .attestationFailed), kind: .terminal),
+    .init(code: .auth, status: 401, action: .retry(reason: .authRefresh), kind: .retryableTransient),
+    .init(code: .forbidden, status: 403, action: .abort(reason: .forbidden), kind: .terminal),
+    .init(code: .network, status: nil, action: .retry(reason: .network), kind: .retryableTransient),
+    .init(code: .notFound, status: 404, action: .surfaceNotFound, kind: .userDecision),
+    .init(code: .preconditionRequired, status: 428, action: .abort(reason: .preconditionRequired), kind: .terminal),
+]
+
 @Suite("EnclaveErrorRecovery dispatch table")
 struct EnclaveErrorRecoveryTests {
 
     // MARK: - Coded errors
 
-    @Test func staleKeyMapsToRefreshCurrentKeyAndRetry() {
+    @Test(arguments: codedErrorExpectations)
+    func codedErrorMapsToExpectedDecision(_ row: CodedErrorExpectation) {
         let decision = EnclaveErrorRecovery.decide(
-            SyncEnclaveError(message: "stale", status: 409, code: "STALE_KEY")
+            SyncEnclaveError(message: "test", status: row.status, code: row.code.rawValue)
         )
-        #expect(decision.action == .refreshCurrentKeyAndRetry)
-        #expect(decision.classification.kind == .retryableRefresh)
-        #expect(decision.classification.code == .staleKey)
+        #expect(decision.action == row.action)
+        #expect(decision.classification.kind == row.kind)
+        #expect(decision.classification.code == row.code)
     }
 
-    @Test func staleBlobMapsToSurfaceConflictStaleBlob() {
-        let decision = EnclaveErrorRecovery.decide(
-            SyncEnclaveError(message: "stale blob", status: 409, code: "STALE_BLOB")
-        )
-        #expect(decision.action == .surfaceConflict(reason: .staleBlob))
-        #expect(decision.classification.kind == .userDecision)
-    }
-
-    @Test func syncConflictMapsToSurfaceConflictSyncConflict() {
-        let decision = EnclaveErrorRecovery.decide(
-            SyncEnclaveError(message: "conflict", status: 409, code: "SYNC_CONFLICT")
-        )
-        #expect(decision.action == .surfaceConflict(reason: .syncConflict))
-        #expect(decision.classification.kind == .userDecision)
-    }
-
-    @Test func idempotencyConflictMapsToAbortIdempotencyConflict() {
-        let decision = EnclaveErrorRecovery.decide(
-            SyncEnclaveError(message: "dup", status: 409, code: "IDEMPOTENCY_CONFLICT")
-        )
-        #expect(decision.action == .abort(reason: .idempotencyConflict))
-        #expect(decision.classification.kind == .terminal)
-    }
-
-    @Test func existingDataMapsToSurfaceExistingDataUnderOtherKey() {
-        let decision = EnclaveErrorRecovery.decide(
-            SyncEnclaveError(message: "elsewhere", status: 409, code: "EXISTING_DATA_UNDER_OTHER_KEY")
-        )
-        #expect(decision.action == .surfaceExistingDataUnderOtherKey)
-        #expect(decision.classification.kind == .userDecision)
-    }
-
-    @Test func unknownKeyMapsToTriggerRecoveryWizard() {
-        let decision = EnclaveErrorRecovery.decide(
-            SyncEnclaveError(message: "unknown", status: 412, code: "UNKNOWN_KEY")
-        )
-        #expect(decision.action == .triggerRecoveryWizard(reason: .unknownKey))
-        #expect(decision.classification.kind == .terminal)
-    }
-
-    @Test func legacyBlobMapsToMigrateLegacyAndRetry() {
-        let decision = EnclaveErrorRecovery.decide(
-            SyncEnclaveError(message: "legacy", status: 410, code: "LEGACY_BLOB_NOT_MIGRATED")
-        )
-        #expect(decision.action == .migrateLegacyAndRetry)
-        #expect(decision.classification.kind == .retryableRefresh)
-    }
-
-    @Test func attestationFailedMapsToBlockAllSync() {
-        let decision = EnclaveErrorRecovery.decide(
-            SyncEnclaveError(message: "boom", status: nil, code: "ATTESTATION_FAILED")
-        )
-        #expect(decision.action == .blockAllSync(reason: .attestationFailed))
-        #expect(decision.classification.kind == .terminal)
-    }
-
-    @Test func authMapsToRetryAuthRefresh() {
-        let decision = EnclaveErrorRecovery.decide(
-            SyncEnclaveError(message: "no jwt", status: 401, code: "AUTH")
-        )
-        #expect(decision.action == .retry(reason: .authRefresh))
-        #expect(decision.classification.kind == .retryableTransient)
-    }
-
-    @Test func forbiddenMapsToAbortForbidden() {
-        let decision = EnclaveErrorRecovery.decide(
-            SyncEnclaveError(message: "nope", status: 403, code: "FORBIDDEN")
-        )
-        #expect(decision.action == .abort(reason: .forbidden))
-        #expect(decision.classification.kind == .terminal)
-    }
-
-    @Test func networkMapsToRetryNetwork() {
-        let decision = EnclaveErrorRecovery.decide(
-            SyncEnclaveError(message: "offline", status: nil, code: "NETWORK")
-        )
-        #expect(decision.action == .retry(reason: .network))
-        #expect(decision.classification.kind == .retryableTransient)
-    }
-
-    @Test func notFoundMapsToSurfaceNotFound() {
-        let decision = EnclaveErrorRecovery.decide(
-            SyncEnclaveError(message: "missing", status: 404, code: "NOT_FOUND")
-        )
-        #expect(decision.action == .surfaceNotFound)
-        #expect(decision.classification.kind == .userDecision)
+    @Test func dispatchTableCoversEveryWireCode() {
+        let covered = Set(codedErrorExpectations.map(\.code))
+        #expect(covered == Set(EnclaveErrorCode.allCases))
     }
 
     // MARK: - HTTP status fallback
