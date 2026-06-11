@@ -79,8 +79,13 @@ struct ChatSidebar: View {
         }
     }
 
+    /// Empty when the updated time would read the same as the created
+    /// time, so rows don't repeat "14m ago · Updated 14m ago".
     private func updatedTimeString(for chat: Chat) -> String {
-        "Updated \(relativeTimeString(from: chat.updatedAt).lowercased())"
+        let created = relativeTimeString(from: chat.createdAt)
+        let updated = relativeTimeString(from: chat.updatedAt)
+        guard updated != created else { return "" }
+        return "Updated \(updated.lowercased())"
     }
     
     var body: some View {
@@ -609,7 +614,7 @@ struct ChatListItem: View {
                         HStack(spacing: 4) {
                             (Text(createdTimeString)
                                 .foregroundColor(Color(UIColor.secondaryLabel))
-                                + Text(" · \(updatedTimeString)")
+                                + Text(updatedTimeString.isEmpty ? "" : " · \(updatedTimeString)")
                                 .foregroundColor(Color(UIColor.tertiaryLabel)))
                                 .font(.caption)
                             if isSyncing {
@@ -663,7 +668,9 @@ struct ChatListItem: View {
             components.append("New chat")
         } else if !createdTimeString.isEmpty {
             components.append("Created \(createdTimeString)")
-            components.append(updatedTimeString)
+            if !updatedTimeString.isEmpty {
+                components.append(updatedTimeString)
+            }
         }
         if isSyncing {
             components.append("Syncing with cloud")
