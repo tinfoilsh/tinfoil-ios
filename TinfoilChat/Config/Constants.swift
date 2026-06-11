@@ -119,8 +119,17 @@ enum Constants {
     }
 
     enum Context {
-        static let defaultMaxMessages = 75
-        static let maxMessagesLimit = 200
+        /// Approximate characters per token used by the estimation heuristic.
+        static let charsPerToken: Double = 4
+        /// Fraction of the model's context window usable by conversation
+        /// history. The remainder is headroom for the system prompt and the
+        /// model's response. Mirrors the webapp's CONTEXT_WINDOW_USAGE_RATIO.
+        static let contextWindowUsageRatio: Double = 0.9
+        /// Fallback context window size when a model doesn't report one.
+        static let defaultContextWindowTokens = 64_000
+        /// Usage percentage at which the context indicator switches to the
+        /// warning color.
+        static let warningThresholdPercent = 80
     }
 
     enum CloudSync {
@@ -228,7 +237,6 @@ enum Constants {
             static let selectedModel = "tinfoil-settings-selected-model"
             static let hapticFeedbackEnabled = "tinfoil-settings-haptic-feedback-enabled"
             static let selectedLanguage = "tinfoil-settings-selected-language"
-            static let maxPromptMessages = "tinfoil-settings-max-prompt-messages"
             static let webSearchEnabled = "tinfoil-settings-web-search-enabled"
             static let reasoningEffort = "tinfoil-settings-reasoning-effort"
             static let thinkingEnabled = "tinfoil-settings-thinking-enabled"
@@ -362,7 +370,6 @@ enum StorageKeysMigration {
             ("lastSelectedModel", Constants.StorageKeys.Settings.selectedModel),
             ("hapticFeedbackEnabled", Constants.StorageKeys.Settings.hapticFeedbackEnabled),
             ("selectedLanguage", Constants.StorageKeys.Settings.selectedLanguage),
-            ("maxPromptMessages", Constants.StorageKeys.Settings.maxPromptMessages),
             ("webSearchEnabled", Constants.StorageKeys.Settings.webSearchEnabled),
             ("cloudSyncEnabled", Constants.StorageKeys.Settings.cloudSyncEnabled),
             ("cloudSyncActiveTab", Constants.StorageKeys.Settings.cloudSyncActiveTab),

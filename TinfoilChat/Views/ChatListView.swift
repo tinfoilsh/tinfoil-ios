@@ -12,7 +12,6 @@ struct ChatListView: View {
     let isLoading: Bool
     let onRequestSignIn: () -> Void
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
-    @ObservedObject private var settings = SettingsManager.shared
     @Binding var messageText: String
 
     @State private var isAtBottom = true
@@ -28,7 +27,10 @@ struct ChatListView: View {
     }
 
     private var archivedMessagesStartIndex: Int {
-        max(0, messages.count - settings.maxMessages)
+        TokenEstimation.findContextStartIndex(
+            messages: messages,
+            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow)
+        )
     }
 
     var body: some View {

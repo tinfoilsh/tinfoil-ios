@@ -13,7 +13,6 @@ struct OptimizedChatListView: View {
     let isLoading: Bool
     let onRequestSignIn: () -> Void
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
-    @ObservedObject private var settings = SettingsManager.shared
     @Binding var messageText: String
 
     @State private var isAtBottom = true
@@ -25,7 +24,10 @@ struct OptimizedChatListView: View {
     @State private var keyboardObservers: [Any] = []
 
     private var archivedMessagesStartIndex: Int {
-        max(0, messages.count - settings.maxMessages)
+        TokenEstimation.findContextStartIndex(
+            messages: messages,
+            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow)
+        )
     }
 
     private var visibleMessages: ArraySlice<Message> {

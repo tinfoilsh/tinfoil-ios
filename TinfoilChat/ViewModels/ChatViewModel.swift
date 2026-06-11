@@ -1672,13 +1672,12 @@ class ChatViewModel: ObservableObject {
                 }
 
                 // Use ChatQueryBuilder to create query with model-specific system prompt handling
-                let maxMessages = profileManager.maxPromptMessages > 0 ? profileManager.maxPromptMessages : settingsManager.maxMessages
                 let chatQuery = ChatQueryBuilder.buildQuery(
                     modelId: modelId,
                     systemPrompt: systemPrompt,
                     rules: processedRules,
                     conversationMessages: self.messages,
-                    maxMessages: maxMessages,
+                    contextWindow: self.currentModel.contextWindow,
                     webSearchEnabled: self.isWebSearchEnabled,
                     isMultimodal: self.currentModel.isMultimodal,
                     reasoningConfig: self.currentModel.reasoningConfig,
