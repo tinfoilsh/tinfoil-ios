@@ -202,9 +202,9 @@ enum Constants {
     }
 
     enum WebApp {
-        /// Deep link into the web app's settings; the `#settings/export`
+        /// Deep link into the web app's settings; the `#settings/cloud-sync`
         /// fragment opens the tab hosting chat export.
-        static let exportChatsURL = URL(string: "https://chat.tinfoil.sh/#settings/export")!
+        static let exportChatsURL = URL(string: "https://chat.tinfoil.sh/#settings/cloud-sync")!
     }
 
     enum Share {
