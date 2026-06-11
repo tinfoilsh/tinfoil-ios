@@ -549,13 +549,8 @@ struct ChatListItem: View {
                         }
                     } else {
                         HStack(spacing: 4) {
-                            if chat.decryptionFailed {
-                                Image(systemName: "lock.fill")
-                                    .font(.caption)
-                                    .foregroundColor(.orange)
-                            }
-                            Text(chat.decryptionFailed ? "Encrypted" : chat.title)
-                                .foregroundColor(chat.decryptionFailed ? .orange : .primary)
+                            Text(chat.title)
+                                .foregroundColor(.primary)
                                 .lineLimit(1)
                             
                             if chat.isBlankChat {
@@ -584,13 +579,9 @@ struct ChatListItem: View {
                     }
                 }
                 
-                // Timestamp or decryption failure message inside the cell
+                // Timestamp inside the cell
                 if !isEditing {
-                    if chat.decryptionFailed {
-                        Text("Failed to decrypt: wrong key")
-                            .font(.caption)
-                            .foregroundColor(.red)
-                    } else if !timeString.isEmpty {
+                    if !timeString.isEmpty {
                         Text(timeString)
                             .font(.caption)
                             .foregroundColor(.gray)
