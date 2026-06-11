@@ -28,7 +28,8 @@ enum EnclaveErrorKind {
     /// NOT_FOUND. Server cannot decide; surface to the user.
     case userDecision
     /// FORBIDDEN / IDEMPOTENCY_CONFLICT / UNKNOWN_KEY /
-    /// ATTESTATION_FAILED / unmapped errors. Stop trying.
+    /// ATTESTATION_FAILED / PRECONDITION_REQUIRED / unmapped errors.
+    /// Stop trying.
     case terminal
 }
 
@@ -45,6 +46,7 @@ enum EnclaveErrorCode: String, CaseIterable {
     case forbidden                 = "FORBIDDEN"
     case network                   = "NETWORK"
     case notFound                  = "NOT_FOUND"
+    case preconditionRequired      = "PRECONDITION_REQUIRED"
 }
 
 struct EnclaveErrorClassification: Equatable {
@@ -81,9 +83,10 @@ enum RecoveryAction: Equatable {
         case attestationFailed = "ATTESTATION_FAILED"
     }
     enum AbortReason: String, Equatable {
-        case idempotencyConflict = "IDEMPOTENCY_CONFLICT"
-        case forbidden           = "FORBIDDEN"
-        case unknown             = "UNKNOWN"
+        case idempotencyConflict  = "IDEMPOTENCY_CONFLICT"
+        case forbidden            = "FORBIDDEN"
+        case preconditionRequired = "PRECONDITION_REQUIRED"
+        case unknown              = "UNKNOWN"
     }
 }
 
@@ -152,7 +155,7 @@ enum EnclaveErrorRecovery {
                 return EnclaveErrorClassification(kind: .retryableRefresh, code: code, status: status, message: message)
             case .syncConflict, .staleBlob, .existingDataUnderOtherKey, .notFound:
                 return EnclaveErrorClassification(kind: .userDecision, code: code, status: status, message: message)
-            case .idempotencyConflict, .unknownKey, .forbidden, .attestationFailed:
+            case .idempotencyConflict, .unknownKey, .forbidden, .attestationFailed, .preconditionRequired:
                 return EnclaveErrorClassification(kind: .terminal, code: code, status: status, message: message)
             case .auth, .network:
                 return EnclaveErrorClassification(kind: .retryableTransient, code: code, status: status, message: message)
@@ -218,6 +221,11 @@ enum EnclaveErrorRecovery {
             return .retry(reason: .network)
         case .notFound:
             return .surfaceNotFound
+        case .preconditionRequired:
+            // 428: the request omitted a required If-Match. That's a
+            // structural client bug, not server state — retrying the
+            // same request can never heal it.
+            return .abort(reason: .preconditionRequired)
         }
     }
 

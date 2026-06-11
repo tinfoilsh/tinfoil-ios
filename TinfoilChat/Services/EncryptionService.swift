@@ -600,7 +600,7 @@ enum EncryptionError: LocalizedError {
         case .invalidKeyCharacters:
             return "Key must only contain lowercase letters and numbers after the prefix"
         case .invalidKeyLength:
-            return "Key length must be even"
+            return "Key must decode to exactly \(SyncEnclaveKeyBundle.cekByteCount) bytes"
         case .invalidEncryptedData:
             return "Missing IV or data in encrypted data"
         case .invalidBase64:
