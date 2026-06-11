@@ -1518,8 +1518,14 @@ class CloudSyncService: ObservableObject {
     /// read fails so save sites can omit the field rather than
     /// poisoning the cache with a misleading zero.
     private func safeReadLocalChatCount() async -> Int? {
-        let chats = await getAllChatsFromStorage()
-        return chats.filter { !$0.isLocalOnly }.count
+        guard let userId = await getCurrentUserId() else { return nil }
+        // The index alone answers the count; loading and decrypting
+        // every chat file would make each status check O(n) in disk
+        // and crypto work.
+        guard let index = try? await EncryptedFileStorage.cloud.loadIndex(userId: userId) else {
+            return nil
+        }
+        return index.filter { !$0.isLocalOnly }.count
     }
 
     private func getCachedProjectChatSyncStatus(_ projectId: String) -> ChatSyncStatus? {
