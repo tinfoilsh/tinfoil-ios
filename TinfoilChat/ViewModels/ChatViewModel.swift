@@ -2607,9 +2607,20 @@ class ChatViewModel: ObservableObject {
             return "Authentication error. Please sign in again."
         }
         
-        // Rate limit (OpenAI SDK error)
-        if case OpenAIError.statusError(_, let statusCode) = error, statusCode == 429 {
-            return "You've reached your daily limit of free requests. Your limit will reset tomorrow, or you can upgrade to Premium for unlimited access."
+        // HTTP status errors from the OpenAI SDK. Handle every code here so
+        // the raw enum dump (including the NSHTTPURLResponse description)
+        // never reaches the UI.
+        if case OpenAIError.statusError(_, let statusCode) = error {
+            switch statusCode {
+            case 401:
+                return "Authentication error. Please sign in again."
+            case 429:
+                return "You've reached your daily limit of free requests. Your limit will reset tomorrow, or you can upgrade to Premium for unlimited access."
+            case 500...599:
+                return "The service is having trouble right now. Please try again in a moment, or switch to a different model."
+            default:
+                return "The model couldn't process this request. Please try again, or start a new chat if the problem persists."
+            }
         }
 
         // Server issues
@@ -2623,9 +2634,62 @@ class ChatViewModel: ObservableObject {
                 break
             }
         }
-        
+
+        // Map raw backend/SDK error text to a human-readable explanation,
+        // mirroring the webapp's `explainError`.
+        if let explained = Self.explainRawError(error.localizedDescription) {
+            return explained
+        }
+
         // Default error message if nothing specific matches
-        return "An error occurred: \(error.localizedDescription)"
+        return "Please try again. If the problem persists, contact support."
+    }
+
+    /// Maps raw error text to a friendly explanation. Returns nil when no
+    /// known pattern matches. Mirrors the webapp's `explainError` patterns.
+    static func explainRawError(_ rawMessage: String) -> String? {
+        let lower = rawMessage.lowercased()
+
+        if lower.contains("context deadline exceeded") ||
+            lower.contains("client.timeout") ||
+            lower.contains("timed out") ||
+            lower.contains("timeout") {
+            return "The model took too long to respond. This is usually a temporary problem on our side. Please try again in a moment."
+        }
+
+        if lower.contains("context length") ||
+            lower.contains("context window") ||
+            lower.contains("maximum context") ||
+            lower.contains("too many tokens") ||
+            lower.contains("token limit") ||
+            lower.contains("prompt length") ||
+            lower.contains("max_model_len") ||
+            lower.contains("input is too long") {
+            return "This conversation is too long for the model. Remove an attachment, shorten your message, or switch to a model with a larger context window."
+        }
+
+        // Secure-channel failures (EHBP) happen when the inference router is
+        // unreachable and a proxy answers without the encryption headers.
+        if lower.contains("ehbp") ||
+            lower.contains("missing header") ||
+            lower.contains("decryption failed") ||
+            lower.contains("invalid response") ||
+            lower.contains("overloaded") ||
+            lower.contains("capacity") ||
+            lower.contains("service unavailable") ||
+            lower.contains("bad gateway") ||
+            lower.contains("internal server error") ||
+            lower.range(of: #"\b5\d\d\b"#, options: .regularExpression) != nil {
+            return "The service is having trouble right now. Please try again in a moment, or switch to a different model."
+        }
+
+        if lower.contains("network") ||
+            lower.contains("connection") ||
+            lower.contains("offline") {
+            return "Connection problem. Check your internet connection and try again."
+        }
+
+        return nil
     }
 
     /// Checks if an error indicates the user has hit their rate limit
