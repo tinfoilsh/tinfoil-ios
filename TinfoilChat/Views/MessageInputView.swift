@@ -193,6 +193,11 @@ struct MessageInputView: View {
                 )
                 .transition(.opacity)
                 .animation(.easeInOut(duration: 0.25), value: rl.remaining)
+                .onTapGesture {
+                    if rl.remaining <= 0 {
+                        viewModel.showRateLimitPaywall = true
+                    }
+                }
         }
     }
 
