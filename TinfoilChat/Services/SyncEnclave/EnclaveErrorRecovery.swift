@@ -33,6 +33,10 @@ enum EnclaveErrorKind {
     case terminal
 }
 
+/// Raw values are the canonical wire strings, mirroring
+/// controlplane/pkg/contract/wirecodes.go in lockstep; `WireCodes`
+/// aliases them for wire-level call sites. Renaming a raw value is a
+/// cross-repo wire break.
 enum EnclaveErrorCode: String, CaseIterable {
     case staleKey                  = "STALE_KEY"
     case staleBlob                 = "STALE_BLOB"

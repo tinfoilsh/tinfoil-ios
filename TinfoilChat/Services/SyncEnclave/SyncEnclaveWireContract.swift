@@ -41,18 +41,23 @@ enum IfMatchSentinels {
     static let anyKey = "*"
 }
 
+/// Wire error codes. The canonical strings live as the raw values of
+/// `EnclaveErrorCode` (EnclaveErrorRecovery.swift) so the wire
+/// contract and the recovery classifier can never drift apart; these
+/// aliases let wire-level call sites name a code without reaching
+/// into the classification enum.
 enum WireCodes {
-    static let preconditionRequired = "PRECONDITION_REQUIRED"
-    static let staleBlob = "STALE_BLOB"
-    static let staleKey = "STALE_KEY"
-    static let idempotencyConflict = "IDEMPOTENCY_CONFLICT"
-    static let existingDataUnderOtherKey = "EXISTING_DATA_UNDER_OTHER_KEY"
-    static let syncConflict = "SYNC_CONFLICT"
-    static let notFound = "NOT_FOUND"
-    static let unknownKey = "UNKNOWN_KEY"
-    static let legacyBlobNotMigrated = "LEGACY_BLOB_NOT_MIGRATED"
-    static let attestationFailed = "ATTESTATION_FAILED"
-    static let auth = "AUTH"
-    static let forbidden = "FORBIDDEN"
-    static let network = "NETWORK"
+    static let preconditionRequired = EnclaveErrorCode.preconditionRequired.rawValue
+    static let staleBlob = EnclaveErrorCode.staleBlob.rawValue
+    static let staleKey = EnclaveErrorCode.staleKey.rawValue
+    static let idempotencyConflict = EnclaveErrorCode.idempotencyConflict.rawValue
+    static let existingDataUnderOtherKey = EnclaveErrorCode.existingDataUnderOtherKey.rawValue
+    static let syncConflict = EnclaveErrorCode.syncConflict.rawValue
+    static let notFound = EnclaveErrorCode.notFound.rawValue
+    static let unknownKey = EnclaveErrorCode.unknownKey.rawValue
+    static let legacyBlobNotMigrated = EnclaveErrorCode.legacyBlobNotMigrated.rawValue
+    static let attestationFailed = EnclaveErrorCode.attestationFailed.rawValue
+    static let auth = EnclaveErrorCode.auth.rawValue
+    static let forbidden = EnclaveErrorCode.forbidden.rawValue
+    static let network = EnclaveErrorCode.network.rawValue
 }
