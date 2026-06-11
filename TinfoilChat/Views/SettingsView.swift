@@ -317,52 +317,8 @@ struct SettingsView: View {
     private var accountSection: some View {
         Section {
             if authManager.isAuthenticated {
-                HStack {
-                    userAvatar
-                        .frame(width: 40, height: 40)
-                        .clipShape(Circle())
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        if let user = clerk.user {
-                            Text("\(user.firstName ?? "") \(user.lastName ?? "")")
-                                .font(.body)
-                                .foregroundColor(.primary)
-                            if let email = user.emailAddresses.first?.emailAddress {
-                                Text(email)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        } else if let userData = authManager.localUserData {
-                            Text((userData["name"] as? String) ?? "User")
-                                .font(.body)
-                                .foregroundColor(.primary)
-                            if let email = userData["email"] as? String {
-                                Text(email)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-
-                    Spacer()
-                }
-                .padding(.vertical, 4)
-
-                Button(action: {
-                    if let user = clerk.user {
-                        editingFirstName = user.firstName ?? ""
-                        editingLastName = user.lastName ?? ""
-                        showProfileEditor = true
-                    }
-                }) {
-                    HStack {
-                        Text("Edit Profile")
-                            .foregroundColor(.primary)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption2)
-                            .foregroundColor(Color(UIColor.quaternaryLabel))
-                    }
+                NavigationLink(destination: manageAccountPage) {
+                    accountSummaryRow
                 }
 
                 Button(action: {
@@ -371,16 +327,6 @@ struct SettingsView: View {
                     HStack {
                         Text("Sign Out")
                             .foregroundColor(.primary)
-                        Spacer()
-                    }
-                }
-
-                Button(action: {
-                    showDeleteConfirmation = true
-                }) {
-                    HStack {
-                        Text("Delete Account")
-                            .foregroundColor(.red)
                         Spacer()
                     }
                 }
@@ -399,6 +345,127 @@ struct SettingsView: View {
             Text("Account")
         }
         .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+
+    private var accountSummaryRow: some View {
+        HStack {
+            userAvatar
+                .frame(width: 40, height: 40)
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                if let user = clerk.user {
+                    Text("\(user.firstName ?? "") \(user.lastName ?? "")")
+                        .font(.body)
+                        .foregroundColor(.primary)
+                    if let email = user.emailAddresses.first?.emailAddress {
+                        Text(email)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                } else if let userData = authManager.localUserData {
+                    Text((userData["name"] as? String) ?? "User")
+                        .font(.body)
+                        .foregroundColor(.primary)
+                    if let email = userData["email"] as? String {
+                        Text(email)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var manageAccountPage: some View {
+        Form {
+            Section {
+                accountSummaryRow
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+
+            Section {
+                Button(action: {
+                    if let user = clerk.user {
+                        editingFirstName = user.firstName ?? ""
+                        editingLastName = user.lastName ?? ""
+                        showProfileEditor = true
+                    }
+                }) {
+                    HStack {
+                        Text("Edit Profile")
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundColor(Color(UIColor.quaternaryLabel))
+                    }
+                }
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+
+            Section {
+                Button(action: {
+                    showDeleteConfirmation = true
+                }) {
+                    HStack {
+                        Text("Delete Account")
+                            .foregroundColor(.red)
+                        Spacer()
+                    }
+                }
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+        }
+        .scrollContentBackground(.hidden)
+        .background(Color.settingsBackground(for: colorScheme))
+        .navigationTitle("Manage Account")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Delete Account", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                Task {
+                    do {
+                        try await clerk.user?.delete()
+                        await performFullDataCleanup()
+                        await authManager.signOut()
+                        dismiss()
+                    } catch {
+                        accountDeletionError = error.localizedDescription
+                    }
+                }
+            }
+        } message: {
+            Text("Are you sure you want to delete your account? This action cannot be undone.")
+        }
+        .alert("Account Deletion Failed", isPresented: Binding(
+            get: { accountDeletionError != nil },
+            set: { if !$0 { accountDeletionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(accountDeletionError ?? "")
+        }
+        .sheet(isPresented: $showProfileEditor) {
+            ProfileEditorView(
+                firstName: $editingFirstName,
+                lastName: $editingLastName,
+                isUpdating: $isUpdatingProfile,
+                errorMessage: $profileUpdateError,
+                onSave: {
+                    Task {
+                        await updateProfile()
+                    }
+                },
+                onCancel: {
+                    showProfileEditor = false
+                }
+            )
+            .environment(clerk)
+        }
     }
 
     private var preferencesSection: some View {
@@ -925,48 +992,6 @@ struct SettingsView: View {
                     ? "All local data will be cleared. You can recover your chats by signing back in."
                     : "All local data will be cleared. You will need your encryption key to recover your chats.")
             }
-        }
-        .alert("Delete Account", isPresented: $showDeleteConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                Task {
-                    do {
-                        try await clerk.user?.delete()
-                        await performFullDataCleanup()
-                        await authManager.signOut()
-                        dismiss()
-                    } catch {
-                        accountDeletionError = error.localizedDescription
-                    }
-                }
-            }
-        } message: {
-            Text("Are you sure you want to delete your account? This action cannot be undone.")
-        }
-        .alert("Account Deletion Failed", isPresented: Binding(
-            get: { accountDeletionError != nil },
-            set: { if !$0 { accountDeletionError = nil } }
-        )) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(accountDeletionError ?? "")
-        }
-        .sheet(isPresented: $showProfileEditor) {
-            ProfileEditorView(
-                firstName: $editingFirstName,
-                lastName: $editingLastName,
-                isUpdating: $isUpdatingProfile,
-                errorMessage: $profileUpdateError,
-                onSave: {
-                    Task {
-                        await updateProfile()
-                    }
-                },
-                onCancel: {
-                    showProfileEditor = false
-                }
-            )
-            .environment(clerk)
         }
         .sheet(isPresented: $showPremiumModal) {
             PaywallView(displayCloseButton: true)
