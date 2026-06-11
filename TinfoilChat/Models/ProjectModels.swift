@@ -57,6 +57,7 @@ struct ProjectDocument: Codable, Identifiable, Equatable {
     var createdAt: String
     var updatedAt: String
     var content: String?
+    var decryptionFailed: Bool?
 }
 
 struct ProjectDocumentPayload: Codable, Equatable {
@@ -133,28 +134,4 @@ struct ProjectSyncStatus: Codable, Equatable {
 typealias ProjectChatSyncStatus = ProjectSyncStatus
 typealias ProjectDocumentSyncStatus = ProjectSyncStatus
 
-struct EncryptedProjectContent: Codable {
-    let encryptedData: EncryptedData
 
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let encryptedData = try? container.decode(EncryptedData.self) {
-            self.encryptedData = encryptedData
-            return
-        }
-
-        let encryptedString = try container.decode(String.self)
-        guard let data = encryptedString.data(using: .utf8) else {
-            throw DecodingError.dataCorruptedError(
-                in: container,
-                debugDescription: "Encrypted content is not valid UTF-8"
-            )
-        }
-        self.encryptedData = try JSONDecoder().decode(EncryptedData.self, from: data)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(encryptedData)
-    }
-}

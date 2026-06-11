@@ -18,7 +18,6 @@ struct ChatIndexEntry: Codable, Identifiable, Equatable {
     var messageCount: Int
     var decryptionFailed: Bool
     var dataCorrupted: Bool
-    var hasEncryptedData: Bool
     var formatVersion: Int?
     var projectId: String?
     var syncVersion: Int
@@ -48,7 +47,6 @@ struct ChatIndexEntry: Codable, Identifiable, Equatable {
         self.messageCount = chat.messages.count
         self.decryptionFailed = chat.decryptionFailed
         self.dataCorrupted = chat.dataCorrupted
-        self.hasEncryptedData = chat.encryptedData != nil
         self.formatVersion = chat.formatVersion
         self.projectId = chat.projectId
         self.syncVersion = chat.syncVersion

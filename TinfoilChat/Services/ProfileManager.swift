@@ -91,8 +91,12 @@ class ProfileManager: ObservableObject {
 
         persistProfileToKeychain(profile)
 
-        // For user-initiated changes, schedule a debounced cloud sync
-        if !isApplyingProfile {
+        // Only treat this as a local edit when the content actually
+        // diverges from the last synced baseline. Debounced observers
+        // can fire after `isApplyingProfile` has reset following a
+        // cloud apply, which would otherwise mark the profile dirty and
+        // wedge future pulls behind a phantom pending change.
+        if !isApplyingProfile && hasProfileChanged(profile, lastSyncedProfile) {
             markLocalProfileChanged()
             if !isSyncing {
                 debounceCloudSync()
@@ -383,8 +387,11 @@ class ProfileManager: ObservableObject {
         
         let profile = createProfileData()
         
-        // Only push if there is a real change vs last synced baseline
+        // Only push if there is a real change vs last synced baseline.
+        // When nothing diverges, clear the pending flag so a phantom
+        // dirty marker can't permanently block pulls from the cloud.
         guard hasProfileChanged(profile, lastSyncedProfile) else {
+            clearLocalProfileChanged()
             return
         }
         

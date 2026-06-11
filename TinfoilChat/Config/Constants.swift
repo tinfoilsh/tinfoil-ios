@@ -79,6 +79,10 @@ enum Constants {
     enum API {
         static let chatCompletionsEndpoint = "/v1/chat/completions"
         static let baseURL = "https://api.tinfoil.sh"
+        /// Read-only recovery endpoint for passkeys registered on the
+        /// pre-enclave (v1) webapp. Consulted only when the enclave key
+        /// registry has no usable bundle for this device.
+        static let legacyPasskeyCredentialsPath = "/api/passkey-credentials/"
         static let sessionTokenExpiryBufferSeconds: TimeInterval = 300  // 5 minutes
 
         enum ErrorCode {
@@ -87,6 +91,17 @@ enum Constants {
             /// per-account hourly inference-token cap.
             static let hourlyLimitReached = "HOURLY_LIMIT_REACHED"
         }
+    }
+
+    enum SyncEnclave {
+        static let url = "https://sync.tinfoil.sh"
+        static let configRepo = "tinfoilsh/confidential-sync"
+        static let chatListLimit = 100
+        static let projectListLimit = 100
+        static let projectChatListLimit = 100
+        /// Hard per-page cap the enclave's list-status endpoint
+        /// enforces; requests above it are clamped server-side.
+        static let listStatusPageLimit = 500
     }
 
 
@@ -125,6 +140,12 @@ enum Constants {
         static let uploadBaseDelaySeconds: TimeInterval = 1.0
         static let uploadMaxDelaySeconds: TimeInterval = 8.0
         static let uploadMaxRetries: Int = 3
+
+        // Poll cadence and deadline for the enclave's async
+        // migrate-all coordinator. Mirrors the webapp constants so
+        // both clients keep the same drain budget.
+        static let migrationPollIntervalSeconds: TimeInterval = 2.0
+        static let migrationPollTimeoutSeconds: TimeInterval = 15 * 60.0
     }
 
     enum Verification {
@@ -135,6 +156,14 @@ enum Constants {
     enum Summarizer {
         static let enclaveURL = "https://summarizer.tinfoil.sh"
         static let configRepo = "tinfoilsh/confidential-summarizer"
+    }
+
+    enum Metadata {
+        static let enclaveURL = "https://opengraph-metadata.tinfoil.sh"
+        static let configRepo = "tinfoilsh/confidential-website-metadata-fetcher"
+        /// Cap on cached link-metadata entries; favicon bytes ride along
+        /// in each entry, so an unbounded cache would grow steadily.
+        static let cacheEntryLimit = 200
     }
 
     enum DocumentProcessing {
@@ -176,12 +205,10 @@ enum Constants {
         static let rpName = "Tinfoil Chat"
         static let prfSalt = Data("tinfoil-chat-key-encryption".utf8)
         static let hkdfInfo = Data("tinfoil-chat-kek-v1".utf8)
-        static let credentialsEndpoint = "/api/passkey-credentials/"
         static let challengeByteCount = 32
         static let kekByteCount = 32
         static let prfCacheKeychainAccount = "sh.tinfoil.passkey-prf-cache"
         static let syncCheckIntervalSeconds: TimeInterval = 30
-        static let credentialSaveMaxAttempts = 3
     }
 
     // MARK: - Centralized UserDefaults Storage Keys
@@ -257,14 +284,33 @@ enum Constants {
         // MARK: - Secret / Sensitive
         enum Secret {
             static let encryptionKeySetUp = "tinfoil-secret-encryption-key-set-up"
-            static let passkeyBackedUp = "tinfoil-secret-passkey-backed-up"
-            static let passkeySyncVersion = "tinfoil-secret-passkey-sync-version"
-            static let passkeyBundleVersion = "tinfoil-secret-passkey-bundle-version"
+            static let passkeyEnclaveKeyId = "tinfoil-secret-passkey-enclave-key-id"
+            static let passkeyEnclaveCredentialId = "tinfoil-secret-passkey-enclave-credential-id"
 
             static func cloudKeyAuthorization(userId: String) -> String {
                 "tinfoil-secret-cloud-key-authorization-\(userId)"
             }
         }
+
+        // MARK: - One-shot migration flags
+        enum Migration {
+            /// Set the first time a build evicts locally-cached cloud chats
+            /// that the legacy v0/v1 decrypt path used to handle. The enclave
+            /// rewraps any orphan rows server-side; the next sync repopulates.
+            static let legacyCloudChatsEvicted = "tinfoil-migration-legacy-cloud-chats-evicted"
+        }
+
+        /// Legacy UserDefaults keys that should be purged on app
+        /// launch. These named the v1 sync state (passkey JSONB
+        /// version counters, the now-removed `passkeyBackedUp`
+        /// hint) and have no replacement in the v2 architecture.
+        static let legacyKeysToRemove: [String] = [
+            "tinfoil-secret-passkey-backed-up",
+            "tinfoil-secret-passkey-sync-version",
+            "tinfoil-secret-passkey-bundle-version",
+            "tinfoil-passkey-backed-up",
+            "tinfoil-passkey-sync-version",
+        ]
     }
 
     enum AppReview {
@@ -297,6 +343,14 @@ enum StorageKeysMigration {
     private static let migrationCompleteKey = "tinfoil-settings-storage-keys-migrated"
 
     static func migrateIfNeeded() {
+        // Purge outside the one-shot guard: users who completed the
+        // key-rename migration before this list existed would
+        // otherwise keep the stale v1 entries forever. Removing an
+        // absent key is a no-op, so re-running every launch is cheap.
+        for key in Constants.StorageKeys.legacyKeysToRemove {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+
         guard !UserDefaults.standard.bool(forKey: migrationCompleteKey) else { return }
 
         let migrations: [(old: String, new: String)] = [
@@ -327,9 +381,7 @@ enum StorageKeysMigration {
             ("tinfoil-all-chats-sync-status", Constants.StorageKeys.Sync.allChatsStatus),
             // Secret / Passkey
             ("encryptionKeyWasSetUp", Constants.StorageKeys.Secret.encryptionKeySetUp),
-            ("tinfoil-passkey-backed-up", Constants.StorageKeys.Secret.passkeyBackedUp),
             ("has_seen_passkey_intro", Constants.StorageKeys.Settings.hasSeenPasskeyIntro),
-            ("tinfoil-passkey-sync-version", Constants.StorageKeys.Secret.passkeySyncVersion),
         ]
 
         for (old, new) in migrations where old != new {

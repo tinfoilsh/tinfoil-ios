@@ -272,7 +272,10 @@ struct SettingsView: View {
     @State private var showSignOutConfirmation = false
     @State private var showPremiumModal = false
     @State private var accountDeletionError: String? = nil
-    
+    @State private var passkeyBundles: [EnclaveKeyCurrentBundle] = []
+    @State private var removingPasskeyId: String? = nil
+    @State private var passkeyBundleError: String? = nil
+
     var shouldOpenCloudSync: Bool = false
     
     // Complete list of languages based on ISO 639-1
@@ -479,6 +482,33 @@ struct SettingsView: View {
                         .padding(.top, 2)
                     }
                     .padding(.vertical, 2)
+                }
+
+                if !passkeyBundles.isEmpty || passkeyBundleError != nil {
+                    passkeyBundleInventory
+                }
+
+                if passkeyManager.passkeyAddDeviceAvailable && EncryptionService.shared.hasEncryptionKey() {
+                    Button(action: {
+                        Task {
+                            await passkeyManager.createPasskeyBackup()
+                        }
+                    }) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "person.badge.key.fill")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                Text("Set Up Passkey on This Device")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                            }
+                            Text("Your other devices use a passkey already. Add one here for one-tap access.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
                 } else if passkeyManager.passkeySetupAvailable && EncryptionService.shared.hasEncryptionKey() {
                     Button(action: {
                         Task {
@@ -628,6 +658,123 @@ struct SettingsView: View {
         .listRowBackground(Color.cardSurface(for: colorScheme))
     }
 
+    private var passkeyBundleInventory: some View {
+        let localCredentialId = UserDefaults.standard.string(
+            forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId
+        )
+        let sorted = passkeyBundles.sorted { a, b in
+            if a.credentialId == localCredentialId { return true }
+            if b.credentialId == localCredentialId { return false }
+            return (a.createdAt ?? "") > (b.createdAt ?? "")
+        }
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Registered platforms (\(sorted.count))")
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+            ForEach(sorted, id: \.credentialId) { bundle in
+                passkeyBundleRow(
+                    bundle: bundle,
+                    isCurrentPlatform: bundle.credentialId == localCredentialId
+                )
+            }
+            if let passkeyBundleError {
+                Text(passkeyBundleError)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func passkeyBundleRow(
+        bundle: EnclaveKeyCurrentBundle,
+        isCurrentPlatform: Bool
+    ) -> some View {
+        let credLabel = bundle.credentialId.count <= 12
+            ? bundle.credentialId
+            : "\(bundle.credentialId.prefix(6))…\(bundle.credentialId.suffix(4))"
+        let dateLabel: String
+        if let created = bundle.createdAt, !created.isEmpty {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let date = formatter.date(from: created)
+                ?? ISO8601DateFormatter().date(from: created)
+            if let date {
+                let display = DateFormatter()
+                display.dateStyle = .medium
+                dateLabel = display.string(from: date)
+            } else {
+                dateLabel = "Date unknown"
+            }
+        } else {
+            dateLabel = "Date unknown"
+        }
+        let isRemoving = removingPasskeyId == bundle.credentialId
+        return HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.badge.key.fill")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(isCurrentPlatform ? "This platform" : "Other platform")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                }
+                Text("\(credLabel) · \(dateLabel)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button(action: {
+                Task { await removeBundle(bundle.credentialId) }
+            }) {
+                Text(isRemoving ? "Removing…" : "Remove")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(isRemoving ? .secondary : .red)
+            }
+            .disabled(removingPasskeyId != nil)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func refreshPasskeyBundles() async {
+        guard settings.isCloudSyncEnabled else {
+            passkeyBundles = []
+            passkeyBundleError = nil
+            return
+        }
+        do {
+            passkeyBundles = try await passkeyManager.listPasskeyBundles()
+            passkeyBundleError = nil
+        } catch {
+            // Keep the previous inventory: clearing it would make a
+            // load failure indistinguishable from "no passkeys
+            // registered" for a security-relevant list.
+            passkeyBundleError = "Couldn't load registered passkeys. Please try again later."
+        }
+    }
+
+    private func removeBundle(_ credentialId: String) async {
+        // One removal at a time: the in-flight UI state is single-valued
+        // and concurrent deletes would race it and duplicate requests.
+        guard removingPasskeyId == nil else { return }
+        removingPasskeyId = credentialId
+        defer { removingPasskeyId = nil }
+        do {
+            try await passkeyManager.removePasskeyBundle(credentialId: credentialId)
+            await refreshPasskeyBundles()
+        } catch {
+            passkeyBundleError = "Couldn't remove the passkey. Please try again."
+        }
+    }
+
     private var subscriptionSection: some View {
         Section {
             if authManager.hasActiveSubscription {
@@ -748,6 +895,9 @@ struct SettingsView: View {
                     .accessibilityLabel("Close")
                 }
             }
+        }
+        .task(id: [settings.isCloudSyncEnabled, passkeyManager.passkeyActive]) {
+            await refreshPasskeyBundles()
         }
         .onAppear {
             // Reset navigation bar to use system colors for settings screens

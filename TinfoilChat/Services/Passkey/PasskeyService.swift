@@ -19,6 +19,12 @@ struct PrfPasskeyResult {
     let credentialId: String
     /// Raw PRF output as a SymmetricKey (32 bytes)
     let prfOutput: SymmetricKey
+    /// Whether the underlying ceremony was completed by an
+    /// authenticator attached to this device (`.platform`) or by a
+    /// cross-device hybrid transport like a paired phone or USB key
+    /// (`.crossPlatform`). Lets the caller decide whether to remember
+    /// this credential id as "this device's".
+    let isPlatformAuthenticator: Bool
 }
 
 /// Errors specific to passkey operations.
@@ -52,6 +58,11 @@ enum PasskeyError: LocalizedError {
 private struct PrfCacheEntry: Codable {
     let credentialId: String
     let prfOutput: Data
+    /// Optional for backward compatibility with entries cached before
+    /// the flag was persisted; readers must treat a missing value as
+    /// cross-platform so a cached hybrid credential is never wrongly
+    /// remembered as this device's.
+    var isPlatformAuthenticator: Bool?
 }
 
 /// Handles passkey creation, authentication, and KEK derivation via PRF + HKDF.
@@ -123,8 +134,13 @@ final class PasskeyService: NSObject {
 
         // If PRF results were returned during creation, use them directly
         if let firstKey = prfOutput.first {
-            let result = PrfPasskeyResult(credentialId: credentialId, prfOutput: firstKey)
+            let result = PrfPasskeyResult(
+                credentialId: credentialId,
+                prfOutput: firstKey,
+                isPlatformAuthenticator: Self.isPlatformAttachment(credential.attachment)
+            )
             cachePrfResult(result)
+            rememberLocalCredentialIfPlatform(result)
             return result
         }
 
@@ -185,9 +201,39 @@ final class PasskeyService: NSObject {
         }
 
         let credentialId = Self.base64urlEncode(assertion.credentialID)
-        let result = PrfPasskeyResult(credentialId: credentialId, prfOutput: prfOutput.first)
+        let result = PrfPasskeyResult(
+            credentialId: credentialId,
+            prfOutput: prfOutput.first,
+            isPlatformAuthenticator: Self.isPlatformAttachment(assertion.attachment)
+        )
         cachePrfResult(result)
+        rememberLocalCredentialIfPlatform(result)
         return result
+    }
+
+    /// Map an `ASAuthorizationPublicKeyCredentialAttachment` to a
+    /// plain boolean. `.platform` means the user verified on this
+    /// device; any other value (cross-platform, or a future case)
+    /// means the credential came from elsewhere and we must not
+    /// remember it as belonging to this device.
+    private static func isPlatformAttachment(
+        _ attachment: ASAuthorizationPublicKeyCredentialAttachment
+    ) -> Bool {
+        attachment == .platform
+    }
+
+    /// Remember `credentialId` as the local platform passkey for
+    /// this device. The lookup key is shared with PasskeyManager's
+    /// "is there a bundle for this device?" check. Skipped silently
+    /// when the credential was authenticated via cross-device
+    /// hybrid (a paired phone, Mac, etc.) — those credentials live
+    /// elsewhere and should not be confused with a local one.
+    func rememberLocalCredentialIfPlatform(_ result: PrfPasskeyResult) {
+        guard result.isPlatformAuthenticator else { return }
+        UserDefaults.standard.set(
+            result.credentialId,
+            forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId
+        )
     }
 
     // MARK: - PRF Cache (Keychain)
@@ -197,7 +243,8 @@ final class PasskeyService: NSObject {
     func cachePrfResult(_ result: PrfPasskeyResult) {
         let entry = PrfCacheEntry(
             credentialId: result.credentialId,
-            prfOutput: result.prfOutput.withUnsafeBytes { Data($0) }
+            prfOutput: result.prfOutput.withUnsafeBytes { Data($0) },
+            isPlatformAuthenticator: result.isPlatformAuthenticator
         )
         guard let data = try? JSONEncoder().encode(entry) else { return }
 
@@ -236,7 +283,8 @@ final class PasskeyService: NSObject {
 
         return PrfPasskeyResult(
             credentialId: entry.credentialId,
-            prfOutput: SymmetricKey(data: entry.prfOutput)
+            prfOutput: SymmetricKey(data: entry.prfOutput),
+            isPlatformAuthenticator: entry.isPlatformAuthenticator ?? false
         )
     }
 

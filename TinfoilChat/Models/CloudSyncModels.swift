@@ -29,9 +29,8 @@ struct StoredChat: Codable {
     // For handling encrypted chats that failed to decrypt
     var decryptionFailed: Bool?
     var dataCorrupted: Bool?
-    var encryptedData: String?
-    
-    // Format version: 0=legacy JSON, 1=gzip+binary
+
+    // Format version: 2=plaintext (enclave-unsealed)
     var formatVersion: Int?
     
     // Project association (used by React, preserved by iOS)
@@ -40,15 +39,13 @@ struct StoredChat: Codable {
     // For tracking streaming state
     var hasActiveStream: Bool?
     
-    /// Creates a placeholder for a chat that failed to decrypt.
-    /// Does NOT require @MainActor — avoids a main-thread hop during background sync.
-    /// The modelType is left nil and resolved lazily in toChat() when the user opens it.
+    /// Creates a placeholder for a chat the enclave declined to unseal
+    /// (e.g. UNKNOWN_KEY). The ciphertext is never carried client-side
+    /// — callers display a "this chat exists but cannot be read" badge.
     static func encryptedPlaceholder(
         id: String,
         createdAt: Date,
-        updatedAt: Date,
-        formatVersion: Int,
-        encryptedData: String?
+        updatedAt: Date
     ) -> StoredChat {
         var chat = StoredChat(
             id: id,
@@ -60,8 +57,7 @@ struct StoredChat: Codable {
             locallyModified: false
         )
         chat.decryptionFailed = true
-        chat.formatVersion = formatVersion
-        chat.encryptedData = encryptedData
+        chat.formatVersion = 2
         return chat
     }
 
@@ -137,7 +133,6 @@ struct StoredChat: Codable {
             updatedAt: updatedAt,
             decryptionFailed: decryptionFailed ?? false,
             dataCorrupted: dataCorrupted ?? false,
-            encryptedData: encryptedData,
             formatVersion: formatVersion,
             projectId: projectId
         )
@@ -154,7 +149,7 @@ struct StoredChat: Codable {
         case id, title, titleState, messages, createdAt, updatedAt
         case language, userId
         case syncVersion, syncedAt, locallyModified
-        case decryptionFailed, dataCorrupted, encryptedData, formatVersion, projectId
+        case decryptionFailed, dataCorrupted, formatVersion, projectId
     }
 
     func encode(to encoder: Encoder) throws {
@@ -184,7 +179,6 @@ struct StoredChat: Codable {
         try container.encode(locallyModified, forKey: .locallyModified)
         try container.encodeIfPresent(decryptionFailed, forKey: .decryptionFailed)
         try container.encodeIfPresent(dataCorrupted, forKey: .dataCorrupted)
-        try container.encodeIfPresent(encryptedData, forKey: .encryptedData)
         try container.encodeIfPresent(formatVersion, forKey: .formatVersion)
         try container.encodeIfPresent(projectId, forKey: .projectId)
         // hasActiveStream is transient UI state — never encode it to the sync blob
@@ -244,7 +238,6 @@ struct StoredChat: Codable {
         locallyModified = try container.decodeIfPresent(Bool.self, forKey: .locallyModified) ?? false
         decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed)
         dataCorrupted = try container.decodeIfPresent(Bool.self, forKey: .dataCorrupted)
-        encryptedData = try container.decodeIfPresent(String.self, forKey: .encryptedData)
         formatVersion = try container.decodeIfPresent(Int.self, forKey: .formatVersion)
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
         // hasActiveStream is transient UI state — always reset to nil on decode
@@ -288,6 +281,16 @@ struct ChatListResponse: Codable {
     let nextContinuationToken: String?
     let hasMore: Bool
 
+    init(
+        conversations: [RemoteChat],
+        nextContinuationToken: String?,
+        hasMore: Bool
+    ) {
+        self.conversations = conversations
+        self.nextContinuationToken = nextContinuationToken
+        self.hasMore = hasMore
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.conversations = (try? container.decode([RemoteChat].self, forKey: .conversations)) ?? []
@@ -311,8 +314,8 @@ struct RemoteChat: Codable {
     let messageCount: Int?  // Optional - might not be present
     let syncVersion: Int?  // Optional - for version tracking
     let size: Int?  // Optional - file size
-    let content: String?  // Encrypted chat content (optional in list)
-    let formatVersion: Int?  // 0=legacy JSON, 1=gzip+binary
+    let content: String?  // Plaintext envelope-v2 chat content (optional in list)
+    let formatVersion: Int?  // 0=legacy JSON, 1=gzip+binary, 2=plaintext (enclave-unsealed)
     let projectId: String?  // Project association (returned by all-updated-since)
 }
 
@@ -326,24 +329,6 @@ struct GenerateConversationIdResponse: Codable {
     let conversationId: String
     let timestamp: String
     let reverseTimestamp: Int
-}
-
-/// Request for uploading a conversation
-struct UploadConversationRequest: Codable {
-    let conversationId: String
-    let data: String  // JSON stringified encrypted data
-    let metadata: [String: String]
-    let projectId: String?
-}
-
-/// Request for updating metadata
-struct UpdateMetadataRequest: Codable {
-    let conversationId: String
-    let metadata: [String: String]
-}
-
-struct UpdateChatProjectRequest: Codable {
-    let projectId: String?
 }
 
 // MARK: - Profile Sync Models
@@ -374,31 +359,26 @@ struct ProfileData: Codable {
     var updatedAt: String?
 }
 
-/// Profile API response
-struct ProfileResponse: Codable {
-    let data: String  // Encrypted profile data
-    let version: String?
-    let created: String?
-    let updated: String?
-}
-
-/// Profile upload request
-struct ProfileUploadRequest: Codable {
-    let data: String  // JSON stringified encrypted data
-}
-
-/// Profile upload response
-struct ProfileUploadResponse: Codable {
-    let version: Int
-    let message: String?
-}
-
 // MARK: - Sync Status Models
 
 /// Chat sync status from server (for efficient sync checking)
 struct ChatSyncStatus: Codable {
     let count: Int
     let lastUpdated: String?
+    /// Snapshot of how many cloud-eligible chats were actually on
+    /// disk when this status was cached. smartSync compares it to a
+    /// live count on every check so that an eviction sweep or any
+    /// other path that silently drops rows triggers a fresh pull
+    /// instead of being masked by a stale watermark. Optional for
+    /// backwards compatibility with snapshots written before the
+    /// field was introduced.
+    let localCount: Int?
+
+    init(count: Int, lastUpdated: String?, localCount: Int? = nil) {
+        self.count = count
+        self.lastUpdated = lastUpdated
+        self.localCount = localCount
+    }
 }
 
 /// Profile sync status from server (for efficient sync checking)

@@ -174,32 +174,73 @@ struct SearchingDotsView: View {
     }
 }
 
-/// Favicon view that displays a website icon
+/// Raw favicon image fetched through the attested metadata enclave.
+/// Owns its async load + state so it can be dropped into any parent
+/// (with its own frame, background, and clip shape) without each
+/// caller duplicating the loader.
+struct FaviconImage: View {
+    let url: String
+    let placeholderColor: Color
+    let placeholderFontSize: CGFloat
+
+    @State private var iconImage: UIImage?
+    @State private var loadFailed = false
+
+    var body: some View {
+        Group {
+            if let image = iconImage {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else if loadFailed {
+                Image(systemName: "globe")
+                    .font(.system(size: placeholderFontSize))
+                    .foregroundColor(placeholderColor)
+            } else {
+                Color.clear
+            }
+        }
+        .task(id: url) {
+            iconImage = nil
+            loadFailed = false
+            do {
+                let metadata = try await LinkMetadataService.shared.metadata(for: url)
+                // The shared in-flight fetch doesn't observe this
+                // task's cancellation, so a superseded task can reach
+                // this point; bail before stomping the new task's state.
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    if let bytes = metadata.faviconBytes, let image = UIImage(data: bytes) {
+                        iconImage = image
+                    } else {
+                        loadFailed = true
+                    }
+                }
+            } catch is CancellationError {
+                // The task was superseded (url changed or view went
+                // away). The new task will reset state itself; don't
+                // surface a failure for an expected cancel.
+                return
+            } catch {
+                await MainActor.run { loadFailed = true }
+            }
+        }
+    }
+}
+
+/// Favicon view that displays a website icon. The icon bytes are
+/// fetched through the attested metadata enclave so the device never
+/// touches an external icon host directly.
 struct FaviconView: View {
     let url: String
     let isDarkMode: Bool
 
-    private var faviconURL: URL? {
-        guard let urlObj = URL(string: url),
-              let host = urlObj.host else { return nil }
-        return URL(string: "https://icons.duckduckgo.com/ip3/\(host).ico")
-    }
-
     var body: some View {
-        AsyncImage(url: faviconURL) { phase in
-            switch phase {
-            case .empty:
-                placeholderIcon
-            case .success(let image):
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-            case .failure:
-                placeholderIcon
-            @unknown default:
-                placeholderIcon
-            }
-        }
+        FaviconImage(
+            url: url,
+            placeholderColor: isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5),
+            placeholderFontSize: 10
+        )
         .frame(width: 16, height: 16)
         .background(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
         .clipShape(Circle())
@@ -207,12 +248,6 @@ struct FaviconView: View {
             Circle()
                 .stroke(isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.1), lineWidth: 0.5)
         )
-    }
-
-    private var placeholderIcon: some View {
-        Image(systemName: "globe")
-            .font(.system(size: 10))
-            .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
     }
 }
 

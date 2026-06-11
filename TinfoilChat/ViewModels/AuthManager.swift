@@ -188,7 +188,7 @@ class AuthManager: ObservableObject {
                 // User was authenticated but Clerk confirms they're no longer signed in.
                 // clearAuthState calls handleSignOut first (while auth is still true)
                 // so that local chats can be saved to disk before clearing.
-                clearAuthState()
+                await clearAuthState()
                 await RevenueCatManager.shared.logoutUser()
             } else {
                 isAuthenticated = false
@@ -199,10 +199,27 @@ class AuthManager: ObservableObject {
         isLoading = false
     }
     
-    private func clearAuthState() {
+    private func clearAuthState() async {
         // Handle chat state BEFORE clearing auth so the view model can still
         // save the current chat (hasChatAccess depends on isAuthenticated).
         chatViewModel?.handleSignOut()
+
+        // Sign-out performs a full local wipe so that no content, encryption
+        // keys, or personalization bleed into the next account on a shared
+        // device. This runs before isAuthenticated is cleared below so the
+        // view model can still resolve the signing-out user's id for the wipe.
+        EncryptionService.shared.clearKey()
+        await DeviceEncryptionService.shared.clearKey()
+        if let chatViewModel {
+            await chatViewModel.wipeLocalChatsForSignOut()
+        } else {
+            // No chat view model is attached (e.g. sign-out resolved before
+            // the UI wired one up); wipe directly so chat files never
+            // outlive the account on a shared device.
+            await Chat.deleteAllChatsFromStorage(userId: localUserData?["id"] as? String)
+        }
+        SettingsManager.shared.clearAllSettings()
+        ProfileManager.shared.clearProfile()
 
         localUserData = nil
         isAuthenticated = false
@@ -222,7 +239,7 @@ class AuthManager: ObservableObject {
             let clerk = self.clerk ?? Clerk.shared
             try await clerk.auth.signOut()
             
-            clearAuthState()
+            await clearAuthState()
             
         } catch {
         }
@@ -308,7 +325,7 @@ class AuthManager: ObservableObject {
             try await user.delete()
             
             // Clear local state
-            clearAuthState()
+            await clearAuthState()
             
         } catch {
             throw error

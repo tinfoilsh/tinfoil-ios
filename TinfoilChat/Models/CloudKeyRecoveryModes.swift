@@ -6,5 +6,4 @@ enum CloudSyncOnboardingMode {
 enum CloudKeyActivationMode {
     case recoverExisting
     case explicitStartFresh
-    case addRecoveryKey
 }

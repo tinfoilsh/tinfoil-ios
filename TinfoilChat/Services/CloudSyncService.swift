@@ -49,9 +49,9 @@ private actor UploadCoalescer {
     }
 
     private var states: [String: ChatUploadState] = [:]
-    private let uploadFn: @Sendable (String) async throws -> Void
+    private let uploadFn: @Sendable (String, String) async throws -> Void
 
-    init(uploadFn: @escaping @Sendable (String) async throws -> Void) {
+    init(uploadFn: @escaping @Sendable (String, String) async throws -> Void) {
         self.uploadFn = uploadFn
     }
 
@@ -93,7 +93,13 @@ private actor UploadCoalescer {
         while states[chatId]?.dirty == true {
             states[chatId]?.dirty = false
 
-            terminalError = await uploadWithRetry(chatId)
+            // Mint one idempotency key per logical write. All HTTP
+            // retries inside uploadWithRetry replay under the same
+            // key so the enclave collapses them to a single
+            // committed effect, even when a previous attempt
+            // already committed and we lost the response.
+            let idempotencyKey = newSyncEnclaveIdempotencyKey()
+            terminalError = await uploadWithRetry(chatId, idempotencyKey: idempotencyKey)
         }
 
         // Notify waiters and clean up in a single access
@@ -121,12 +127,12 @@ private actor UploadCoalescer {
         }
     }
 
-    private func uploadWithRetry(_ chatId: String) async -> Error? {
+    private func uploadWithRetry(_ chatId: String, idempotencyKey: String) async -> Error? {
         var lastError: Error?
 
         for attempt in 0...Constants.Sync.uploadMaxRetries {
             do {
-                try await uploadFn(chatId)
+                try await uploadFn(chatId, idempotencyKey)
                 states[chatId]?.failureCount = 0
                 return nil
             } catch {
@@ -169,8 +175,8 @@ class CloudSyncService: ObservableObject {
     
     // MARK: - Private Properties
     private lazy var uploadCoalescer: UploadCoalescer = {
-        UploadCoalescer { [weak self] chatId in
-            try await self?.doBackupChat(chatId)
+        UploadCoalescer { [weak self] chatId, idempotencyKey in
+            try await self?.doBackupChat(chatId, idempotencyKey: idempotencyKey)
         }
     }()
     private var streamingCallbacks: Set<String> = []
@@ -184,8 +190,102 @@ class CloudSyncService: ObservableObject {
 
     private init() {}
 
-    private func canWriteToCloud() -> Bool {
-        CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey()
+    /// The enclave is the source of truth for write authority: the local
+    /// CEK may write only when it derives the key id the enclave currently
+    /// has registered. The enclave never registers a key as a side effect
+    /// of a write — without a `user_keys` row every push is rejected as a
+    /// stale key — so when the remote has no key yet this gate registers
+    /// the local CEK itself (empty remote) or defers the write until the
+    /// legacy-migration path adopts the key (un-migrated legacy data). A
+    /// local authorization hint is never sufficient on its own — another
+    /// device may have rotated or reset the key, leaving this device's
+    /// hint stale.
+    private func canWriteToCloud() async -> Bool {
+        let cek: Data
+        do {
+            cek = try EncryptionService.shared.getKeyBytesOrThrow()
+        } catch {
+            return false
+        }
+
+        let response: EnclaveKeyCurrentResponse
+        do {
+            response = try await SyncEnclaveAPI.keyCurrent()
+        } catch {
+            // Can't verify right now (offline / attestation / 5xx): defer the
+            // write to a later sync cycle rather than risk writing under a
+            // key the enclave no longer recognizes.
+            return false
+        }
+
+        guard let remoteKeyId = response.keyId else {
+            if response.hasData {
+                // Un-migrated legacy data with no registered key: pushing
+                // now would only earn a stale-key rejection, and adopting
+                // the key here would bypass the migration path's decrypt
+                // probe. Defer; once the migration adopts the key the
+                // next pass clears this gate.
+                return false
+            }
+            // Only ever bind a key the user has actually committed and
+            // only while cloud sync is on. During an activation ceremony
+            // the new key is staged in memory only; a concurrent
+            // background write must not register it before the ceremony
+            // finishes (a transient failure would roll the client back
+            // while the server stays bound to the discarded key).
+            guard SettingsManager.shared.isCloudSyncEnabled,
+                  let persistedKey = EncryptionService.shared.persistedPrimaryKey(),
+                  let persistedBytes = try? EncryptionService.shared.getAlternativeKeyBytes(persistedKey)
+            else {
+                return false
+            }
+            return await registerKeyForEmptyRemote(keyB64: dataToBase64(persistedBytes))
+        }
+
+        let localKeyId: String
+        do {
+            localKeyId = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+        } catch {
+            return false
+        }
+
+        return localKeyId == remoteKeyId
+    }
+
+    private var emptyRemoteRegistration: Task<Bool, Never>?
+
+    /// Bind the loaded primary CEK as the enclave's current key when the
+    /// remote is completely empty. The controlplane rejects every push as
+    /// a stale key until a user_keys row exists, and nothing else
+    /// registers a manually generated/imported key on a brand-new
+    /// account, so the write gate performs the registration itself. The
+    /// AnyKey sentinel keeps this race-safe across devices: registration
+    /// only succeeds while no key is registered, and a loss just defers
+    /// the push until the next validation pass sees the winner's key.
+    private func registerKeyForEmptyRemote(keyB64: String) async -> Bool {
+        if let inFlight = emptyRemoteRegistration {
+            return await inFlight.value
+        }
+        let task = Task<Bool, Never> {
+            do {
+                _ = try await SyncEnclaveAPI.registerKey(
+                    EnclaveKeyRegisterRequest(
+                        key: keyB64,
+                        ifMatch: IfMatchSentinels.anyKey,
+                        createdVia: SyncEnclaveCreatedVia.manual.rawValue,
+                        idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                        initialBundle: nil
+                    )
+                )
+                return true
+            } catch {
+                return false
+            }
+        }
+        emptyRemoteRegistration = task
+        let result = await task.value
+        emptyRemoteRegistration = nil
+        return result
     }
     
     // MARK: - Initialization
@@ -227,9 +327,9 @@ class CloudSyncService: ObservableObject {
         }
         
         // Set token getter for both R2 storage and ProfileSync
-        cloudStorage.setTokenGetter(tokenGetter)
-        ProfileSyncService.shared.setTokenGetter(tokenGetter)
-        ProjectStorageService.shared.setTokenGetter(tokenGetter)
+        await cloudStorage.setTokenGetter(tokenGetter)
+        await ProfileSyncService.shared.setTokenGetter(tokenGetter)
+        await ProjectStorageService.shared.setTokenGetter(tokenGetter)
         
     }
     
@@ -242,7 +342,7 @@ class CloudSyncService: ObservableObject {
             return
         }
 
-        guard canWriteToCloud() else {
+        guard await canWriteToCloud() else {
             return
         }
 
@@ -253,8 +353,8 @@ class CloudSyncService: ObservableObject {
         }
     }
     
-    private func doBackupChat(_ chatId: String) async throws {
-        guard canWriteToCloud() else { return }
+    private func doBackupChat(_ chatId: String, idempotencyKey: String) async throws {
+        guard await canWriteToCloud() else { return }
 
         // Check if chat is currently streaming
         if streamingTracker.isStreaming(chatId) {
@@ -288,8 +388,10 @@ class CloudSyncService: ObservableObject {
         }
         
         
-        // Don't sync blank, empty, or decryption failure chats
-        if chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed || chat.encryptedData != nil {
+        // Don't sync blank, empty, decryption-failure, or local-only chats.
+        // Local-only chats are the user's explicit choice to keep a chat off
+        // the cloud, so they must never be uploaded.
+        if chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed || chat.isLocalOnly {
             return
         }
 
@@ -298,17 +400,97 @@ class CloudSyncService: ObservableObject {
             return
         }
         
-        try await uploadAndMarkSynced(chat)
-        
+        do {
+            try await uploadAndMarkSynced(chat, idempotencyKey: idempotencyKey)
+        } catch {
+            try await handleUploadFailure(chatId: chatId, error: error)
+        }
     }
-    
+
+    /// Dispatch a sync-enclave error to the matching recovery
+    /// surface. Re-throws for retryable cases so the coalescer can
+    /// retry under the same idempotency key; swallows for
+    /// non-retryable cases after posting a notification so the
+    /// chat stays locallyModified and is picked up on the next
+    /// natural sync cycle without burning the retry budget.
+    private func handleUploadFailure(chatId: String, error: Error) async throws {
+        let decision = EnclaveErrorRecovery.decide(error)
+        #if DEBUG
+        print("[CloudSync] upload recovery decision chat=\(chatId) action=\(decision.action) code=\(decision.classification.code?.rawValue ?? "nil")")
+        #endif
+        switch decision.action {
+        case .retry:
+            throw error
+        case .refreshCurrentKeyAndRetry:
+            // Notify so a listener (e.g. PasskeyManager) refreshes
+            // the canonical enclave key, then re-throw so the
+            // coalescer retries under the same idempotency key.
+            // The retry replays after the listener (hopefully) has
+            // rotated the key; if it hasn't yet, the retry fails
+            // and the chat stays locallyModified for the next sync
+            // cycle.
+            postSyncEvent(.tinfoilSyncKeyRefreshNeeded)
+            throw error
+        case .surfaceConflict:
+            postSyncEvent(.tinfoilSyncConflictDetected, userInfo: ["chatId": chatId])
+            await resolveConflictByPullingRemote(chatId)
+        case .surfaceExistingDataUnderOtherKey:
+            postSyncEvent(.tinfoilSyncExistingDataUnderOtherKey)
+        case .surfaceNotFound:
+            postSyncEvent(.tinfoilSyncChatNotFound, userInfo: ["chatId": chatId])
+        case .triggerRecoveryWizard:
+            postSyncEvent(.tinfoilSyncRecoveryNeeded)
+        case .blockAllSync:
+            postSyncEvent(.tinfoilSyncAttestationFailed)
+        case .migrateLegacyAndRetry:
+            // Re-throw so the coalescer retries the write. The legacy
+            // re-seal runs out of band — on the next launch and right
+            // after the key is adopted (see PasskeyManager) — both
+            // gated on the key being the registered current key. If
+            // that completes before retries exhaust the upload
+            // succeeds; otherwise the chat waits for the next cycle.
+            throw error
+        case .abort(let reason):
+            postSyncEvent(
+                .tinfoilSyncUploadAborted,
+                userInfo: ["chatId": chatId, "reason": reason.rawValue]
+            )
+        }
+    }
+
+    private func postSyncEvent(_ name: Notification.Name, userInfo: [String: Any]? = nil) {
+        NotificationCenter.default.post(name: name, object: nil, userInfo: userInfo)
+    }
+
+    /// Last-write-wins conflict resolution. Pulls the remote chat
+    /// fresh from the enclave and overwrites the local copy so the
+    /// chat exits the stuck-row retry loop. If the pull itself
+    /// fails the chat stays locallyModified and the next sync
+    /// cycle retries.
+    private func resolveConflictByPullingRemote(_ chatId: String) async {
+        do {
+            guard var downloadedChat = try await cloudStorage.downloadChat(chatId) else {
+                return
+            }
+            if downloadedChat.modelType == nil {
+                downloadedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+            }
+            await saveChatToStorage(downloadedChat)
+            await markChatAsSynced(downloadedChat.id, version: downloadedChat.syncVersion)
+        } catch {
+            #if DEBUG
+            print("[CloudSync] resolveConflictByPullingRemote failed for \(chatId): \(error)")
+            #endif
+        }
+    }
+
     // MARK: - Bulk Sync Operations
     
     /// Backup all unsynced chats
     func backupUnsyncedChats() async -> SyncResult {
         var result = SyncResult()
 
-        guard canWriteToCloud() else {
+        guard await canWriteToCloud() else {
             return result
         }
         
@@ -318,7 +500,7 @@ class CloudSyncService: ObservableObject {
         // Filter out blank, empty, decryption failure, and streaming chats
         var chatsToSync: [Chat] = []
         for chat in unsyncedChats {
-            if !chat.isBlankChat && !chat.messages.isEmpty && !chat.decryptionFailed && chat.encryptedData == nil {
+            if !chat.isBlankChat && !chat.messages.isEmpty && !chat.decryptionFailed {
                 let isStreaming = streamingTracker.isStreaming(chat.id)
                 if !isStreaming {
                     chatsToSync.append(chat)
@@ -409,16 +591,14 @@ class CloudSyncService: ObservableObject {
                 if let decrypted = await decryptRemoteChat(remoteChat, content: content) {
                     downloadedChats.append(decrypted.chat)
                 } else {
-                    let placeholder = createEncryptedPlaceholder(
-                        remoteChat: remoteChat,
-                        encryptedContent: content
-                    )
+                    let placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
                     downloadedChats.append(placeholder)
                 }
             }
 
-            // Sort by creation date (newest first)
-            downloadedChats.sort { $0.createdAt > $1.createdAt }
+            // Sort by latest activity (newest first), matching the server's
+            // direction=desc list-status pagination.
+            downloadedChats.sort { $0.updatedAt > $1.updatedAt }
             
             return PaginatedChatsResult(
                 chats: downloadedChats,
@@ -445,8 +625,9 @@ class CloudSyncService: ObservableObject {
     ) async -> PaginatedChatsResult {
         let allChats = await getAllChatsFromStorage()
         
-        // Sort by creation date (newest first)
-        let sortedChats = allChats.sorted { $0.createdAt > $1.createdAt }
+        // Sort by latest activity (newest first), matching the server's
+        // direction=desc list-status pagination.
+        let sortedChats = allChats.sorted { $0.updatedAt > $1.updatedAt }
         
         // Parse continuation token as offset
         let offset = Int(continuationToken ?? "0") ?? 0
@@ -479,43 +660,32 @@ class CloudSyncService: ObservableObject {
         )
     }
     
-    /// Decrypt a remote chat's content, apply server metadata dates, and set a default model if needed.
-    /// Returns the decrypted `StoredChat` and whether a fallback key was used (indicating reencryption is needed).
-    /// Returns `nil` on failure — callers are responsible for creating an encrypted placeholder.
+    /// Apply server metadata dates and set a default model on a chat
+    /// the enclave already unsealed for us. `content` is the StoredChat
+    /// JSON returned by `/v1/sync/pull` (format-version 2).
+    /// Returns `nil` on a malformed body — callers create an encrypted
+    /// placeholder in that case.
     struct DecryptedChatResult {
         var chat: StoredChat
-        let usedFallbackKey: Bool
     }
 
     private func decryptRemoteChat(
         _ remoteChat: RemoteChat,
         content: String
     ) async -> DecryptedChatResult? {
-        let formatVersion = remoteChat.formatVersion ?? 0
+        guard let plaintextData = content.data(using: .utf8) else { return nil }
 
         do {
-            let decryptionResult: DecryptionResult<StoredChat>
-
-            if formatVersion == 1 {
-                // v1: content is base64-encoded binary
-                guard let binaryData = Data(base64Encoded: content) else { return nil }
-                decryptionResult = try encryptionService.decryptV1(binaryData, as: StoredChat.self)
-            } else {
-                // v0: content is a JSON-encoded EncryptedData envelope
-                guard let contentData = content.data(using: .utf8) else { return nil }
-                let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
-                decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
-            }
-
-            var decryptedChat = decryptionResult.value
-            decryptedChat.formatVersion = formatVersion
+            var decryptedChat = try JSONDecoder().decode(StoredChat.self, from: plaintextData)
+            decryptedChat.formatVersion = 2
             if let remoteProjectId = remoteChat.projectId {
                 decryptedChat.projectId = remoteProjectId
             }
 
-            // Prefer blob's createdAt (matches React's `decrypted.createdAt ?? remote.createdAt`).
-            // StoredChat decoder falls back to Date() on parse failure — detect that
-            // by checking if the blob date is within the last few seconds.
+            // Prefer the blob's createdAt over the remote metadata.
+            // StoredChat falls back to `Date()` on parse failure — when
+            // the blob date is within the last few seconds it's almost
+            // certainly that fallback, so prefer the server timestamp.
             let blobCreatedAt = decryptedChat.createdAt
             let blobLooksLikeFallback = abs(blobCreatedAt.timeIntervalSinceNow) < Constants.Sync.createdAtFallbackThresholdSeconds
             if blobLooksLikeFallback, let createdDate = parseISODate(remoteChat.createdAt) {
@@ -528,23 +698,20 @@ class CloudSyncService: ObservableObject {
                 decryptedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
             }
 
-            return DecryptedChatResult(chat: decryptedChat, usedFallbackKey: decryptionResult.usedFallbackKey)
+            return DecryptedChatResult(chat: decryptedChat)
         } catch {
             return nil
         }
     }
 
-    /// Create encrypted placeholder for chats that failed to decrypt
-    private func createEncryptedPlaceholder(
-        remoteChat: RemoteChat,
-        encryptedContent: String
-    ) -> StoredChat {
+    /// Create a placeholder for a chat the enclave declined to unseal
+    /// (e.g. UNKNOWN_KEY). The ciphertext stays server-side; the local
+    /// row is purely a "this chat exists but cannot be read" badge.
+    private func createEncryptedPlaceholder(remoteChat: RemoteChat) -> StoredChat {
         StoredChat.encryptedPlaceholder(
             id: remoteChat.id,
             createdAt: parseISODate(remoteChat.createdAt) ?? Date(),
-            updatedAt: parseISODate(remoteChat.updatedAt) ?? Date(),
-            formatVersion: remoteChat.formatVersion ?? 0,
-            encryptedData: encryptedContent
+            updatedAt: parseISODate(remoteChat.updatedAt) ?? Date()
         )
     }
     
@@ -587,7 +754,7 @@ class CloudSyncService: ObservableObject {
     }
 
     /// Sync all chats (upload local changes, download remote changes)
-    func syncAllChats() async -> SyncResult {
+    func syncAllChats(deep: Bool = false) async -> SyncResult {
         guard !isSyncing else {
             return SyncResult()
         }
@@ -600,12 +767,12 @@ class CloudSyncService: ObservableObject {
             lastSyncDate = Date()
         }
 
-        let result = await doSyncAllChats()
+        let result = await doSyncAllChats(deep: deep)
         syncErrors = result.errors
         return result
     }
 
-    private func doSyncAllChats() async -> SyncResult {
+    private func doSyncAllChats(deep: Bool = false) async -> SyncResult {
         var result = SyncResult()
 
         // Delete local chats that were deleted on another device
@@ -626,11 +793,6 @@ class CloudSyncService: ObservableObject {
 
         // Then, get list of remote chats with content
         do {
-            let remoteList = try await cloudStorage.listChats(
-                limit: Constants.Pagination.chatsPerPage,
-                includeContent: true
-            )
-
             let localChats = await getAllChatsFromStorage()
 
             // Initialize encryption if available; continue even without a key so we can at least
@@ -639,9 +801,21 @@ class CloudSyncService: ObservableObject {
 
             // Create maps for easy lookup
             let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
-            let remoteConversations = remoteList.conversations
 
-            // Process remote chats sequentially to avoid connection exhaustion
+            // A deep sync (pull-to-refresh) keeps paging through the rest of
+            // the remote history so older chats that predate this device's
+            // local copy are pulled down too. The periodic and launch syncs
+            // stay first-page-only for bandwidth.
+            var continuationToken: String? = nil
+            repeat {
+                let remoteList = try await cloudStorage.listChats(
+                    limit: Constants.Pagination.chatsPerPage,
+                    continuationToken: continuationToken,
+                    includeContent: true
+                )
+                let remoteConversations = remoteList.conversations
+
+                // Process remote chats sequentially to avoid connection exhaustion
             for remoteChat in remoteConversations {
                 // First validate if this remote chat should be processed
                 if !(await shouldProcessRemoteChat(remoteChat)) {
@@ -700,10 +874,7 @@ class CloudSyncService: ObservableObject {
                             // the remote was re-encrypted with a key we don't have yet).
                             let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
                             if !hasValidLocal {
-                                let placeholder = createEncryptedPlaceholder(
-                                    remoteChat: remoteChat,
-                                    encryptedContent: content
-                                )
+                                let placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
                                 await saveChatToStorage(placeholder)
                                 result = SyncResult(
                                     uploaded: result.uploaded,
@@ -734,6 +905,12 @@ class CloudSyncService: ObservableObject {
                     }
                 }
             }
+
+                let nextToken = remoteList.nextContinuationToken?.isEmpty == false
+                    ? remoteList.nextContinuationToken
+                    : nil
+                continuationToken = (deep && remoteList.hasMore) ? nextToken : nil
+            } while continuationToken != nil
 
             // Refresh cached sync status so subsequent smart-syncs have up-to-date info
             await refreshSyncStatusCache()
@@ -797,6 +974,30 @@ class CloudSyncService: ObservableObject {
                         remoteCount: remoteStatus.count,
                         remoteLastUpdated: remoteStatus.lastUpdated
                     )
+                }
+
+                // Detect the disk-lost-rows case after the more
+                // precise remote-side signals above. The cached
+                // count tracks the server, not what is actually on
+                // disk — so a chat that 404s during decrypt, an
+                // eviction sweep, or any other path that silently
+                // drops rows can leave the watermark intact even
+                // though the user can no longer see those chats.
+                // When the live local count drops below the
+                // snapshot we last persisted, force a full pull.
+                // Older cached entries (no `localCount`) keep the
+                // legacy behaviour to avoid spurious sync storms on
+                // first upgrade.
+                if let cachedLocal = cached.localCount {
+                    let liveLocal = await safeReadLocalChatCount() ?? cachedLocal
+                    if liveLocal < cachedLocal {
+                        return SyncStatusResult(
+                            needsSync: true,
+                            reason: .countChanged,
+                            remoteCount: remoteStatus.count,
+                            remoteLastUpdated: remoteStatus.lastUpdated
+                        )
+                    }
                 }
 
                 return SyncStatusResult(
@@ -892,10 +1093,7 @@ class CloudSyncService: ObservableObject {
                             let localChat = localChatMap[remoteChat.id]
                             let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
                             if !hasValidLocal {
-                                let placeholder = createEncryptedPlaceholder(
-                                    remoteChat: remoteChat,
-                                    encryptedContent: content
-                                )
+                                let placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
                                 await saveChatToStorage(placeholder)
                                 result = SyncResult(
                                     uploaded: result.uploaded,
@@ -961,6 +1159,20 @@ class CloudSyncService: ObservableObject {
         let statusCheck = await checkSyncStatus()
 
         if !statusCheck.needsSync {
+            // A deletion from another device can be absorbed into the status
+            // cache (the count matches again) on the same tick its tombstone
+            // was missed locally, after which the count gate never reopens and
+            // the orphan lingers until a full reload. Re-run the tombstone
+            // reconciliation here so a missed deletion self-heals on the next
+            // tick. The pass is idempotent and only reports chats actually
+            // removed locally, so it triggers a UI reload only when needed.
+            if let cachedStatus = getCachedSyncStatus(),
+               let lastUpdated = cachedStatus.lastUpdated {
+                let reconciled = await deleteRemotelyDeletedChats(since: lastUpdated)
+                if reconciled > 0 {
+                    return SyncResult(deleted: reconciled)
+                }
+            }
             return SyncResult()
         }
 
@@ -1016,11 +1228,6 @@ class CloudSyncService: ObservableObject {
             return await smartSync()
         }
         return await smartSyncProjectChats(projectId)
-    }
-
-    func updateChatProject(_ chatId: String, projectId: String?) async throws {
-        guard canWriteToCloud() else { return }
-        try await cloudStorage.updateChatProject(chatId: chatId, projectId: projectId)
     }
 
     func syncProjectChats(_ projectId: String) async -> SyncResult {
@@ -1217,10 +1424,7 @@ class CloudSyncService: ObservableObject {
                 let localChat = localChatMap[remoteChat.id]
                 let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
                 if !hasValidLocal {
-                    var placeholder = createEncryptedPlaceholder(
-                        remoteChat: remoteChat,
-                        encryptedContent: content
-                    )
+                    var placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
                     placeholder.projectId = projectId
                     await saveChatToStorage(placeholder)
                     return (1, [])
@@ -1240,7 +1444,7 @@ class CloudSyncService: ObservableObject {
     private func backupUnsyncedProjectChats(_ projectId: String) async -> SyncResult {
         var result = SyncResult()
 
-        guard canWriteToCloud() else {
+        guard await canWriteToCloud() else {
             return result
         }
 
@@ -1251,7 +1455,6 @@ class CloudSyncService: ObservableObject {
             guard !chat.isBlankChat,
                   !chat.messages.isEmpty,
                   !chat.decryptionFailed,
-                  chat.encryptedData == nil,
                   !streamingTracker.isStreaming(chat.id) else {
                 continue
             }
@@ -1292,11 +1495,32 @@ class CloudSyncService: ObservableObject {
         return try? JSONDecoder().decode(ChatSyncStatus.self, from: data)
     }
 
-    private func saveSyncStatus(count: Int, lastUpdated: String) {
-        let status = ChatSyncStatus(count: count, lastUpdated: lastUpdated)
+    private func saveSyncStatus(count: Int, lastUpdated: String, localCount: Int?) {
+        let status = ChatSyncStatus(
+            count: count,
+            lastUpdated: lastUpdated,
+            localCount: localCount
+        )
         if let data = try? JSONEncoder().encode(status) {
             UserDefaults.standard.set(data, forKey: syncStatusKey)
         }
+    }
+
+    /// Count cloud-eligible chats currently on disk. Used to detect
+    /// post-eviction drift in checkSyncStatus and recorded alongside
+    /// the cached remote watermark so a future check can spot rows
+    /// disappearing from local storage. Returns nil when the storage
+    /// read fails so save sites can omit the field rather than
+    /// poisoning the cache with a misleading zero.
+    private func safeReadLocalChatCount() async -> Int? {
+        guard let userId = await getCurrentUserId() else { return nil }
+        // The index alone answers the count; loading and decrypting
+        // every chat file would make each status check O(n) in disk
+        // and crypto work.
+        guard let index = try? await EncryptedFileStorage.cloud.loadIndex(userId: userId) else {
+            return nil
+        }
+        return index.filter { !$0.isLocalOnly }.count
     }
 
     private func getCachedProjectChatSyncStatus(_ projectId: String) -> ChatSyncStatus? {
@@ -1317,7 +1541,12 @@ class CloudSyncService: ObservableObject {
     private func refreshSyncStatusCache() async {
         if let remoteStatus = try? await cloudStorage.getChatSyncStatus(),
            let lastUpdated = remoteStatus.lastUpdated {
-            saveSyncStatus(count: remoteStatus.count, lastUpdated: lastUpdated)
+            let localCount = await safeReadLocalChatCount()
+            saveSyncStatus(
+                count: remoteStatus.count,
+                lastUpdated: lastUpdated,
+                localCount: localCount
+            )
         }
     }
 
@@ -1395,10 +1624,7 @@ class CloudSyncService: ObservableObject {
                             await saveChatToStorage(decrypted.chat)
                             await markChatAsSynced(decrypted.chat.id, version: decrypted.chat.syncVersion)
                         } else {
-                            var placeholder = createEncryptedPlaceholder(
-                                remoteChat: remoteChat,
-                                encryptedContent: content
-                            )
+                            var placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
                             placeholder.projectId = remoteProjectId
                             await saveChatToStorage(placeholder)
                         }
@@ -1465,7 +1691,9 @@ class CloudSyncService: ObservableObject {
         let userId = await getCurrentUserId()
         guard let userId = userId else { return [] }
         let index = (try? await EncryptedFileStorage.cloud.loadIndex(userId: userId)) ?? []
-        let unsyncedIds = index.filter { $0.locallyModified || $0.syncedAt == nil }.map(\.id)
+        let unsyncedIds = index.filter {
+            ($0.locallyModified || $0.syncedAt == nil) && !$0.isLocalOnly
+        }.map(\.id)
         return (try? await EncryptedFileStorage.cloud.loadChats(chatIds: unsyncedIds, userId: userId)) ?? []
     }
 
@@ -1491,14 +1719,62 @@ class CloudSyncService: ObservableObject {
         await Chat.saveChat(chatToSave, userId: userId)
     }
 
-    /// Upload a chat to cloud and mark it as synced with an incremented version.
-    /// Encapsulates the two-step "upload current version, increment after success" protocol.
-    private func uploadAndMarkSynced(_ chat: Chat) async throws {
+    /// Upload a chat to cloud and mark it as synced with the enclave's
+    /// authoritative version (the new etag), or `chat.syncVersion + 1`
+    /// when the enclave didn't return a parseable etag.
+    private func uploadAndMarkSynced(_ chat: Chat, idempotencyKey: String) async throws {
         guard !streamingTracker.isStreaming(chat.id) else { return }
 
         let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion)
-        try await cloudStorage.uploadChat(storedChat)
-        await markChatAsSynced(chat.id, version: chat.syncVersion + 1)
+        let result = try await cloudStorage.uploadChat(storedChat, idempotencyKey: idempotencyKey)
+        let newVersion = result.syncVersion ?? chat.syncVersion + 1
+        if !result.rewrites.isEmpty {
+            // Persist the enclave-minted attachment ids before marking
+            // the chat synced. If the local rewrite fails we want the
+            // next sync pass to retry the upload (so the cloud copy and
+            // the on-disk copy converge on the same ids) rather than
+            // record success while the local chat still points at
+            // pre-upload client ids.
+            try await applyAttachmentRewrites(chatId: chat.id, rewrites: result.rewrites)
+        }
+        await markChatAsSynced(chat.id, version: newVersion)
+    }
+
+    /// Apply enclave-minted attachment ids/keys to the freshest local
+    /// copy of the chat, matching by the stable client-side id that
+    /// the upload captured. The chat object we uploaded is a private
+    /// snapshot, so without this step the persistent chat keeps the
+    /// pre-upload local ids and the next sync would either re-upload
+    /// the same bytes or fail to fetch the cloud copy on another
+    /// device.
+    private func applyAttachmentRewrites(
+        chatId: String,
+        rewrites: [CloudStorageService.AttachmentRewrite]
+    ) async throws {
+        guard let userId = await getCurrentUserId() else { return }
+        guard var chat = try await EncryptedFileStorage.cloud.loadChat(
+            chatId: chatId,
+            userId: userId
+        ) else { return }
+
+        let rewriteByClientId = Dictionary(
+            uniqueKeysWithValues: rewrites.map { ($0.clientId, $0) }
+        )
+
+        var didChange = false
+        for msgIdx in chat.messages.indices {
+            for attIdx in chat.messages[msgIdx].attachments.indices {
+                let clientId = chat.messages[msgIdx].attachments[attIdx].id
+                guard let rewrite = rewriteByClientId[clientId] else { continue }
+                chat.messages[msgIdx].attachments[attIdx].id = rewrite.serverId
+                chat.messages[msgIdx].attachments[attIdx].encryptionKey =
+                    rewrite.encryptionKey
+                didChange = true
+            }
+        }
+
+        guard didChange else { return }
+        try await EncryptedFileStorage.cloud.saveChat(chat, userId: userId)
     }
 
     private func markChatAsSynced(_ chatId: String, version: Int) async {
@@ -1518,11 +1794,28 @@ class CloudSyncService: ObservableObject {
     private func deleteRemotelyDeletedChats(since: String) async -> Int {
         do {
             let deleted = try await cloudStorage.getDeletedChatsSince(since: since)
+            guard !deleted.deletedIds.isEmpty,
+                  let userId = await getCurrentUserId() else {
+                return 0
+            }
+            var removedCount = 0
             for id in deleted.deletedIds {
+                // Skip chats already absent locally (a prior reconciliation
+                // pass handled them, or they were never stored here). This
+                // keeps repeated passes idempotent so they never report a
+                // phantom deletion and trigger a needless UI reload. A
+                // local-only chat lives outside cloud storage, so loadChat
+                // returns nil and it is preserved.
+                let existing = try? await EncryptedFileStorage.cloud.loadChat(
+                    chatId: id,
+                    userId: userId
+                )
+                guard existing != nil else { continue }
                 deletedChatsTracker.markAsDeleted(id)
                 await deleteChatFromStorage(id)
+                removedCount += 1
             }
-            return deleted.deletedIds.count
+            return removedCount
         } catch {
             // Non-fatal: continue even if deletion check fails
             return 0
@@ -1573,100 +1866,64 @@ class CloudSyncService: ObservableObject {
     
     // MARK: - Retry Decryption Methods
 
-    /// Retry decryption for chats that failed to decrypt
+    /// Drop locally-stored placeholders for chats that previously failed to
+    /// decrypt and re-pull them from the enclave. The legacy-blob migration
+    /// runner is expected to have already rewrapped any server-side rows that
+    /// were stuck on a key the client no longer has.
     func retryDecryptionWithNewKey(
         onProgress: ((Int, Int) -> Void)? = nil,
         batchSize: Int = 5
     ) async -> Int {
-        var decryptedCount = 0
+        guard let userId = await getCurrentUserId() else { return 0 }
+        // The index alone knows which chats are placeholders; loading
+        // and decrypting every chat file just to read the flag would
+        // make each retry pass O(n) in disk and crypto work.
+        let index = (try? await EncryptedFileStorage.cloud.loadIndex(userId: userId)) ?? []
+        let failedChatIds = index.filter(\.decryptionFailed).map(\.id)
+        if failedChatIds.isEmpty { return 0 }
 
-        // Get all chats that have encrypted data
-        let chatsWithEncryptedData = await getChatsWithEncryptedData()
+        // Without keys every pull would come back empty; bail before
+        // touching any placeholder so nothing is mistaken for an
+        // upstream deletion.
+        guard CEKEncoding.pullKeysIfAvailable() != nil else { return 0 }
 
-        // Process chats sequentially to avoid connection exhaustion
-        for (index, chat) in chatsWithEncryptedData.enumerated() {
-            guard let encryptedData = chat.encryptedData else { continue }
-
+        var recovered = 0
+        for (offset, chatId) in failedChatIds.enumerated() {
+            // Re-pull each failed chat by id and replace the local
+            // placeholder only once the enclave hands back plaintext.
+            // A transient failure leaves the placeholder in place, so
+            // chats never vanish from history because a retry pass ran
+            // while the enclave was unreachable. Rows deleted upstream
+            // drop their placeholder and stay gone; they must not be
+            // reported as "recovered".
             do {
-                let decryptionResult: DecryptionResult<StoredChat>
-
-                if chat.formatVersion == 1 {
-                    // v1: encryptedData is base64-encoded binary
-                    guard let binaryData = Data(base64Encoded: encryptedData) else {
-                        throw CloudSyncError.invalidBase64
+                if let fresh = try await cloudStorage.downloadChat(chatId) {
+                    if fresh.decryptionFailed != true {
+                        await saveChatToStorage(fresh)
+                        await markChatAsSynced(fresh.id, version: fresh.syncVersion)
+                        recovered += 1
                     }
-                    decryptionResult = try encryptionService.decryptV1(binaryData, as: StoredChat.self)
                 } else {
-                    // v0: encryptedData is a JSON-encoded EncryptedData envelope
-                    guard let contentData = encryptedData.data(using: .utf8) else {
-                        throw CloudSyncError.invalidBase64
-                    }
-                    let encrypted = try JSONDecoder().decode(EncryptedData.self, from: contentData)
-                    decryptionResult = try await encryptionService.decrypt(encrypted, as: StoredChat.self)
+                    await deleteChatFromStorage(chatId)
                 }
-
-                let decryptedData = decryptionResult.value
-
-                // Get a model type for decrypted chat (use existing or get default)
-                let modelForChat: ModelType
-                if let existingModel = decryptedData.modelType {
-                    modelForChat = existingModel
-                } else {
-                    guard let defaultModel = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first else {
-                        continue
-                    }
-                    modelForChat = defaultModel
-                }
-
-                // Use decrypted content but preserve metadata dates and format version
-                let updatedChat = StoredChat(
-                    from: Chat(
-                        id: chat.id,
-                        title: decryptedData.title,
-                        messages: decryptedData.messages,
-                        createdAt: chat.createdAt,
-                        modelType: modelForChat,
-                        language: decryptedData.language,
-                        userId: decryptedData.userId,
-                        syncVersion: chat.syncVersion,
-                        syncedAt: chat.syncedAt,
-                        locallyModified: false,
-                        updatedAt: chat.updatedAt,
-                        decryptionFailed: false,
-                        encryptedData: nil,
-                        formatVersion: chat.formatVersion,
-                        isLocalOnly: chat.isLocalOnly
-                    )
-                )
-
-                await saveChatToStorage(updatedChat)
-                decryptedCount += 1
             } catch {
-                // Continue to next chat on failure
+                // Keep the placeholder; a later pass retries.
             }
 
-            // Report progress periodically
-            if (index + 1) % batchSize == 0 || index == chatsWithEncryptedData.count - 1 {
-                onProgress?(index + 1, chatsWithEncryptedData.count)
-                // Yield to the event loop
-                try? await Task.sleep(nanoseconds: 1_000_000) // 1ms
+            if (offset + 1) % batchSize == 0 || offset == failedChatIds.count - 1 {
+                onProgress?(offset + 1, failedChatIds.count)
+                try? await Task.sleep(nanoseconds: 1_000_000)
             }
         }
-        
-        return decryptedCount
+        return recovered
     }
-    
-    /// Get all chats that have encrypted data stored
-    private func getChatsWithEncryptedData() async -> [Chat] {
-        let allChats = await getAllChatsFromStorage()
-        return allChats.filter { $0.decryptionFailed && $0.encryptedData != nil }
-    }
+
     
     /// Re-encrypt all local chats with new key and upload to cloud
     func reencryptAndUploadChats() async -> (reencrypted: Int, uploaded: Int, errors: [String]) {
         var result = (reencrypted: 0, uploaded: 0, errors: [String]())
 
-        guard canWriteToCloud() else {
+        guard await canWriteToCloud() else {
             return result
         }
         
@@ -1712,27 +1969,4 @@ class CloudSyncService: ObservableObject {
 
 }
 
-// MARK: - Cloud Sync Errors
 
-enum CloudSyncError: LocalizedError {
-    case syncInProgress
-    case authenticationRequired
-    case invalidBase64
-    case encryptionFailed
-    case decryptionFailed
-    
-    var errorDescription: String? {
-        switch self {
-        case .syncInProgress:
-            return "Sync already in progress"
-        case .authenticationRequired:
-            return "Authentication required for sync"
-        case .invalidBase64:
-            return "Invalid base64 data"
-        case .encryptionFailed:
-            return "Failed to encrypt data"
-        case .decryptionFailed:
-            return "Failed to decrypt data"
-        }
-    }
-}

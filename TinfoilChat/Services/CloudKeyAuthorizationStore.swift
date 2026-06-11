@@ -88,8 +88,12 @@ final class CloudKeyAuthorizationStore {
         failureMode: CloudKeyAuthorizationMode? = nil
     ) async throws -> CloudKeyAuthorizationMode {
         return try await applyAndValidate(
-            setKeys: {
-                try await EncryptionService.shared.setAllKeys(primary: primary, alternatives: alternatives)
+            stageKeys: {
+                try await EncryptionService.shared.setAllKeys(
+                    primary: primary,
+                    alternatives: alternatives,
+                    persist: false
+                )
             },
             successMode: successMode,
             failureMode: failureMode
@@ -102,35 +106,105 @@ final class CloudKeyAuthorizationStore {
         failureMode: CloudKeyAuthorizationMode? = nil
     ) async throws -> CloudKeyAuthorizationMode {
         return try await applyAndValidate(
-            setKeys: {
-                try await EncryptionService.shared.setKey(key)
+            stageKeys: {
+                try await EncryptionService.shared.setKey(key, persist: false)
             },
             successMode: successMode,
             failureMode: failureMode
         )
     }
 
+    /// Stage a new key in memory, ask the enclave to confirm it, and only
+    /// then write it to the Keychain. On failure the staged key is dropped
+    /// so a key the enclave rejects is never persisted locally.
     private func applyAndValidate(
-        setKeys: () async throws -> Void,
+        stageKeys: () async throws -> Void,
         successMode: CloudKeyAuthorizationMode,
         failureMode: CloudKeyAuthorizationMode?
     ) async throws -> CloudKeyAuthorizationMode {
-        let previousKeys = EncryptionService.shared.getAllKeys()
         do {
-            try await setKeys()
-        } catch let setKeysError {
-            do {
-                try rollbackToPreviousKeys(previousKeys)
-            } catch let rollbackError {
-                throw rollbackError
-            }
-            throw setKeysError
+            try await stageKeys()
+        } catch let stageError {
+            EncryptionService.shared.discardStagedKeyState()
+            throw stageError
         }
 
-        return try await authorizeCurrentPrimaryKeyAfterValidation(
-            rollbackTo: previousKeys,
-            successMode: successMode,
-            failureMode: failureMode
+        let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
+        guard validation.canWrite else {
+            if let failureMode {
+                return try commitStagedKey(mode: failureMode)
+            }
+            EncryptionService.shared.discardStagedKeyState()
+            throw CloudKeyAuthorizationError.validationFailed(
+                validation.message ?? CloudKeyPreflightValidator.mismatchMessage
+            )
+        }
+
+        return try commitStagedKey(mode: successMode)
+    }
+
+    /// Persist the staged key (the enclave accepted it, or the caller
+    /// explicitly chose to proceed) and stamp the local mode hint.
+    private func commitStagedKey(
+        mode: CloudKeyAuthorizationMode
+    ) throws -> CloudKeyAuthorizationMode {
+        do {
+            try EncryptionService.shared.persistCurrentKeyState()
+        } catch {
+            EncryptionService.shared.discardStagedKeyState()
+            throw CloudKeyAuthorizationError.authorizationUnavailable
+        }
+        // The mode hint is best-effort local state: failing to stamp
+        // it (e.g. no resolvable user id during a session blip) must
+        // never destroy the key the enclave just accepted and the
+        // Keychain just persisted. Without the hint, writes stay
+        // gated until a later preflight validation re-stamps it.
+        _ = authorizeCurrentPrimaryKey(mode: mode)
+        return mode
+    }
+
+    /// Make the current (staged or persisted) primary CEK the enclave's
+    /// authoritative key for an explicit "start fresh". When existing
+    /// cloud data sits under a different key, the steady-state write guard
+    /// blocks the new key; the only way past it is register-key with
+    /// created_via=start_fresh, which atomically drops the old rows and
+    /// rebinds the user to this CEK.
+    ///
+    /// No-op only when the enclave's registered key already IS this CEK
+    /// (matching key id) — a prior ceremony that registered it must not
+    /// be wiped again. Every other state registers, including an empty
+    /// remote and unregistered legacy data: start-fresh still needs the
+    /// enclave-side key row, or every subsequent push is rejected as a
+    /// stale key. Throws when the enclave can't be reached so the caller
+    /// surfaces "try again" instead of stranding a local-only key the
+    /// enclave never accepted.
+    func registerStartFreshKeyIfNeeded() async throws {
+        let cek = try EncryptionService.shared.getKeyBytesOrThrow()
+        let keyB64 = cek.base64EncodedString()
+
+        let current: EnclaveKeyCurrentResponse
+        do {
+            current = try await SyncEnclaveAPI.keyCurrent()
+        } catch {
+            throw CloudKeyAuthorizationError.validationFailed(
+                CloudKeyPreflightValidator.unknownRemoteStateMessage
+            )
+        }
+
+        if let remoteKeyId = current.keyId,
+           let localKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek),
+           localKeyId == remoteKeyId {
+            return
+        }
+
+        _ = try await SyncEnclaveAPI.registerKey(
+            EnclaveKeyRegisterRequest(
+                key: keyB64,
+                ifMatch: current.etag ?? IfMatchSentinels.anyKey,
+                createdVia: SyncEnclaveCreatedVia.startFresh.rawValue,
+                idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                initialBundle: nil
+            )
         )
     }
 

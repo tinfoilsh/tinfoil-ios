@@ -15,12 +15,6 @@ struct EncryptedData: Codable {
     let data: String  // Base64 encoded encrypted data
 }
 
-/// Represents the result of a decryption attempt
-struct DecryptionResult<T> {
-    let value: T
-    let usedFallbackKey: Bool
-}
-
 /// Service for handling end-to-end encryption of chat data
 class EncryptionService: ObservableObject, @unchecked Sendable {
     static let shared = EncryptionService()
@@ -32,10 +26,29 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     private var _encryptionKey: SymmetricKey?
     private let keychainLock = NSLock()
 
+    /// Primary key staged in memory but not yet written to the Keychain.
+    /// Set by `setKey(_:persist:)` with `persist: false` so the enclave
+    /// handshake runs against the new key while the Keychain still holds
+    /// the previous one. Committed by `persistCurrentKeyState()` only
+    /// after the enclave accepts it, or dropped by
+    /// `discardStagedKeyState()` on failure.
+    private var _stagedPrimaryKey: String?
+    private var _stagedAlternatives: [String]?
+
     /// Thread-safe access to the in-memory encryption key.
     private var encryptionKey: SymmetricKey? {
         get { keychainLock.withLock { _encryptionKey } }
         set { keychainLock.withLock { _encryptionKey = newValue } }
+    }
+
+    private var stagedPrimaryKey: String? {
+        get { keychainLock.withLock { _stagedPrimaryKey } }
+        set { keychainLock.withLock { _stagedPrimaryKey = newValue } }
+    }
+
+    private var stagedAlternatives: [String]? {
+        get { keychainLock.withLock { _stagedAlternatives } }
+        set { keychainLock.withLock { _stagedAlternatives = newValue } }
     }
 
     private init() {}
@@ -69,24 +82,47 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         return newKey
     }
 
-    /// Set encryption key from alphanumeric string
-    func setKey(_ keyString: String) async throws {
+    /// Set encryption key from alphanumeric string.
+    ///
+    /// When `persist` is false the key is loaded into memory and staged
+    /// (so the enclave wire and `getKey()` use it) but not written to the
+    /// Keychain. Callers must follow up with `persistCurrentKeyState()`
+    /// once the enclave accepts the key, or `discardStagedKeyState()` to
+    /// roll back.
+    func setKey(_ keyString: String, persist: Bool = true) async throws {
         let (normalizedKey, keyData) = try normalizeKeyInput(keyString)
-        let previousKey = loadKeyFromKeychain()
 
-        // Create SymmetricKey
+        // The in-memory key always reflects the active (possibly staged)
+        // key so local encrypt/decrypt works immediately.
         self.encryptionKey = SymmetricKey(data: keyData)
 
-        // Store the key in Keychain with prefix
+        guard persist else {
+            stagedPrimaryKey = normalizedKey
+            stagedAlternatives = nil
+            return
+        }
+
+        let previousKey = loadKeyFromKeychain()
         try saveKeyToKeychain(normalizedKey)
         try updateKeyHistory(withNewKey: normalizedKey, previousKey: previousKey)
+        stagedPrimaryKey = nil
+        stagedAlternatives = nil
     }
     
     /// Get current encryption key as alphanumeric string
     func getKey() -> String? {
-        return loadKeyFromKeychain()
+        return stagedPrimaryKey ?? loadKeyFromKeychain()
     }
     
+    /// The primary key as committed to the Keychain, ignoring any key
+    /// staged in memory while an activation ceremony awaits enclave
+    /// confirmation. Callers that bind a key server-side outside a
+    /// ceremony (e.g. the lazy empty-remote registration on the write
+    /// gate) must use this so they never register an uncommitted key.
+    func persistedPrimaryKey() -> String? {
+        return loadKeyFromKeychain()
+    }
+
     /// Check if an encryption key exists in the keychain
     /// Returns true if key exists OR if we previously set up a key (to handle temporary keychain failures)
     func hasEncryptionKey() -> Bool {
@@ -112,6 +148,60 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         return (primary: loadKeyFromKeychain(), alternatives: loadKeyHistory())
     }
 
+    /// Staged-aware variant of `getAllKeys()`: while a key bundle staged
+    /// via `setKey(_:persist:false)` / `setAllKeys(...:persist:false)`
+    /// awaits enclave confirmation, the staged primary and alternatives
+    /// are the active set the wire operates on, not the Keychain state
+    /// they would replace. Falls back to the persisted bundle when
+    /// nothing is staged.
+    func getActiveKeys() -> (primary: String?, alternatives: [String]) {
+        if let staged = stagedPrimaryKey {
+            return (primary: staged, alternatives: stagedAlternatives ?? [])
+        }
+        return (primary: loadKeyFromKeychain(), alternatives: loadKeyHistory())
+    }
+
+    /// Return the raw 32-byte CEK for the primary key. Throws when no
+    /// primary key is loaded. Used by the sync-enclave wire which
+    /// expects a base64-encoded raw CEK on every push / pull / delete.
+    func getKeyBytesOrThrow() throws -> Data {
+        guard let key = stagedPrimaryKey ?? loadKeyFromKeychain() else {
+            throw EncryptionError.keyNotInitialized
+        }
+        let (_, bytes) = try normalizeKeyInput(key)
+        return bytes
+    }
+
+    /// Decode an arbitrary `key_xxx` alphanumeric string to its raw
+    /// bytes. Used by the migration-sweep path which iterates over the
+    /// primary + every alternative key.
+    func getAlternativeKeyBytes(_ key: String) throws -> Data {
+        let (_, bytes) = try normalizeKeyInput(key)
+        return bytes
+    }
+
+    /// Set the primary key from a fresh CEK provided as raw 32 bytes,
+    /// e.g. one minted server-side by the enclave or recovered from a
+    /// passkey bundle. Encodes the bytes back into the alphanumeric
+    /// keychain format so the rest of the app keeps working unchanged.
+    func setKeyBytes(_ bytes: Data) async throws {
+        try await setKey(encodeKeyFromBytes(bytes))
+    }
+
+    /// Encode raw CEK bytes into the canonical `key_<base36>` string
+    /// the rest of the app stores and compares. Mirrors the webapp's
+    /// `encodeKeyFromBytes`.
+    func encodeKeyFromBytes(_ bytes: Data) -> String {
+        return "key_" + bytesToAlphanumeric(bytes)
+    }
+
+    /// Drop every historical decryption key, leaving only the primary
+    /// in place. Called once `migrate-all` confirms every legacy row
+    /// has been re-sealed under the primary CEK.
+    func clearFallbackKeys() {
+        deleteKeyHistoryFromKeychain()
+    }
+
     /// Add a decryption-only fallback key without changing the primary key.
     func addDecryptionKey(_ keyString: String) throws {
         let (normalizedKey, _) = try normalizeKeyInput(keyString)
@@ -129,27 +219,36 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
 
     /// Bulk-load primary + alternative keys from an external source (e.g. passkey recovery).
     /// Sets the primary key and merges validated alternatives into key history.
-    func setAllKeys(primary: String, alternatives: [String]) async throws {
-        try await setKey(primary)
+    func setAllKeys(primary: String, alternatives: [String], persist: Bool = true) async throws {
+        try await setKey(primary, persist: persist)
 
-        var existingHistory = loadKeyHistory()
+        guard persist else {
+            stagedAlternatives = alternatives
+            return
+        }
+
+        try mergeAlternativesIntoHistory(alternatives, primary: primary)
+    }
+
+    /// Merge validated alternative keys into the persisted key history,
+    /// skipping the primary, malformed entries, and duplicates. Shared
+    /// by `setAllKeys(...)` and `persistCurrentKeyState()` so the two
+    /// paths cannot drift.
+    private func mergeAlternativesIntoHistory(_ alternatives: [String], primary: String) throws {
+        var history = loadKeyHistory()
         var addedNew = false
 
         for key in alternatives {
             if key == primary { continue }
-            do {
-                _ = try normalizeKeyInput(key)
-            } catch {
-                continue
-            }
-            if !existingHistory.contains(key) {
-                existingHistory.append(key)
+            guard (try? normalizeKeyInput(key)) != nil else { continue }
+            if !history.contains(key) {
+                history.append(key)
                 addedNew = true
             }
         }
 
         if addedNew {
-            try saveKeyHistory(existingHistory)
+            try saveKeyHistory(history)
         }
     }
 
@@ -176,48 +275,50 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         clearKey()
     }
 
+    /// Commit a key staged via `setKey(_:persist:false)` or
+    /// `setAllKeys(...:persist:false)` to the Keychain. No-op when nothing
+    /// is staged. Call this only after the enclave has accepted the key.
+    func persistCurrentKeyState() throws {
+        guard let staged = stagedPrimaryKey else { return }
+
+        let previousKey = loadKeyFromKeychain()
+        try saveKeyToKeychain(staged)
+        try updateKeyHistory(withNewKey: staged, previousKey: previousKey)
+
+        if let alternatives = stagedAlternatives {
+            try mergeAlternativesIntoHistory(alternatives, primary: staged)
+        }
+
+        stagedPrimaryKey = nil
+        stagedAlternatives = nil
+    }
+
+    /// Drop a staged key without persisting it and restore the in-memory
+    /// key to the persisted Keychain value so local encrypt/decrypt keeps
+    /// using the real active key.
+    func discardStagedKeyState() {
+        guard stagedPrimaryKey != nil || stagedAlternatives != nil else { return }
+        stagedPrimaryKey = nil
+        stagedAlternatives = nil
+
+        if let persisted = loadKeyFromKeychain(),
+           let (_, keyData) = try? normalizeKeyInput(persisted) {
+            encryptionKey = SymmetricKey(data: keyData)
+        } else {
+            encryptionKey = nil
+        }
+    }
+
     /// Remove encryption key
     func clearKey() {
         encryptionKey = nil
+        stagedPrimaryKey = nil
+        stagedAlternatives = nil
         deleteKeyFromKeychain()
         deleteKeyHistoryFromKeychain()
         UserDefaults.standard.removeObject(forKey: encryptionKeySetupFlagKey)
     }
     
-    // MARK: - Encryption/Decryption
-    
-    /// Encrypt data
-    func encrypt<T: Encodable>(_ data: T) async throws -> EncryptedData {
-        // Don't set date encoding - let StoredChat handle its own format
-        let jsonData = try JSONEncoder().encode(data)
-        return try await encryptData(jsonData)
-    }
-    
-    /// Decrypt data
-    func decrypt<T: Decodable>(_ encryptedData: EncryptedData, as type: T.Type) async throws -> DecryptionResult<T> {
-        let (data, usedFallback) = try await decryptDataWithFallbackInfo(encryptedData)
-        let value = try JSONDecoder().decode(type, from: data)
-        return DecryptionResult(value: value, usedFallbackKey: usedFallback)
-    }
-
-    // MARK: - V1 Binary Encryption/Decryption
-
-    /// Encrypt data using v1 format: JSON → gzip → AES-GCM → raw binary.
-    func encryptV1<T: Encodable>(_ data: T) throws -> Data {
-        guard let key = encryptionKey else {
-            throw EncryptionError.keyNotInitialized
-        }
-        return try BinaryCodec.compressAndEncrypt(data, using: key)
-    }
-
-    /// Decrypt v1 binary data, trying the primary key then falling back to key history.
-    func decryptV1<T: Decodable>(_ binary: Data, as type: T.Type) throws -> DecryptionResult<T> {
-        let (value, usedFallback) = try decryptWithKeyFallback { key in
-            try BinaryCodec.decryptAndDecompress(binary, using: key, as: type)
-        }
-        return DecryptionResult(value: value, usedFallbackKey: usedFallback)
-    }
-
     // MARK: - Helper Methods
 
     /// Try the primary key first, then iterate through key history on failure.
@@ -257,6 +358,9 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         }
 
         let keyData = try alphanumericToBytes(processedKey)
+        guard keyData.count == SyncEnclaveKeyBundle.cekByteCount else {
+            throw EncryptionError.invalidKeyLength
+        }
         let normalizedKey = "key_" + processedKey
         return (normalizedKey, keyData)
     }
@@ -461,31 +565,11 @@ extension EncryptionService: ChatEncryptor {
     }
 
     func decryptData(_ encrypted: EncryptedData) async throws -> Data {
-        let (data, _) = try await decryptDataWithFallbackInfo(encrypted)
-        return data
-    }
-
-    /// Decrypt to raw bytes, exposing whether a fallback key was used.
-    /// Used by the cloud-key preflight to answer "does this key work?" without
-    /// requiring the decrypted payload to conform to a specific Swift schema.
-    func decryptRawWithFallbackInfo(_ encrypted: EncryptedData) async throws -> (Data, Bool) {
-        return try await decryptDataWithFallbackInfo(encrypted)
-    }
-
-    /// Decrypt v1 binary content to raw bytes, exposing whether a fallback key was used.
-    func decryptRawV1WithFallbackInfo(_ binary: Data) throws -> (Data, Bool) {
-        return try decryptWithKeyFallback { key in
-            try BinaryCodec.decryptRaw(binary, using: key)
-        }
-    }
-
-    /// Shared decryption that tries the primary key, then falls back to key history.
-    /// Returns the decrypted data and whether a fallback key was used.
-    private func decryptDataWithFallbackInfo(_ encrypted: EncryptedData) async throws -> (Data, Bool) {
         let sealedBox = try AESGCMHelper.parseSealedBox(from: encrypted)
-        return try decryptWithKeyFallback { key in
+        let (data, _) = try decryptWithKeyFallback { key in
             try AES.GCM.open(sealedBox, using: key)
         }
+        return data
     }
 }
 
@@ -509,7 +593,7 @@ enum EncryptionError: LocalizedError {
         case .invalidKeyCharacters:
             return "Key must only contain lowercase letters and numbers after the prefix"
         case .invalidKeyLength:
-            return "Key length must be even"
+            return "Key must decode to exactly \(SyncEnclaveKeyBundle.cekByteCount) bytes"
         case .invalidEncryptedData:
             return "Missing IV or data in encrypted data"
         case .invalidBase64:

@@ -2,351 +2,238 @@
 //  ProfileSyncService.swift
 //  TinfoilChat
 //
-//  Service for syncing user profiles to cloud
+//  Profile sync built on top of the attested sync enclave. The
+//  enclave is the only encryptor; the controlplane only sees
+//  ciphertext from its perspective. Mirrors
+//  `services/cloud/profile-sync.ts` in the webapp.
 //
 
-import Foundation
 import ClerkKit
+import Foundation
 
-/// Service for managing profile synchronization with cloud
+/// Service for managing profile synchronization with cloud.
 @MainActor
 class ProfileSyncService: ObservableObject {
     static let shared = ProfileSyncService()
-    
-    private let apiBaseURL = Constants.API.baseURL
+
+    private let profileScope: SyncScope = .profile
+    private let profileRowId = "profile"
+
     private var getToken: (() async -> String?)? = nil
     private var cachedProfile: ProfileData? = nil
     private var failedDecryptionData: String? = nil
-    
-    // Shared ISO8601 formatter with fractional seconds for consistency
+
     private static let iso8601Formatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
-    
+
     private init() {}
-    
+
     // MARK: - Configuration
-    
-    /// Set the token getter function for authentication
-    func setTokenGetter(_ tokenGetter: @escaping () async -> String?) {
+
+    /// Set the token getter function for authentication. Wires the
+    /// same closure into the shared sync enclave client. Returns once
+    /// the actor-isolated client has accepted the getter so callers
+    /// can't race the first authenticated request against an empty
+    /// token cache.
+    func setTokenGetter(_ tokenGetter: @escaping () async -> String?) async {
         self.getToken = tokenGetter
+        let captured = tokenGetter
+        await SyncEnclaveClient.shared.setTokenGetter { await captured() }
     }
-    
-    /// Default token getter using Clerk
+
     private func defaultTokenGetter() async -> String? {
         do {
-            // Ensure Clerk is loaded
             let isLoaded = Clerk.shared.isLoaded
             if !isLoaded {
                 try await Clerk.shared.refreshClient()
             }
-            
-            // Get session token (auto-refresh if expired)
             if let session = Clerk.shared.session {
                 if let token = try? await session.getToken() {
                     return token
-                } else if let tokenResource = session.lastActiveToken {
+                }
+                if let tokenResource = session.lastActiveToken {
                     return tokenResource.jwt
                 }
             }
-            
             return nil
         } catch {
             return nil
         }
     }
-    
-    /// Check if user is authenticated
+
     func isAuthenticated() async -> Bool {
         let token = await (getToken ?? defaultTokenGetter)()
         return token != nil && !token!.isEmpty
     }
-    
-    // MARK: - API Headers
-    
-    private func getHeaders() async throws -> [String: String] {
-        guard let token = await (getToken ?? defaultTokenGetter)() else {
-            throw ProfileSyncError.authenticationRequired
-        }
-        
-        // Check if token looks valid (basic check)
-        if token.isEmpty {
-            throw ProfileSyncError.authenticationRequired
-        }
-        
-        return [
-            "Authorization": "Bearer \(token)",
-            "Content-Type": "application/json"
-        ]
-    }
-    
+
     // MARK: - Profile Operations
 
-    func fetchEncryptedProfilePayload() async throws -> String? {
-        guard await isAuthenticated() else {
-            return nil
-        }
-
-        guard let url = URL(string: "\(apiBaseURL)/api/profile/") else {
-            throw ProfileSyncError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.allHTTPHeaderFields = try await getHeaders()
-
-        let (data, response): (Data, URLResponse)
-        do {
-            (data, response) = try await URLSession.shared.data(for: request)
-        } catch {
-            throw ProfileSyncError.fetchFailed(underlying: error)
-        }
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ProfileSyncError.invalidResponse
-        }
-
-        if httpResponse.statusCode == 404 {
-            return nil
-        }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            let error = URLError(.badServerResponse, userInfo: [NSURLErrorFailingURLErrorKey: url, "statusCode": httpResponse.statusCode])
-            throw ProfileSyncError.fetchFailed(underlying: error)
-        }
-
-        let profileResponse = try JSONDecoder().decode(ProfileResponse.self, from: data)
-        return profileResponse.data
-    }
-    
-    /// Fetch profile from cloud
+    /// Get profile from cloud via the sync enclave. The enclave
+    /// unseals the row server-side and returns plaintext, so there
+    /// is no client-side decryption step.
     func fetchProfile() async throws -> ProfileData? {
-        guard let payload = try await fetchEncryptedProfilePayload() else {
-            if await isAuthenticated() {
-                failedDecryptionData = nil
-            }
-            return nil
-        }
+        guard await isAuthenticated() else { return nil }
+        guard let keys = CEKEncoding.pullKeysIfAvailable() else { return nil }
 
-        // Initialize encryption service
-        _ = try await EncryptionService.shared.initialize()
-        
-        // Try to decrypt the profile data
         do {
-            // Parse the encrypted data (JSON string format)
-            guard let encryptedData = payload.data(using: .utf8) else {
-                throw ProfileSyncError.invalidDataFormat
+            let response = try await SyncEnclaveAPI.pull(
+                EnclavePullRequest(
+                    scope: profileScope,
+                    ids: [profileRowId],
+                    all: nil,
+                    cursor: nil,
+                    limit: nil,
+                    keys: keys
+                )
+            )
+            guard let item = response.items.first else {
+                // An empty response means no row exists server-side,
+                // same as an explicit notFound: clear any stale
+                // decrypt-failure state so future uploads aren't
+                // wedged by `hasFailedRemoteDecryption()`.
+                self.failedDecryptionData = nil
+                self.cachedProfile = nil
+                return nil
             }
-            
-            let encrypted = try JSONDecoder().decode(EncryptedData.self, from: encryptedData)
-            
-            
-            let decryptionResult = try await EncryptionService.shared.decrypt(encrypted, as: ProfileData.self)
-            let decrypted = decryptionResult.value
-            
-            // Cache the decrypted profile
-            self.cachedProfile = decrypted
+            if !item.ok {
+                if item.code == WireCodes.notFound {
+                    // The row no longer exists server-side; any
+                    // prior decrypt-failure state is stale and would
+                    // wedge future syncs that consult
+                    // `hasFailedRemoteDecryption()`.
+                    self.failedDecryptionData = nil
+                    self.cachedProfile = nil
+                    return nil
+                }
+                self.failedDecryptionData = "code:\(item.code ?? "UNKNOWN")"
+                self.cachedProfile = nil
+                return nil
+            }
+            guard let b64 = item.plaintext,
+                  let plaintext = Data(base64Encoded: b64) else {
+                return nil
+            }
+            var decoded = try JSONDecoder().decode(ProfileData.self, from: plaintext)
+            if let etag = item.etag, let version = Int(etag) {
+                decoded.version = version
+            }
+            self.cachedProfile = decoded
             self.failedDecryptionData = nil
-            
-            return decrypted
-        } catch {
-            // Failed to decrypt - store for later retry
-            self.failedDecryptionData = payload
-            self.cachedProfile = nil
-            
-            
+            return decoded
+        } catch let error as SyncEnclaveError where error.status == 404 {
             return nil
         }
     }
-    
-    /// Save profile to cloud
+
+    /// Save profile to cloud through the enclave.
     func saveProfile(_ profile: ProfileData) async throws -> (success: Bool, version: Int?) {
-        guard await isAuthenticated() else {
-            return (false, nil)
-        }
-        
-        
-        // Initialize encryption service
-        _ = try await EncryptionService.shared.initialize()
-        
-        // Add metadata
-        var profileWithMetadata = profile
-        profileWithMetadata.updatedAt = Self.iso8601Formatter.string(from: Date())
-        profileWithMetadata.version = (profile.version ?? 0) + 1
-        
-        // Encrypt the profile data
-        let encrypted = try await EncryptionService.shared.encrypt(profileWithMetadata)
-        
-        
-        // Send encrypted data as JSON string
-        let encryptedData = try JSONEncoder().encode(encrypted)
-        guard let jsonString = String(data: encryptedData, encoding: .utf8) else {
-            throw ProfileSyncError.encodingFailed
-        }
-        
-        // Create upload request
-        guard let url = URL(string: "\(apiBaseURL)/api/profile/") else {
-            throw ProfileSyncError.invalidURL
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        request.allHTTPHeaderFields = try await getHeaders()
-        
-        let body = ProfileUploadRequest(data: jsonString)
-        request.httpBody = try JSONEncoder().encode(body)
-        
-        let (data, response): (Data, URLResponse)
-        do {
-            (data, response) = try await URLSession.shared.data(for: request)
-        } catch {
-            throw ProfileSyncError.saveFailed(underlying: error)
-        }
-        
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            let error = URLError(.badServerResponse, userInfo: [NSURLErrorFailingURLErrorKey: url, "statusCode": (response as? HTTPURLResponse)?.statusCode ?? 0])
-            throw ProfileSyncError.saveFailed(underlying: error)
-        }
-        
-        // Try to parse the response to get the server-assigned version
-        var serverVersion = profileWithMetadata.version
-        if let responseData = try? JSONDecoder().decode(ProfileUploadResponse.self, from: data) {
-            serverVersion = responseData.version
-        }
-        
-        // Update cache with server version
-        profileWithMetadata.version = serverVersion
-        self.cachedProfile = profileWithMetadata
-        
-        
-        return (true, serverVersion)
-    }
-    
-    /// Retry decryption with new key
-    func retryDecryptionWithNewKey() async throws -> ProfileData? {
-        guard let failedDecryptionData = failedDecryptionData else {
-            return nil
-        }
-        
-        do {
-            _ = try await EncryptionService.shared.initialize()
-            
-            // Parse the encrypted data (JSON string format)
-            guard let encryptedData = failedDecryptionData.data(using: .utf8) else {
-                throw ProfileSyncError.invalidDataFormat
+        guard await isAuthenticated() else { return (false, nil) }
+        let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
+
+        // Push the local profile under a given base version. The
+        // controlplane treats a missing/zero version as create-only and
+        // any positive version as a CAS update gated on the row's etag.
+        func pushAtVersion(_ baseVersion: Int) async throws -> (success: Bool, version: Int?) {
+            var profileWithMetadata = profile
+            profileWithMetadata.updatedAt = Self.iso8601Formatter.string(from: Date())
+            profileWithMetadata.version = baseVersion + 1
+
+            let plaintext = try JSONEncoder().encode(profileWithMetadata)
+            let ifMatch: String? = baseVersion > 0 ? String(baseVersion) : nil
+
+            let metadata: [String: AnyCodable] = [
+                "version": AnyCodable(profileWithMetadata.version ?? 1)
+            ]
+            let response = try await SyncEnclaveAPI.push(
+                EnclavePushRequest(
+                    scope: profileScope,
+                    id: profileRowId,
+                    key: keyB64,
+                    plaintext: plaintext.base64EncodedString(),
+                    ifMatch: ifMatch,
+                    idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                    metadata: metadata
+                )
+            )
+            if let etagVersion = Int(response.etag) {
+                profileWithMetadata.version = etagVersion
             }
-            
-            let encrypted = try JSONDecoder().decode(EncryptedData.self, from: encryptedData)
-            let decryptionResult = try await EncryptionService.shared.decrypt(encrypted, as: ProfileData.self)
-            let decrypted = decryptionResult.value
-            
-            // Cache the successfully decrypted profile
-            self.cachedProfile = decrypted
-            self.failedDecryptionData = nil
-            
-            return decrypted
-        } catch {
-            return nil
+            self.cachedProfile = profileWithMetadata
+            return (true, profileWithMetadata.version)
         }
-    }
-    
-    /// Get cached profile (for quick access)
-    func getCachedProfile() -> ProfileData? {
-        return cachedProfile
+
+        do {
+            return try await pushAtVersion(profile.version ?? 0)
+        } catch let error as SyncEnclaveError where Self.isStaleBlobConflict(error) {
+            // Optimistic-concurrency conflict: our base version is
+            // behind the server, or we tried to create a profile that
+            // already exists. Re-read the current version and retry once
+            // so local settings win instead of looping on STALE_BLOB.
+            let remote = try await fetchProfile()
+            return try await pushAtVersion(remote?.version ?? 0)
+        }
     }
 
-    func hasFailedRemoteDecryption() -> Bool {
-        failedDecryptionData != nil
+    /// A STALE_BLOB (HTTP 412) push means our If-Match version no longer
+    /// matches the server: either the row advanced under another writer
+    /// or we tried to create a profile that already exists.
+    private static func isStaleBlobConflict(_ error: SyncEnclaveError) -> Bool {
+        error.code == WireCodes.staleBlob || error.status == 412
     }
-    
-    /// Clear cache
+
+    /// Re-attempt a profile fetch after a key change. The enclave
+    /// already tries every key the client supplies on each pull, so
+    /// a retry is just another pull through the standard path.
+    func retryDecryptionWithNewKey() async throws -> ProfileData? {
+        guard failedDecryptionData != nil else { return nil }
+        return try await fetchProfile()
+    }
+
+    func getCachedProfile() -> ProfileData? { cachedProfile }
+
+    func hasFailedRemoteDecryption() -> Bool { failedDecryptionData != nil }
+
     func clearCache() {
         cachedProfile = nil
         failedDecryptionData = nil
     }
 
-    // MARK: - Sync Status Operations
+    // MARK: - Sync status
 
-    /// Get sync status to check if profile changed without fetching full data
+    /// Get sync status to check if the profile changed without
+    /// fetching full data. Walks the profile scope's list-status to
+    /// look for the singleton row.
     func getSyncStatus() async -> ProfileSyncStatus? {
-        guard await isAuthenticated() else {
-            return nil
-        }
-
-        guard let url = URL(string: "\(apiBaseURL)/api/profile/sync-status") else {
-            return nil
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-
+        guard await isAuthenticated() else { return nil }
         do {
-            request.allHTTPHeaderFields = try await getHeaders()
-        } catch {
-            return nil
-        }
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                return nil
+            let status = try await SyncEnclaveAPI.listStatus(
+                EnclaveListStatusRequest(
+                    scope: profileScope,
+                    cursor: nil,
+                    limit: nil,
+                    projectId: nil
+                )
+            )
+            if let current = status.updates.first(where: { $0.id == profileRowId }) {
+                let version = Int(current.etag)
+                return ProfileSyncStatus(
+                    exists: true,
+                    version: version,
+                    lastUpdated: current.updatedAt
+                )
             }
-
-            if httpResponse.statusCode == 401 {
-                return nil
-            }
-
-            if httpResponse.statusCode == 404 {
+            // No active row — check if it was deleted recently.
+            if status.deletes.first(where: { $0.scope == profileScope && $0.id == profileRowId }) != nil {
                 return ProfileSyncStatus(exists: false, version: nil, lastUpdated: nil)
             }
-
-            guard httpResponse.statusCode == 200 else {
-                return nil
-            }
-
-            return try JSONDecoder().decode(ProfileSyncStatus.self, from: data)
+            return ProfileSyncStatus(exists: false, version: nil, lastUpdated: nil)
         } catch {
             return nil
         }
     }
 }
 
-// MARK: - Profile Sync Errors
 
-enum ProfileSyncError: LocalizedError {
-    case authenticationRequired
-    case invalidResponse
-    case fetchFailed(underlying: Error)
-    case saveFailed(underlying: Error)
-    case invalidDataFormat
-    case encryptionFailed
-    case decryptionFailed
-    case encodingFailed
-    case invalidURL
-    
-    var errorDescription: String? {
-        switch self {
-        case .authenticationRequired:
-            return "Authentication required for profile sync"
-        case .invalidResponse:
-            return "Invalid response from server"
-        case .fetchFailed(let underlying):
-            return "Failed to fetch profile from cloud: \(underlying.localizedDescription)"
-        case .saveFailed(let underlying):
-            return "Failed to save profile to cloud: \(underlying.localizedDescription)"
-        case .invalidDataFormat:
-            return "Invalid data format in profile response"
-        case .encryptionFailed:
-            return "Failed to encrypt profile data"
-        case .decryptionFailed:
-            return "Failed to decrypt profile data"
-        case .encodingFailed:
-            return "Failed to encode data as UTF-8 string"
-        case .invalidURL:
-            return "Invalid API URL configuration"
-        }
-    }
-}

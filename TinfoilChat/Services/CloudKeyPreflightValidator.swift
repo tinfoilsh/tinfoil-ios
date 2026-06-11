@@ -1,10 +1,20 @@
+//
+//  CloudKeyPreflightValidator.swift
+//  TinfoilChat
+//
+//  Validates that the locally-loaded primary CEK matches the
+//  user's existing cloud data by probing the enclave directly.
+//  With the v2 sync architecture, validation collapses to "ask the
+//  enclave to unseal a row with this CEK and check whether it
+//  refuses". The enclave returns UNKNOWN_KEY when the supplied key
+//  doesn't match, and plaintext otherwise.
+//
+
 import Foundation
 
 private enum CloudKeyValidationMessages {
     static let noEncryptionKey = "No encryption key is currently loaded."
     static let unknownRemoteState = "We couldn't verify whether encrypted cloud data already exists."
-    static let unknownProfile = "We couldn't verify your existing cloud profile."
-    static let unknownChats = "We couldn't verify your existing cloud chats."
     static let keyMismatch = "This key doesn't match your existing cloud data."
 }
 
@@ -12,6 +22,16 @@ enum CloudRemoteState {
     case empty
     case exists
     case unknown
+}
+
+/// Result of probing the local key-set against existing remote rows.
+/// Mirrors the webapp's `LegacyKeyProbeOutcome` so both platforms reach
+/// the same verdict when deciding whether a key may be bound.
+enum LocalKeyProbeOutcome {
+    case decryptable
+    case undecryptable
+    case noSample
+    case transientFailure
 }
 
 struct CloudKeyValidationResult {
@@ -24,13 +44,23 @@ struct CloudKeyValidationResult {
 final class CloudKeyPreflightValidator {
     static let shared = CloudKeyPreflightValidator()
     static let mismatchMessage = CloudKeyValidationMessages.keyMismatch
+    static let unknownRemoteStateMessage = CloudKeyValidationMessages.unknownRemoteState
 
     private let profileSync = ProfileSyncService.shared
     private let cloudStorage = CloudStorageService.shared
     private let encryptionService = EncryptionService.shared
 
+    /// Every data scope the probe samples, matching the webapp's
+    /// `LEGACY_KEY_PROBE_SCOPES`. Project data can exist without any
+    /// profile or chat, so all four must be checked before concluding
+    /// the remote is empty.
+    private static let probeScopes: [SyncScope] = [.chat, .profile, .project, .projectDocument]
+
     private init() {}
 
+    /// Inspect the remote state by combining a profile-sync-status
+    /// check with a chat-sync-status fallback. This does NOT require
+    /// the user's CEK and is safe to call before any key is loaded.
     func inspectRemoteState() async -> CloudRemoteState {
         guard let profileStatus = await profileSync.getSyncStatus() else {
             return .unknown
@@ -48,136 +78,92 @@ final class CloudKeyPreflightValidator {
         }
     }
 
+    /// Validate the currently-loaded key-set by asking the enclave to
+    /// unseal a sample of real rows across every data scope. A row the
+    /// keys cannot open (`UNKNOWN_KEY`) blocks binding even when other
+    /// rows decrypt; a decryptable sample confirms the key; an empty
+    /// sample means there is nothing to strand. Mirrors the webapp's
+    /// shared decrypt probe so both platforms gate identically.
     func validateCurrentPrimaryKey() async -> CloudKeyValidationResult {
         guard encryptionService.getKey() != nil else {
             return unknownResult(message: CloudKeyValidationMessages.noEncryptionKey)
         }
 
-        guard let profileStatus = await profileSync.getSyncStatus() else {
+        switch await probeKeysAcrossScopes(CEKEncoding.keyValidationProbeKeys()) {
+        case .undecryptable:
+            return blockedResult()
+        case .transientFailure:
             return unknownResult(message: CloudKeyValidationMessages.unknownRemoteState)
-        }
-
-        if profileStatus.exists {
-            return await validateProfileProbe()
-        }
-
-        do {
-            let chatStatus = try await cloudStorage.getChatSyncStatus()
-            if chatStatus.count > 0 {
-                return await validateChatProbe()
-            }
-        } catch {
-            return unknownResult(message: CloudKeyValidationMessages.unknownRemoteState)
-        }
-
-        return CloudKeyValidationResult(
-            remoteState: .empty,
-            canWrite: true,
-            message: nil
-        )
-    }
-
-    private func validateProfileProbe() async -> CloudKeyValidationResult {
-        let mismatchResult = blockedResult()
-
-        let payload: String
-        do {
-            guard let fetchedPayload = try await profileSync.fetchEncryptedProfilePayload() else {
-                return unknownResult(message: CloudKeyValidationMessages.unknownProfile)
-            }
-            payload = fetchedPayload
-        } catch {
-            return unknownResult(message: CloudKeyValidationMessages.unknownProfile)
-        }
-
-        do {
-            guard let data = payload.data(using: .utf8) else {
-                return mismatchResult
-            }
-
-            let encrypted = try JSONDecoder().decode(EncryptedData.self, from: data)
-            // Decrypt to raw bytes only: a successful AES-GCM open with the primary
-            // key proves the key matches the cloud data. Avoid decoding into a
-            // typed Swift schema here — the JS web client writes blobs whose
-            // schema may evolve, and a Swift decode failure must not be treated
-            // as "wrong key".
-            let (_, usedFallback) = try await encryptionService.decryptRawWithFallbackInfo(encrypted)
-
-            guard !usedFallback else {
-                return mismatchResult
-            }
-
+        case .decryptable:
             return validResult()
-        } catch {
-            return mismatchResult
+        case .noSample:
+            return CloudKeyValidationResult(
+                remoteState: .empty,
+                canWrite: true,
+                message: nil
+            )
         }
     }
 
-    private func validateChatProbe() async -> CloudKeyValidationResult {
-        do {
-            let response = try await cloudStorage.listChats(
-                limit: Constants.Sync.keyValidationProbeCount,
-                includeContent: true
-            )
+    /// Pull a small sample from each data scope with the supplied
+    /// candidate key-set and classify whether those keys can unseal
+    /// whatever the enclave already holds. The probe never
+    /// short-circuits on the first decryptable row: a single
+    /// `UNKNOWN_KEY` anywhere is enough to refuse the bind, since binding
+    /// a key that cannot open existing rows would strand that data. A
+    /// transient pull failure is not proof of mismatch, so it is
+    /// reported separately and the caller treats it as retryable.
+    /// Also used by recovery flows that must verify a recovered CEK
+    /// against existing cloud data before binding it to the enclave.
+    func probeKeysAcrossScopes(_ keys: [EnclavePullKey]) async -> LocalKeyProbeOutcome {
+        guard !keys.isEmpty else { return .undecryptable }
 
-            guard !response.conversations.isEmpty else {
-                return unknownResult(message: CloudKeyValidationMessages.unknownChats)
+        var sawDecryptable = false
+        var sawUndecryptable = false
+
+        for scope in Self.probeScopes {
+            let request: EnclavePullRequest
+            if scope == .profile {
+                request = EnclavePullRequest(
+                    scope: .profile,
+                    ids: ["profile"],
+                    all: nil,
+                    cursor: nil,
+                    limit: nil,
+                    keys: keys
+                )
+            } else {
+                request = EnclavePullRequest(
+                    scope: scope,
+                    ids: nil,
+                    all: true,
+                    cursor: nil,
+                    limit: Constants.Sync.keyValidationProbeCount,
+                    keys: keys
+                )
             }
 
-            var sawMismatch = false
-
-            for conversation in response.conversations.prefix(Constants.Sync.keyValidationProbeCount) {
-                guard let content = conversation.content else { continue }
-
-                if conversation.formatVersion == 1 {
-                    guard let binary = Data(base64Encoded: content) else {
-                        sawMismatch = true
-                        continue
+            do {
+                let response = try await SyncEnclaveAPI.pull(request)
+                for item in response.items {
+                    if item.ok {
+                        sawDecryptable = true
+                    } else if item.code == WireCodes.unknownKey {
+                        sawUndecryptable = true
                     }
-
-                    do {
-                        // Schema-free probe: a successful raw decrypt proves the
-                        // primary key works. Decoding into StoredChat here would
-                        // false-positive a "key mismatch" whenever the JS web
-                        // client uploads a chat blob with a slightly different
-                        // shape (e.g. missing optional sync metadata fields).
-                        let (_, usedFallback) = try encryptionService.decryptRawV1WithFallbackInfo(binary)
-                        if !usedFallback {
-                            return validResult()
-                        }
-                        sawMismatch = true
-                    } catch {
-                        sawMismatch = true
-                    }
-
-                    continue
                 }
-
-                do {
-                    let encryptedData = try JSONDecoder().decode(
-                        EncryptedData.self,
-                        from: Data(content.utf8)
-                    )
-                    let (_, usedFallback) = try await encryptionService.decryptRawWithFallbackInfo(encryptedData)
-                    if !usedFallback {
-                        return validResult()
-                    }
-                    sawMismatch = true
-                } catch {
-                    sawMismatch = true
-                }
+            } catch {
+                // A row an earlier scope already failed to unseal is
+                // definitive proof of mismatch; a later transient pull
+                // failure must not soften that verdict into "retryable".
+                if sawUndecryptable { return .undecryptable }
+                return .transientFailure
             }
-
-            return CloudKeyValidationResult(
-                remoteState: sawMismatch ? .exists : .unknown,
-                canWrite: false,
-                message: sawMismatch
-                    ? CloudKeyValidationMessages.keyMismatch
-                    : CloudKeyValidationMessages.unknownChats
-            )
-        } catch {
-            return unknownResult(message: CloudKeyValidationMessages.unknownChats)
         }
+
+        if sawUndecryptable { return .undecryptable }
+        if sawDecryptable { return .decryptable }
+        return .noSample
     }
 
     private func unknownResult(message: String) -> CloudKeyValidationResult {

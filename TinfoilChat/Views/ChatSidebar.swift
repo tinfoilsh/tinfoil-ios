@@ -20,9 +20,6 @@ struct ChatSidebar: View {
     @State private var deletingChatId: String? = nil
     @State private var showDeleteAlert: Bool = false
 
-    @State private var showEncryptedChatAlert: Bool = false
-    @State private var selectedEncryptedChat: Chat? = nil
-
     @State private var isTabSwitching: Bool = false
     @State private var isProjectsExpanded: Bool = false
     @State private var isChatsExpanded: Bool = true
@@ -45,8 +42,11 @@ struct ChatSidebar: View {
             // When cloud sync is off, all chats are local
             source = viewModel.localChats
         }
-        // Temporary and project chats are never listed in the root chat sidebar
-        return source.filter { !$0.isTemporary && $0.projectId == nil }
+        // Temporary and project chats are never listed in the root chat
+        // sidebar. Chats that failed to decrypt are hidden entirely; they
+        // stay in storage so re-decryption can recover them once the
+        // right key is active, at which point they reappear here.
+        return source.filter { !$0.isTemporary && $0.projectId == nil && !$0.decryptionFailed }
     }
 
     // Timer to update relative time strings
@@ -99,17 +99,6 @@ struct ChatSidebar: View {
                 }
                 deletingChatId = nil
             }
-        }
-        .alert("Encrypted Chat", isPresented: $showEncryptedChatAlert) {
-            Button("Go to Settings") {
-                viewModel.shouldOpenCloudSync = true
-                viewModel.showSidebarSettings = true
-            }
-            Button("Cancel", role: .cancel) {
-                selectedEncryptedChat = nil
-            }
-        } message: {
-            Text("This chat is encrypted with a different key. Go to Settings > Cloud Sync to update your encryption key.")
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
         }
@@ -179,7 +168,7 @@ struct ChatSidebar: View {
             .applyAlwaysBounceIfAvailable()
             .refreshable {
                 await authManager.initializeAuthState()
-                await viewModel.performFullSync()
+                await viewModel.performFullSync(deep: true)
             }
             .frame(maxHeight: .infinity)
 
@@ -205,12 +194,7 @@ struct ChatSidebar: View {
                     editingTitle: $editingTitle,
                     timeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
                     onSelect: {
-                        if chat.decryptionFailed {
-                            selectedEncryptedChat = chat
-                            showEncryptedChatAlert = true
-                        } else {
-                            viewModel.selectChat(chat)
-                        }
+                        viewModel.selectChat(chat)
                     },
                     onEdit: {
                         if editingChatId == chat.id {
@@ -580,13 +564,8 @@ struct ChatListItem: View {
                         }
                     } else {
                         HStack(spacing: 4) {
-                            if chat.decryptionFailed {
-                                Image(systemName: "lock.fill")
-                                    .font(.caption)
-                                    .foregroundColor(.orange)
-                            }
-                            Text(chat.decryptionFailed ? "Encrypted" : chat.title)
-                                .foregroundColor(chat.decryptionFailed ? .orange : .primary)
+                            Text(chat.title)
+                                .foregroundColor(.primary)
                                 .lineLimit(1)
                             
                             if chat.isBlankChat {
@@ -615,13 +594,9 @@ struct ChatListItem: View {
                     }
                 }
                 
-                // Timestamp or decryption failure message inside the cell
+                // Timestamp inside the cell
                 if !isEditing {
-                    if chat.decryptionFailed {
-                        Text("Failed to decrypt: wrong key")
-                            .font(.caption)
-                            .foregroundColor(.red)
-                    } else if !timeString.isEmpty {
+                    if !timeString.isEmpty {
                         Text(timeString)
                             .font(.caption)
                             .foregroundColor(.gray)

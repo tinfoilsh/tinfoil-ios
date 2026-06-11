@@ -250,8 +250,8 @@ class ChatViewModel: ObservableObject {
     var activeProjectChats: [Chat] {
         guard let projectId = activeProject?.id else { return [] }
         return chats
-            .filter { $0.projectId == projectId && !$0.isTemporary && !$0.isBlankChat }
-            .sorted { $0.createdAt > $1.createdAt }
+            .filter { $0.projectId == projectId && !$0.isTemporary && !$0.isBlankChat && !$0.decryptionFailed }
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
     
     // Computed property to check if user has premium access
@@ -805,8 +805,9 @@ class ChatViewModel: ObservableObject {
         isLoadingProject = true
         projectError = nil
         do {
+            let resolvedName = name ?? "My Project #\(projects.count + 1)"
             let project = try await projectStorage.createProject(
-                CreateProjectData(name: name ?? Self.generateProjectName())
+                CreateProjectData(name: resolvedName)
             )
             projects.insert(project, at: 0)
             await enterProject(projectId: project.id)
@@ -964,7 +965,6 @@ class ChatViewModel: ObservableObject {
         let wasCurrent = currentChat?.id == chatId
         guard var chat = chatForProjectMove(chatId) else { return }
         let wasLocal = chat.isLocalOnly
-        let oldProjectId = chat.projectId
 
         chat.projectId = projectId
         chat.isLocalOnly = false
@@ -987,31 +987,14 @@ class ChatViewModel: ObservableObject {
 
         saveChat(chat)
 
-        do {
-            try await cloudSync.updateChatProject(chatId, projectId: projectId)
-            await cloudSync.backupChat(chatId, ensureLatestUpload: true)
-            if let projectId {
-                await loadProjectChatsIntoMemory(projectId: projectId)
-            }
-        } catch {
-            projectError = error.localizedDescription
-            chat.projectId = oldProjectId
-            chat.isLocalOnly = wasLocal
-            if wasLocal {
-                chats.removeAll { $0.id == chatId }
-                if let index = localChats.firstIndex(where: { $0.id == chatId }) {
-                    localChats[index] = chat
-                } else {
-                    localChats.insert(chat, at: min(1, localChats.count))
-                }
-            } else {
-                replaceChat(chat)
-            }
-            if wasCurrent {
-                currentChat = chat
-            }
-            saveChat(chat)
-            return
+        // The upload itself carries the project membership (the enclave
+        // stamps the row's project_id from the chat push metadata), so
+        // backing up the chat IS the server-side move. If the upload
+        // can't land right now the chat stays locallyModified and the
+        // next sync retries it, like any other offline edit.
+        await cloudSync.backupChat(chatId, ensureLatestUpload: true)
+        if let projectId {
+            await loadProjectChatsIntoMemory(projectId: projectId)
         }
 
         if wasCurrent, activeProject?.id != projectId {
@@ -1035,7 +1018,7 @@ class ChatViewModel: ObservableObject {
                 chats.append(projectChat)
             }
         }
-        chats.sort { $0.createdAt > $1.createdAt }
+        chats.sort { $0.updatedAt > $1.updatedAt }
     }
 
     private func loadProjectChatsFromStorage(projectId: String) async -> [Chat] {
@@ -1046,16 +1029,10 @@ class ChatViewModel: ObservableObject {
                 $0.projectId == projectId &&
                 ($0.messageCount > 0 || $0.decryptionFailed || $0.titleState != .placeholder)
             }
-            .sorted { $0.createdAt > $1.createdAt }
+            .sorted { $0.updatedAt > $1.updatedAt }
             .map(\.id)
         return await Chat.loadChats(chatIds: ids, userId: userId)
-            .sorted { $0.createdAt > $1.createdAt }
-    }
-
-    private static func generateProjectName() -> String {
-        let adjectives = ["Private", "Secret", "Encrypted", "Anonymous", "Stealth", "Incognito", "Covert", "Hidden"]
-        let animals = ["Orangutan", "Penguin", "Platypus", "Armadillo", "Chameleon", "Pangolin", "Narwhal", "Capybara"]
-        return "\(adjectives.randomElement() ?? "Private") \(animals.randomElement() ?? "Project")"
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
 
     /// Toggles temporary (incognito) chat mode. When enabled, the current chat
@@ -3182,8 +3159,8 @@ class ChatViewModel: ObservableObject {
         passkeyManager.reset()
 
         // Clear cloud chats and create a new empty one with the free model.
-        // Local chats are only cleared from memory — files on disk are preserved
-        // and will be reloaded on next sign-in via handleSignIn/loadAllLocalChats.
+        // On-disk local chats are wiped immediately after this by clearAuthState's
+        // full sign-out cleanup, so no content persists across accounts.
         chats = []
         localChats = []
         activeStorageTab = .cloud
@@ -3219,7 +3196,20 @@ class ChatViewModel: ObservableObject {
         // Clear encryption key reference
         encryptionKey = nil
     }
-    
+
+    /// Erase on-disk chats for the signed-out user during sign-out cleanup.
+    /// The in-memory blank chat created by handleSignOut is left intact so the
+    /// signed-out session still has a usable chat. Must run before the auth
+    /// manager clears its authenticated state so currentUserId still resolves.
+    func wipeLocalChatsForSignOut() async {
+        // Drain the queued disk saves first; the queue is chained, so
+        // awaiting the latest task flushes every earlier one. Otherwise a
+        // detached save kicked off by handleSignOut could land after the
+        // wipe and resurrect the signed-out user's chat files.
+        await pendingSaveTask?.value
+        await Chat.deleteAllChatsFromStorage(userId: currentUserId)
+    }
+
     /// Handle sign-in by loading user's saved chats and triggering sync
     func handleSignIn() {
         #if DEBUG
@@ -3287,6 +3277,13 @@ class ChatViewModel: ObservableObject {
             // Start auto-sync timer now that user is authenticated
             // (This also handles the case where someone signs in after app launch)
             setupAutoSyncTimer()
+
+            // One-shot legacy cleanup for users who sign in after launch;
+            // the launch-time pass only covers an already-signed-in user.
+            // Flag-gated per user, so re-running is cheap.
+            Task.detached(priority: .background) {
+                await LegacyChatEviction.runIfNeeded(userId: userId)
+            }
             
             // Check if we need to set up encryption first
             // IMPORTANT: Do NOT auto-generate a key here; allow UI to prompt the user
@@ -3626,7 +3623,7 @@ class ChatViewModel: ObservableObject {
     private func loadAllLocalChats(userId: String?) async -> [Chat] {
         guard let userId = userId else { return [] }
         return ((try? await EncryptedFileStorage.local.loadAllChats(userId: userId)) ?? [])
-            .sorted { $0.createdAt > $1.createdAt }
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
 
     private func loadFirstPageOfChats(
@@ -3639,11 +3636,11 @@ class ChatViewModel: ObservableObject {
         let filtered = index
             .filter { !excludedIds.contains($0.id) }
             .filter { filter?($0) ?? true }
-            .sorted { $0.createdAt > $1.createdAt }
+            .sorted { $0.updatedAt > $1.updatedAt }
         let firstPageIds = filtered.prefix(Constants.Pagination.chatsPerPage).map(\.id)
 
         let chats = await Chat.loadChats(chatIds: firstPageIds, userId: userId)
-            .sorted { $0.createdAt > $1.createdAt }
+            .sorted { $0.updatedAt > $1.updatedAt }
 
         return (chats, filtered.count)
     }
@@ -3738,7 +3735,7 @@ class ChatViewModel: ObservableObject {
         let result = await loadFirstPageOfChats(userId: userId, excluding: locallyModifiedIds, filter: \.isCloudDisplayable)
 
         // Combine: locally modified chats + synced chats from files
-        let sortedChats = (locallyModifiedChats + result.chats).sorted { $0.createdAt > $1.createdAt }
+        let sortedChats = (locallyModifiedChats + result.chats).sorted { $0.updatedAt > $1.updatedAt }
 
         // Keep track of currently loaded chat IDs to preserve pagination
         let currentlyLoadedIds = Set(chats.map { $0.id })
@@ -3785,11 +3782,11 @@ class ChatViewModel: ObservableObject {
             updatedChats.append(contentsOf: syncedChatsToShow)
         }
         
-        // Sort non-blank chats by createdAt before normalization
+        // Sort non-blank chats by latest activity before normalization
         updatedChats.sort { chat1, chat2 in
             if chat1.isBlankChat { return true }
             if chat2.isBlankChat { return false }
-            return chat1.createdAt > chat2.createdAt
+            return chat1.updatedAt > chat2.updatedAt
         }
 
         // Set chats and normalize to ensure exactly one blank chat at position 0
@@ -3838,7 +3835,7 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Perform a full sync with the cloud
-    func performFullSync() async {
+    func performFullSync(deep: Bool = false) async {
         // Gate sync when cloud sync is disabled
         if !SettingsManager.shared.isCloudSyncEnabled {
             return
@@ -3854,7 +3851,7 @@ class ChatViewModel: ObservableObject {
             self.syncErrors = []
         }
         
-        let result = await cloudSync.syncAllChats()
+        let result = await cloudSync.syncAllChats(deep: deep)
         
         // Update chats if there were changes (await this before marking sync complete)
         if result.downloaded > 0 || result.uploaded > 0 || result.deleted > 0 {
@@ -3899,31 +3896,47 @@ class ChatViewModel: ObservableObject {
         mode: CloudKeyActivationMode = .recoverExisting
     ) async throws {
         do {
-            let previousKeys = EncryptionService.shared.getAllKeys()
-
             switch mode {
-            case .addRecoveryKey:
-                try EncryptionService.shared.addDecryptionKey(key)
             case .recoverExisting:
                 _ = try await CloudKeyAuthorizationStore.shared.applyPrimaryKeyWithValidation(key)
             case .explicitStartFresh:
-                try await EncryptionService.shared.setKey(key)
-                guard CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh) else {
-                    do {
-                        try EncryptionService.shared.replaceKeyBundle(
-                            primary: previousKeys.primary,
-                            alternatives: previousKeys.alternatives
-                        )
-                    } catch {
-                        EncryptionService.shared.clearKey()
-                    }
-                    throw CloudKeyAuthorizationError.authorizationUnavailable
+                // Stage the key in memory so the enclave handshake runs
+                // against it without writing it to the Keychain first. Only
+                // after the enclave registers the start-fresh key (or
+                // confirms the remote is empty / already bound to this key)
+                // do we persist it. If the enclave can't be reached we throw
+                // and discard the staged key, so a new key is never stranded
+                // locally while the enclave keeps the old one.
+                try await EncryptionService.shared.setKey(key, persist: false)
+                do {
+                    try await CloudKeyAuthorizationStore.shared.registerStartFreshKeyIfNeeded()
+                    try EncryptionService.shared.persistCurrentKeyState()
+                } catch {
+                    EncryptionService.shared.discardStagedKeyState()
+                    throw error
                 }
+                // The enclave has already rebound the account to this key
+                // and the Keychain has persisted it; the local mode stamp
+                // is best-effort. Failing it must not wipe the only copy
+                // of the now-authoritative key, so writes just stay gated
+                // until a later preflight validation re-stamps the hint.
+                _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh)
             }
 
             await MainActor.run {
                 self.encryptionKey = EncryptionService.shared.getKey()
                 self.showEncryptionSetup = false
+            }
+
+            // A v1 user activating their key on a fresh device has legacy
+            // cloud data but no registered key: the launch-time migration
+            // pass ran before any key existed, so without a re-kick the
+            // key is never adopted and cloud writes stay deferred for the
+            // whole session. Run the migration again now that a key is
+            // active so adoption happens in-session.
+            Task.detached(priority: .background) {
+                _ = await LegacyBlobMigration.runAndFinalize()
+                await PasskeyManager.shared.refreshBundleState()
             }
 
             await ProfileManager.shared.retryDecryptionWithNewKey()
@@ -3960,10 +3973,6 @@ class ChatViewModel: ObservableObject {
             }
             throw error  // Re-throw to let caller handle it
         }
-    }
-
-    func addRecoveryKey(_ key: String) async throws {
-        try await setEncryptionKey(key, mode: .addRecoveryKey)
     }
     
     /// Retry decryption of failed chats with the current key
