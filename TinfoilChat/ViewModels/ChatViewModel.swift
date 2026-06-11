@@ -3520,7 +3520,14 @@ class ChatViewModel: ObservableObject {
     func deleteAllChats() async throws {
         let localIds = chats.map(\.id) + localChats.map(\.id)
 
-        if authManager?.isAuthenticated == true && EncryptionService.shared.hasEncryptionKey() {
+        // When the cloud backup is in play (key present, or sync enabled but
+        // the key is missing) this must succeed or throw: skipping it would
+        // report success while encrypted chats survive on the server. Only a
+        // signed-in account that never set up cloud sync gets a local-only
+        // wipe.
+        let isAuthenticated = authManager?.isAuthenticated == true
+        let hasKey = EncryptionService.shared.hasEncryptionKey()
+        if isAuthenticated && (hasKey || SettingsManager.shared.isCloudSyncEnabled) {
             try await cloudSync.deleteAllFromCloud()
         }
 
