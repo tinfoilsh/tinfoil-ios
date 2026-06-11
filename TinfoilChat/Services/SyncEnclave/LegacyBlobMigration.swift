@@ -207,50 +207,29 @@ enum LegacyBlobMigration {
     /// registered current key. Adoption permanently binds the registry
     /// to this key, so registering a stale Keychain CEK over data sealed
     /// under a different key would strand the data and block the correct
-    /// key from ever being promoted. Pulls a few rows per scope with the
-    /// full candidate set: any successful decrypt proves the keys match;
-    /// rows that all fail to unseal prove they don't. When no row can be
-    /// sampled at all, adoption proceeds (nothing observable to
-    /// contradict the key, and a wrong adoption only blocks rewraps,
-    /// which recovery can later fix).
+    /// key from ever being promoted. Delegates to the shared cross-scope
+    /// probe: a single row the keys cannot unseal refuses adoption even
+    /// when other rows decrypt. When no row can be sampled at all,
+    /// adoption proceeds (nothing observable to contradict the key, and
+    /// a wrong adoption only blocks rewraps, which recovery can later
+    /// fix).
     private static func localKeysCanDecryptRemoteData() async -> Bool {
         let keys = CEKEncoding.migrationKeys()
         guard !keys.isEmpty else { return false }
 
-        var sawUndecryptableRow = false
-        for scope in [SyncScope.chat, .profile, .project] {
-            let items: [EnclavePullItem]
-            do {
-                let request = EnclavePullRequest(
-                    scope: scope,
-                    ids: scope == .profile ? ["profile"] : nil,
-                    all: scope == .profile ? nil : true,
-                    cursor: nil,
-                    limit: scope == .profile ? nil : Constants.Sync.keyValidationProbeCount,
-                    keys: keys
-                )
-                items = try await SyncEnclaveAPI.pull(request).items
-            } catch {
-                // Transient probe failure: don't adopt on this pass; the
-                // next launch retries with the gate still closed.
-                return false
-            }
-            for item in items {
-                if item.ok {
-                    return true
-                }
-                if item.code == WireCodes.unknownKey {
-                    sawUndecryptableRow = true
-                }
-            }
-        }
-        if sawUndecryptableRow {
+        switch await CloudKeyPreflightValidator.shared.probeKeysAcrossScopes(keys) {
+        case .decryptable, .noSample:
+            return true
+        case .undecryptable:
             #if DEBUG
             print("[LegacyBlobMigration] skip adoption: local keys cannot unseal existing remote data")
             #endif
             return false
+        case .transientFailure:
+            // Transient probe failure: don't adopt on this pass; the
+            // next launch retries with the gate still closed.
+            return false
         }
-        return true
     }
 
     private static func adoptLocalKeyForMigration(keyB64: String) async -> Bool {

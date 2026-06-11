@@ -153,6 +153,10 @@ final class CloudKeyPreflightValidator {
                     }
                 }
             } catch {
+                // A row an earlier scope already failed to unseal is
+                // definitive proof of mismatch; a later transient pull
+                // failure must not soften that verdict into "retryable".
+                if sawUndecryptable { return .undecryptable }
                 return .transientFailure
             }
         }
