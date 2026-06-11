@@ -77,6 +77,11 @@ struct ChatSidebar: View {
             return "\(months)mo ago"
         }
     }
+
+    private func lastUpdatedString(for chat: Chat) -> String {
+        let relative = relativeTimeString(from: chat.updatedAt)
+        return relative == "Just now" ? "Updated just now" : "Updated \(relative)"
+    }
     
     var body: some View {
         sidebarContent
@@ -192,7 +197,7 @@ struct ChatSidebar: View {
                     isSelected: viewModel.currentChat?.id == chat.id,
                     isEditing: editingChatId == chat.id,
                     editingTitle: $editingTitle,
-                    timeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
+                    timeString: chat.isBlankChat ? "" : lastUpdatedString(for: chat),
                     onSelect: {
                         viewModel.selectChat(chat)
                     },

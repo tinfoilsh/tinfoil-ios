@@ -3811,6 +3811,11 @@ class ChatViewModel: ObservableObject {
             // Only append to the visible chats array
             if !uniqueNewChats.isEmpty {
                 self.chats.append(contentsOf: uniqueNewChats)
+                self.chats.sort { chat1, chat2 in
+                    if chat1.isBlankChat { return true }
+                    if chat2.isBlankChat { return false }
+                    return chat1.updatedAt > chat2.updatedAt
+                }
             }
             
             // Update pagination state
