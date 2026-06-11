@@ -298,87 +298,72 @@ struct CloudSyncSettingsView: View {
                 }
 
                 if passkeyManager.passkeyAddDeviceAvailable && EncryptionService.shared.hasEncryptionKey() {
-                    Button(action: {
-                        Task {
-                            await passkeyManager.createPasskeyBackup()
-                        }
-                    }) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "person.badge.key.fill")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
-                                Text("Set Up Passkey on This Device")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
-                            }
-                            Text("Your other devices use a passkey already. Add one here for one-tap access.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 2)
+                    passkeyActionButton(
+                        title: "Set Up Passkey on This Device",
+                        subtitle: "Your other devices use a passkey already. Add one here for one-tap access."
+                    ) {
+                        await passkeyManager.createPasskeyBackup()
                     }
                 } else if passkeyManager.passkeySetupAvailable && EncryptionService.shared.hasEncryptionKey() {
-                    Button(action: {
-                        Task {
-                            await passkeyManager.createPasskeyBackup()
-                        }
-                    }) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "person.badge.key.fill")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
-                                Text("Add Passkey for seamless sync")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
-                            }
-                            Text("Use Face ID or Touch ID to sync chats across devices")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 2)
+                    passkeyActionButton(
+                        title: "Add Passkey for seamless sync",
+                        subtitle: "Use Face ID or Touch ID to sync chats across devices"
+                    ) {
+                        await passkeyManager.createPasskeyBackup()
                     }
                 } else if passkeyManager.passkeySetupAvailable && !EncryptionService.shared.hasEncryptionKey() {
-                    Button(action: {
-                        Task {
-                            let result = await passkeyManager.retryPasskeySetup()
-                            switch result {
-                            case .manualSetupRequired:
-                                await MainActor.run {
-                                    viewModel.cloudSyncOnboardingMode = .setup
-                                    viewModel.showCloudSyncOnboarding = true
-                                }
-                            case .manualRecoveryRequired:
-                                await MainActor.run {
-                                    viewModel.cloudSyncOnboardingMode = .recovery
-                                    viewModel.showCloudSyncOnboarding = true
-                                }
-                            default:
-                                break
+                    passkeyActionButton(
+                        title: "Add Passkey for seamless sync",
+                        subtitle: "Create a passkey to sync chats across devices"
+                    ) {
+                        let result = await passkeyManager.retryPasskeySetup()
+                        switch result {
+                        case .manualSetupRequired:
+                            await MainActor.run {
+                                viewModel.cloudSyncOnboardingMode = .setup
+                                viewModel.showCloudSyncOnboarding = true
                             }
-                        }
-                    }) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "person.badge.key.fill")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
-                                Text("Add Passkey for seamless sync")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
+                        case .manualRecoveryRequired:
+                            await MainActor.run {
+                                viewModel.cloudSyncOnboardingMode = .recovery
+                                viewModel.showCloudSyncOnboarding = true
                             }
-                            Text("Create a passkey to sync chats across devices")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                        default:
+                            break
                         }
-                        .padding(.vertical, 2)
                     }
                 }
             } header: {
                 Text("Passkeys")
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
+        }
+    }
+
+    private func passkeyActionButton(
+        title: String,
+        subtitle: String,
+        action: @escaping () async -> Void
+    ) -> some View {
+        Button(action: {
+            Task {
+                await action()
+            }
+        }) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.badge.key.fill")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                    Text(title)
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                }
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.vertical, 2)
         }
     }
 
