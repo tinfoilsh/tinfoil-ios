@@ -129,6 +129,7 @@ struct MessageInputView: View {
                 AddToSheetView(
                     viewModel: viewModel,
                     isDarkMode: isDarkMode,
+                    contextUsage: showContextIndicator ? contextUsage : nil,
                     onCamera: {
                         pendingPickerAction = .camera
                         viewModel.showAddSheet = false
@@ -143,7 +144,7 @@ struct MessageInputView: View {
                     }
                 )
                 .environmentObject(authManager)
-                .presentationDetents([.height(280)])
+                .presentationDetents([.height(showContextIndicator ? 324 : 280)])
                 .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
             }
             .sheet(isPresented: $viewModel.showRateLimitPaywall) {
@@ -331,11 +332,6 @@ struct MessageInputView: View {
                         .padding(.leading, 4)
                     }
 
-                    if showContextIndicator {
-                        ContextUsageIndicator(usage: contextUsage)
-                            .padding(.leading, 4)
-                    }
-
                     Spacer()
 
                     // Microphone button
@@ -444,11 +440,6 @@ struct MessageInputView: View {
                             thinkingEnabled: $viewModel.thinkingEnabled
                         )
                         .padding(.leading, 4)
-                    }
-
-                    if showContextIndicator {
-                        ContextUsageIndicator(usage: contextUsage)
-                            .padding(.leading, 4)
                     }
 
                     Spacer()
@@ -623,6 +614,7 @@ struct AddToSheetView: View {
     @EnvironmentObject private var authManager: AuthManager
     @ObservedObject private var settings = SettingsManager.shared
     let isDarkMode: Bool
+    let contextUsage: ContextUsage?
     let onCamera: () -> Void
     let onPhotos: () -> Void
     let onFiles: () -> Void
@@ -666,6 +658,15 @@ struct AddToSheetView: View {
                     settings.webSearchEnabled = newValue
                 }
                 .padding(.horizontal, 20)
+
+                if let contextUsage {
+                    HStack {
+                        Label("Context Used", systemImage: "text.alignleft")
+                        Spacer()
+                        ContextUsageIndicator(usage: contextUsage)
+                    }
+                    .padding(.horizontal, 20)
+                }
             }
             .padding(.top, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
