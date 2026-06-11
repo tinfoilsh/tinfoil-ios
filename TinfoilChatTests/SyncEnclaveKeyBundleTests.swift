@@ -2,12 +2,6 @@
 //  SyncEnclaveKeyBundleTests.swift
 //  TinfoilChatTests
 //
-//  The wire bundle is just AES-GCM(plaintext). The modern shape wraps the
-//  raw 32-byte CEK directly; the pre-v2 webapp wrapped a
-//  {primary: <base64>, alternatives: [...]} envelope. Unwrap must accept
-//  both so a user whose passkey was first registered on the old web wire
-//  can still unlock on iOS.
-//
 
 import CryptoKit
 import Foundation
@@ -17,18 +11,19 @@ import Testing
 @Suite("SyncEnclaveKeyBundle unwrap tolerance")
 struct SyncEnclaveKeyBundleTests {
 
-    private func makeKek() -> SymmetricKey {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        precondition(status == errSecSuccess)
-        return SymmetricKey(data: Data(bytes))
-    }
-
-    private func makeIv() -> Data {
-        var bytes = [UInt8](repeating: 0, count: 12)
+    private func makeRandomBytes(count: Int) -> Data {
+        var bytes = [UInt8](repeating: 0, count: count)
         let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
         precondition(status == errSecSuccess)
         return Data(bytes)
+    }
+
+    private func makeKek() -> SymmetricKey {
+        SymmetricKey(data: makeRandomBytes(count: 32))
+    }
+
+    private func makeIv() -> Data {
+        makeRandomBytes(count: 12)
     }
 
     private func encryptPlaintext(_ plaintext: Data, with kek: SymmetricKey, iv: Data) throws -> (kekIvHex: String, wrappedKeyHex: String) {
