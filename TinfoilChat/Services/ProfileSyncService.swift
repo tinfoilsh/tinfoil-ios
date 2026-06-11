@@ -89,7 +89,15 @@ class ProfileSyncService: ObservableObject {
                     keys: keys
                 )
             )
-            guard let item = response.items.first else { return nil }
+            guard let item = response.items.first else {
+                // An empty response means no row exists server-side,
+                // same as an explicit notFound: clear any stale
+                // decrypt-failure state so future uploads aren't
+                // wedged by `hasFailedRemoteDecryption()`.
+                self.failedDecryptionData = nil
+                self.cachedProfile = nil
+                return nil
+            }
             if !item.ok {
                 if item.code == WireCodes.notFound {
                     // The row no longer exists server-side; any
