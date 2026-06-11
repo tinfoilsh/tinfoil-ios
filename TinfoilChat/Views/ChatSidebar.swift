@@ -79,8 +79,9 @@ struct ChatSidebar: View {
     }
 
     private func lastUpdatedString(for chat: Chat) -> String {
-        let relative = relativeTimeString(from: chat.updatedAt)
-        return relative == "Just now" ? "Updated just now" : "Updated \(relative)"
+        let created = relativeTimeString(from: chat.createdAt).lowercased()
+        let updated = relativeTimeString(from: chat.updatedAt).lowercased()
+        return "Created \(created) · Updated \(updated)"
     }
     
     var body: some View {

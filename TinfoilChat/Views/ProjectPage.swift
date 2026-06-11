@@ -150,7 +150,7 @@ struct ProjectPage: View {
                         .foregroundColor(.primary)
                         .lineLimit(1)
                     if !chat.isBlankChat {
-                        Text(lastUpdatedString(from: chat.updatedAt))
+                        Text(timestampString(for: chat))
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -215,9 +215,10 @@ struct ProjectPage: View {
         }
     }
 
-    private func lastUpdatedString(from date: Date) -> String {
-        let relative = relativeTimeString(from: date)
-        return relative == "Just now" ? "Updated just now" : "Updated \(relative)"
+    private func timestampString(for chat: Chat) -> String {
+        let created = relativeTimeString(from: chat.createdAt).lowercased()
+        let updated = relativeTimeString(from: chat.updatedAt).lowercased()
+        return "Created \(created) · Updated \(updated)"
     }
 }
 
