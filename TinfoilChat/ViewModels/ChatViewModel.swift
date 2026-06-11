@@ -959,7 +959,6 @@ class ChatViewModel: ObservableObject {
         let wasCurrent = currentChat?.id == chatId
         guard var chat = chatForProjectMove(chatId) else { return }
         let wasLocal = chat.isLocalOnly
-        let oldProjectId = chat.projectId
 
         chat.projectId = projectId
         chat.isLocalOnly = false
@@ -982,31 +981,14 @@ class ChatViewModel: ObservableObject {
 
         saveChat(chat)
 
-        do {
-            try await cloudSync.updateChatProject(chatId, projectId: projectId)
-            await cloudSync.backupChat(chatId, ensureLatestUpload: true)
-            if let projectId {
-                await loadProjectChatsIntoMemory(projectId: projectId)
-            }
-        } catch {
-            projectError = error.localizedDescription
-            chat.projectId = oldProjectId
-            chat.isLocalOnly = wasLocal
-            if wasLocal {
-                chats.removeAll { $0.id == chatId }
-                if let index = localChats.firstIndex(where: { $0.id == chatId }) {
-                    localChats[index] = chat
-                } else {
-                    localChats.insert(chat, at: min(1, localChats.count))
-                }
-            } else {
-                replaceChat(chat)
-            }
-            if wasCurrent {
-                currentChat = chat
-            }
-            saveChat(chat)
-            return
+        // The upload itself carries the project membership (the enclave
+        // stamps the row's project_id from the chat push metadata), so
+        // backing up the chat IS the server-side move. If the upload
+        // can't land right now the chat stays locallyModified and the
+        // next sync retries it, like any other offline edit.
+        await cloudSync.backupChat(chatId, ensureLatestUpload: true)
+        if let projectId {
+            await loadProjectChatsIntoMemory(projectId: projectId)
         }
 
         if wasCurrent, activeProject?.id != projectId {

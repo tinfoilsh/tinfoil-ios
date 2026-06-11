@@ -1230,11 +1230,6 @@ class CloudSyncService: ObservableObject {
         return await smartSyncProjectChats(projectId)
     }
 
-    func updateChatProject(_ chatId: String, projectId: String?) async throws {
-        guard await canWriteToCloud() else { return }
-        try await cloudStorage.updateChatProject(chatId: chatId, projectId: projectId)
-    }
-
     func syncProjectChats(_ projectId: String) async -> SyncResult {
         guard !isSyncing else {
             return SyncResult()

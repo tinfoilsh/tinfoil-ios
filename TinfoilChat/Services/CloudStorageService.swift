@@ -469,15 +469,6 @@ class CloudStorageService: ObservableObject {
 
     // MARK: - Project chat operations
 
-    /// No-op. Project membership rides on the next `uploadChat`
-    /// (via `metadata.projectId`) and the enclave stamps the row's
-    /// `project_id` column from there. Callers MUST pair this with a
-    /// `backupChat` so the change actually propagates.
-    func updateChatProject(chatId: String, projectId: String?) async throws {
-        _ = chatId
-        _ = projectId
-    }
-
     func listProjectChats(
         projectId: String,
         includeContent: Bool = false,

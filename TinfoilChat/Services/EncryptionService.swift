@@ -195,13 +195,6 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         return "key_" + bytesToAlphanumeric(bytes)
     }
 
-    /// Number of historical "alternative" decryption keys currently
-    /// stored. Used by the enclave-driven legacy migration to report
-    /// progress and to confirm cleanup is needed.
-    func getFallbackKeyCount() -> Int {
-        return loadKeyHistory().count
-    }
-
     /// Drop every historical decryption key, leaving only the primary
     /// in place. Called once `migrate-all` confirms every legacy row
     /// has been re-sealed under the primary CEK.

@@ -24,15 +24,9 @@ enum CEKEncoding {
     /// primary and decrypt cleanly here. Anything that doesn't decrypt
     /// is treated as UNKNOWN_KEY by the enclave instead of silently
     /// trying historical keys; migration sweeps are the only path that
-    /// needs alternatives.
-    static func pullKeys() throws -> [EnclavePullKey] {
-        let primary = try requirePrimaryKeyB64()
-        return [EnclavePullKey(key: primary)]
-    }
-
-    /// Returns `nil` instead of throwing when no key is loaded, for
-    /// callers that opportunistically attempt to read without a key
-    /// (sign-out cleanup, optional refreshes).
+    /// needs alternatives. Returns `nil` instead of throwing when no
+    /// key is loaded, for callers that opportunistically attempt to
+    /// read without a key (sign-out cleanup, optional refreshes).
     static func pullKeysIfAvailable() -> [EnclavePullKey]? {
         guard let primary = try? requirePrimaryKeyB64() else { return nil }
         return [EnclavePullKey(key: primary)]
@@ -79,7 +73,7 @@ enum CEKEncoding {
     /// unsealing legacy v0/v1 blobs and uses `keys[0]` as the rewrap
     /// target. Once the one-shot sweep reports `fullyMigrated`, the
     /// alternatives are cleared from local state and this helper
-    /// collapses to the same shape as `pullKeys()`.
+    /// collapses to the same shape as `pullKeysIfAvailable()`.
     static func migrationKeys() -> [EnclavePullKey] {
         var out: [EnclavePullKey] = []
         let allKeys = EncryptionService.shared.getAllKeys()
