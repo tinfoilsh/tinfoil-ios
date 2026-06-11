@@ -26,13 +26,9 @@ struct ContentView: View {
         Group {
             if authManager.isLoading {
                 ZStack {
-                    (colorScheme == .dark ? Color.backgroundPrimary : Color.white)
-                        .ignoresSafeArea()
+                    splashBackground
                     VStack(spacing: 24) {
-                        Image(colorScheme == .dark ? "logo-white" : "logo-dark")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(height: 48)
+                        splashLogo
 
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .white : .gray))
@@ -169,16 +165,24 @@ struct ContentView: View {
         .overlay {
             if scenePhase != .active {
                 ZStack {
-                    (colorScheme == .dark ? Color.backgroundPrimary : Color.white)
-                        .ignoresSafeArea()
-                    Image(colorScheme == .dark ? "logo-white" : "logo-dark")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 48)
+                    splashBackground
+                    splashLogo
                 }
                 .transition(.opacity)
             }
         }
+    }
+
+    private var splashBackground: some View {
+        (colorScheme == .dark ? Color.backgroundPrimary : Color.white)
+            .ignoresSafeArea()
+    }
+
+    private var splashLogo: some View {
+        Image(colorScheme == .dark ? "logo-white" : "logo-dark")
+            .resizable()
+            .scaledToFit()
+            .frame(height: 48)
     }
 
     private func requestAppReviewIfEligible() {
