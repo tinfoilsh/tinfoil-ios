@@ -503,7 +503,26 @@ final class ProjectStorageService: ObservableObject {
 
         if includeContent {
             let ids = scoped.map { $0.id }
-            guard let keys = CEKEncoding.pullKeysIfAvailable() else { return [] }
+            guard let keys = CEKEncoding.pullKeysIfAvailable() else {
+                // No keys to unseal with: surface every known row as a
+                // decrypt-failed placeholder so the documents don't
+                // silently vanish from the list until a key arrives.
+                return scoped.map { update in
+                    let docId = documentIdFromWireId(update.id)
+                    return ProjectDocument(
+                        id: docId,
+                        projectId: projectId,
+                        filename: "",
+                        contentType: "",
+                        sizeBytes: 0,
+                        syncVersion: etagToSyncVersion(update.etag),
+                        createdAt: createdAtFromReverseId(docId),
+                        updatedAt: update.updatedAt,
+                        content: nil,
+                        decryptionFailed: true
+                    )
+                }
+            }
             let response = try await SyncEnclaveAPI.pull(
                 EnclavePullRequest(
                     scope: .projectDocument,
