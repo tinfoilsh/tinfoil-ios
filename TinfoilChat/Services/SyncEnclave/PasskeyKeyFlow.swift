@@ -417,34 +417,6 @@ enum PasskeyKeyFlow {
         }
 
         if enclaveKeyId == nil {
-            // The legacy bundle may wrap a rotated-away CEK while the
-            // user's un-migrated rows are sealed under a different key.
-            // Registering it would permanently bind the registry to a
-            // key that cannot open that data, so confirm the recovered
-            // key set unseals a sample of the remote rows first.
-            var probeKeys = [EnclavePullKey(key: dataToBase64(cek))]
-            for alt in legacyAlternatives {
-                guard let bytes = try? EncryptionService.shared.getAlternativeKeyBytes(alt) else { continue }
-                let b64 = dataToBase64(bytes)
-                if !probeKeys.contains(where: { $0.key == b64 }) {
-                    probeKeys.append(EnclavePullKey(key: b64))
-                }
-            }
-            switch await CloudKeyPreflightValidator.shared.probeKeysAcrossScopes(probeKeys) {
-            case .undecryptable:
-                return .failure(
-                    .keyIdMismatch,
-                    message: "recovered legacy key cannot unlock existing cloud data"
-                )
-            case .transientFailure:
-                return .failure(
-                    .enclaveUnavailable,
-                    message: "could not verify the recovered key against existing cloud data"
-                )
-            case .decryptable, .noSample:
-                break
-            }
-
             // No enclave key yet — register the recovered CEK + initial
             // bundle so the user becomes a first-class v2 user.
             do {
@@ -491,9 +463,9 @@ enum PasskeyKeyFlow {
         }
 
         // Only retain the bundle's historical keys once the recovery is
-        // accepted: a rejected recovery (rotated-away CEK, failed probe)
-        // must not pollute the local key history with alternatives that
-        // were never adopted.
+        // accepted: a rejected recovery (rotated-away CEK) must not
+        // pollute the local key history with alternatives that were
+        // never adopted.
         retainLegacyAlternatives(legacyAlternatives)
 
         return .success(

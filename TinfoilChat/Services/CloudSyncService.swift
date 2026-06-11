@@ -224,10 +224,9 @@ class CloudSyncService: ObservableObject {
         guard let remoteKeyId = response.keyId else {
             if response.hasData {
                 // Un-migrated legacy data with no registered key: pushing
-                // now would only earn a stale-key rejection, and adopting
-                // the key here would bypass the migration path's decrypt
-                // probe. Defer; once the migration adopts the key the
-                // next pass clears this gate.
+                // now would only earn a stale-key rejection. Defer; the
+                // migration path adopts the key and the next pass clears
+                // this gate.
                 return false
             }
             // Only ever bind a key the user has actually committed and

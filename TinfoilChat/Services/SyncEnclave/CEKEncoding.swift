@@ -32,41 +32,6 @@ enum CEKEncoding {
         return [EnclavePullKey(key: primary)]
     }
 
-    /// Keys to probe existing cloud data with when validating the
-    /// currently-loaded primary key. When the loaded primary is one of
-    /// the device's persisted keys, probe with the full persisted set:
-    /// historical alternatives belong to the same user and the
-    /// migration sweep can rewrap rows sealed under them. When the
-    /// loaded primary is a newly staged key that has not been persisted
-    /// yet, probe with the staged set alone — a leftover persisted key
-    /// must not vouch for a different key that cannot actually unlock
-    /// the data, and a fresh device with no persisted keys must still
-    /// get its staged key probed.
-    static func keyValidationProbeKeys() -> [EnclavePullKey] {
-        let service = EncryptionService.shared
-        let active = service.getActiveKeys()
-        guard let primary = active.primary,
-              let primaryBytes = try? service.getAlternativeKeyBytes(primary) else { return [] }
-        let primaryB64 = primaryBytes.base64EncodedString()
-
-        var out = [EnclavePullKey(key: primaryB64)]
-        var seen: Set<String> = [primaryB64]
-        func add(_ b64: String) {
-            guard seen.insert(b64).inserted else { return }
-            out.append(EnclavePullKey(key: b64))
-        }
-
-        let persisted = migrationKeys()
-        if persisted.contains(where: { $0.key == primaryB64 }) {
-            for entry in persisted { add(entry.key) }
-        }
-        for alt in active.alternatives {
-            guard let bytes = try? service.getAlternativeKeyBytes(alt) else { continue }
-            add(bytes.base64EncodedString())
-        }
-        return out
-    }
-
     /// Build the `keys` array for the migration path: primary first,
     /// then every alternative (history) key the local service still has
     /// on file, base64-encoded. The enclave tries each in turn when

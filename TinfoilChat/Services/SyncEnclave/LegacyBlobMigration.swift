@@ -87,7 +87,6 @@ enum LegacyBlobMigration {
             // passkey wrapping it stays promotable afterwards. Mirrors the
             // webapp's migration adoption.
             if current.keyId == nil, current.hasData,
-                await localKeysCanDecryptRemoteData(),
                 await adoptLocalKeyForMigration(keyB64: targetKeyB64)
             {
                 current = try await SyncEnclaveAPI.keyCurrent()
@@ -202,36 +201,6 @@ enum LegacyBlobMigration {
     /// never strands a backup. register-key's if_match='*' fails safely on
     /// a concurrent register. Returns true when the key was adopted.
     /// Mirrors the webapp's migration adoption.
-    /// Probe whether the local key set can actually unseal the user's
-    /// existing remote data before adopting the local CEK as the
-    /// registered current key. Adoption permanently binds the registry
-    /// to this key, so registering a stale Keychain CEK over data sealed
-    /// under a different key would strand the data and block the correct
-    /// key from ever being promoted. Delegates to the shared cross-scope
-    /// probe: a single row the keys cannot unseal refuses adoption even
-    /// when other rows decrypt. When no row can be sampled at all,
-    /// adoption proceeds (nothing observable to contradict the key, and
-    /// a wrong adoption only blocks rewraps, which recovery can later
-    /// fix).
-    private static func localKeysCanDecryptRemoteData() async -> Bool {
-        let keys = CEKEncoding.migrationKeys()
-        guard !keys.isEmpty else { return false }
-
-        switch await CloudKeyPreflightValidator.shared.probeKeysAcrossScopes(keys) {
-        case .decryptable, .noSample:
-            return true
-        case .undecryptable:
-            #if DEBUG
-            print("[LegacyBlobMigration] skip adoption: local keys cannot unseal existing remote data")
-            #endif
-            return false
-        case .transientFailure:
-            // Transient probe failure: don't adopt on this pass; the
-            // next launch retries with the gate still closed.
-            return false
-        }
-    }
-
     private static func adoptLocalKeyForMigration(keyB64: String) async -> Bool {
         do {
             _ = try await SyncEnclaveAPI.registerKey(
