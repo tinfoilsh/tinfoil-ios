@@ -58,14 +58,22 @@ enum TokenEstimation {
 
     /// Returns the index of the first message (from the end) that fits within
     /// the token budget. Messages before this index are "archived" and
-    /// excluded from the prompt. The most recent message is always included,
-    /// even if it alone exceeds the budget.
+    /// excluded from the prompt. The most recent substantive message is always
+    /// included, even if it alone exceeds the budget: zero-token messages
+    /// (like the empty assistant placeholder appended before streaming) must
+    /// not satisfy that guarantee on their own, or the latest user message
+    /// could be dropped from the prompt.
     static func findContextStartIndex(messages: [Message], budgetTokens: Int) -> Int {
         var usedTokens = 0
+        var hasIncludedSubstantiveMessage = false
         for i in stride(from: messages.count - 1, through: 0, by: -1) {
-            usedTokens += estimateMessageTokens(messages[i])
-            if usedTokens > budgetTokens && i < messages.count - 1 {
+            let messageTokens = estimateMessageTokens(messages[i])
+            usedTokens += messageTokens
+            if usedTokens > budgetTokens && hasIncludedSubstantiveMessage {
                 return i + 1
+            }
+            if messageTokens > 0 {
+                hasIncludedSubstantiveMessage = true
             }
         }
         return 0

@@ -70,6 +70,17 @@ struct TokenEstimationTests {
         #expect(selected[0].id == messages[1].id)
     }
 
+    @Test func trailingEmptyPlaceholderDoesNotEvictLatestUserMessage() {
+        let messages = [
+            message(content: String(repeating: "a", count: 40)),
+            message(content: String(repeating: "a", count: 400)),
+            message(role: .assistant, content: ""),
+        ]
+        // Budget smaller than the latest user message alone: the user message
+        // must still be kept alongside the streaming placeholder.
+        #expect(TokenEstimation.findContextStartIndex(messages: messages, budgetTokens: 10) == 1)
+    }
+
     @Test func emptyMessagesSelectsNothing() {
         #expect(TokenEstimation.findContextStartIndex(messages: [], budgetTokens: 100) == 0)
         #expect(TokenEstimation.selectMessagesWithinBudget([], contextWindow: nil).isEmpty)
