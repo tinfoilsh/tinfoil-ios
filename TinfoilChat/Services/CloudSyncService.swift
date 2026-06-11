@@ -1882,31 +1882,40 @@ class CloudSyncService: ObservableObject {
         let failedChats = await getAllChatsFromStorage().filter { $0.decryptionFailed }
         if failedChats.isEmpty { return 0 }
 
-        let failedIds = Set(failedChats.map { $0.id })
+        // Without keys every pull would come back empty; bail before
+        // touching any placeholder so nothing is mistaken for an
+        // upstream deletion.
+        guard CEKEncoding.pullKeysIfAvailable() != nil else { return 0 }
 
+        var recovered = 0
         for (index, chat) in failedChats.enumerated() {
-            await deleteChatFromStorage(chat.id)
+            // Re-pull each failed chat by id and replace the local
+            // placeholder only once the enclave hands back plaintext.
+            // A transient failure leaves the placeholder in place, so
+            // chats never vanish from history because a retry pass ran
+            // while the enclave was unreachable. Rows deleted upstream
+            // drop their placeholder and stay gone; they must not be
+            // reported as "recovered".
+            do {
+                if let fresh = try await cloudStorage.downloadChat(chat.id) {
+                    if fresh.decryptionFailed != true {
+                        await saveChatToStorage(fresh)
+                        await markChatAsSynced(fresh.id, version: fresh.syncVersion)
+                        recovered += 1
+                    }
+                } else {
+                    await deleteChatFromStorage(chat.id)
+                }
+            } catch {
+                // Keep the placeholder; a later pass retries.
+            }
 
             if (index + 1) % batchSize == 0 || index == failedChats.count - 1 {
                 onProgress?(index + 1, failedChats.count)
                 try? await Task.sleep(nanoseconds: 1_000_000)
             }
         }
-
-        // Bypass the status-cache short-circuit in smartSync(): the
-        // remote rows themselves haven't changed, only our local
-        // placeholders. A deep pull is required to actually refetch
-        // them — the default first-page sync would leave any failed
-        // chat older than the first page deleted locally with nothing
-        // in its place until the user happens to paginate that far.
-        _ = await syncAllChats(deep: true)
-
-        // Only count chats that were actually re-fetched and decrypted
-        // successfully. Chats that were deleted upstream stay gone and
-        // must not be reported as "recovered".
-        let afterSync = await getAllChatsFromStorage()
-        let recovered = afterSync.filter { failedIds.contains($0.id) && !$0.decryptionFailed }
-        return recovered.count
+        return recovered
     }
 
     
