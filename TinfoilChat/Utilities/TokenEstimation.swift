@@ -13,7 +13,10 @@ import Foundation
 /// archive the same messages for a given conversation and model.
 enum TokenEstimation {
 
-    /// Roughly estimate token count based on character length.
+    /// Uses the same chars-per-token heuristic as the webapp (~4 characters
+    /// per token for typical English text), rounding up so short fragments
+    /// still cost at least one token. Deliberately not a real tokenizer:
+    /// archiving only needs both platforms to agree, not exact counts.
     static func estimateTokenCount(_ text: String?) -> Int {
         guard let text, !text.isEmpty else { return 0 }
         return Int(ceil(Double(text.count) / Constants.Context.charsPerToken))
@@ -32,7 +35,9 @@ enum TokenEstimation {
         return match.2 != nil ? value * 1000 : value
     }
 
-    /// The token budget available to conversation history for a model.
+    /// Applies the usage ratio to the parsed window size, keeping the
+    /// remainder of the window reserved for the model's reply, the system
+    /// prompt, and the slack in our character-based estimates.
     static func contextTokenBudget(_ contextWindow: String?) -> Int {
         Int(floor(Double(parseContextWindowTokens(contextWindow)) * Constants.Context.contextWindowUsageRatio))
     }
