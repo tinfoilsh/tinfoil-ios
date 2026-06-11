@@ -160,6 +160,7 @@ struct MessageInputView: View {
             .sheet(isPresented: $viewModel.showModelSelectorSheet) {
                 ModelSelectorSheetView(viewModel: viewModel, isDarkMode: isDarkMode)
                     .presentationDetents([.medium, .large])
+                    .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
             }
     }
 
@@ -706,6 +707,7 @@ struct ModelSelectorSheetView: View {
                 .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
             }
             .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .navigationTitle("Select Model")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
