@@ -24,6 +24,7 @@ struct ChatSidebar: View {
     @State private var isProjectsExpanded: Bool = false
     @State private var isChatsExpanded: Bool = true
     @ObservedObject private var settings = SettingsManager.shared
+    @ObservedObject private var cloudSync = CloudSyncService.shared
 
     private var activeTab: ChatStorageTab {
         viewModel.activeStorageTab
@@ -199,6 +200,7 @@ struct ChatSidebar: View {
                     isEditing: editingChatId == chat.id,
                     editingTitle: $editingTitle,
                     timeString: chat.isBlankChat ? "" : lastUpdatedString(for: chat),
+                    isSyncing: !chat.isBlankChat && cloudSync.pendingUploadChatIds.contains(chat.id),
                     onSelect: {
                         viewModel.selectChat(chat)
                     },
@@ -537,6 +539,7 @@ struct ChatListItem: View {
     let isEditing: Bool
     @Binding var editingTitle: String
     let timeString: String
+    var isSyncing: Bool = false
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -603,9 +606,16 @@ struct ChatListItem: View {
                 // Timestamp inside the cell
                 if !isEditing {
                     if !timeString.isEmpty {
-                        Text(timeString)
-                            .font(.caption)
-                            .foregroundColor(.gray)
+                        HStack(spacing: 4) {
+                            Text(timeString)
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                            if isSyncing {
+                                Image(systemName: "icloud.and.arrow.up")
+                                    .font(.caption2)
+                                    .foregroundColor(.blue)
+                            }
+                        }
                     } else {
                         // Placeholder for new chats to maintain consistent height
                         Text(" ")
@@ -651,6 +661,9 @@ struct ChatListItem: View {
             components.append("New chat")
         } else if !timeString.isEmpty {
             components.append(timeString)
+        }
+        if isSyncing {
+            components.append("Syncing with cloud")
         }
         return components.joined(separator: ", ")
     }

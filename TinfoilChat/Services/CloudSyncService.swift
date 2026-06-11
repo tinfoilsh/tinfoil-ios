@@ -172,6 +172,9 @@ class CloudSyncService: ObservableObject {
     @Published var syncStatus: String = ""
     @Published var lastSyncDate: Date?
     @Published var syncErrors: [String] = []
+    /// Chats whose upload is queued or in flight, so list rows can
+    /// show a per-chat syncing indicator.
+    @Published var pendingUploadChatIds: Set<String> = []
     
     // MARK: - Private Properties
     private lazy var uploadCoalescer: UploadCoalescer = {
@@ -346,7 +349,12 @@ class CloudSyncService: ObservableObject {
             return
         }
 
+        pendingUploadChatIds.insert(chatId)
         await uploadCoalescer.enqueue(chatId)
+        Task { [weak self] in
+            await self?.uploadCoalescer.waitForUpload(chatId)
+            self?.pendingUploadChatIds.remove(chatId)
+        }
 
         if ensureLatestUpload {
             await uploadCoalescer.waitForUpload(chatId)
