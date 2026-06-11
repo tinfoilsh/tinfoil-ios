@@ -169,6 +169,7 @@ struct ProjectPage: View {
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+            .tint(.red)
             Button {
                 Task {
                     await viewModel.removeChatFromProject(chatId: chat.id)
@@ -373,6 +374,7 @@ struct ProjectDocumentsView: View {
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+            .tint(.red)
         }
     }
 
