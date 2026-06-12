@@ -175,6 +175,11 @@ class CloudSyncService: ObservableObject {
     /// Chats whose upload is queued or in flight, so list rows can
     /// show a per-chat syncing indicator.
     @Published var pendingUploadChatIds: Set<String> = []
+    /// Reference counts behind `pendingUploadChatIds`. Uploads of the same
+    /// chat can overlap, and an earlier upload's completion may be scheduled
+    /// after a later `backupChat` call; plain Set removal would then clear
+    /// the indicator while the later upload is still in flight.
+    private var pendingUploadCounts: [String: Int] = [:]
     
     // MARK: - Private Properties
     private lazy var uploadCoalescer: UploadCoalescer = {
@@ -348,18 +353,33 @@ class CloudSyncService: ObservableObject {
             return
         }
 
-        pendingUploadChatIds.insert(chatId)
+        beginPendingUpload(chatId)
         await uploadCoalescer.enqueue(chatId)
         Task { [weak self] in
             await self?.uploadCoalescer.waitForUpload(chatId)
-            self?.pendingUploadChatIds.remove(chatId)
+            self?.endPendingUpload(chatId)
         }
 
         if ensureLatestUpload {
             await uploadCoalescer.waitForUpload(chatId)
         }
     }
-    
+
+    private func beginPendingUpload(_ chatId: String) {
+        pendingUploadCounts[chatId, default: 0] += 1
+        pendingUploadChatIds.insert(chatId)
+    }
+
+    private func endPendingUpload(_ chatId: String) {
+        let remaining = (pendingUploadCounts[chatId] ?? 1) - 1
+        if remaining <= 0 {
+            pendingUploadCounts.removeValue(forKey: chatId)
+            pendingUploadChatIds.remove(chatId)
+        } else {
+            pendingUploadCounts[chatId] = remaining
+        }
+    }
+
     private func doBackupChat(_ chatId: String, idempotencyKey: String) async throws {
         guard await canWriteToCloud() else { return }
 
