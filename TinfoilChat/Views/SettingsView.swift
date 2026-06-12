@@ -704,44 +704,54 @@ struct SettingsView: View {
         }
     }
 
-    /// Re-checks the typed phrase before deleting, mirroring the webapp's
-    /// defense-in-depth gate on the same action.
     private func confirmDeleteAllChats() {
-        let typed = deleteAllChatsConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let typed = deleteAllChatsConfirmText
         deleteAllChatsConfirmText = ""
-        guard typed == Self.deleteAllChatsConfirmPhrase else {
-            dataActionMessage = "Deletion cancelled: the confirmation phrase didn't match."
-            return
-        }
-        isDeletingAllChats = true
-        Task {
-            do {
-                try await chatViewModel.deleteAllChats()
-                dataActionMessage = "All chats have been deleted."
-            } catch {
-                dataActionMessage = "Failed to delete all chats. Please try again."
-            }
-            isDeletingAllChats = false
+        confirmBulkDelete(
+            typed: typed,
+            phrase: Self.deleteAllChatsConfirmPhrase,
+            itemsName: "chats",
+            setDeleting: { isDeletingAllChats = $0 }
+        ) {
+            try await chatViewModel.deleteAllChats()
         }
     }
 
-    /// Same defense-in-depth confirmation gate as `confirmDeleteAllChats`.
     private func confirmDeleteAllProjects() {
-        let typed = deleteAllProjectsConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let typed = deleteAllProjectsConfirmText
         deleteAllProjectsConfirmText = ""
-        guard typed == Self.deleteAllProjectsConfirmPhrase else {
+        confirmBulkDelete(
+            typed: typed,
+            phrase: Self.deleteAllProjectsConfirmPhrase,
+            itemsName: "projects",
+            setDeleting: { isDeletingAllProjects = $0 }
+        ) {
+            try await chatViewModel.deleteAllProjects()
+        }
+    }
+
+    /// Re-checks the typed phrase before deleting, mirroring the webapp's
+    /// defense-in-depth gate on its bulk delete actions.
+    private func confirmBulkDelete(
+        typed: String,
+        phrase: String,
+        itemsName: String,
+        setDeleting: @escaping (Bool) -> Void,
+        delete: @escaping () async throws -> Void
+    ) {
+        guard typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == phrase else {
             dataActionMessage = "Deletion cancelled: the confirmation phrase didn't match."
             return
         }
-        isDeletingAllProjects = true
+        setDeleting(true)
         Task {
             do {
-                try await chatViewModel.deleteAllProjects()
-                dataActionMessage = "All projects have been deleted."
+                try await delete()
+                dataActionMessage = "All \(itemsName) have been deleted."
             } catch {
-                dataActionMessage = "Failed to delete all projects. Please try again."
+                dataActionMessage = "Failed to delete all \(itemsName). Please try again."
             }
-            isDeletingAllProjects = false
+            setDeleting(false)
         }
     }
 
