@@ -298,6 +298,11 @@ class CloudSyncService: ObservableObject {
         emptyRemoteRegistration = task
         let result = await task.value
         emptyRemoteRegistration = nil
+        if result {
+            // The local key just became the enclave's registered key, so
+            // any surfaced key problem is stale.
+            SyncHealthStore.shared.reportKeyHealthy()
+        }
         return result
     }
     
