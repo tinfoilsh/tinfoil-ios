@@ -171,7 +171,6 @@ struct ChatQueryBuilderReasoningTests {
             systemPrompt: "you are tin",
             rules: "",
             conversationMessages: [],
-            maxMessages: 10,
             stream: false,
             reasoningConfig: deepseekConfig(),
             reasoningEffort: .high,

@@ -55,6 +55,9 @@ struct CloudSyncSettingsView: View {
     
     @State private var copiedToClipboard: Bool = false
     @State private var showBackupKeySheet: Bool = false
+    @State private var passkeyBundles: [EnclaveKeyCurrentBundle] = []
+    @State private var removingPasskeyId: String? = nil
+    @State private var passkeyBundleError: String? = nil
     
     var body: some View {
         List {
@@ -189,6 +192,8 @@ struct CloudSyncSettingsView: View {
             .listRowBackground(Color.cardSurface(for: colorScheme))
             } // end if settings.isCloudSyncEnabled
 
+            passkeySection
+
             // Local-Only Mode Section
             Section {
                 VStack(alignment: .leading, spacing: 6) {
@@ -220,6 +225,9 @@ struct CloudSyncSettingsView: View {
         .background(Color.settingsBackground(for: colorScheme))
         .navigationTitle("Cloud Sync Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: [settings.isCloudSyncEnabled, passkeyManager.passkeyActive]) {
+            await refreshPasskeyBundles()
+        }
         .onAppear {
             // Reset navigation bar to use system colors for settings screens
             let appearance = UINavigationBarAppearance()
@@ -250,6 +258,232 @@ struct CloudSyncSettingsView: View {
             }
     }
     
+    @ViewBuilder
+    private var passkeySection: some View {
+        if passkeyManager.passkeyActive
+            || !passkeyBundles.isEmpty
+            || passkeyBundleError != nil
+            || passkeyManager.passkeyAddDeviceAvailable
+            || passkeyManager.passkeySetupAvailable {
+            Section {
+                if passkeyManager.passkeyActive {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.badge.key.fill")
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                            Text("Sync and backup using Passkeys")
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                        }
+                        Text("Use Face ID or Touch ID to sync chats across devices")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.shield.fill")
+                                .font(.caption)
+                                .foregroundColor(.green)
+                            Text("Passkey active")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.green)
+                        }
+                        .padding(.top, 2)
+                    }
+                    .padding(.vertical, 2)
+                }
+
+                if !passkeyBundles.isEmpty || passkeyBundleError != nil {
+                    passkeyBundleInventory
+                }
+
+                if passkeyManager.passkeyAddDeviceAvailable && EncryptionService.shared.hasEncryptionKey() {
+                    passkeyActionButton(
+                        title: "Set Up Passkey on This Device",
+                        subtitle: "Your other devices use a passkey already. Add one here for one-tap access."
+                    ) {
+                        await passkeyManager.createPasskeyBackup()
+                    }
+                } else if passkeyManager.passkeySetupAvailable && EncryptionService.shared.hasEncryptionKey() {
+                    passkeyActionButton(
+                        title: "Add Passkey for seamless sync",
+                        subtitle: "Use Face ID or Touch ID to sync chats across devices"
+                    ) {
+                        await passkeyManager.createPasskeyBackup()
+                    }
+                } else if passkeyManager.passkeySetupAvailable && !EncryptionService.shared.hasEncryptionKey() {
+                    passkeyActionButton(
+                        title: "Add Passkey for seamless sync",
+                        subtitle: "Create a passkey to sync chats across devices"
+                    ) {
+                        let result = await passkeyManager.retryPasskeySetup()
+                        switch result {
+                        case .manualSetupRequired:
+                            await MainActor.run {
+                                viewModel.cloudSyncOnboardingMode = .setup
+                                viewModel.showCloudSyncOnboarding = true
+                            }
+                        case .manualRecoveryRequired:
+                            await MainActor.run {
+                                viewModel.cloudSyncOnboardingMode = .recovery
+                                viewModel.showCloudSyncOnboarding = true
+                            }
+                        default:
+                            break
+                        }
+                    }
+                }
+            } header: {
+                Text("Passkeys")
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+        }
+    }
+
+    private func passkeyActionButton(
+        title: String,
+        subtitle: String,
+        action: @escaping () async -> Void
+    ) -> some View {
+        Button(action: {
+            Task {
+                await action()
+            }
+        }) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.badge.key.fill")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                    Text(title)
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                }
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private var passkeyBundleInventory: some View {
+        let localCredentialId = UserDefaults.standard.string(
+            forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId
+        )
+        let sorted = passkeyBundles.sorted { a, b in
+            if a.credentialId == localCredentialId { return true }
+            if b.credentialId == localCredentialId { return false }
+            return (a.createdAt ?? "") > (b.createdAt ?? "")
+        }
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Registered platforms (\(sorted.count))")
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+            ForEach(sorted, id: \.credentialId) { bundle in
+                passkeyBundleRow(
+                    bundle: bundle,
+                    isCurrentPlatform: bundle.credentialId == localCredentialId
+                )
+            }
+            if let passkeyBundleError {
+                Text(passkeyBundleError)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func passkeyBundleRow(
+        bundle: EnclaveKeyCurrentBundle,
+        isCurrentPlatform: Bool
+    ) -> some View {
+        let credLabel = bundle.credentialId.count <= 12
+            ? bundle.credentialId
+            : "\(bundle.credentialId.prefix(6))…\(bundle.credentialId.suffix(4))"
+        let dateLabel: String
+        if let created = bundle.createdAt, !created.isEmpty {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let date = formatter.date(from: created)
+                ?? ISO8601DateFormatter().date(from: created)
+            if let date {
+                let display = DateFormatter()
+                display.dateStyle = .medium
+                dateLabel = display.string(from: date)
+            } else {
+                dateLabel = "Date unknown"
+            }
+        } else {
+            dateLabel = "Date unknown"
+        }
+        let isRemoving = removingPasskeyId == bundle.credentialId
+        return HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.badge.key.fill")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(isCurrentPlatform ? "This platform" : "Other platform")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                }
+                Text("\(credLabel) · \(dateLabel)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button(action: {
+                Task { await removeBundle(bundle.credentialId) }
+            }) {
+                Text(isRemoving ? "Removing…" : "Remove")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(isRemoving ? .secondary : .red)
+            }
+            .disabled(removingPasskeyId != nil)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func refreshPasskeyBundles() async {
+        guard settings.isCloudSyncEnabled else {
+            passkeyBundles = []
+            passkeyBundleError = nil
+            return
+        }
+        do {
+            passkeyBundles = try await passkeyManager.listPasskeyBundles()
+            passkeyBundleError = nil
+        } catch {
+            // Keep the previous inventory: clearing it would make a
+            // load failure indistinguishable from "no passkeys
+            // registered" for a security-relevant list.
+            passkeyBundleError = "Couldn't load registered passkeys. Please try again later."
+        }
+    }
+
+    private func removeBundle(_ credentialId: String) async {
+        // One removal at a time: the in-flight UI state is single-valued
+        // and concurrent deletes would race it and duplicate requests.
+        guard removingPasskeyId == nil else { return }
+        removingPasskeyId = credentialId
+        defer { removingPasskeyId = nil }
+        do {
+            try await passkeyManager.removePasskeyBundle(credentialId: credentialId)
+            await refreshPasskeyBundles()
+        } catch {
+            passkeyBundleError = "Couldn't remove the passkey. Please try again."
+        }
+    }
+
     private func maskKey(_ key: String) -> String {
         guard key.count > 12 else { return key }
         let visibleChars = 12 // Show first 12 characters

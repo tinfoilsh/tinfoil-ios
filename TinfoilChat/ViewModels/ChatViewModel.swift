@@ -901,6 +901,18 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Permanently deletes every project the user owns, mirroring the
+    /// webapp's bulk action. Throws so callers can surface the failure and
+    /// leave local state untouched for a retry.
+    @MainActor
+    func deleteAllProjects() async throws {
+        _ = try await projectStorage.deleteAllProjects()
+        projects = []
+        if activeProject != nil {
+            exitProject()
+        }
+    }
+
     func deleteActiveProject() async {
         guard let project = activeProject else { return }
 
@@ -1672,13 +1684,12 @@ class ChatViewModel: ObservableObject {
                 }
 
                 // Use ChatQueryBuilder to create query with model-specific system prompt handling
-                let maxMessages = profileManager.maxPromptMessages > 0 ? profileManager.maxPromptMessages : settingsManager.maxMessages
                 let chatQuery = ChatQueryBuilder.buildQuery(
                     modelId: modelId,
                     systemPrompt: systemPrompt,
                     rules: processedRules,
                     conversationMessages: self.messages,
-                    maxMessages: maxMessages,
+                    contextWindow: self.currentModel.contextWindow,
                     webSearchEnabled: self.isWebSearchEnabled,
                     isMultimodal: self.currentModel.isMultimodal,
                     reasoningConfig: self.currentModel.reasoningConfig,
@@ -2608,9 +2619,20 @@ class ChatViewModel: ObservableObject {
             return "Authentication error. Please sign in again."
         }
         
-        // Rate limit (OpenAI SDK error)
-        if case OpenAIError.statusError(_, let statusCode) = error, statusCode == 429 {
-            return "You've reached your daily limit of free requests. Your limit will reset tomorrow, or you can upgrade to Premium for unlimited access."
+        // HTTP status errors from the OpenAI SDK. Handle every code here so
+        // the raw enum dump (including the NSHTTPURLResponse description)
+        // never reaches the UI.
+        if case OpenAIError.statusError(_, let statusCode) = error {
+            switch statusCode {
+            case 401:
+                return "Authentication error. Please sign in again."
+            case 429:
+                return "You've reached your daily limit of free requests. Your limit will reset tomorrow, or you can upgrade to Premium for unlimited access."
+            case 500...599:
+                return "The service is having trouble right now. Please try again in a moment, or switch to a different model."
+            default:
+                return "The model couldn't process this request. Please try again, or start a new chat if the problem persists."
+            }
         }
 
         // Server issues
@@ -2624,9 +2646,62 @@ class ChatViewModel: ObservableObject {
                 break
             }
         }
-        
+
+        // Map raw backend/SDK error text to a human-readable explanation,
+        // mirroring the webapp's `explainError`.
+        if let explained = Self.explainRawError(error.localizedDescription) {
+            return explained
+        }
+
         // Default error message if nothing specific matches
-        return "An error occurred: \(error.localizedDescription)"
+        return "Please try again. If the problem persists, contact support."
+    }
+
+    /// Maps raw error text to a friendly explanation. Returns nil when no
+    /// known pattern matches. Mirrors the webapp's `explainError` patterns.
+    static func explainRawError(_ rawMessage: String) -> String? {
+        let lower = rawMessage.lowercased()
+
+        if lower.contains("context deadline exceeded") ||
+            lower.contains("client.timeout") ||
+            lower.contains("timed out") ||
+            lower.contains("timeout") {
+            return "The model took too long to respond. This is usually a temporary problem on our side. Please try again in a moment."
+        }
+
+        if lower.contains("context length") ||
+            lower.contains("context window") ||
+            lower.contains("maximum context") ||
+            lower.contains("too many tokens") ||
+            lower.contains("token limit") ||
+            lower.contains("prompt length") ||
+            lower.contains("max_model_len") ||
+            lower.contains("input is too long") {
+            return "This conversation is too long for the model. Remove an attachment, shorten your message, or switch to a model with a larger context window."
+        }
+
+        // Secure-channel failures (EHBP) happen when the inference router is
+        // unreachable and a proxy answers without the encryption headers.
+        if lower.contains("ehbp") ||
+            lower.contains("missing header") ||
+            lower.contains("decryption failed") ||
+            lower.contains("invalid response") ||
+            lower.contains("overloaded") ||
+            lower.contains("capacity") ||
+            lower.contains("service unavailable") ||
+            lower.contains("bad gateway") ||
+            lower.contains("internal server error") ||
+            lower.range(of: #"\b5\d\d\b"#, options: .regularExpression) != nil {
+            return "The service is having trouble right now. Please try again in a moment, or switch to a different model."
+        }
+
+        if lower.contains("network") ||
+            lower.contains("connection") ||
+            lower.contains("offline") {
+            return "Connection problem. Check your internet connection and try again."
+        }
+
+        return nil
     }
 
     /// Checks if an error indicates the user has hit their rate limit
@@ -3350,6 +3425,18 @@ class ChatViewModel: ObservableObject {
                         }
                     }
 
+                    // A local key that mismatches the enclave's registered
+                    // key can never sync or migrate. Converge silently via
+                    // passkey when possible; otherwise prompt the user to
+                    // recover so this stale device enters v2.
+                    if SettingsManager.shared.isCloudSyncEnabled,
+                       await self.passkeyManager.resolveKeyMismatchAtLaunch() == .manualRecoveryRequired {
+                        await MainActor.run {
+                            self.cloudSyncOnboardingMode = .recovery
+                            self.showCloudSyncOnboarding = true
+                        }
+                    }
+
                     // Check passkey state for users who already have keys
                     await self.passkeyManager.checkPasskeyStateForExistingKey()
 
@@ -3437,6 +3524,36 @@ class ChatViewModel: ObservableObject {
     }
     
     // MARK: - Cloud Sync Methods
+
+    /// Permanently deletes every chat, mirroring the webapp: the cloud
+    /// bulk-delete runs first so a failure leaves local state untouched and
+    /// the user can retry without partial-deletion side effects.
+    @MainActor
+    func deleteAllChats() async throws {
+        let localIds = chats.map(\.id) + localChats.map(\.id)
+
+        // When the cloud backup is in play (key present, or sync enabled but
+        // the key is missing) this must succeed or throw: skipping it would
+        // report success while encrypted chats survive on the server. Only a
+        // signed-in account that never set up cloud sync gets a local-only
+        // wipe.
+        let isAuthenticated = authManager?.isAuthenticated == true
+        let hasKey = EncryptionService.shared.hasEncryptionKey()
+        if isAuthenticated && (hasKey || SettingsManager.shared.isCloudSyncEnabled) {
+            try await cloudSync.deleteAllFromCloud()
+        }
+
+        // Tombstone so an in-flight sync pass can't resurrect wiped chats
+        for id in localIds {
+            DeletedChatsTracker.shared.markAsDeleted(id)
+        }
+
+        await clearAllChatsFromDevice()
+        // The device wipe clears the in-memory key reference; restore it so
+        // newly created chats keep syncing.
+        reloadEncryptionKey()
+        createNewChat()
+    }
 
     /// Removes all cloud (non-local) chats from the device
     @MainActor
@@ -3706,6 +3823,11 @@ class ChatViewModel: ObservableObject {
             // Only append to the visible chats array
             if !uniqueNewChats.isEmpty {
                 self.chats.append(contentsOf: uniqueNewChats)
+                self.chats.sort { chat1, chat2 in
+                    if chat1.isBlankChat { return true }
+                    if chat2.isBlankChat { return false }
+                    return chat1.updatedAt > chat2.updatedAt
+                }
             }
             
             // Update pagination state
@@ -3835,7 +3957,7 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Perform a full sync with the cloud
-    func performFullSync(deep: Bool = false) async {
+    func performFullSync() async {
         // Gate sync when cloud sync is disabled
         if !SettingsManager.shared.isCloudSyncEnabled {
             return
@@ -3851,7 +3973,7 @@ class ChatViewModel: ObservableObject {
             self.syncErrors = []
         }
         
-        let result = await cloudSync.syncAllChats(deep: deep)
+        let result = await cloudSync.syncAllChats()
         
         // Update chats if there were changes (await this before marking sync complete)
         if result.downloaded > 0 || result.uploaded > 0 || result.deleted > 0 {

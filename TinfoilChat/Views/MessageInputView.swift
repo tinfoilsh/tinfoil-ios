@@ -129,6 +129,7 @@ struct MessageInputView: View {
                 AddToSheetView(
                     viewModel: viewModel,
                     isDarkMode: isDarkMode,
+                    contextUsage: showContextIndicator ? contextUsage : nil,
                     onCamera: {
                         pendingPickerAction = .camera
                         viewModel.showAddSheet = false
@@ -143,7 +144,7 @@ struct MessageInputView: View {
                     }
                 )
                 .environmentObject(authManager)
-                .presentationDetents([.height(280)])
+                .presentationDetents([.height(showContextIndicator ? 324 : 280)])
                 .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
             }
             .sheet(isPresented: $viewModel.showRateLimitPaywall) {
@@ -160,6 +161,7 @@ struct MessageInputView: View {
             .sheet(isPresented: $viewModel.showModelSelectorSheet) {
                 ModelSelectorSheetView(viewModel: viewModel, isDarkMode: isDarkMode)
                     .presentationDetents([.medium, .large])
+                    .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
             }
     }
 
@@ -193,7 +195,43 @@ struct MessageInputView: View {
                 )
                 .transition(.opacity)
                 .animation(.easeInOut(duration: 0.25), value: rl.remaining)
+                .onTapGesture {
+                    if rl.remaining <= 0 {
+                        viewModel.showRateLimitPaywall = true
+                    }
+                }
         }
+    }
+
+    /// The indicator is hidden on a blank chat, matching the webapp's
+    /// welcome screen behavior.
+    private var showContextIndicator: Bool {
+        !(viewModel.currentChat?.messages.isEmpty ?? true)
+    }
+
+    /// Estimated context usage for the conversation: non-archived messages
+    /// plus the draft input and pending attachments, against the current
+    /// model's token budget. Mirrors the webapp's calculation.
+    private var contextUsage: ContextUsage {
+        let limitTokens = TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow)
+        var usedTokens = TokenEstimation.estimateTokenCount(messageText)
+
+        let messages = viewModel.messages
+        let startIndex = TokenEstimation.findContextStartIndex(messages: messages, budgetTokens: limitTokens)
+        for i in startIndex..<messages.count {
+            usedTokens += TokenEstimation.estimateMessageTokens(messages[i])
+        }
+
+        for attachment in viewModel.pendingAttachments {
+            usedTokens += TokenEstimation.estimateTokenCount(attachment.textContent)
+            usedTokens += TokenEstimation.estimateTokenCount(attachment.description)
+        }
+
+        return ContextUsage(
+            percentage: Double(usedTokens) / Double(limitTokens) * 100,
+            usedTokens: usedTokens,
+            limitTokens: limitTokens
+        )
     }
 
     /// When the latest assistant message ends in an input-surface
@@ -245,6 +283,24 @@ struct MessageInputView: View {
         }
     }
 
+    /// Shared between the iOS 26 and pre-26 input layouts so the editor's
+    /// growing list of paste/send hooks stays defined in one place.
+    private var messageTextEditor: some View {
+        CustomTextEditor(text: $messageText,
+                         textHeight: $textHeight,
+                         placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
+                         shouldFocusInput: viewModel.shouldFocusInput,
+                         isLoading: viewModel.isLoading,
+                         allowsImagePaste: viewModel.currentModel.isMultimodal,
+                         onFocusHandled: { viewModel.shouldFocusInput = false },
+                         onSendMessage: { text in viewModel.sendMessage(text: text) },
+                         onPasteImage: { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
+                         onPasteFile: { url, fileName in viewModel.addDocumentAttachment(url: url, fileName: fileName) },
+                         onPasteFileError: { message in viewModel.attachmentError = message })
+            .frame(height: textHeight)
+            .padding(.horizontal)
+    }
+
     @ViewBuilder
     private var standardInputContent: some View {
         if #available(iOS 26, *) {
@@ -265,15 +321,7 @@ struct MessageInputView: View {
                 }
 
                 // Text input area
-                CustomTextEditor(text: $messageText,
-                                 textHeight: $textHeight,
-                                 placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
-                                 shouldFocusInput: viewModel.shouldFocusInput,
-                                 isLoading: viewModel.isLoading,
-                                 onFocusHandled: { viewModel.shouldFocusInput = false },
-                                 onSendMessage: { text in viewModel.sendMessage(text: text) })
-                    .frame(height: textHeight)
-                    .padding(.horizontal)
+                messageTextEditor
 
                 // Bottom row with action buttons
                 HStack {
@@ -372,15 +420,7 @@ struct MessageInputView: View {
                 }
 
                 // Text input area
-                CustomTextEditor(text: $messageText,
-                                 textHeight: $textHeight,
-                                 placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
-                                 shouldFocusInput: viewModel.shouldFocusInput,
-                                 isLoading: viewModel.isLoading,
-                                 onFocusHandled: { viewModel.shouldFocusInput = false },
-                                 onSendMessage: { text in viewModel.sendMessage(text: text) })
-                    .frame(height: textHeight)
-                    .padding(.horizontal)
+                messageTextEditor
 
                 // Bottom row with action buttons
                 HStack {
@@ -570,6 +610,7 @@ struct AddToSheetView: View {
     @EnvironmentObject private var authManager: AuthManager
     @ObservedObject private var settings = SettingsManager.shared
     let isDarkMode: Bool
+    let contextUsage: ContextUsage?
     let onCamera: () -> Void
     let onPhotos: () -> Void
     let onFiles: () -> Void
@@ -613,6 +654,15 @@ struct AddToSheetView: View {
                     settings.webSearchEnabled = newValue
                 }
                 .padding(.horizontal, 20)
+
+                if let contextUsage {
+                    HStack {
+                        Label("Context Used", systemImage: "text.alignleft")
+                        Spacer()
+                        ContextUsageIndicator(usage: contextUsage)
+                    }
+                    .padding(.horizontal, 20)
+                }
             }
             .padding(.top, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -701,6 +751,7 @@ struct ModelSelectorSheetView: View {
                 .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
             }
             .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .navigationTitle("Select Model")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -725,11 +776,19 @@ struct CustomTextEditor: UIViewRepresentable {
     var placeholderText: String
     var shouldFocusInput: Bool
     var isLoading: Bool
+    var allowsImagePaste: Bool = false
     var onFocusHandled: () -> Void
     var onSendMessage: (String) -> Void
+    var onPasteImage: ((Data, String) -> Void)? = nil
+    var onPasteFile: ((URL, String) -> Void)? = nil
+    var onPasteFileError: ((String) -> Void)? = nil
 
     func makeUIView(context: Context) -> UITextView {
-        let textView = UITextView()
+        let textView = PastingTextView()
+        textView.allowsImagePaste = allowsImagePaste
+        textView.onPasteImage = onPasteImage
+        textView.onPasteFile = onPasteFile
+        textView.onPasteFileError = onPasteFileError
         textView.delegate = context.coordinator
         textView.font = UIFont.preferredFont(forTextStyle: .body)
         textView.backgroundColor = .clear
@@ -761,6 +820,12 @@ struct CustomTextEditor: UIViewRepresentable {
     
     func updateUIView(_ uiView: UITextView, context: Context) {
         context.coordinator.parent = self
+        if let pastingView = uiView as? PastingTextView {
+            pastingView.allowsImagePaste = allowsImagePaste
+            pastingView.onPasteImage = onPasteImage
+            pastingView.onPasteFile = onPasteFile
+            pastingView.onPasteFileError = onPasteFileError
+        }
         let isCurrentlyEditing = context.coordinator.isEditing
 
         if shouldFocusInput && !context.coordinator.hasFocusedFromFlag {
@@ -908,6 +973,89 @@ struct CustomTextEditor: UIViewRepresentable {
                 textView.textColor = .lightGray
             }
             refreshAccessibility(textView)
+        }
+    }
+}
+
+/// UITextView that accepts images and file URLs from the pasteboard in
+/// addition to plain text, turning them into attachments.
+final class PastingTextView: UITextView {
+    var allowsImagePaste = false
+    var onPasteImage: ((Data, String) -> Void)?
+    var onPasteFile: ((URL, String) -> Void)?
+    var onPasteFileError: ((String) -> Void)?
+
+    /// File URLs win over any string representation on the pasteboard:
+    /// copying a file (e.g. from the Files app) often includes its name as
+    /// plain text, and pasting that name instead of the file would be wrong.
+    private var pasteboardFileURLs: [URL] {
+        UIPasteboard.general.urls?.filter { $0.isFileURL } ?? []
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)) {
+            if allowsImagePaste && UIPasteboard.general.hasImages && onPasteImage != nil {
+                return true
+            }
+            if !pasteboardFileURLs.isEmpty && onPasteFile != nil {
+                return true
+            }
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        let pasteboard = UIPasteboard.general
+
+        if allowsImagePaste, pasteboard.hasImages,
+           let onPasteImage, let images = pasteboard.images, !images.isEmpty {
+            for (index, image) in images.enumerated() {
+                guard let data = image.jpegData(
+                    compressionQuality: CGFloat(Constants.Attachments.imageCompressionQuality)
+                ) else { continue }
+                let fileName = images.count > 1 ? "Pasted Image \(index + 1).jpg" : "Pasted Image.jpg"
+                onPasteImage(data, fileName)
+            }
+            return
+        }
+
+        if let onPasteFile {
+            let fileURLs = pasteboardFileURLs
+            if !fileURLs.isEmpty {
+                for url in fileURLs {
+                    importPastedFile(url: url, onPasteFile: onPasteFile)
+                }
+                return
+            }
+        }
+
+        super.paste(sender)
+    }
+
+    /// Copies a pasted file into the app's temp directory so the attachment
+    /// pipeline can read it after the pasteboard's access window closes.
+    /// Oversized files are rejected up front: the pipeline would refuse them
+    /// anyway, and copying or reading them first would waste disk and memory.
+    private func importPastedFile(url: URL, onPasteFile: (URL, String) -> Void) {
+        let fileName = url.lastPathComponent
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString + "_" + fileName)
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+
+        if let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           Int64(fileSize) > Constants.Attachments.maxFileSizeBytes {
+            let message = DocumentProcessingService.ProcessingError
+                .fileTooLarge(Int64(fileSize)).errorDescription
+            onPasteFileError?(message ?? "File is too large.")
+            return
+        }
+
+        do {
+            try FileManager.default.copyItem(at: url, to: tempURL)
+            onPasteFile(tempURL, fileName)
+        } catch {
+            onPasteFileError?("Couldn't read the pasted file. Try attaching it with the + button instead.")
         }
     }
 } 

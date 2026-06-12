@@ -59,7 +59,22 @@ struct ReasoningEffortSelector: View {
     var body: some View {
         if !supportsEffort && !supportsToggle {
             EmptyView()
-        } else if supportsToggle && !supportsEffort {
+        } else if #available(iOS 26, *) {
+            // On iOS 26 the menu label disappears while the menu is open and
+            // re-animates on dismissal; without a glass identity on the label
+            // and a clipped container the pill visibly drops and bounces back.
+            GlassEffectContainer {
+                menuContent
+                    .clipped()
+            }
+        } else {
+            menuContent
+        }
+    }
+
+    @ViewBuilder
+    private var menuContent: some View {
+        if supportsToggle && !supportsEffort {
             toggleOnlyMenu
         } else {
             effortMenu
@@ -128,13 +143,19 @@ struct ReasoningEffortSelector: View {
     /// effort menu. Uses the SF Symbols `lightbulb`/`lightbulb.slash`
     /// glyph pair — the system-provided slash variant adapts to both
     /// light and dark modes natively, so no manual overlay is needed.
+    @ViewBuilder
     private func iconLabel(active: Bool) -> some View {
-        Image(systemName: active ? "lightbulb" : "lightbulb.slash")
+        let pill = Image(systemName: active ? "lightbulb" : "lightbulb.slash")
             .font(.system(size: 12, weight: .semibold))
             .foregroundColor(active ? .primary : .primary.opacity(0.9))
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(Color.secondary.opacity(0.12))
             .clipShape(Capsule())
+        if #available(iOS 26, *) {
+            pill.glassEffect(.identity)
+        } else {
+            pill
+        }
     }
 }

@@ -60,13 +60,6 @@ class SettingsManager: ObservableObject {
         }
     }
     
-    // Max messages setting
-    @Published var maxMessages: Int {
-        didSet {
-            UserDefaults.standard.set(maxMessages, forKey: Constants.StorageKeys.Settings.maxPromptMessages)
-        }
-    }
-    
     // Custom system prompt settings
     @Published var isUsingCustomPrompt: Bool {
         didSet {
@@ -125,14 +118,6 @@ class SettingsManager: ObservableObject {
             self.selectedTraits = []
         }
         
-        // Initialize max messages setting
-        if let savedMaxMessages = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.maxPromptMessages) as? Int {
-            self.maxMessages = min(max(savedMaxMessages, 1), Constants.Context.maxMessagesLimit)
-        } else {
-            self.maxMessages = Constants.Context.defaultMaxMessages
-            UserDefaults.standard.set(Constants.Context.defaultMaxMessages, forKey: Constants.StorageKeys.Settings.maxPromptMessages)
-        }
-        
         // Initialize custom system prompt settings
         self.isUsingCustomPrompt = UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled) as? Bool ?? false
         self.customSystemPrompt = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt) ?? ""
@@ -176,7 +161,6 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.profession)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.traits)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.additionalContext)
-        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.maxPromptMessages)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.webSearchEnabled)
@@ -191,7 +175,6 @@ class SettingsManager: ObservableObject {
         profession = ""
         selectedTraits = []
         additionalContext = ""
-        maxMessages = Constants.Context.defaultMaxMessages
         isUsingCustomPrompt = false
         customSystemPrompt = ""
         webSearchEnabled = true
@@ -272,9 +255,18 @@ struct SettingsView: View {
     @State private var showSignOutConfirmation = false
     @State private var showPremiumModal = false
     @State private var accountDeletionError: String? = nil
-    @State private var passkeyBundles: [EnclaveKeyCurrentBundle] = []
-    @State private var removingPasskeyId: String? = nil
-    @State private var passkeyBundleError: String? = nil
+    @State private var showDeleteAllChatsConfirm = false
+    @State private var deleteAllChatsConfirmText = ""
+    @State private var isDeletingAllChats = false
+    @State private var showDeleteAllProjectsConfirm = false
+    @State private var deleteAllProjectsConfirmText = ""
+    @State private var isDeletingAllProjects = false
+    @State private var dataActionMessage: String? = nil
+
+    /// Typed confirmation phrases gating the bulk deletions, matching the
+    /// webapp's safeguard for the same features.
+    private static let deleteAllChatsConfirmPhrase = "delete all chats"
+    private static let deleteAllProjectsConfirmPhrase = "delete all projects"
 
     var shouldOpenCloudSync: Bool = false
     
@@ -334,37 +326,67 @@ struct SettingsView: View {
     private var accountSection: some View {
         Section {
             if authManager.isAuthenticated {
-                HStack {
-                    userAvatar
-                        .frame(width: 40, height: 40)
-                        .clipShape(Circle())
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        if let user = clerk.user {
-                            Text("\(user.firstName ?? "") \(user.lastName ?? "")")
-                                .font(.body)
-                                .foregroundColor(.primary)
-                            if let email = user.emailAddresses.first?.emailAddress {
-                                Text(email)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        } else if let userData = authManager.localUserData {
-                            Text((userData["name"] as? String) ?? "User")
-                                .font(.body)
-                                .foregroundColor(.primary)
-                            if let email = userData["email"] as? String {
-                                Text(email)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-
-                    Spacer()
+                NavigationLink(destination: manageAccountPage) {
+                    accountSummaryRow
                 }
-                .padding(.vertical, 4)
+            } else {
+                Button(action: {
+                    showAuthView = true
+                }) {
+                    HStack {
+                        Text("Sign up or Log In")
+                            .foregroundColor(.primary)
+                        Spacer()
+                    }
+                }
+            }
+        } header: {
+            Text("Account")
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
 
+    private var accountSummaryRow: some View {
+        HStack {
+            userAvatar
+                .frame(width: 40, height: 40)
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                if let user = clerk.user {
+                    Text("\(user.firstName ?? "") \(user.lastName ?? "")")
+                        .font(.body)
+                        .foregroundColor(.primary)
+                    if let email = user.emailAddresses.first?.emailAddress {
+                        Text(email)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                } else if let userData = authManager.localUserData {
+                    Text((userData["name"] as? String) ?? "User")
+                        .font(.body)
+                        .foregroundColor(.primary)
+                    if let email = userData["email"] as? String {
+                        Text(email)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var manageAccountPage: some View {
+        Form {
+            Section {
+                accountSummaryRow
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+
+            Section {
                 Button(action: {
                     if let user = clerk.user {
                         editingFirstName = user.firstName ?? ""
@@ -391,7 +413,10 @@ struct SettingsView: View {
                         Spacer()
                     }
                 }
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
 
+            Section {
                 Button(action: {
                     showDeleteConfirmation = true
                 }) {
@@ -401,21 +426,82 @@ struct SettingsView: View {
                         Spacer()
                     }
                 }
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+        }
+        .scrollContentBackground(.hidden)
+        .background(Color.settingsBackground(for: colorScheme))
+        .navigationTitle("Manage Account")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Sign Out", isPresented: $showSignOutConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Sign Out") {
+                Task {
+                    await performFullDataCleanup()
+                    await authManager.signOut()
+                    dismiss()
+                }
+            }
+        } message: {
+            if settings.isLocalOnlyModeEnabled {
+                Text(passkeyManager.passkeyActive
+                    ? "All local data will be cleared. You can recover your chats by signing back in.\n\n⚠️ Your local chats will be deleted forever."
+                    : "All local data will be cleared. You will need your encryption key to recover your chats.\n\n⚠️ Your local chats will be deleted forever.")
             } else {
-                Button(action: {
-                    showAuthView = true
-                }) {
-                    HStack {
-                        Text("Sign up or Log In")
-                            .foregroundColor(.primary)
-                        Spacer()
+                Text(passkeyManager.passkeyActive
+                    ? "All local data will be cleared. You can recover your chats by signing back in."
+                    : "All local data will be cleared. You will need your encryption key to recover your chats.")
+            }
+        }
+        .alert("Delete Account", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                Task {
+                    // Require a live Clerk session before wiping anything:
+                    // without it the server-side account would survive while
+                    // local data is destroyed and the user is signed out.
+                    guard let user = clerk.user else {
+                        accountDeletionError = "Couldn't reach your account session. Please sign in again and retry."
+                        return
+                    }
+                    do {
+                        try await user.delete()
+                        await performFullDataCleanup()
+                        await authManager.signOut()
+                        dismiss()
+                    } catch {
+                        accountDeletionError = error.localizedDescription
                     }
                 }
             }
-        } header: {
-            Text("Account")
+        } message: {
+            Text("Are you sure you want to delete your account? This action cannot be undone.")
         }
-        .listRowBackground(Color.cardSurface(for: colorScheme))
+        .alert("Account Deletion Failed", isPresented: Binding(
+            get: { accountDeletionError != nil },
+            set: { if !$0 { accountDeletionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(accountDeletionError ?? "")
+        }
+        .sheet(isPresented: $showProfileEditor) {
+            ProfileEditorView(
+                firstName: $editingFirstName,
+                lastName: $editingLastName,
+                isUpdating: $isUpdatingProfile,
+                errorMessage: $profileUpdateError,
+                onSave: {
+                    Task {
+                        await updateProfile()
+                    }
+                },
+                onCancel: {
+                    showProfileEditor = false
+                }
+            )
+            .environment(clerk)
+        }
     }
 
     private var preferencesSection: some View {
@@ -457,160 +543,7 @@ struct SettingsView: View {
                     }
                 }
 
-                if passkeyManager.passkeyActive {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "person.badge.key.fill")
-                                .font(.subheadline)
-                                .foregroundColor(.primary)
-                            Text("Sync and backup using Passkeys")
-                                .font(.subheadline)
-                                .foregroundColor(.primary)
-                        }
-                        Text("Use Face ID or Touch ID to sync chats across devices")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.shield.fill")
-                                .font(.caption)
-                                .foregroundColor(.green)
-                            Text("Passkey active")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(.green)
-                        }
-                        .padding(.top, 2)
-                    }
-                    .padding(.vertical, 2)
-                }
-
-                if !passkeyBundles.isEmpty || passkeyBundleError != nil {
-                    passkeyBundleInventory
-                }
-
-                if passkeyManager.passkeyAddDeviceAvailable && EncryptionService.shared.hasEncryptionKey() {
-                    Button(action: {
-                        Task {
-                            await passkeyManager.createPasskeyBackup()
-                        }
-                    }) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "person.badge.key.fill")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
-                                Text("Set Up Passkey on This Device")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
-                            }
-                            Text("Your other devices use a passkey already. Add one here for one-tap access.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 2)
-                    }
-                } else if passkeyManager.passkeySetupAvailable && EncryptionService.shared.hasEncryptionKey() {
-                    Button(action: {
-                        Task {
-                            await passkeyManager.createPasskeyBackup()
-                        }
-                    }) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "person.badge.key.fill")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
-                                Text("Add Passkey for seamless sync")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
-                            }
-                            Text("Use Face ID or Touch ID to sync chats across devices")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 2)
-                    }
-                } else if passkeyManager.passkeySetupAvailable && !EncryptionService.shared.hasEncryptionKey() {
-                    Button(action: {
-                        Task {
-                            let result = await passkeyManager.retryPasskeySetup()
-                            switch result {
-                            case .manualSetupRequired:
-                                await MainActor.run {
-                                    chatViewModel.cloudSyncOnboardingMode = .setup
-                                    chatViewModel.showCloudSyncOnboarding = true
-                                }
-                            case .manualRecoveryRequired:
-                                await MainActor.run {
-                                    chatViewModel.cloudSyncOnboardingMode = .recovery
-                                    chatViewModel.showCloudSyncOnboarding = true
-                                }
-                            default:
-                                break
-                            }
-                        }
-                    }) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "person.badge.key.fill")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
-                                Text("Add Passkey for seamless sync")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
-                            }
-                            Text("Create a passkey to sync chats across devices")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
             }
-
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Messages in Context")
-                        .font(.body)
-                    Text("Maximum number of recent messages sent to the model (1-\(Constants.Context.maxMessagesLimit)). Longer contexts increase network usage and slow down responses.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                HStack(spacing: 8) {
-                    Button(action: {
-                        if settings.maxMessages > 1 {
-                            settings.maxMessages -= 1
-                            ProfileManager.shared.maxPromptMessages = settings.maxMessages
-                        }
-                    }) {
-                        Image(systemName: "minus.circle")
-                            .foregroundColor(settings.maxMessages > 1 ? .accentColor : .gray)
-                    }
-                    .buttonStyle(BorderlessButtonStyle())
-                    .disabled(settings.maxMessages <= 1)
-                    .accessibilityLabel("Decrease messages in context")
-
-                    Text("\(settings.maxMessages)")
-                        .frame(minWidth: 40)
-                        .font(.system(.body, design: .monospaced))
-                        .accessibilityLabel("Messages in context: \(settings.maxMessages)")
-
-                    Button(action: {
-                        if settings.maxMessages < Constants.Context.maxMessagesLimit {
-                            settings.maxMessages += 1
-                            ProfileManager.shared.maxPromptMessages = settings.maxMessages
-                        }
-                    }) {
-                        Image(systemName: "plus.circle")
-                            .foregroundColor(settings.maxMessages < Constants.Context.maxMessagesLimit ? .accentColor : .gray)
-                    }
-                    .buttonStyle(BorderlessButtonStyle())
-                    .disabled(settings.maxMessages >= Constants.Context.maxMessagesLimit)
-                    .accessibilityLabel("Increase messages in context")
-                }
-            }
-            .padding(.vertical, 4)
 
             NavigationLink(destination: CustomSystemPromptView(
                 isUsingCustomPrompt: $settings.isUsingCustomPrompt,
@@ -652,126 +585,173 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            NavigationLink(destination: manageDataPage) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Manage Data")
+                        .font(.body)
+                    Text("Export or delete your chats and projects")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
         } header: {
             Text("Chat Settings")
         }
         .listRowBackground(Color.cardSurface(for: colorScheme))
     }
 
-    private var passkeyBundleInventory: some View {
-        let localCredentialId = UserDefaults.standard.string(
-            forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId
-        )
-        let sorted = passkeyBundles.sorted { a, b in
-            if a.credentialId == localCredentialId { return true }
-            if b.credentialId == localCredentialId { return false }
-            return (a.createdAt ?? "") > (b.createdAt ?? "")
-        }
-        return VStack(alignment: .leading, spacing: 8) {
-            Text("Registered platforms (\(sorted.count))")
-                .font(.caption)
-                .fontWeight(.medium)
-                .foregroundColor(.secondary)
-                .textCase(.uppercase)
-            ForEach(sorted, id: \.credentialId) { bundle in
-                passkeyBundleRow(
-                    bundle: bundle,
-                    isCurrentPlatform: bundle.credentialId == localCredentialId
-                )
-            }
-            if let passkeyBundleError {
-                Text(passkeyBundleError)
-                    .font(.caption)
-                    .foregroundColor(.red)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    private func passkeyBundleRow(
-        bundle: EnclaveKeyCurrentBundle,
-        isCurrentPlatform: Bool
-    ) -> some View {
-        let credLabel = bundle.credentialId.count <= 12
-            ? bundle.credentialId
-            : "\(bundle.credentialId.prefix(6))…\(bundle.credentialId.suffix(4))"
-        let dateLabel: String
-        if let created = bundle.createdAt, !created.isEmpty {
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            let date = formatter.date(from: created)
-                ?? ISO8601DateFormatter().date(from: created)
-            if let date {
-                let display = DateFormatter()
-                display.dateStyle = .medium
-                dateLabel = display.string(from: date)
-            } else {
-                dateLabel = "Date unknown"
-            }
-        } else {
-            dateLabel = "Date unknown"
-        }
-        let isRemoving = removingPasskeyId == bundle.credentialId
-        return HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Image(systemName: "person.badge.key.fill")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(isCurrentPlatform ? "This platform" : "Other platform")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.primary)
+    private var manageDataPage: some View {
+        Form {
+            Section {
+                Button(action: {
+                    UIApplication.shared.open(Constants.WebApp.exportChatsURL)
+                }) {
+                    HStack {
+                        Text("Export Chats")
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Image(systemName: "arrow.up.forward.square")
+                            .font(.footnote)
+                            .foregroundColor(Color(UIColor.tertiaryLabel))
+                    }
                 }
-                Text("\(credLabel) · \(dateLabel)")
+            } header: {
+                Text("Export")
+            } footer: {
+                Text("Chats are exported from the Tinfoil web app. Sign in with the same account to download your conversations.")
                     .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
             }
-            Spacer()
-            Button(action: {
-                Task { await removeBundle(bundle.credentialId) }
-            }) {
-                Text(isRemoving ? "Removing…" : "Remove")
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+
+            Section {
+                Button(action: {
+                    showDeleteAllChatsConfirm = true
+                }) {
+                    HStack {
+                        Text("Delete All Chats")
+                            .foregroundColor(.red)
+                        Spacer()
+                        if isDeletingAllChats {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(isDeletingAllChats)
+
+                if authManager.isAuthenticated && settings.isCloudSyncEnabled {
+                    Button(action: {
+                        showDeleteAllProjectsConfirm = true
+                    }) {
+                        HStack {
+                            Text("Delete All Projects")
+                                .foregroundColor(.red)
+                            Spacer()
+                            if isDeletingAllProjects {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isDeletingAllProjects)
+                }
+            } header: {
+                Text("Delete")
+            } footer: {
+                Text(authManager.isAuthenticated
+                     ? "Permanently delete data from this device and your encrypted cloud backup. This cannot be undone."
+                     : "Permanently delete every chat from this device. This cannot be undone.")
                     .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(isRemoving ? .secondary : .red)
             }
-            .disabled(removingPasskeyId != nil)
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .listRowBackground(Color.cardSurface(for: colorScheme))
         }
-        .padding(.vertical, 4)
+        .scrollContentBackground(.hidden)
+        .background(Color.settingsBackground(for: colorScheme))
+        .navigationTitle("Manage Data")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Delete All Chats", isPresented: $showDeleteAllChatsConfirm) {
+            TextField(Self.deleteAllChatsConfirmPhrase, text: $deleteAllChatsConfirmText)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            Button("Cancel", role: .cancel) {
+                deleteAllChatsConfirmText = ""
+            }
+            Button("Delete", role: .destructive) {
+                confirmDeleteAllChats()
+            }
+        } message: {
+            Text("This permanently deletes every chat and cannot be undone. Type \"\(Self.deleteAllChatsConfirmPhrase)\" to confirm.")
+        }
+        .alert("Delete All Projects", isPresented: $showDeleteAllProjectsConfirm) {
+            TextField(Self.deleteAllProjectsConfirmPhrase, text: $deleteAllProjectsConfirmText)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            Button("Cancel", role: .cancel) {
+                deleteAllProjectsConfirmText = ""
+            }
+            Button("Delete", role: .destructive) {
+                confirmDeleteAllProjects()
+            }
+        } message: {
+            Text("This permanently deletes every project and cannot be undone. Type \"\(Self.deleteAllProjectsConfirmPhrase)\" to confirm.")
+        }
+        .alert("Manage Data", isPresented: Binding(
+            get: { dataActionMessage != nil },
+            set: { if !$0 { dataActionMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(dataActionMessage ?? "")
+        }
     }
 
-    private func refreshPasskeyBundles() async {
-        guard settings.isCloudSyncEnabled else {
-            passkeyBundles = []
-            passkeyBundleError = nil
+    private func confirmDeleteAllChats() {
+        let typed = deleteAllChatsConfirmText
+        deleteAllChatsConfirmText = ""
+        confirmBulkDelete(
+            typed: typed,
+            phrase: Self.deleteAllChatsConfirmPhrase,
+            itemsName: "chats",
+            setDeleting: { isDeletingAllChats = $0 }
+        ) {
+            try await chatViewModel.deleteAllChats()
+        }
+    }
+
+    private func confirmDeleteAllProjects() {
+        let typed = deleteAllProjectsConfirmText
+        deleteAllProjectsConfirmText = ""
+        confirmBulkDelete(
+            typed: typed,
+            phrase: Self.deleteAllProjectsConfirmPhrase,
+            itemsName: "projects",
+            setDeleting: { isDeletingAllProjects = $0 }
+        ) {
+            try await chatViewModel.deleteAllProjects()
+        }
+    }
+
+    /// Re-checks the typed phrase before deleting, mirroring the webapp's
+    /// defense-in-depth gate on its bulk delete actions.
+    private func confirmBulkDelete(
+        typed: String,
+        phrase: String,
+        itemsName: String,
+        setDeleting: @escaping (Bool) -> Void,
+        delete: @escaping () async throws -> Void
+    ) {
+        guard typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == phrase else {
+            dataActionMessage = "Deletion cancelled: the confirmation phrase didn't match."
             return
         }
-        do {
-            passkeyBundles = try await passkeyManager.listPasskeyBundles()
-            passkeyBundleError = nil
-        } catch {
-            // Keep the previous inventory: clearing it would make a
-            // load failure indistinguishable from "no passkeys
-            // registered" for a security-relevant list.
-            passkeyBundleError = "Couldn't load registered passkeys. Please try again later."
-        }
-    }
-
-    private func removeBundle(_ credentialId: String) async {
-        // One removal at a time: the in-flight UI state is single-valued
-        // and concurrent deletes would race it and duplicate requests.
-        guard removingPasskeyId == nil else { return }
-        removingPasskeyId = credentialId
-        defer { removingPasskeyId = nil }
-        do {
-            try await passkeyManager.removePasskeyBundle(credentialId: credentialId)
-            await refreshPasskeyBundles()
-        } catch {
-            passkeyBundleError = "Couldn't remove the passkey. Please try again."
+        setDeleting(true)
+        Task {
+            do {
+                try await delete()
+                dataActionMessage = "All \(itemsName) have been deleted."
+            } catch {
+                dataActionMessage = "Failed to delete all \(itemsName). Please try again."
+            }
+            setDeleting(false)
         }
     }
 
@@ -805,15 +785,18 @@ struct SettingsView: View {
                     }
                     showPremiumModal = true
                 }) {
-                    HStack {
-                        Text("Subscribe to Premium")
-                            .foregroundColor(.primary)
+                    HStack(spacing: 8) {
                         Spacer()
-                        Text("Unlock all models")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        Image(systemName: "sparkles")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Subscribe to Premium")
+                            .font(.body.weight(.semibold))
+                        Spacer()
                     }
+                    .foregroundColor(.white)
+                    .padding(.vertical, 4)
                 }
+                .listRowBackground(Color.tinfoilAccentDark)
             }
         } header: {
             Text("Subscription")
@@ -876,9 +859,9 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 accountSection
-                preferencesSection
-                chatSettingsSection
                 subscriptionSection
+                chatSettingsSection
+                preferencesSection
                 contactSection
                 legalSection
             }
@@ -895,9 +878,6 @@ struct SettingsView: View {
                     .accessibilityLabel("Close")
                 }
             }
-        }
-        .task(id: [settings.isCloudSyncEnabled, passkeyManager.passkeyActive]) {
-            await refreshPasskeyBundles()
         }
         .onAppear {
             // Reset navigation bar to use system colors for settings screens
@@ -926,11 +906,6 @@ struct SettingsView: View {
                         settings.selectedLanguage = profileManager.language
                     }
                     
-                    // Update max messages if different
-                    if profileManager.maxPromptMessages > 0 && profileManager.maxPromptMessages != settings.maxMessages {
-                        settings.maxMessages = profileManager.maxPromptMessages
-                    }
-                    
                     // Update custom prompt settings from single source of truth (ProfileManager)
                     settings.isUsingCustomPrompt = profileManager.isUsingCustomPrompt
                     settings.customSystemPrompt = profileManager.customSystemPrompt
@@ -949,11 +924,6 @@ struct SettingsView: View {
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
         // Keep UI settings in sync with ProfileManager when remote changes arrive
-        .onReceive(ProfileManager.shared.$maxPromptMessages) { newValue in
-            if newValue > 0 && settings.maxMessages != newValue {
-                settings.maxMessages = newValue
-            }
-        }
         .onReceive(ProfileManager.shared.$language) { newValue in
             if !newValue.isEmpty && settings.selectedLanguage != newValue {
                 settings.selectedLanguage = newValue
@@ -973,68 +943,6 @@ struct SettingsView: View {
             AuthenticationView()
                 .environment(Clerk.shared)
                 .environmentObject(authManager)
-        }
-        .alert("Sign Out", isPresented: $showSignOutConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Sign Out") {
-                Task {
-                    await performFullDataCleanup()
-                    await authManager.signOut()
-                    dismiss()
-                }
-            }
-        } message: {
-            if settings.isLocalOnlyModeEnabled {
-                Text(passkeyManager.passkeyActive
-                    ? "All local data will be cleared. You can recover your chats by signing back in.\n\n⚠️ Your local chats will be deleted forever."
-                    : "All local data will be cleared. You will need your encryption key to recover your chats.\n\n⚠️ Your local chats will be deleted forever.")
-            } else {
-                Text(passkeyManager.passkeyActive
-                    ? "All local data will be cleared. You can recover your chats by signing back in."
-                    : "All local data will be cleared. You will need your encryption key to recover your chats.")
-            }
-        }
-        .alert("Delete Account", isPresented: $showDeleteConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                Task {
-                    do {
-                        try await clerk.user?.delete()
-                        await performFullDataCleanup()
-                        await authManager.signOut()
-                        dismiss()
-                    } catch {
-                        accountDeletionError = error.localizedDescription
-                    }
-                }
-            }
-        } message: {
-            Text("Are you sure you want to delete your account? This action cannot be undone.")
-        }
-        .alert("Account Deletion Failed", isPresented: Binding(
-            get: { accountDeletionError != nil },
-            set: { if !$0 { accountDeletionError = nil } }
-        )) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(accountDeletionError ?? "")
-        }
-        .sheet(isPresented: $showProfileEditor) {
-            ProfileEditorView(
-                firstName: $editingFirstName,
-                lastName: $editingLastName,
-                isUpdating: $isUpdatingProfile,
-                errorMessage: $profileUpdateError,
-                onSave: {
-                    Task {
-                        await updateProfile()
-                    }
-                },
-                onCancel: {
-                    showProfileEditor = false
-                }
-            )
-            .environment(clerk)
         }
         .sheet(isPresented: $showPremiumModal) {
             PaywallView(displayCloseButton: true)

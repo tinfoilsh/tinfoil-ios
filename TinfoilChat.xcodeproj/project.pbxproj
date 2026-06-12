@@ -574,7 +574,7 @@
 			repositoryURL = "https://github.com/tinfoilsh/textual";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.0.6;
+				minimumVersion = 0.0.7;
 			};
 		};
 		99EEFB192F9EE9E8005B3D75 /* XCRemoteSwiftPackageReference "tinfoil-swift" */ = {

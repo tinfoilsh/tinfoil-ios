@@ -21,6 +21,17 @@ enum PasskeyRecoveryResult {
     case recoveryFailed
 }
 
+// MARK: - KeyMismatchResolution
+
+/// Outcome of reconciling a loaded local CEK against the enclave's
+/// registered key at launch.
+enum KeyMismatchResolution {
+    case noMismatch
+    case resolvedSilently
+    case passkeyPromptShown
+    case manualRecoveryRequired
+}
+
 // MARK: - PasskeyManager
 
 @MainActor
@@ -151,6 +162,53 @@ final class PasskeyManager: ObservableObject {
 
         passkeySetupAvailable = true
         return .manualRecoveryRequired
+    }
+
+    /// Reconcile a loaded local CEK that derives a different key id
+    /// than the enclave's registered key. A stale device in that state
+    /// can never write or migrate, so route it onto the registered key:
+    /// try a silent passkey unlock first, surface the recovery-choice
+    /// sheet when the key has bundles but the silent ceremony failed,
+    /// and report `manualRecoveryRequired` when the key was adopted
+    /// bundleless (e.g. by the migration path on another device) so the
+    /// caller can open manual key entry. The replaced local key is kept
+    /// in the key history, so the next migration sweep can still rewrap
+    /// rows sealed under it.
+    func resolveKeyMismatchAtLaunch() async -> KeyMismatchResolution {
+        guard let cek = try? EncryptionService.shared.getKeyBytesOrThrow(),
+              let localKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek) else {
+            return .noMismatch
+        }
+        guard let state = try? await SyncEnclaveAPI.keyCurrent(),
+              let remoteKeyId = state.keyId,
+              remoteKeyId != localKeyId else {
+            return .noMismatch
+        }
+
+        guard !state.bundles.isEmpty else {
+            return .manualRecoveryRequired
+        }
+
+        let result = await PasskeyKeyFlow.unlockFromServer(
+            prefer: UserDefaults.standard.string(
+                forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId
+            ),
+            silent: true
+        )
+        if case .success(let recoveredCek, let keyIdHex, _, _) = result {
+            do {
+                try await applyRecoveredCek(cek: recoveredCek)
+            } catch {
+                showPasskeyRecoveryChoice = true
+                return .passkeyPromptShown
+            }
+            persistEnclaveKeyId(keyIdHex)
+            activatePasskey()
+            onKeyRefreshedFromBackup?()
+            return .resolvedSilently
+        }
+        showPasskeyRecoveryChoice = true
+        return .passkeyPromptShown
     }
 
     /// Apply a successful passkey unlock/recovery result to local state,

@@ -150,9 +150,8 @@ struct ProjectPage: View {
                         .foregroundColor(.primary)
                         .lineLimit(1)
                     if !chat.isBlankChat {
-                        Text(relativeTimeString(from: chat.createdAt))
+                        timestampText(for: chat)
                             .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 }
                 Spacer()
@@ -169,6 +168,7 @@ struct ProjectPage: View {
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+            .tint(.red)
             Button {
                 Task {
                     await viewModel.removeChatFromProject(chatId: chat.id)
@@ -212,6 +212,17 @@ struct ProjectPage: View {
         } else {
             return "\(Int(difference / 604800))w ago"
         }
+    }
+
+    private func timestampText(for chat: Chat) -> Text {
+        let created = relativeTimeString(from: chat.createdAt)
+        let updated = relativeTimeString(from: chat.updatedAt)
+        let createdText = Text(created)
+            .foregroundColor(Color(UIColor.secondaryLabel))
+        guard updated != created else { return createdText }
+        return createdText
+            + Text(" · Updated \(updated.lowercased())")
+            .foregroundColor(Color(UIColor.tertiaryLabel))
     }
 }
 
@@ -373,6 +384,7 @@ struct ProjectDocumentsView: View {
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+            .tint(.red)
         }
     }
 

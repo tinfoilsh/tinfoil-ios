@@ -13,7 +13,6 @@ struct OptimizedChatListView: View {
     let isLoading: Bool
     let onRequestSignIn: () -> Void
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
-    @ObservedObject private var settings = SettingsManager.shared
     @Binding var messageText: String
 
     @State private var isAtBottom = true
@@ -23,9 +22,16 @@ struct OptimizedChatListView: View {
     @State private var lastAIMessageID: String? = nil
     @State private var scrollTrigger = UUID()
     @State private var keyboardObservers: [Any] = []
+    @State private var archivedMessagesStartIndex = 0
 
-    private var archivedMessagesStartIndex: Int {
-        max(0, messages.count - settings.maxMessages)
+    /// Token estimation walks every message, so the result is cached and
+    /// refreshed only when the conversation, model, or message count changes
+    /// instead of on every body evaluation during streaming.
+    private func refreshArchivedMessagesStartIndex() {
+        archivedMessagesStartIndex = TokenEstimation.findContextStartIndex(
+            messages: messages,
+            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow)
+        )
     }
 
     private var visibleMessages: ArraySlice<Message> {
@@ -101,12 +107,17 @@ struct OptimizedChatListView: View {
         }
         .onAppear {
             setupKeyboardObservers()
+            refreshArchivedMessagesStartIndex()
         }
         .onDisappear {
             removeKeyboardObservers()
             viewModel.isScrollInteractionActive = false
         }
+        .onChange(of: viewModel.currentModel.id) { _, _ in
+            refreshArchivedMessagesStartIndex()
+        }
         .onChange(of: messages.count) { oldCount, newCount in
+            refreshArchivedMessagesStartIndex()
             if newCount > oldCount {
                 let newMessages = messages.suffix(newCount - oldCount)
                 let hasUserMessage = newMessages.contains { $0.role == .user }
@@ -124,6 +135,7 @@ struct OptimizedChatListView: View {
             }
         }
         .onChange(of: viewModel.currentChat?.createdAt) { _, _ in
+            refreshArchivedMessagesStartIndex()
             userHasScrolled = false
             viewModel.isScrollInteractionActive = false
 

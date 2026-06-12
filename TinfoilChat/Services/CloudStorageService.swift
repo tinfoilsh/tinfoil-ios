@@ -573,48 +573,56 @@ class CloudStorageService: ObservableObject {
 
     // MARK: - Helpers
 
-    private func attachInlineContent(_ conversations: inout [RemoteChat]) async {
-        guard let keys = CEKEncoding.pullKeysIfAvailable() else { return }
+    /// Pull the full content for the given chats and merge it into the
+    /// array in place. Requests are batched so payloads stay bounded no
+    /// matter how many chats need content. Chats whose pull fails keep
+    /// metadata only; callers fall back to per-chat downloads.
+    func attachInlineContent(_ conversations: inout [RemoteChat]) async {
+        guard !conversations.isEmpty,
+              let keys = CEKEncoding.pullKeysIfAvailable() else { return }
         let ids = conversations.map(\.id)
-        do {
-            let response = try await SyncEnclaveAPI.pull(
-                EnclavePullRequest(
-                    scope: .chat,
-                    ids: ids,
-                    all: nil,
-                    cursor: nil,
-                    limit: nil,
-                    keys: keys
+        var pulledById: [String: (content: String, syncVersion: Int?)] = [:]
+        for batchStart in stride(from: 0, to: ids.count, by: Constants.SyncEnclave.pullBatchSize) {
+            let batch = Array(ids[batchStart..<min(batchStart + Constants.SyncEnclave.pullBatchSize, ids.count)])
+            do {
+                let response = try await SyncEnclaveAPI.pull(
+                    EnclavePullRequest(
+                        scope: .chat,
+                        ids: batch,
+                        all: nil,
+                        cursor: nil,
+                        limit: nil,
+                        keys: keys
+                    )
                 )
+                for item in response.items {
+                    if !item.ok { continue }
+                    guard let b64 = item.plaintext,
+                          let data = Data(base64Encoded: b64),
+                          let content = String(data: data, encoding: .utf8) else { continue }
+                    pulledById[item.id] = (content, etagToSyncVersion(item.etag))
+                }
+            } catch {
+                // Listing succeeded; surface only metadata when content
+                // pulls fail. Callers fall back to per-chat downloads.
+            }
+        }
+        for index in conversations.indices {
+            let existing = conversations[index]
+            guard let pulled = pulledById[existing.id] else { continue }
+            conversations[index] = RemoteChat(
+                id: existing.id,
+                key: existing.key,
+                createdAt: existing.createdAt,
+                updatedAt: existing.updatedAt,
+                title: existing.title,
+                messageCount: existing.messageCount,
+                syncVersion: pulled.syncVersion ?? existing.syncVersion,
+                size: existing.size,
+                content: pulled.content,
+                formatVersion: 2,
+                projectId: existing.projectId
             )
-            var pulledById: [String: (content: String, syncVersion: Int?)] = [:]
-            for item in response.items {
-                if !item.ok { continue }
-                guard let b64 = item.plaintext,
-                      let data = Data(base64Encoded: b64),
-                      let content = String(data: data, encoding: .utf8) else { continue }
-                pulledById[item.id] = (content, etagToSyncVersion(item.etag))
-            }
-            for index in conversations.indices {
-                let existing = conversations[index]
-                guard let pulled = pulledById[existing.id] else { continue }
-                conversations[index] = RemoteChat(
-                    id: existing.id,
-                    key: existing.key,
-                    createdAt: existing.createdAt,
-                    updatedAt: existing.updatedAt,
-                    title: existing.title,
-                    messageCount: existing.messageCount,
-                    syncVersion: pulled.syncVersion ?? existing.syncVersion,
-                    size: existing.size,
-                    content: pulled.content,
-                    formatVersion: 2,
-                    projectId: existing.projectId
-                )
-            }
-        } catch {
-            // Listing succeeded; surface only metadata when content
-            // pulls fail. Callers fall back to per-chat downloads.
         }
     }
 

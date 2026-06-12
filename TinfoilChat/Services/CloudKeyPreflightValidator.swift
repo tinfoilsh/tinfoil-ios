@@ -2,12 +2,14 @@
 //  CloudKeyPreflightValidator.swift
 //  TinfoilChat
 //
-//  Validates that the locally-loaded primary CEK matches the
-//  user's existing cloud data by probing the enclave directly.
-//  With the v2 sync architecture, validation collapses to "ask the
-//  enclave to unseal a row with this CEK and check whether it
-//  refuses". The enclave returns UNKNOWN_KEY when the supplied key
-//  doesn't match, and plaintext otherwise.
+//  Validates that the locally-loaded primary CEK is consistent with
+//  what the enclave reports as the user's current key. The enclave
+//  owns key identity — the authoritative answer is "does the local
+//  CEK derive the same key id the enclave has registered?". Legacy
+//  (un-keyed) data never blocks the local key: which rows a key can
+//  unseal is only provable by decrypting, and the migration sweep is
+//  self-guarding — the enclave rewraps only rows it successfully
+//  decrypts, leaving the rest on cooldown.
 //
 
 import Foundation
@@ -22,16 +24,6 @@ enum CloudRemoteState {
     case empty
     case exists
     case unknown
-}
-
-/// Result of probing the local key-set against existing remote rows.
-/// Mirrors the webapp's `LegacyKeyProbeOutcome` so both platforms reach
-/// the same verdict when deciding whether a key may be bound.
-enum LocalKeyProbeOutcome {
-    case decryptable
-    case undecryptable
-    case noSample
-    case transientFailure
 }
 
 struct CloudKeyValidationResult {
@@ -49,12 +41,6 @@ final class CloudKeyPreflightValidator {
     private let profileSync = ProfileSyncService.shared
     private let cloudStorage = CloudStorageService.shared
     private let encryptionService = EncryptionService.shared
-
-    /// Every data scope the probe samples, matching the webapp's
-    /// `LEGACY_KEY_PROBE_SCOPES`. Project data can exist without any
-    /// profile or chat, so all four must be checked before concluding
-    /// the remote is empty.
-    private static let probeScopes: [SyncScope] = [.chat, .profile, .project, .projectDocument]
 
     private init() {}
 
@@ -78,92 +64,53 @@ final class CloudKeyPreflightValidator {
         }
     }
 
-    /// Validate the currently-loaded key-set by asking the enclave to
-    /// unseal a sample of real rows across every data scope. A row the
-    /// keys cannot open (`UNKNOWN_KEY`) blocks binding even when other
-    /// rows decrypt; a decryptable sample confirms the key; an empty
-    /// sample means there is nothing to strand. Mirrors the webapp's
-    /// shared decrypt probe so both platforms gate identically.
+    /// Validate the local CEK against the enclave's current key id.
+    ///
+    ///  - No local key loaded                    → unknown / canWrite=false
+    ///  - Enclave unreachable                    → unknown / canWrite=false
+    ///  - No remote key and no data              → empty   / canWrite=true
+    ///  - Legacy data but no registered key      → exists  / canWrite=true
+    ///  - Local key id matches the enclave's     → exists  / canWrite=true
+    ///  - Local key id differs from the enclave  → exists  / canWrite=false
+    ///
+    /// Legacy (un-keyed) data never blocks the local key: which rows the
+    /// key can actually unseal is only provable by decrypting, and the
+    /// migration sweep is self-guarding — the enclave rewraps only rows
+    /// it successfully decrypts, leaving the rest on cooldown. Blocking
+    /// on a decrypt probe produced false negatives for mixed-key v1
+    /// accounts (rows sealed under several historical keys) and silently
+    /// prevented any migration at all. Mirrors the webapp's preflight.
     func validateCurrentPrimaryKey() async -> CloudKeyValidationResult {
-        guard encryptionService.getKey() != nil else {
+        let cek: Data
+        do {
+            cek = try encryptionService.getKeyBytesOrThrow()
+        } catch {
             return unknownResult(message: CloudKeyValidationMessages.noEncryptionKey)
         }
 
-        switch await probeKeysAcrossScopes(CEKEncoding.keyValidationProbeKeys()) {
-        case .undecryptable:
-            return blockedResult()
-        case .transientFailure:
+        let current: EnclaveKeyCurrentResponse
+        do {
+            current = try await SyncEnclaveAPI.keyCurrent()
+        } catch {
             return unknownResult(message: CloudKeyValidationMessages.unknownRemoteState)
-        case .decryptable:
-            return validResult()
-        case .noSample:
+        }
+
+        guard let remoteKeyId = current.keyId else {
+            if current.hasData {
+                return validResult()
+            }
             return CloudKeyValidationResult(
                 remoteState: .empty,
                 canWrite: true,
                 message: nil
             )
         }
-    }
 
-    /// Pull a small sample from each data scope with the supplied
-    /// candidate key-set and classify whether those keys can unseal
-    /// whatever the enclave already holds. The probe never
-    /// short-circuits on the first decryptable row: a single
-    /// `UNKNOWN_KEY` anywhere is enough to refuse the bind, since binding
-    /// a key that cannot open existing rows would strand that data. A
-    /// transient pull failure is not proof of mismatch, so it is
-    /// reported separately and the caller treats it as retryable.
-    /// Also used by recovery flows that must verify a recovered CEK
-    /// against existing cloud data before binding it to the enclave.
-    func probeKeysAcrossScopes(_ keys: [EnclavePullKey]) async -> LocalKeyProbeOutcome {
-        guard !keys.isEmpty else { return .undecryptable }
-
-        var sawDecryptable = false
-        var sawUndecryptable = false
-
-        for scope in Self.probeScopes {
-            let request: EnclavePullRequest
-            if scope == .profile {
-                request = EnclavePullRequest(
-                    scope: .profile,
-                    ids: ["profile"],
-                    all: nil,
-                    cursor: nil,
-                    limit: nil,
-                    keys: keys
-                )
-            } else {
-                request = EnclavePullRequest(
-                    scope: scope,
-                    ids: nil,
-                    all: true,
-                    cursor: nil,
-                    limit: Constants.Sync.keyValidationProbeCount,
-                    keys: keys
-                )
-            }
-
-            do {
-                let response = try await SyncEnclaveAPI.pull(request)
-                for item in response.items {
-                    if item.ok {
-                        sawDecryptable = true
-                    } else if item.code == WireCodes.unknownKey {
-                        sawUndecryptable = true
-                    }
-                }
-            } catch {
-                // A row an earlier scope already failed to unseal is
-                // definitive proof of mismatch; a later transient pull
-                // failure must not soften that verdict into "retryable".
-                if sawUndecryptable { return .undecryptable }
-                return .transientFailure
-            }
+        guard let localKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek) else {
+            return blockedResult()
         }
 
-        if sawUndecryptable { return .undecryptable }
-        if sawDecryptable { return .decryptable }
-        return .noSample
+        return localKeyId == remoteKeyId ? validResult() : blockedResult()
     }
 
     private func unknownResult(message: String) -> CloudKeyValidationResult {

@@ -96,6 +96,10 @@ private struct TimelineEventsView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    // Hug the text's ideal height so the greedy connector
+                    // line cannot stretch the row when a large height is
+                    // proposed (e.g. by the streaming cell buffer).
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }

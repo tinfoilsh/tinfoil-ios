@@ -15,7 +15,6 @@ class ProfileManager: ObservableObject {
     
     // Published properties for UI binding
     @Published var isDarkMode: Bool = true
-    @Published var maxPromptMessages: Int = Constants.Context.defaultMaxMessages
     @Published var language: String = "English"
     
     // Personalization settings
@@ -135,7 +134,6 @@ class ProfileManager: ObservableObject {
     private func createProfileData() -> ProfileData {
         return ProfileData(
             isDarkMode: isDarkMode,
-            maxPromptMessages: maxPromptMessages,
             language: language,
             nickname: nickname,
             profession: profession,
@@ -155,9 +153,6 @@ class ProfileManager: ObservableObject {
         
         if let isDarkMode = profile.isDarkMode {
             self.isDarkMode = isDarkMode
-        }
-        if let maxPromptMessages = profile.maxPromptMessages {
-            self.maxPromptMessages = maxPromptMessages
         }
         if let language = profile.language {
             self.language = language
@@ -202,13 +197,6 @@ class ProfileManager: ObservableObject {
             }
             .store(in: &cancellables)
         
-        $maxPromptMessages
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard !(self?.isApplyingProfile ?? false) else { return }
-                self?.saveToKeychain()
-            }
-            .store(in: &cancellables)
         
         $language
             .dropFirst()
@@ -467,7 +455,6 @@ class ProfileManager: ObservableObject {
         }
         
         return p1.isDarkMode != p2.isDarkMode ||
-               p1.maxPromptMessages != p2.maxPromptMessages ||
                p1.language != p2.language ||
                p1.nickname != p2.nickname ||
                p1.profession != p2.profession ||
@@ -537,7 +524,6 @@ class ProfileManager: ObservableObject {
     func clearProfile() {
         // Reset to defaults
         isDarkMode = true
-        maxPromptMessages = Constants.Context.defaultMaxMessages
         language = "English"
         nickname = ""
         profession = ""

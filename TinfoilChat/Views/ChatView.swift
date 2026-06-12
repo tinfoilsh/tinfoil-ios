@@ -281,12 +281,12 @@ struct ChatContainer: View {
                         HStack(spacing: 6) {
                             Image(systemName: "folder")
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.accentColor)
+                                .foregroundColor(toolbarContentColor)
                             Text(activeProject.name)
                                 .font(.caption)
                                 .fontWeight(.semibold)
                                 .lineLimit(1)
-                                .foregroundColor(.accentColor)
+                                .foregroundColor(toolbarContentColor)
                         }
                         .opacity(isVerificationBadgeExpanded ? 0 : 1)
                         .accessibilityElement(children: .combine)
@@ -296,11 +296,11 @@ struct ChatContainer: View {
 
                     if viewModel.isTemporaryMode && viewModel.activeProject == nil {
                         HStack(spacing: 6) {
-                            GhostIcon(size: 14, color: .accentColor, style: .filled)
+                            GhostIcon(size: 14, color: toolbarContentColor, style: .filled)
                             Text("Temporary")
                                 .font(.caption)
                                 .fontWeight(.semibold)
-                                .foregroundColor(.accentColor)
+                                .foregroundColor(toolbarContentColor)
                         }
                         .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
                         .accessibilityElement(children: .combine)
@@ -326,7 +326,7 @@ struct ChatContainer: View {
                     Button(action: toggleTemporaryMode) {
                         GhostIcon(
                             size: 17,
-                            color: viewModel.isTemporaryMode ? .accentColor : toolbarContentColor,
+                            color: toolbarContentColor,
                             style: viewModel.isTemporaryMode ? .filled : .outline
                         )
                     }

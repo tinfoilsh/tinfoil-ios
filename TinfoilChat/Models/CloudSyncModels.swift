@@ -340,7 +340,6 @@ struct ProfileData: Codable {
     var themeMode: String?
     
     // Chat settings
-    var maxPromptMessages: Int?
     var language: String?
     
     // Personalization settings

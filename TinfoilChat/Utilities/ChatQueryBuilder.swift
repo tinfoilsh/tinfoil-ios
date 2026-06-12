@@ -30,7 +30,8 @@ struct ChatQueryBuilder {
     ///   - systemPrompt: The base system prompt with placeholders already replaced
     ///   - rules: Additional rules to include (will be combined with system prompt based on model)
     ///   - conversationMessages: The message history from the chat
-    ///   - maxMessages: Maximum number of messages to include from history
+    ///   - contextWindow: The model's context window (e.g. "64k tokens") used
+    ///     to budget how much history is included
     ///   - stream: Whether to stream the response (default: true)
     ///   - webSearchEnabled: Whether to enable web search for this query (default: false)
     ///   - isMultimodal: Whether the current model supports image content parts
@@ -50,7 +51,7 @@ struct ChatQueryBuilder {
         systemPrompt: String,
         rules: String,
         conversationMessages: [Message],
-        maxMessages: Int,
+        contextWindow: String? = nil,
         stream: Bool = true,
         webSearchEnabled: Bool = false,
         isMultimodal: Bool = false,
@@ -81,8 +82,7 @@ struct ChatQueryBuilder {
             messages.append(.system(.init(content: .textContent(fullPrompt))))
         }
 
-        // Add conversation history
-        let recentMessages = Array(conversationMessages.suffix(maxMessages))
+        let recentMessages = TokenEstimation.selectMessagesWithinBudget(conversationMessages, contextWindow: contextWindow)
         var hasAddedSystemInstructions = useSystemRole
 
         for msg in recentMessages {
