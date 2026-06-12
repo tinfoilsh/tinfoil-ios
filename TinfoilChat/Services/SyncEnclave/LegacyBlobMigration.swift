@@ -82,7 +82,7 @@ enum LegacyBlobMigration {
             // passkey, or only an un-promoted legacy passkey, so none of
             // the passkey/recovery flows that register the key ever run,
             // and nothing else would migrate them. Adopt the local CEK as
-            // the current key here (bundleless, recovery) so the gate below
+            // the current key here (created_via=recovery) so the gate below
             // passes. Safe because we already hold the CEK and a legacy
             // passkey wrapping it stays promotable afterwards. Mirrors the
             // webapp's migration adoption.
@@ -192,16 +192,19 @@ enum LegacyBlobMigration {
     /// or only an un-promoted legacy passkey — could never migrate:
     /// nothing registers their CEK, so every rewrap is gated out.
     ///
-    /// Registered bundleless with created_via=recovery, which the
-    /// controlplane accepts non-destructively over legacy (key_id NULL)
-    /// rows. The caller only invokes this when no key is registered
-    /// (key_id == nil) and legacy data exists, so no enclave bundle can
-    /// exist; a legacy passkey wrapping this same CEK stays promotable
-    /// afterwards (recoverFromLegacyPasskey adds its bundle), so adopting
-    /// never strands a backup. register-key's if_match='*' fails safely on
+    /// Registered with created_via=recovery, which the controlplane
+    /// accepts non-destructively over legacy (key_id NULL) rows. When
+    /// this device holds a cached passkey PRF for a credential still on
+    /// the user's account, the CEK is wrapped under it and registered
+    /// with an initial bundle so the adopted key is passkey-recoverable
+    /// from day one; otherwise it is registered bundleless and a legacy
+    /// passkey wrapping this same CEK stays promotable afterwards
+    /// (recoverFromLegacyPasskey adds its bundle), so adopting never
+    /// strands a backup. register-key's if_match='*' fails safely on
     /// a concurrent register. Returns true when the key was adopted.
     /// Mirrors the webapp's migration adoption.
     private static func adoptLocalKeyForMigration(keyB64: String) async -> Bool {
+        let initialBundle = await initialBundleFromCachedPrf()
         do {
             _ = try await SyncEnclaveAPI.registerKey(
                 EnclaveKeyRegisterRequest(
@@ -209,7 +212,7 @@ enum LegacyBlobMigration {
                     ifMatch: IfMatchSentinels.anyKey,
                     createdVia: SyncEnclaveCreatedVia.recovery.rawValue,
                     idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                    initialBundle: nil
+                    initialBundle: initialBundle
                 )
             )
         } catch {
@@ -219,9 +222,48 @@ enum LegacyBlobMigration {
             return false
         }
         #if DEBUG
-        print("[LegacyBlobMigration] adopted local key as current to enable migration")
+        print("[LegacyBlobMigration] adopted local key as current to enable migration (bundle: \(initialBundle != nil))")
         #endif
         return true
+    }
+
+    /// Best-effort initial bundle for key adoption: wrap the CEK being
+    /// registered under the KEK derived from this device's cached
+    /// passkey PRF. Adoption must never be blocked by bundle problems,
+    /// so every failure path returns nil and the caller registers
+    /// bundleless.
+    ///
+    /// The cached credential is only trusted when it still appears in
+    /// the user's stored credentials — a stale cache (passkey deleted
+    /// or re-created) must not attach an unopenable bundle, which would
+    /// make the account look passkey-recoverable when it is not.
+    private static func initialBundleFromCachedPrf() async -> EnclaveKeyRegisterBundleInput? {
+        guard let cached = await PasskeyService.shared.getCachedPrfResult() else {
+            return nil
+        }
+        let entries = await LegacyPasskeyCredentials.fetch()
+        guard entries.contains(where: { $0.id == cached.credentialId }) else {
+            return nil
+        }
+        do {
+            let cek = try EncryptionService.shared.getKeyBytesOrThrow()
+            let kek = PasskeyService.deriveKeyEncryptionKey(from: cached.prfOutput)
+            let bundle = try SyncEnclaveKeyBundle.wrapCek(
+                credentialId: cached.credentialId,
+                kek: kek,
+                cek: cek
+            )
+            return EnclaveKeyRegisterBundleInput(
+                credentialId: bundle.credentialId,
+                kekIvHex: bundle.kekIvHex,
+                encryptedKeysHex: bundle.wrappedKeyHex
+            )
+        } catch {
+            #if DEBUG
+            print("[LegacyBlobMigration] could not build initial bundle for adoption: \(error)")
+            #endif
+            return nil
+        }
     }
 
     private static func shouldKeepPolling(_ resp: EnclaveMigrateAllResponse?) -> Bool {
