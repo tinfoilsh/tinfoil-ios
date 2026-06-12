@@ -25,6 +25,7 @@ struct ChatSidebar: View {
     @State private var isChatsExpanded: Bool = true
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var cloudSync = CloudSyncService.shared
+    @ObservedObject private var syncHealth = SyncHealthStore.shared
 
     private var activeTab: ChatStorageTab {
         viewModel.activeStorageTab
@@ -205,6 +206,7 @@ struct ChatSidebar: View {
                     createdTimeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
                     updatedTimeString: chat.isBlankChat ? "" : updatedTimeString(for: chat),
                     isSyncing: !chat.isBlankChat && cloudSync.pendingUploadChatIds.contains(chat.id),
+                    syncFailed: !chat.isBlankChat && syncHealth.failedChats[chat.id] != nil,
                     onSelect: {
                         viewModel.selectChat(chat)
                     },
@@ -288,6 +290,19 @@ struct ChatSidebar: View {
         }
     }
 
+    private var settingsGearIcon: some View {
+        Image(systemName: "gear")
+            .overlay(alignment: .topTrailing) {
+                if syncHealth.needsAttention() {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 8, height: 8)
+                        .offset(x: 4, y: -4)
+                        .accessibilityLabel("Cloud sync needs attention")
+                }
+            }
+    }
+
     @ViewBuilder
     private var settingsButton: some View {
         if #available(iOS 26, *) {
@@ -295,7 +310,7 @@ struct ChatSidebar: View {
                 viewModel.showSidebarSettings = true
             } label: {
                 HStack {
-                    Image(systemName: "gear")
+                    settingsGearIcon
                     Text("Settings")
                 }
                 .padding(.vertical, 12)
@@ -308,7 +323,7 @@ struct ChatSidebar: View {
                 viewModel.showSidebarSettings = true
             } label: {
                 HStack {
-                    Image(systemName: "gear")
+                    settingsGearIcon
                     Text("Settings")
                 }
                 .padding(.vertical, 12)
@@ -545,6 +560,7 @@ struct ChatListItem: View {
     let createdTimeString: String
     let updatedTimeString: String
     var isSyncing: Bool = false
+    var syncFailed: Bool = false
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -617,7 +633,11 @@ struct ChatListItem: View {
                                 + Text(updatedTimeString.isEmpty ? "" : " · \(updatedTimeString)")
                                 .foregroundColor(Color(UIColor.tertiaryLabel)))
                                 .font(.caption)
-                            if isSyncing {
+                            if syncFailed {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .font(.caption2)
+                                    .foregroundColor(.orange)
+                            } else if isSyncing {
                                 Image(systemName: "icloud.and.arrow.up")
                                     .font(.caption2)
                                     .foregroundColor(.blue)
@@ -672,7 +692,9 @@ struct ChatListItem: View {
                 components.append(updatedTimeString)
             }
         }
-        if isSyncing {
+        if syncFailed {
+            components.append("Couldn't sync with cloud")
+        } else if isSyncing {
             components.append("Syncing with cloud")
         }
         return components.joined(separator: ", ")

@@ -15,6 +15,7 @@ struct CloudSyncSettingsView: View {
     @ObservedObject var authManager: AuthManager
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var passkeyManager = PasskeyManager.shared
+    @ObservedObject private var syncHealth = SyncHealthStore.shared
 
     private var cloudSyncBinding: Binding<Bool> {
         Binding(
@@ -116,6 +117,8 @@ struct CloudSyncSettingsView: View {
                             }
                         }
                     }
+
+                    syncHealthRows
 
                     if settings.isCloudSyncEnabled &&
                         CloudKeyAuthorizationStore.shared.currentMode() == nil {
@@ -258,6 +261,71 @@ struct CloudSyncSettingsView: View {
             }
     }
     
+    /// Gate-driven status rows from the sync-health store: explains
+    /// why sync is blocked, offers the recovery wizard for key
+    /// problems, and counts chats stuck on terminal upload failures.
+    @ViewBuilder
+    private var syncHealthRows: some View {
+        switch syncHealth.gate {
+        case .actionRequired(let reason, _):
+            VStack(alignment: .leading, spacing: 8) {
+                Label(actionRequiredMessage(for: reason), systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundColor(reason == .accountBlocked ? .red : .orange)
+                if reason != .accountBlocked {
+                    Button {
+                        viewModel.cloudSyncOnboardingMode = .recovery
+                        viewModel.showCloudSyncOnboarding = true
+                    } label: {
+                        Text("Recover Key")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.orange)
+                            .cornerRadius(6)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        case .paused(let reason, _):
+            Label(
+                reason == .attestation
+                    ? "The sync server couldn't be verified. Retrying automatically."
+                    : "Having trouble reaching the cloud. Retrying automatically.",
+                systemImage: "exclamationmark.triangle"
+            )
+            .font(.caption)
+            .foregroundColor(.orange)
+        case .ok:
+            EmptyView()
+        }
+
+        if !syncHealth.failedChats.isEmpty {
+            Text(
+                syncHealth.failedChats.count == 1
+                    ? "1 chat couldn't be synced. It's marked in the sidebar."
+                    : "\(syncHealth.failedChats.count) chats couldn't be synced. They're marked in the sidebar."
+            )
+            .font(.caption)
+            .foregroundColor(.orange)
+        }
+    }
+
+    private func actionRequiredMessage(for reason: SyncHealthStore.ActionReason) -> String {
+        switch reason {
+        case .keyRecovery:
+            return "Sync is paused because your encryption key needs to be recovered."
+        case .keyMismatch:
+            return "This device's encryption key is out of date and needs to be recovered."
+        case .keyConflict:
+            return "Your cloud data is protected by a different key than this device's."
+        case .accountBlocked:
+            return "Sync is unavailable for this account. Please contact support if this persists."
+        }
+    }
+
     @ViewBuilder
     private var passkeySection: some View {
         if passkeyManager.passkeyActive

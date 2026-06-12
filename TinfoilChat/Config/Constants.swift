@@ -157,6 +157,12 @@ enum Constants {
         // both clients keep the same drain budget.
         static let migrationPollIntervalSeconds: TimeInterval = 2.0
         static let migrationPollTimeoutSeconds: TimeInterval = 15 * 60.0
+
+        // How long sync must stay paused before the UI escalates from
+        // the quiet settings status line to the attention badge.
+        // Transient network blips and enclave restarts resolve well
+        // inside this window; anything longer deserves attention.
+        static let pausedAttentionWindowSeconds: TimeInterval = 5 * 60.0
     }
 
     enum Verification {
