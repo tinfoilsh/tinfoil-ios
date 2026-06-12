@@ -7,8 +7,7 @@
 
 import SwiftUI
 
-/// Context window usage for the current conversation against the selected
-/// model's token budget. Mirrors the webapp's `ContextUsage` shape.
+/// Mirrors the webapp's `ContextUsage` shape.
 struct ContextUsage {
     let percentage: Double
     let usedTokens: Int
