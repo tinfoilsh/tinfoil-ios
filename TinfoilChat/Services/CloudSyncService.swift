@@ -256,7 +256,13 @@ class CloudSyncService: ObservableObject {
             return false
         }
 
-        return localKeyId == remoteKeyId
+        if localKeyId == remoteKeyId {
+            // The enclave just confirmed the local key is authoritative,
+            // so any surfaced key problem is stale.
+            SyncHealthStore.shared.reportKeyHealthy()
+            return true
+        }
+        return false
     }
 
     private var emptyRemoteRegistration: Task<Bool, Never>?
@@ -437,9 +443,11 @@ class CloudSyncService: ObservableObject {
     /// Dispatch a sync-enclave error to the matching recovery
     /// surface. Re-throws for retryable cases so the coalescer can
     /// retry under the same idempotency key; swallows for
-    /// non-retryable cases after posting a notification so the
-    /// chat stays locallyModified and is picked up on the next
-    /// natural sync cycle without burning the retry budget.
+    /// non-retryable cases after reporting into the sync-health
+    /// store (which the settings status row and the sidebar badge
+    /// render) so the chat stays locallyModified and is picked up
+    /// on the next natural sync cycle without burning the retry
+    /// budget.
     private func handleUploadFailure(chatId: String, error: Error) async throws {
         let decision = EnclaveErrorRecovery.decide(error)
         #if DEBUG
@@ -449,26 +457,27 @@ class CloudSyncService: ObservableObject {
         case .retry:
             throw error
         case .refreshCurrentKeyAndRetry:
-            // Notify so a listener (e.g. PasskeyManager) refreshes
-            // the canonical enclave key, then re-throw so the
-            // coalescer retries under the same idempotency key.
-            // The retry replays after the listener (hopefully) has
-            // rotated the key; if it hasn't yet, the retry fails
-            // and the chat stays locallyModified for the next sync
-            // cycle.
-            postSyncEvent(.tinfoilSyncKeyRefreshNeeded)
+            // Surface the stale key, then re-throw so the coalescer
+            // retries under the same idempotency key. If a key
+            // refresh lands before retries exhaust, the retry
+            // succeeds and the healthy write gate clears the state;
+            // otherwise the chat stays locallyModified for the next
+            // sync cycle.
+            SyncHealthStore.shared.reportKeyActionRequired(.keyMismatch)
             throw error
         case .surfaceConflict:
-            postSyncEvent(.tinfoilSyncConflictDetected, userInfo: ["chatId": chatId])
             await resolveConflictByPullingRemote(chatId)
         case .surfaceExistingDataUnderOtherKey:
-            postSyncEvent(.tinfoilSyncExistingDataUnderOtherKey)
+            SyncHealthStore.shared.reportKeyActionRequired(.keyConflict)
         case .surfaceNotFound:
-            postSyncEvent(.tinfoilSyncChatNotFound, userInfo: ["chatId": chatId])
+            SyncHealthStore.shared.reportChatSyncFailed(
+                chatId,
+                message: "This chat no longer exists in the cloud"
+            )
         case .triggerRecoveryWizard:
-            postSyncEvent(.tinfoilSyncRecoveryNeeded)
+            SyncHealthStore.shared.reportKeyActionRequired(.keyRecovery)
         case .blockAllSync:
-            postSyncEvent(.tinfoilSyncAttestationFailed)
+            SyncHealthStore.shared.reportSyncPaused(.attestation)
         case .migrateLegacyAndRetry:
             // Re-throw so the coalescer retries the write. The legacy
             // re-seal runs out of band — on the next launch and right
@@ -478,15 +487,15 @@ class CloudSyncService: ObservableObject {
             // succeeds; otherwise the chat waits for the next cycle.
             throw error
         case .abort(let reason):
-            postSyncEvent(
-                .tinfoilSyncUploadAborted,
-                userInfo: ["chatId": chatId, "reason": reason.rawValue]
-            )
+            if reason == .forbidden {
+                SyncHealthStore.shared.reportKeyActionRequired(.accountBlocked)
+            } else {
+                SyncHealthStore.shared.reportChatSyncFailed(
+                    chatId,
+                    message: "This chat couldn't be synced"
+                )
+            }
         }
-    }
-
-    private func postSyncEvent(_ name: Notification.Name, userInfo: [String: Any]? = nil) {
-        NotificationCenter.default.post(name: name, object: nil, userInfo: userInfo)
     }
 
     /// Last-write-wins conflict resolution. Pulls the remote chat
@@ -551,6 +560,10 @@ class CloudSyncService: ObservableObject {
                     errors: result.errors
                 )
             } catch {
+                SyncHealthStore.shared.reportChatSyncFailed(
+                    chat.id,
+                    message: "This chat couldn't be synced"
+                )
                 result = SyncResult(
                     uploaded: result.uploaded,
                     downloaded: result.downloaded,
@@ -1710,6 +1723,7 @@ class CloudSyncService: ObservableObject {
             
             // Successfully deleted from cloud, can remove from tracker
             deletedChatsTracker.removeFromDeleted(chatId)
+            SyncHealthStore.shared.reportChatSynced(chatId)
             
         } catch {
             deletedChatsTracker.removeFromDeleted(chatId)
@@ -1781,6 +1795,7 @@ class CloudSyncService: ObservableObject {
             try await applyAttachmentRewrites(chatId: chat.id, rewrites: result.rewrites)
         }
         await markChatAsSynced(chat.id, version: newVersion)
+        SyncHealthStore.shared.reportChatSynced(chat.id)
     }
 
     /// Apply enclave-minted attachment ids/keys to the freshest local

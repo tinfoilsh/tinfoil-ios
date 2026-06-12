@@ -273,17 +273,3 @@ enum EnclaveErrorRecovery {
         return false
     }
 }
-
-/// Notification names for sync recovery surface events. UI
-/// subscribers (banners, modals, recovery wizard) post these to
-/// drive their own state. Mirrors the webapp's `tinfoil:sync-*`
-/// window CustomEvents.
-extension Notification.Name {
-    static let tinfoilSyncKeyRefreshNeeded          = Notification.Name("tinfoil.sync.keyRefreshNeeded")
-    static let tinfoilSyncRecoveryNeeded            = Notification.Name("tinfoil.sync.recoveryNeeded")
-    static let tinfoilSyncAttestationFailed         = Notification.Name("tinfoil.sync.attestationFailed")
-    static let tinfoilSyncExistingDataUnderOtherKey = Notification.Name("tinfoil.sync.existingDataUnderOtherKey")
-    static let tinfoilSyncChatNotFound              = Notification.Name("tinfoil.sync.chatNotFound")
-    static let tinfoilSyncUploadAborted             = Notification.Name("tinfoil.sync.uploadAborted")
-    static let tinfoilSyncConflictDetected          = Notification.Name("tinfoil.sync.conflictDetected")
-}

@@ -3260,6 +3260,7 @@ class ChatViewModel: ObservableObject {
         lastSyncDate = nil
         syncErrors = []
         isSyncing = false
+        SyncHealthStore.shared.reset()
         
         // Reset pagination state
         paginationToken = nil
