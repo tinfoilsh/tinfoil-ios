@@ -44,7 +44,11 @@ enum TokenEstimation {
 
     /// Estimate the prompt tokens contributed by a single message, including
     /// tool calls and attachment text. Thoughts are excluded because they are
-    /// never sent back in prompts.
+    /// never sent back in prompts. Search reasoning is counted even though
+    /// this app's query builder doesn't resend it yet: the webapp sends it
+    /// for multi-turn context and counts it, and matching its estimate keeps
+    /// the archive boundary identical across platforms (erring toward a
+    /// smaller prompt, never an overflow).
     static func estimateMessageTokens(_ message: Message) -> Int {
         var tokens = estimateTokenCount(message.content)
         if let searchReasoning = message.searchReasoning {
