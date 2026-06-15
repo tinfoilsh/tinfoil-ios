@@ -319,6 +319,14 @@ enum Constants {
             /// that the legacy v0/v1 decrypt path used to handle. The enclave
             /// rewraps any orphan rows server-side; the next sync repopulates.
             static let legacyCloudChatsEvicted = "tinfoil-migration-legacy-cloud-chats-evicted"
+            /// Per-user fingerprint (suffixed with the clerk user id) of the
+            /// migration candidate key set whose last completed sweep left
+            /// rows blocked under every key this client holds. While it
+            /// matches the current key set the launch sweep is skipped so a
+            /// doomed migrate-all is not re-driven every launch; a changed
+            /// key set no longer matches and the sweep runs again. Cleared
+            /// once a sweep fully migrates with nothing blocked.
+            static let migrationExhaustedKeyset = "tinfoil-migration-exhausted-keyset"
         }
 
         /// Legacy UserDefaults keys that should be purged on app
