@@ -17,6 +17,7 @@
 //  deltas — the enclave already owns the global counter.
 //
 
+import ClerkKit
 import Foundation
 
 struct ScopeMigrationResult {
@@ -101,6 +102,25 @@ enum LegacyBlobMigration {
             return .empty
         }
 
+        // Skip a sweep that already exhausted this exact candidate key
+        // set. A prior completed sweep that left rows blocked under every
+        // key this client holds will fail those same rows again (and
+        // re-stamp them on the controlplane) if retried with an unchanged
+        // key set. The gate clears the moment the key set changes (a
+        // newly recovered key has a different fingerprint), so a
+        // genuinely actionable retry still runs. Mirrors the webapp's
+        // migration key-set gate; the server 24h cooldown is the backstop.
+        let activeUserId = await Clerk.shared.user?.id
+        let keysetFingerprint = candidateKeySetFingerprint()
+        if let activeUserId, let keysetFingerprint,
+            loadExhaustedKeyset(activeUserId) == keysetFingerprint
+        {
+            #if DEBUG
+            print("[LegacyBlobMigration] skip: candidate key set already exhausted")
+            #endif
+            return .empty
+        }
+
         let keys = CEKEncoding.migrationKeys()
         let startedAt = Date()
         let pollInterval = Constants.Sync.migrationPollIntervalSeconds
@@ -148,6 +168,7 @@ enum LegacyBlobMigration {
         // that as a clean drain would clear the alternative keys after
         // nothing was rewrapped, stranding every legacy row.
         let jobFailed = lastResponse?.status == failedJobStatus
+        let completedSweep = (lastResponse?.partial == false) && !jobFailed
         if lastResponse?.partial != false || jobFailed {
             report.fullyMigrated = false
         }
@@ -156,16 +177,29 @@ enum LegacyBlobMigration {
         // though no scopes were touched.
         if snapshot.isEmpty {
             if let last = lastResponse, !last.partial, !jobFailed {
-                return MigrationReport(
+                let emptyDone = MigrationReport(
                     scopes: [],
                     totalMigrated: 0,
                     totalRemaining: 0,
                     totalBlocked: 0,
                     fullyMigrated: true
                 )
+                recordKeysetOutcome(
+                    userId: activeUserId,
+                    fingerprint: keysetFingerprint,
+                    report: emptyDone,
+                    completedSweep: true
+                )
+                return emptyDone
             }
             return .empty
         }
+        recordKeysetOutcome(
+            userId: activeUserId,
+            fingerprint: keysetFingerprint,
+            report: report,
+            completedSweep: completedSweep
+        )
         return report
     }
 
@@ -185,6 +219,69 @@ enum LegacyBlobMigration {
     }
 
     // MARK: - Private
+
+    /// Stable, non-secret fingerprint of the migration candidate key set
+    /// (primary plus alternatives) the way `CEKEncoding.migrationKeys()`
+    /// assembles it. Derived from each key's enclave key_id (a hex
+    /// digest, never the raw CEK), sorted and joined so the value is
+    /// order-independent and safe to persist. Returns nil when no
+    /// primary key is loaded. Mirrors the webapp's
+    /// `migrationKeySetFingerprint`.
+    private static func candidateKeySetFingerprint() -> String? {
+        let allKeys = EncryptionService.shared.getAllKeys()
+        guard let primary = allKeys.primary else { return nil }
+        // Mirror CEKEncoding.migrationKeys(): without a readable primary
+        // there is no candidate key set, so the fingerprint must be nil
+        // rather than one built from alternatives alone. Otherwise the
+        // gate would diverge from the sweep, which never runs without a
+        // primary at keys[0].
+        guard let primaryBytes = try? EncryptionService.shared.getAlternativeKeyBytes(primary),
+            let primaryId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: primaryBytes)
+        else { return nil }
+        var ids: [String] = [primaryId]
+        for alt in allKeys.alternatives where alt != primary {
+            guard let bytes = try? EncryptionService.shared.getAlternativeKeyBytes(alt),
+                let id = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: bytes)
+            else { continue }
+            ids.append(id)
+        }
+        return ids.sorted().joined(separator: ",")
+    }
+
+    private static func exhaustedKeysetStorageKey(_ userId: String) -> String {
+        Constants.StorageKeys.Migration.migrationExhaustedKeyset + "_" + userId
+    }
+
+    /// Persisted fingerprint of the candidate key set whose last completed
+    /// sweep left rows blocked, or nil when none is recorded.
+    private static func loadExhaustedKeyset(_ userId: String) -> String? {
+        UserDefaults.standard.string(forKey: exhaustedKeysetStorageKey(userId))
+    }
+
+    /// Persist or clear the exhausted-key-set fingerprint from a sweep
+    /// result. A completed sweep (not partial/failed) that still leaves
+    /// rows blocked marks this exact key set exhausted so later launches
+    /// skip the doomed re-sweep until the key set changes; a sweep that
+    /// fully migrates with nothing blocked clears the gate. A partial
+    /// sweep leaves the gate untouched so the next launch keeps making
+    /// progress.
+    private static func recordKeysetOutcome(
+        userId: String?,
+        fingerprint: String?,
+        report: MigrationReport,
+        completedSweep: Bool
+    ) {
+        guard let userId, !userId.isEmpty else { return }
+        let key = exhaustedKeysetStorageKey(userId)
+        let defaults = UserDefaults.standard
+        if report.fullyMigrated {
+            defaults.removeObject(forKey: key)
+            return
+        }
+        if completedSweep, report.totalBlocked > 0, let fingerprint {
+            defaults.set(fingerprint, forKey: key)
+        }
+    }
 
     /// Register the local primary CEK as the enclave's current key for a
     /// user who has legacy data but no registered key. Without this a

@@ -5,8 +5,8 @@
 //  Wrap / unwrap the user's content encryption key (CEK) under a
 //  passkey-PRF-derived KEK, in the shape the sync enclave expects.
 //
-//  The enclave wire (see syncplan.md §6 and Go `internal/server/types.go`)
-//  carries one wrapped CEK per registered passkey credential. There is no
+//  The enclave wire (Go `internal/server/types.go`) carries one wrapped
+//  CEK per registered passkey credential. There is no
 //  list of "alternative" keys: the enclave is the single source of truth,
 //  and legacy alternatives are handled by opportunistic migration.
 //
