@@ -300,7 +300,11 @@ enum LegacyBlobMigration {
     /// strands a backup. register-key's if_match='*' fails safely on
     /// a concurrent register. Returns true when the key was adopted.
     /// Mirrors the webapp's migration adoption.
-    private static func adoptLocalKeyForMigration(keyB64: String) async -> Bool {
+    ///
+    /// Reused by the cloud write gate (`canWriteToCloud`) so a legacy
+    /// user adopts their key on their next write instead of deferring
+    /// forever while they wait for the out-of-band migration kick.
+    static func adoptLocalKeyForMigration(keyB64: String) async -> Bool {
         let initialBundle = await initialBundleFromCachedPrf()
         do {
             _ = try await SyncEnclaveAPI.registerKey(
