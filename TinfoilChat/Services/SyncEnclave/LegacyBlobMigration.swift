@@ -230,15 +230,21 @@ enum LegacyBlobMigration {
     private static func candidateKeySetFingerprint() -> String? {
         let allKeys = EncryptionService.shared.getAllKeys()
         guard let primary = allKeys.primary else { return nil }
-        let candidates = [primary] + allKeys.alternatives.filter { $0 != primary }
-        var ids: [String] = []
-        for key in candidates {
-            guard let bytes = try? EncryptionService.shared.getAlternativeKeyBytes(key),
+        // Mirror CEKEncoding.migrationKeys(): without a readable primary
+        // there is no candidate key set, so the fingerprint must be nil
+        // rather than one built from alternatives alone. Otherwise the
+        // gate would diverge from the sweep, which never runs without a
+        // primary at keys[0].
+        guard let primaryBytes = try? EncryptionService.shared.getAlternativeKeyBytes(primary),
+            let primaryId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: primaryBytes)
+        else { return nil }
+        var ids: [String] = [primaryId]
+        for alt in allKeys.alternatives where alt != primary {
+            guard let bytes = try? EncryptionService.shared.getAlternativeKeyBytes(alt),
                 let id = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: bytes)
             else { continue }
             ids.append(id)
         }
-        guard !ids.isEmpty else { return nil }
         return ids.sorted().joined(separator: ",")
     }
 
