@@ -265,6 +265,7 @@ struct ChatContainer: View {
                 }
             }
             ToolbarItem(placement: .principal) {
+                VStack(spacing: 1) {
                 ZStack {
                     Image(colorScheme == .dark ? "logo-white" : "logo-dark")
                         .resizable()
@@ -309,6 +310,22 @@ struct ChatContainer: View {
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel("Temporary chat")
                         .accessibilityHidden(isSidebarOpen || isVerificationBadgeExpanded)
+                    }
+                }
+
+                    if let presetId = viewModel.currentChat?.promptPresetId,
+                       let preset = ProfileManager.shared.promptPreset(for: presetId),
+                       !isSidebarOpen && !isVerificationBadgeExpanded {
+                        HStack(spacing: 4) {
+                            Image(systemName: preset.iconName)
+                                .font(.system(size: 9, weight: .semibold))
+                            Text(preset.name)
+                                .font(.system(size: 10, weight: .medium))
+                                .lineLimit(1)
+                        }
+                        .foregroundColor(Color.accentPrimary)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Prompt: \(preset.name)")
                     }
                 }
                 .offset(x: (isSidebarOpen && UIDevice.current.userInterfaceIdiom == .pad) ? sidebarWidth / 2 : 0)

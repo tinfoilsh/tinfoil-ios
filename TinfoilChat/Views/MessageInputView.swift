@@ -203,18 +203,6 @@ struct MessageInputView: View {
         }
     }
 
-    /// Placeholder for the message editor. When a prompt preset is active for
-    /// the current chat, it surfaces the preset name. Resolving the preset only
-    /// touches ProfileManager when an id is set, so a fresh launch (no preset)
-    /// never forces its initialization.
-    private var inputPlaceholder: String {
-        if let presetId = viewModel.currentChat?.promptPresetId,
-           let preset = ProfileManager.shared.promptPreset(for: presetId) {
-            return "Write your message - using \(preset.name) prompt"
-        }
-        return (viewModel.currentChat?.messages.isEmpty ?? true) ? "What's on your mind?" : "Message"
-    }
-
     /// The indicator is hidden on a blank chat, matching the webapp's
     /// welcome screen behavior.
     private var showContextIndicator: Bool {
@@ -300,7 +288,7 @@ struct MessageInputView: View {
     private var messageTextEditor: some View {
         CustomTextEditor(text: $messageText,
                          textHeight: $textHeight,
-                         placeholderText: inputPlaceholder,
+                         placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
                          shouldFocusInput: viewModel.shouldFocusInput,
                          isLoading: viewModel.isLoading,
                          allowsImagePaste: viewModel.currentModel.isMultimodal,
