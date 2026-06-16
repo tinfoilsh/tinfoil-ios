@@ -73,10 +73,19 @@ class SettingsManager: ObservableObject {
         }
     }
 
+    // While true, setting-change observers skip notifying ProfileManager. This
+    // is set while a synced profile is being applied, both to avoid redundant
+    // sync callbacks and to prevent re-entering ProfileManager.shared while its
+    // singleton is still being initialized (applyProfile runs inside init).
+    var isApplyingSharedProfile = false
+
     // Web search toggle
     @Published var webSearchEnabled: Bool {
         didSet {
             UserDefaults.standard.set(webSearchEnabled, forKey: Constants.StorageKeys.Settings.webSearchEnabled)
+            if !isApplyingSharedProfile {
+                ProfileManager.shared.sharedSettingsDidChange()
+            }
         }
     }
 
@@ -564,6 +573,22 @@ struct SettingsView: View {
                             .foregroundColor(.green)
                             .accessibilityLabel("Enabled")
                     }
+                }
+            }
+
+            NavigationLink(destination: PromptLibraryView(
+                viewModel: chatViewModel,
+                onStarted: { dismiss() }
+            )) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Prompts")
+                            .font(.body)
+                        Text("Browse and manage prompt presets")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
                 }
             }
 

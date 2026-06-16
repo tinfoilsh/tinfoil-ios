@@ -49,6 +49,10 @@ struct Chat: Identifiable, Codable {
     // Project association (used by React, preserved by iOS)
     var projectId: String?
 
+    // Active prompt-library preset for this chat. Resolves to a built-in or
+    // user preset whose system prompt overrides the default for this chat.
+    var promptPresetId: String?
+
     // Transient flag for ephemeral "temporary" chats. Never persisted to disk
     // or cloud. Used to power the toolbar incognito toggle.
     var isTemporary: Bool = false
@@ -100,7 +104,8 @@ struct Chat: Identifiable, Codable {
         dataCorrupted: Bool = false,
         formatVersion: Int? = nil,
         isLocalOnly: Bool = false,
-        projectId: String? = nil)
+        projectId: String? = nil,
+        promptPresetId: String? = nil)
     {
         let resolvedTitleState = titleState ?? Chat.deriveTitleState(for: title, messages: messages)
 
@@ -121,6 +126,7 @@ struct Chat: Identifiable, Codable {
         self.formatVersion = formatVersion
         self.isLocalOnly = isLocalOnly
         self.projectId = projectId
+        self.promptPresetId = promptPresetId
     }
     
     // MARK: - Factory Methods
@@ -141,7 +147,8 @@ struct Chat: Identifiable, Codable {
         locallyModified: Bool = true,
         updatedAt: Date? = nil,
         isLocalOnly: Bool = false,
-        projectId: String? = nil
+        projectId: String? = nil,
+        promptPresetId: String? = nil
     ) -> Chat {
         // Try to use the provided model, fall back to current model, then first available
         guard let model = modelType ?? AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first else {
@@ -161,7 +168,8 @@ struct Chat: Identifiable, Codable {
             locallyModified: locallyModified,
             updatedAt: updatedAt,
             isLocalOnly: isLocalOnly,
-            projectId: projectId
+            projectId: projectId,
+            promptPresetId: promptPresetId
         )
     }
     
@@ -170,7 +178,7 @@ struct Chat: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, title, titleState, messages, createdAt, modelType, language, userId
         case syncVersion, syncedAt, locallyModified, updatedAt
-        case decryptionFailed, dataCorrupted, formatVersion, isLocalOnly, projectId
+        case decryptionFailed, dataCorrupted, formatVersion, isLocalOnly, projectId, promptPresetId
     }
 
     init(from decoder: Decoder) throws {
@@ -199,6 +207,7 @@ struct Chat: Identifiable, Codable {
         formatVersion = try container.decodeIfPresent(Int.self, forKey: .formatVersion)
         isLocalOnly = try container.decodeIfPresent(Bool.self, forKey: .isLocalOnly) ?? false
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
+        promptPresetId = try container.decodeIfPresent(String.self, forKey: .promptPresetId)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -225,6 +234,7 @@ struct Chat: Identifiable, Codable {
         try container.encodeIfPresent(formatVersion, forKey: .formatVersion)
         try container.encode(isLocalOnly, forKey: .isLocalOnly)
         try container.encodeIfPresent(projectId, forKey: .projectId)
+        try container.encodeIfPresent(promptPresetId, forKey: .promptPresetId)
     }
     
     // MARK: - Haptic Feedback Methods

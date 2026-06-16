@@ -54,6 +54,9 @@ class ChatViewModel: ObservableObject {
     @Published var scrollTargetOffset: CGFloat = 0 
     /// When set to true, the input field should become first responder (focus keyboard)
     @Published var shouldFocusInput: Bool = false
+    // Set when a flow wants the input focused only after a presenting sheet has
+    // finished dismissing, so the keyboard rises in the chat's layout.
+    var focusInputAfterDismiss = false
     @Published var isScrollInteractionActive: Bool = false
     @Published var isAtBottom: Bool = true
     @Published var scrollToBottomTrigger: UUID = UUID()
@@ -66,6 +69,9 @@ class ChatViewModel: ObservableObject {
                 reasoningEffort.rawValue,
                 forKey: Constants.StorageKeys.Settings.reasoningEffort
             )
+            if !isLoadingPersistedSettings {
+                ProfileManager.shared.sharedSettingsDidChange()
+            }
         }
     }
     @Published var thinkingEnabled: Bool = true {
@@ -74,8 +80,18 @@ class ChatViewModel: ObservableObject {
                 thinkingEnabled,
                 forKey: Constants.StorageKeys.Settings.thinkingEnabled
             )
+            if !isLoadingPersistedSettings {
+                ProfileManager.shared.sharedSettingsDidChange()
+            }
         }
     }
+
+    // While true, persisted-setting didSet observers skip the shared-settings
+    // sync callback. Loading stored values during init is not a user edit, and
+    // touching ProfileManager here would lazily initialize it (and publish its
+    // applied profile) in the middle of the SwiftUI update that creates this
+    // view model.
+    private var isLoadingPersistedSettings = false
     @Published var imageViewerImages: [Attachment] = []
     @Published var imageViewerIndex: Int = 0
     @Published var showImageViewer: Bool = false
@@ -197,6 +213,7 @@ class ChatViewModel: ObservableObject {
     private var autoSyncTimer: Timer?
     private var didBecomeActiveObserver: NSObjectProtocol?
     private var willResignActiveObserver: NSObjectProtocol?
+    private var sharedSettingsObserver: NSObjectProtocol?
     private var networkStatusCancellable: AnyCancellable?
     private var streamUpdateTimer: Timer?
     private var pendingStreamUpdate: Chat?
@@ -352,6 +369,7 @@ class ChatViewModel: ObservableObject {
         // Load persisted reasoning preferences. Both default to the most
         // permissive setting (thinking on, medium effort) when no value has
         // been saved yet, matching the webapp.
+        isLoadingPersistedSettings = true
         if let savedEffortRaw = UserDefaults.standard.string(
             forKey: Constants.StorageKeys.Settings.reasoningEffort
         ), let savedEffort = ReasoningEffort(rawValue: savedEffortRaw) {
@@ -364,6 +382,7 @@ class ChatViewModel: ObservableObject {
                 forKey: Constants.StorageKeys.Settings.thinkingEnabled
             )
         }
+        isLoadingPersistedSettings = false
 
         if let savedTab = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.cloudSyncActiveTab),
            let tab = ChatStorageTab(rawValue: savedTab) {
@@ -394,6 +413,7 @@ class ChatViewModel: ObservableObject {
 
         // Setup app lifecycle observers
         setupAppLifecycleObservers()
+        setupSharedSettingsObserver()
 
         // Setup network status observer for automatic retry on reconnection
         setupNetworkStatusObserver()
@@ -431,6 +451,39 @@ class ChatViewModel: ObservableObject {
         }
         if let observer = willResignActiveObserver {
             NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = sharedSettingsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    private func setupSharedSettingsObserver() {
+        sharedSettingsObserver = NotificationCenter.default.addObserver(
+            forName: .profileSharedSettingsDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let profile = notification.object as? ProfileData else { return }
+            Task { @MainActor in
+                self?.applySharedSettings(profile)
+            }
+        }
+    }
+
+    private func applySharedSettings(_ profile: ProfileData) {
+        if let selectedModel = profile.selectedModel,
+           let model = AppConfig.shared.availableModels.first(where: { $0.id == selectedModel }) {
+            currentModel = model
+        }
+        if let effort = profile.reasoningEffort,
+           let parsedEffort = ReasoningEffort(rawValue: effort) {
+            reasoningEffort = parsedEffort
+        }
+        if let thinkingEnabled = profile.thinkingEnabled {
+            self.thinkingEnabled = thinkingEnabled
+        }
+        if let webSearchEnabled = profile.webSearchEnabled {
+            isWebSearchEnabled = webSearchEnabled
         }
     }
     
@@ -1012,6 +1065,44 @@ class ChatViewModel: ObservableObject {
         if wasCurrent, activeProject?.id != projectId {
             createNewChat(isLocalOnly: false, projectId: activeProject?.id)
         }
+    }
+
+    /// Sets (or clears) the prompt-library preset for the current chat. The
+    /// preset's system prompt overrides the default for this conversation.
+    func setPromptPreset(_ presetId: String?) {
+        guard var chat = currentChat else { return }
+        if let updated = updateChatInPlace(chat.id, update: { c in
+            c.promptPresetId = presetId
+            c.locallyModified = true
+            c.updatedAt = Date()
+        }) {
+            saveChat(updated)
+        } else {
+            // Chat not yet in either array (e.g. a transient blank chat):
+            // update the in-memory current chat so the preset still applies.
+            chat.promptPresetId = presetId
+            chat.locallyModified = true
+            chat.updatedAt = Date()
+            currentChat = chat
+        }
+    }
+
+    /// Starts a fresh chat preloaded with the given prompt preset. Focus is
+    /// deferred until the presenting sheet finishes dismissing (see
+    /// `focusInputIfPending`), otherwise the keyboard would rise inside the
+    /// dismissing sheet's layout instead of the chat's input area.
+    func startChat(withPresetId presetId: String) {
+        createNewChat(focusInput: false)
+        setPromptPreset(presetId)
+        focusInputAfterDismiss = true
+    }
+
+    /// Focuses the input if a flow requested it be deferred until a sheet
+    /// dismissal completed. Call from the sheet's `onDismiss`.
+    func focusInputIfPending() {
+        guard focusInputAfterDismiss else { return }
+        focusInputAfterDismiss = false
+        shouldFocusInput = true
     }
 
     private func chatForProjectMove(_ chatId: String) -> Chat? {
@@ -1608,8 +1699,10 @@ class ChatViewModel: ObservableObject {
                 let profileManager = ProfileManager.shared
                 var systemPrompt: String
                 
-                // Use custom prompt if enabled (from ProfileManager), otherwise use default
-                if let customPrompt = profileManager.getCustomSystemPrompt() {
+                // Precedence: per-chat prompt preset > custom prompt toggle > default
+                if let preset = profileManager.promptPreset(for: currentChat?.promptPresetId) {
+                    systemPrompt = preset.systemPrompt
+                } else if let customPrompt = profileManager.getCustomSystemPrompt() {
                     systemPrompt = customPrompt
                 } else if settingsManager.isUsingCustomPrompt && !settingsManager.customSystemPrompt.isEmpty {
                     systemPrompt = settingsManager.customSystemPrompt
@@ -3139,6 +3232,7 @@ class ChatViewModel: ObservableObject {
         self.currentModel = modelType
         // This will trigger the didSet in AppConfig which persists to UserDefaults
         AppConfig.shared.currentModel = modelType
+        ProfileManager.shared.sharedSettingsDidChange()
         
         // Update the current chat's model if requested
         if shouldUpdateChat, var chat = currentChat {

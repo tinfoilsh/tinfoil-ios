@@ -9,6 +9,10 @@ import Foundation
 import Combine
 import SwiftUI
 
+extension Notification.Name {
+    static let profileSharedSettingsDidChange = Notification.Name("com.tinfoil.chat.profile.shared-settings-did-change")
+}
+
 @MainActor
 class ProfileManager: ObservableObject {
     static let shared = ProfileManager()
@@ -27,6 +31,9 @@ class ProfileManager: ObservableObject {
     // Custom system prompt
     @Published var isUsingCustomPrompt: Bool = false
     @Published var customSystemPrompt: String = ""
+
+    // User-created prompt presets (synced through the shared profile row)
+    @Published var customPromptPresets: [SyncedPromptPreset] = []
     
     // Sync state
     @Published var isSyncing: Bool = false
@@ -46,6 +53,10 @@ class ProfileManager: ObservableObject {
     private var isApplyingProfile: Bool = false  // Flag to prevent observer loops
     private var isPulling: Bool = false
     private var isPushing: Bool = false
+    private var codeExecutionEnabled: Bool?
+    private var piiCheckEnabled: Bool?
+    private var chatFont: String?
+    private var projectUploadPreference: String?
     
     // Keychain keys
     private let keychainKey = "userProfile"
@@ -132,6 +143,18 @@ class ProfileManager: ObservableObject {
     
     /// Create ProfileData from current settings
     private func createProfileData() -> ProfileData {
+        let selectedModel = AppConfig.shared.currentModel?.id
+            ?? UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.selectedModel)
+        let reasoningEffort = UserDefaults.standard.string(
+            forKey: Constants.StorageKeys.Settings.reasoningEffort
+        ) ?? ReasoningEffort.medium.rawValue
+        let thinkingEnabled: Bool
+        if UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.thinkingEnabled) != nil {
+            thinkingEnabled = UserDefaults.standard.bool(forKey: Constants.StorageKeys.Settings.thinkingEnabled)
+        } else {
+            thinkingEnabled = true
+        }
+
         return ProfileData(
             isDarkMode: isDarkMode,
             language: language,
@@ -142,6 +165,15 @@ class ProfileManager: ObservableObject {
             isUsingPersonalization: isUsingPersonalization,
             isUsingCustomPrompt: isUsingCustomPrompt,
             customSystemPrompt: customSystemPrompt,
+            customPromptPresets: customPromptPresets,
+            selectedModel: selectedModel,
+            reasoningEffort: reasoningEffort,
+            thinkingEnabled: thinkingEnabled,
+            webSearchEnabled: SettingsManager.shared.webSearchEnabled,
+            codeExecutionEnabled: codeExecutionEnabled,
+            piiCheckEnabled: piiCheckEnabled,
+            chatFont: chatFont,
+            projectUploadPreference: projectUploadPreference,
             version: lastSyncedVersion,  // Will be incremented by ProfileSyncService
             updatedAt: ISO8601DateFormatter().string(from: Date())
         )
@@ -150,6 +182,10 @@ class ProfileManager: ObservableObject {
     /// Apply profile data to published properties
     private func applyProfile(_ profile: ProfileData) {
         isApplyingProfile = true  // Prevent observer loops
+        // Suppress SettingsManager's sync callbacks while applying, so writing
+        // shared settings here does not re-enter this still-initializing
+        // singleton (applyProfile can run from within init).
+        SettingsManager.shared.isApplyingSharedProfile = true
         
         if let isDarkMode = profile.isDarkMode {
             self.isDarkMode = isDarkMode
@@ -178,11 +214,53 @@ class ProfileManager: ObservableObject {
         if let customSystemPrompt = profile.customSystemPrompt {
             self.customSystemPrompt = customSystemPrompt
         }
+        if let customPromptPresets = profile.customPromptPresets {
+            self.customPromptPresets = customPromptPresets
+        }
+        if let selectedModel = profile.selectedModel {
+            UserDefaults.standard.set(selectedModel, forKey: Constants.StorageKeys.Settings.selectedModel)
+            applySelectedModel(selectedModel)
+        }
+        if let reasoningEffort = profile.reasoningEffort,
+           ReasoningEffort(rawValue: reasoningEffort) != nil {
+            UserDefaults.standard.set(reasoningEffort, forKey: Constants.StorageKeys.Settings.reasoningEffort)
+        }
+        if let thinkingEnabled = profile.thinkingEnabled {
+            UserDefaults.standard.set(thinkingEnabled, forKey: Constants.StorageKeys.Settings.thinkingEnabled)
+        }
+        if let webSearchEnabled = profile.webSearchEnabled {
+            SettingsManager.shared.webSearchEnabled = webSearchEnabled
+        }
+        if let codeExecutionEnabled = profile.codeExecutionEnabled {
+            self.codeExecutionEnabled = codeExecutionEnabled
+        }
+        if let piiCheckEnabled = profile.piiCheckEnabled {
+            self.piiCheckEnabled = piiCheckEnabled
+        }
+        if let chatFont = profile.chatFont {
+            self.chatFont = chatFont
+        }
+        if let projectUploadPreference = profile.projectUploadPreference {
+            self.projectUploadPreference = projectUploadPreference
+        }
         if let version = profile.version {
             self.lastSyncedVersion = version
         }
-        
+
+        NotificationCenter.default.post(
+            name: .profileSharedSettingsDidChange,
+            object: profile
+        )
+
+        SettingsManager.shared.isApplyingSharedProfile = false
         isApplyingProfile = false  // Re-enable observers
+    }
+
+    private func applySelectedModel(_ modelId: String) {
+        guard let model = AppConfig.shared.availableModels.first(where: { $0.id == modelId }) else {
+            return
+        }
+        AppConfig.shared.currentModel = model
     }
     
     // MARK: - Change Observers
@@ -265,6 +343,75 @@ class ProfileManager: ObservableObject {
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
+
+        $customPromptPresets
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
+                self?.saveToKeychain()
+            }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - Prompt Presets
+
+    /// All presets surfaced in the prompt library: built-ins followed by the
+    /// user's custom presets.
+    var allPromptPresets: [PromptPreset] {
+        PromptPreset.builtIns + customPromptPresets.map { PromptPreset(from: $0) }
+    }
+
+    /// Resolve a preset by id across built-ins and user presets.
+    func promptPreset(for id: String?) -> PromptPreset? {
+        guard let id else { return nil }
+        return allPromptPresets.first { $0.id == id }
+    }
+
+    private func generatePresetId() -> String {
+        let random = UUID().uuidString.prefix(8).lowercased()
+        let timestamp = String(Int(Date().timeIntervalSince1970 * 1000), radix: 36)
+        return "\(PromptPreset.userIdPrefix)\(timestamp)-\(random)"
+    }
+
+    /// Create a new user preset and return its library representation.
+    @discardableResult
+    func createPromptPreset(name: String, description: String, systemPrompt: String) -> PromptPreset {
+        let now = Date().timeIntervalSince1970 * 1000
+        let preset = SyncedPromptPreset(
+            id: generatePresetId(),
+            name: name,
+            description: description,
+            systemPrompt: systemPrompt,
+            createdAt: now,
+            updatedAt: now
+        )
+        customPromptPresets.append(preset)
+        return PromptPreset(from: preset)
+    }
+
+    /// Update an existing user preset in place.
+    func updatePromptPreset(id: String, name: String, description: String, systemPrompt: String) {
+        guard let index = customPromptPresets.firstIndex(where: { $0.id == id }) else { return }
+        customPromptPresets[index].name = name
+        customPromptPresets[index].description = description
+        customPromptPresets[index].systemPrompt = systemPrompt
+        customPromptPresets[index].updatedAt = Date().timeIntervalSince1970 * 1000
+    }
+
+    /// Delete a user preset.
+    func deletePromptPreset(id: String) {
+        customPromptPresets.removeAll { $0.id == id }
+    }
+
+    /// Duplicate a built-in or user preset into a new editable user preset.
+    @discardableResult
+    func duplicatePromptPreset(id: String) -> PromptPreset? {
+        guard let source = promptPreset(for: id) else { return nil }
+        return createPromptPreset(
+            name: "\(source.name) (copy)",
+            description: source.description,
+            systemPrompt: source.systemPrompt
+        )
     }
     
     // MARK: - Cloud Sync
@@ -462,7 +609,26 @@ class ProfileManager: ObservableObject {
                p1.additionalContext != p2.additionalContext ||
                p1.isUsingPersonalization != p2.isUsingPersonalization ||
                p1.isUsingCustomPrompt != p2.isUsingCustomPrompt ||
-               p1.customSystemPrompt != p2.customSystemPrompt
+               p1.customSystemPrompt != p2.customSystemPrompt ||
+               p1.customPromptPresets != p2.customPromptPresets ||
+               p1.selectedModel != p2.selectedModel ||
+               p1.reasoningEffort != p2.reasoningEffort ||
+               p1.thinkingEnabled != p2.thinkingEnabled ||
+               p1.webSearchEnabled != p2.webSearchEnabled ||
+               p1.codeExecutionEnabled != p2.codeExecutionEnabled ||
+               p1.piiCheckEnabled != p2.piiCheckEnabled ||
+               p1.chatFont != p2.chatFont ||
+               p1.projectUploadPreference != p2.projectUploadPreference
+    }
+
+    func sharedSettingsDidChange() {
+        // Ignore changes that originate from applying a synced/loaded profile.
+        // Settings applied mid-`applyProfile` (e.g. webSearchEnabled) would
+        // otherwise persist a partially-applied snapshot, since fields applied
+        // later in the sequence still hold their pre-apply values. The applying
+        // flow persists the full profile itself once application completes.
+        guard !isApplyingProfile else { return }
+        saveToKeychain()
     }
     
     /// Generate personalization prompt for chat as a `<user_preferences>` XML block.
@@ -532,6 +698,7 @@ class ProfileManager: ObservableObject {
         isUsingPersonalization = false
         isUsingCustomPrompt = false
         customSystemPrompt = ""
+        customPromptPresets = []
         
         // Clear from keychain
         keychainHelper.delete(for: keychainKey, service: keychainService)

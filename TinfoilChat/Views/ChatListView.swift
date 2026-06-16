@@ -16,6 +16,7 @@ struct ChatListView: View {
 
     @State private var isAtBottom = true
     @State private var userHasScrolled = false
+    @State private var showPromptLibrary = false
     @State private var isKeyboardVisible = false
     @State private var keyboardHeight: CGFloat = 0
     @State private var scrollTrigger = UUID()
@@ -88,17 +89,38 @@ struct ChatListView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            MessageInputView(
-                messageText: $messageText,
-                viewModel: viewModel,
-                isKeyboardVisible: isKeyboardVisible
-            )
-            .environmentObject(viewModel.authManager ?? AuthManager())
+            VStack(spacing: 0) {
+                if messages.isEmpty {
+                    PromptSuggestionsBar(
+                        viewModel: viewModel,
+                        onOpenLibrary: { showPromptLibrary = true }
+                    )
+                }
+                MessageInputView(
+                    messageText: $messageText,
+                    viewModel: viewModel,
+                    isKeyboardVisible: isKeyboardVisible
+                )
+                .environmentObject(viewModel.authManager ?? AuthManager())
+            }
             .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
                 HStack {
                     Spacer()
                     view.frame(maxWidth: 600)
                     Spacer()
+                }
+            }
+        }
+        .sheet(isPresented: $showPromptLibrary) {
+            NavigationStack {
+                PromptLibraryView(
+                    activePresetId: viewModel.currentChat?.promptPresetId,
+                    onSelectPreset: { viewModel.setPromptPreset($0) }
+                )
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") { showPromptLibrary = false }
+                    }
                 }
             }
         }
