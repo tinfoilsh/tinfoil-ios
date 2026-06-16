@@ -283,8 +283,8 @@ struct PromptDetailView: View {
                         // object while SwiftUI is processing the dismissal update.
                         dismiss()
                         DispatchQueue.main.async {
-                            started?()
                             viewModel.startChat(withPresetId: presetId)
+                            started?()
                         }
                     } label: {
                         HStack {
