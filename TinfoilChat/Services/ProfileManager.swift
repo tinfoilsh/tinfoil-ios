@@ -543,12 +543,14 @@ class ProfileManager: ObservableObject {
             return
         }
 
-        guard !hasPendingLocalProfileChanges else {
-            return
-        }
-
         // Prevent overlapping pulls
         guard !isPulling else { return }
+        // A pending local edit must not be overwritten by the remote, but
+        // we still pull so we can learn the server's current version.
+        // Otherwise a client left "dirty" never establishes a base version
+        // and keeps trying to create the profile at version zero, which
+        // loops forever on STALE_BLOB and blocks all future pulls.
+        let hasPendingEdit = hasPendingLocalProfileChanges
         isPulling = true
         updateSyncingState()
         
@@ -557,10 +559,17 @@ class ProfileManager: ObservableObject {
                 let cloudVersion = cloudProfile.version ?? 0
 
                 // DEBUG[profile-sync]: remove before merge.
-                print("[profile-sync] syncFromCloud cloudVersion=\(cloudVersion) lastSyncedVersion=\(lastSyncedVersion) willApply=\(cloudVersion > lastSyncedVersion || hasProfileChanged(cloudProfile, lastSyncedProfile)) diff=\(profileDiffFields(cloudProfile, lastSyncedProfile))")
+                print("[profile-sync] syncFromCloud cloudVersion=\(cloudVersion) lastSyncedVersion=\(lastSyncedVersion) hasPendingEdit=\(hasPendingEdit) willApply=\(!hasPendingEdit && (cloudVersion > lastSyncedVersion || hasProfileChanged(cloudProfile, lastSyncedProfile))) diff=\(profileDiffFields(cloudProfile, lastSyncedProfile))")
 
-                // Apply if cloud is newer by version OR content differs from our last-synced snapshot
-                if cloudVersion > lastSyncedVersion || hasProfileChanged(cloudProfile, lastSyncedProfile) {
+                if hasPendingEdit {
+                    // Record the server version so the pending push rebases
+                    // onto it as a CAS update instead of a create; the
+                    // last-write-wins arbitration on push decides the winner.
+                    if cloudVersion > lastSyncedVersion {
+                        lastSyncedVersion = cloudVersion
+                    }
+                } else if cloudVersion > lastSyncedVersion || hasProfileChanged(cloudProfile, lastSyncedProfile) {
+                    // Apply if cloud is newer by version OR content differs from our last-synced snapshot
                     applyProfile(cloudProfile)
 
                     // Use the round-tripped local snapshot as the baseline
