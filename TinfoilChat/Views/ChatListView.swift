@@ -90,7 +90,7 @@ struct ChatListView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
-                if messages.isEmpty && !isKeyboardVisible {
+                if messages.isEmpty {
                     PromptSuggestionsBar(
                         viewModel: viewModel,
                         onOpenLibrary: { showPromptLibrary = true }
