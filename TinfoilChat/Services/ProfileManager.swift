@@ -62,6 +62,9 @@ class ProfileManager: ObservableObject {
     private let keychainKey = "userProfile"
     private let keychainService = "com.tinfoil.chat.profile"
     private let profileDirtyKey = "com.tinfoil.chat.profile.dirty"
+    // Content modification time of the pending local profile edit, used
+    // to arbitrate last-write-wins against a concurrently-updated remote.
+    private let profileChangedAtKey = "com.tinfoil.chat.profile.changed-at"
     
     private init() {
         loadFromKeychain()
@@ -122,11 +125,33 @@ class ProfileManager: ObservableObject {
 
     private func markLocalProfileChanged() {
         UserDefaults.standard.set(true, forKey: profileDirtyKey)
+        UserDefaults.standard.set(
+            ProfileManager.iso8601Formatter.string(from: Date()),
+            forKey: profileChangedAtKey
+        )
     }
 
     private func clearLocalProfileChanged() {
         UserDefaults.standard.removeObject(forKey: profileDirtyKey)
+        UserDefaults.standard.removeObject(forKey: profileChangedAtKey)
     }
+
+    /// Edit time of the pending local profile change, used to arbitrate
+    /// last-write-wins against the remote. Falls back to now so a local
+    /// edit is never treated as older than the remote it is replacing.
+    private func localProfileChangedAt() -> String {
+        if let stored = UserDefaults.standard.string(forKey: profileChangedAtKey),
+           ProfileManager.iso8601Formatter.date(from: stored) != nil {
+            return stored
+        }
+        return ProfileManager.iso8601Formatter.string(from: Date())
+    }
+
+    private static let iso8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 
     private func persistProfileToKeychain(_ profile: ProfileData) {
         guard let data = try? JSONEncoder().encode(profile) else {
@@ -175,7 +200,7 @@ class ProfileManager: ObservableObject {
             chatFont: chatFont,
             projectUploadPreference: projectUploadPreference,
             version: lastSyncedVersion,  // Will be incremented by ProfileSyncService
-            updatedAt: ISO8601DateFormatter().string(from: Date())
+            updatedAt: localProfileChangedAt()
         )
     }
     
@@ -543,10 +568,22 @@ class ProfileManager: ObservableObject {
                     // Fallback: ensure we at least bump our local version
                     lastSyncedVersion = (profile.version ?? lastSyncedVersion) + 1
                 }
-                var syncedProfile = profile
-                syncedProfile.version = lastSyncedVersion
-                lastSyncedProfile = syncedProfile
-                persistProfileToKeychain(syncedProfile)
+
+                if let remoteProfile = result.remoteProfile {
+                    // A concurrently-updated device won the last-write
+                    // race; adopt its settings locally so both devices
+                    // converge instead of keeping our now-stale edit.
+                    applyProfile(remoteProfile)
+                    var adopted = remoteProfile
+                    adopted.version = lastSyncedVersion
+                    lastSyncedProfile = adopted
+                    persistProfileToKeychain(adopted)
+                } else {
+                    var syncedProfile = profile
+                    syncedProfile.version = lastSyncedVersion
+                    lastSyncedProfile = syncedProfile
+                    persistProfileToKeychain(syncedProfile)
+                }
                 clearLocalProfileChanged()
                 lastSyncDate = Date()
                 syncError = nil

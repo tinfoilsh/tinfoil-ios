@@ -547,7 +547,10 @@ class CloudSyncService: ObservableObject {
             }
 
             let localChat = await loadChatFromStorage(chatId)
-            let remoteWins = localChat.map { downloadedChat.updatedAt > $0.updatedAt } ?? true
+            let remoteWins = SyncConflictResolver.remoteWins(
+                local: localChat?.updatedAt,
+                remote: downloadedChat.updatedAt
+            )
 
             if !remoteWins {
                 await rebaseSyncVersion(chatId, version: downloadedChat.syncVersion)
