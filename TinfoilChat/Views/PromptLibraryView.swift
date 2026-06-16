@@ -42,13 +42,18 @@ struct PromptSuggestionsBar: View {
         viewModel.currentChat?.promptPresetId
     }
 
-    /// User-pinned favorites when set, otherwise the first built-in presets.
+    /// User-pinned favorites, with any remaining slots filled by the default
+    /// built-in presets so the home screen always offers a full set.
     private var suggestions: [PromptPreset] {
-        let favorites = profileManager.favoritePromptPresets
-        if !favorites.isEmpty {
-            return favorites
+        let target = Constants.PromptLibrary.homeSuggestionCount
+        var result = profileManager.favoritePromptPresets
+        let pinnedIds = Set(result.map { $0.id })
+        for preset in PromptPreset.builtIns where result.count < target {
+            if !pinnedIds.contains(preset.id) {
+                result.append(preset)
+            }
         }
-        return Array(PromptPreset.builtIns.prefix(Constants.PromptLibrary.homeSuggestionCount))
+        return Array(result.prefix(target))
     }
 
     var body: some View {
