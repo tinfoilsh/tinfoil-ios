@@ -543,28 +543,41 @@ class ProfileManager: ObservableObject {
             return
         }
 
-        guard !hasPendingLocalProfileChanges else {
-            return
-        }
-
         // Prevent overlapping pulls
         guard !isPulling else { return }
+        // A pending local edit must not be overwritten by the remote, but
+        // we still pull so we can learn the server's current version.
+        // Otherwise a client left "dirty" never establishes a base version
+        // and keeps trying to create the profile at version zero, which
+        // loops forever on STALE_BLOB and blocks all future pulls.
+        let hasPendingEdit = hasPendingLocalProfileChanges
         isPulling = true
         updateSyncingState()
         
         do {
             if let cloudProfile = try await profileSync.fetchProfile() {
                 let cloudVersion = cloudProfile.version ?? 0
-                
-                // Apply if cloud is newer by version OR content differs from our last-synced snapshot
-                if cloudVersion > lastSyncedVersion || hasProfileChanged(cloudProfile, lastSyncedProfile) {
+
+                if hasPendingEdit {
+                    // Record the server version so the pending push rebases
+                    // onto it as a CAS update instead of a create; the
+                    // last-write-wins arbitration on push decides the winner.
+                    if cloudVersion > lastSyncedVersion {
+                        lastSyncedVersion = cloudVersion
+                    }
+                } else if cloudVersion > lastSyncedVersion || hasProfileChanged(cloudProfile, lastSyncedProfile) {
+                    // Apply if cloud is newer by version OR content differs from our last-synced snapshot
                     applyProfile(cloudProfile)
-                    
-                    // Save to keychain without triggering local change observers
-                    persistProfileToKeychain(cloudProfile)
-                    
+
+                    // Use the round-tripped local snapshot as the baseline
+                    // rather than the raw remote: the remote may omit fields
+                    // this client always emits (e.g. defaulted reasoning or
+                    // thinking values), which would otherwise read back as a
+                    // phantom local change and wedge sync behind a
+                    // never-clearing dirty flag while looping STALE_BLOB pushes.
+                    commitSyncedBaseline(createProfileData(), version: cloudVersion)
+
                     lastSyncedVersion = cloudVersion
-                    lastSyncedProfile = cloudProfile
                     clearLocalProfileChanged()
                     lastSyncDate = Date()
                     syncError = nil
@@ -604,7 +617,7 @@ class ProfileManager: ObservableObject {
         guard !isPushing else { return }
         
         let profile = createProfileData()
-        
+
         // Only push if there is a real change vs last synced baseline.
         // When nothing diverges, clear the pending flag so a phantom
         // dirty marker can't permanently block pulls from the cloud.
@@ -632,15 +645,12 @@ class ProfileManager: ObservableObject {
                     // race; adopt its settings locally so both devices
                     // converge instead of keeping our now-stale edit.
                     applyProfile(remoteProfile)
-                    var adopted = remoteProfile
-                    adopted.version = lastSyncedVersion
-                    lastSyncedProfile = adopted
-                    persistProfileToKeychain(adopted)
+                    // Baseline mirrors what we would re-serialize, not the
+                    // raw remote, so fields we emit but the peer omits don't
+                    // read back as a phantom change and re-arm the push loop.
+                    commitSyncedBaseline(createProfileData(), version: lastSyncedVersion)
                 } else {
-                    var syncedProfile = profile
-                    syncedProfile.version = lastSyncedVersion
-                    lastSyncedProfile = syncedProfile
-                    persistProfileToKeychain(syncedProfile)
+                    commitSyncedBaseline(profile, version: lastSyncedVersion)
                 }
                 clearLocalProfileChanged()
                 lastSyncDate = Date()
@@ -675,11 +685,13 @@ class ProfileManager: ObservableObject {
         do {
             if let decryptedProfile = try await profileSync.retryDecryptionWithNewKey() {
                 applyProfile(decryptedProfile)
-                persistProfileToKeychain(decryptedProfile)
                 if let version = decryptedProfile.version {
                     lastSyncedVersion = version
                 }
-                lastSyncedProfile = decryptedProfile
+                // Baseline mirrors what we would re-serialize, not the raw
+                // remote, so peer-omitted fields don't read back as a
+                // phantom local change after decryption recovery.
+                commitSyncedBaseline(createProfileData(), version: lastSyncedVersion)
                 clearLocalProfileChanged()
                 syncError = nil
             }
@@ -689,7 +701,21 @@ class ProfileManager: ObservableObject {
     }
     
     // MARK: - Helpers
-    
+
+    /// Record `snapshot` as the synced baseline at `version`: stamp the
+    /// version, persist it to the keychain (without triggering local
+    /// change observers), and set it as the in-memory baseline. Callers
+    /// pass the round-tripped local snapshot (createProfileData()) rather
+    /// than the raw remote so fields this client always emits but a peer
+    /// omits never read back as a phantom local change that would wedge
+    /// sync behind a never-clearing dirty flag.
+    private func commitSyncedBaseline(_ snapshot: ProfileData, version: Int) {
+        var baseline = snapshot
+        baseline.version = version
+        persistProfileToKeychain(baseline)
+        lastSyncedProfile = baseline
+    }
+
     /// Check if two profiles are different (excluding metadata)
     private func hasProfileChanged(_ profile1: ProfileData?, _ profile2: ProfileData?) -> Bool {
         guard let p1 = profile1, let p2 = profile2 else {
