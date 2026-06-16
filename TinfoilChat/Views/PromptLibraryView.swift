@@ -202,11 +202,12 @@ struct PromptLibraryView: View {
                 onRequestDelete: { presetPendingDelete = $0 }
             )
         } label: {
-            HStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
                 Image(systemName: preset.iconName)
                     .font(.system(size: 16))
                     .foregroundColor(.secondary)
                     .frame(width: 24)
+                    .alignmentGuide(.top) { $0[.top] - 2 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(preset.name)
                         .font(.body)
@@ -282,25 +283,25 @@ struct PromptDetailView: View {
         let isActive = activePresetId == preset.id
         Form {
             Section {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 12) {
-                        Image(systemName: preset.iconName)
-                            .font(.system(size: 20))
-                            .foregroundColor(.secondary)
-                            .frame(width: 28, alignment: .center)
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: preset.iconName)
+                        .font(.system(size: 20))
+                        .foregroundColor(.secondary)
+                        .frame(width: 28, alignment: .center)
+                    VStack(alignment: .leading, spacing: 6) {
                         Text(preset.name)
                             .font(.headline)
-                        Spacer(minLength: 0)
-                    }
-                    if !preset.description.isEmpty {
-                        Text(preset.description)
-                            .font(.subheadline)
+                        if !preset.description.isEmpty {
+                            Text(preset.description)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        Text(preset.isBuiltIn ? "Built-in" : "Custom")
+                            .font(.caption2)
                             .foregroundColor(.secondary)
+                            .textCase(.uppercase)
                     }
-                    Text(preset.isBuiltIn ? "Built-in" : "Custom")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .textCase(.uppercase)
+                    Spacer(minLength: 0)
                 }
 
                 if let viewModel {
