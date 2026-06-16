@@ -140,14 +140,18 @@ class ProfileManager: ObservableObject {
     }
 
     /// Edit time of the pending local profile change, used to arbitrate
-    /// last-write-wins against the remote. Falls back to now so a local
-    /// edit is never treated as older than the remote it is replacing.
-    private func localProfileChangedAt() -> String {
+    /// last-write-wins against the remote. Returns nil when the edit time
+    /// is unknown (e.g. a dirty flag left by an older build, or partially
+    /// cleared storage) so unknown-age local data cannot win the
+    /// arbitration and clobber a genuinely newer remote: conflict
+    /// resolution then defers to the remote, while a non-conflicting push
+    /// still stamps the current time.
+    private func localProfileChangedAt() -> String? {
         if let stored = UserDefaults.standard.string(forKey: profileChangedAtKey),
            ProfileManager.iso8601Formatter.date(from: stored) != nil {
             return stored
         }
-        return ProfileManager.iso8601Formatter.string(from: Date())
+        return nil
     }
 
     private static let iso8601Formatter: ISO8601DateFormatter = {
