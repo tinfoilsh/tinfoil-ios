@@ -129,8 +129,8 @@ class ProfileSyncService: ObservableObject {
     }
 
     /// Save profile to cloud through the enclave.
-    func saveProfile(_ profile: ProfileData) async throws -> (success: Bool, version: Int?) {
-        guard await isAuthenticated() else { return (false, nil) }
+    func saveProfile(_ profile: ProfileData) async throws -> (success: Bool, version: Int?, remoteProfile: ProfileData?) {
+        guard await isAuthenticated() else { return (false, nil, nil) }
         let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
 
         // Push the local profile under a given base version. The
@@ -138,7 +138,9 @@ class ProfileSyncService: ObservableObject {
         // any positive version as a CAS update gated on the row's etag.
         func pushAtVersion(_ baseVersion: Int) async throws -> (success: Bool, version: Int?) {
             var profileWithMetadata = profile
-            profileWithMetadata.updatedAt = Self.iso8601Formatter.string(from: Date())
+            // Preserve the caller's edit time so other devices can
+            // arbitrate last-write-wins; only stamp now when absent.
+            profileWithMetadata.updatedAt = profile.updatedAt ?? Self.iso8601Formatter.string(from: Date())
             profileWithMetadata.version = baseVersion + 1
 
             let plaintext = try JSONEncoder().encode(profileWithMetadata)
@@ -166,15 +168,45 @@ class ProfileSyncService: ObservableObject {
         }
 
         do {
-            return try await pushAtVersion(profile.version ?? 0)
+            let result = try await pushAtVersion(profile.version ?? 0)
+            return (result.success, result.version, nil)
         } catch let error as SyncEnclaveError where Self.isStaleBlobConflict(error) {
-            // Optimistic-concurrency conflict: our base version is
-            // behind the server, or we tried to create a profile that
-            // already exists. Re-read the current version and retry once
-            // so local settings win instead of looping on STALE_BLOB.
+            // Optimistic-concurrency conflict: the server holds a
+            // version our push was not based on. Re-read it and
+            // arbitrate last-write-wins by content modification time.
             let remote = try await fetchProfile()
-            return try await pushAtVersion(remote?.version ?? 0)
+
+            if let remote = remote,
+               SyncConflictResolver.remoteWins(
+                   local: Self.parseISODate(profile.updatedAt),
+                   remote: Self.parseISODate(remote.updatedAt)
+               ) {
+                // The remote is the strictly newer write. Adopt it
+                // instead of clobbering, and hand it back so the caller
+                // can apply it locally; both devices then converge.
+                self.cachedProfile = remote
+                return (true, remote.version, remote)
+            }
+
+            // Our local edit is the last write. Rebase onto the
+            // server's current version and re-push so local wins
+            // instead of looping on STALE_BLOB forever.
+            let result = try await pushAtVersion(remote?.version ?? 0)
+            return (result.success, result.version, nil)
         }
+    }
+
+    /// Parse an ISO-8601 timestamp, tolerating values written with or
+    /// without fractional seconds so cross-device and cross-client
+    /// profiles compare correctly.
+    private static func parseISODate(_ string: String?) -> Date? {
+        guard let string = string else { return nil }
+        if let date = iso8601Formatter.date(from: string) {
+            return date
+        }
+        let fallback = ISO8601DateFormatter()
+        fallback.formatOptions = [.withInternetDateTime]
+        return fallback.date(from: string)
     }
 
     /// A STALE_BLOB (HTTP 412) push means our If-Match version no longer

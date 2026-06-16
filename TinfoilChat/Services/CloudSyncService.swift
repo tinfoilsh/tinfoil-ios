@@ -520,11 +520,23 @@ class CloudSyncService: ObservableObject {
         }
     }
 
-    /// Last-write-wins conflict resolution. Pulls the remote chat
-    /// fresh from the enclave and overwrites the local copy so the
-    /// chat exits the stuck-row retry loop. If the pull itself
-    /// fails the chat stays locallyModified and the next sync
-    /// cycle retries.
+    /// Last-write-wins conflict resolution, arbitrated by content
+    /// modification time so the winner is the same on every device.
+    ///
+    /// On a STALE_BLOB / SYNC_CONFLICT the server holds a version our
+    /// upload was not based on. We download that remote row and compare
+    /// its updatedAt against the local copy:
+    ///
+    /// - Remote is strictly newer (or we have no local copy): the
+    ///   remote is the last write, so overwrite local with it.
+    /// - Local is at least as fresh: OUR edit is the last write, so we
+    ///   must not clobber unsynced local messages with the older remote
+    ///   snapshot. Rebase the local row onto the server's current
+    ///   version (so the next upload's CAS base matches) and re-upload,
+    ///   letting local win instead of looping on STALE_BLOB forever.
+    ///
+    /// If the pull itself fails the chat stays locallyModified and the
+    /// next sync cycle retries.
     private func resolveConflictByPullingRemote(_ chatId: String) async {
         do {
             guard var downloadedChat = try await cloudStorage.downloadChat(chatId) else {
@@ -533,6 +545,22 @@ class CloudSyncService: ObservableObject {
             if downloadedChat.modelType == nil {
                 downloadedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
             }
+
+            let localChat = await loadChatFromStorage(chatId)
+            let remoteWins = SyncConflictResolver.remoteWins(
+                local: localChat?.updatedAt,
+                remote: downloadedChat.updatedAt
+            )
+
+            if !remoteWins {
+                await rebaseSyncVersion(chatId, version: downloadedChat.syncVersion)
+                // Re-enqueue rather than wait: the coalescer worker will
+                // pick up the dirty flag and re-run the upload with the
+                // rebased version.
+                await backupChat(chatId)
+                return
+            }
+
             await saveChatToStorage(downloadedChat)
             await markChatAsSynced(downloadedChat.id, version: downloadedChat.syncVersion)
         } catch {
@@ -1869,6 +1897,24 @@ class CloudSyncService: ObservableObject {
             syncVersion: version,
             syncedAt: Date(),
             locallyModified: false
+        )
+    }
+
+    /// Rebase the local chat's sync version onto the server's current
+    /// version while keeping it locallyModified, so the next upload's
+    /// CAS base matches the enclave and the fresher local copy wins the
+    /// last-write-wins race instead of looping on STALE_BLOB. Unlike
+    /// markChatAsSynced this never clears the dirty flag, so the chat is
+    /// still uploaded; the existing syncedAt is preserved.
+    private func rebaseSyncVersion(_ chatId: String, version: Int) async {
+        guard let userId = await getCurrentUserId() else { return }
+        let existingSyncedAt = await loadChatFromStorage(chatId)?.syncedAt
+        try? await EncryptedFileStorage.cloud.updateSyncMetadata(
+            chatId: chatId,
+            userId: userId,
+            syncVersion: version,
+            syncedAt: existingSyncedAt ?? Date(),
+            locallyModified: true
         )
     }
 

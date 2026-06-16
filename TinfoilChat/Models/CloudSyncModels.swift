@@ -7,6 +7,26 @@
 
 import Foundation
 
+// MARK: - Conflict Resolution
+
+/// Last-write-wins arbitration by content modification time, shared by
+/// every scope's conflict resolution (chats, profile) so the winner is
+/// the same on every device.
+enum SyncConflictResolver {
+    /// Returns true when the remote copy is the last write and should
+    /// overwrite local; false when the local copy is at least as fresh
+    /// and must be preserved (re-uploaded).
+    ///
+    /// A missing local timestamp means we cannot prove local is fresher,
+    /// so remote wins. A missing remote timestamp lets local win, since
+    /// we have a concrete local edit time to trust.
+    static func remoteWins(local: Date?, remote: Date?) -> Bool {
+        guard let local = local else { return true }
+        guard let remote = remote else { return false }
+        return remote > local
+    }
+}
+
 // MARK: - Sync Models
 
 /// Extended chat model with sync metadata
