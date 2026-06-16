@@ -617,6 +617,12 @@ class ProfileManager: ObservableObject {
     }
 
     func sharedSettingsDidChange() {
+        // Ignore changes that originate from applying a synced/loaded profile.
+        // Settings applied mid-`applyProfile` (e.g. webSearchEnabled) would
+        // otherwise persist a partially-applied snapshot, since fields applied
+        // later in the sequence still hold their pre-apply values. The applying
+        // flow persists the full profile itself once application completes.
+        guard !isApplyingProfile else { return }
         saveToKeychain()
     }
     
