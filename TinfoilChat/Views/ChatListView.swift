@@ -88,12 +88,17 @@ struct ChatListView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            MessageInputView(
-                messageText: $messageText,
-                viewModel: viewModel,
-                isKeyboardVisible: isKeyboardVisible
-            )
-            .environmentObject(viewModel.authManager ?? AuthManager())
+            VStack(spacing: 0) {
+                if messages.isEmpty && !isKeyboardVisible {
+                    PromptSuggestionsBar(viewModel: viewModel)
+                }
+                MessageInputView(
+                    messageText: $messageText,
+                    viewModel: viewModel,
+                    isKeyboardVisible: isKeyboardVisible
+                )
+                .environmentObject(viewModel.authManager ?? AuthManager())
+            }
             .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
                 HStack {
                     Spacer()

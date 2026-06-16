@@ -30,6 +30,83 @@ func ensureSystemTags(_ prompt: String) -> String {
     return "<system>\n\(trimmed)\n</system>"
 }
 
+/// Compact grid of prompt presets shown directly above the chat input on the
+/// welcome screen. Tapping a preset toggles it for the current chat; "More"
+/// opens the full library.
+struct PromptSuggestionsBar: View {
+    @ObservedObject var viewModel: TinfoilChat.ChatViewModel
+    @State private var showPromptLibrary = false
+
+    private static let suggestionCount = 3
+
+    private var activePresetId: String? {
+        viewModel.currentChat?.promptPresetId
+    }
+
+    var body: some View {
+        let suggested = Array(PromptPreset.builtIns.prefix(Self.suggestionCount))
+        let columns = [
+            GridItem(.flexible(), spacing: 8),
+            GridItem(.flexible(), spacing: 8)
+        ]
+        LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(suggested) { preset in
+                let isActive = activePresetId == preset.id
+                Button {
+                    viewModel.setPromptPreset(isActive ? nil : preset.id)
+                } label: {
+                    pill(iconName: preset.iconName, title: preset.name, isActive: isActive)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button {
+                showPromptLibrary = true
+            } label: {
+                pill(iconName: "square.grid.2x2", title: "More", isActive: false)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+        .sheet(isPresented: $showPromptLibrary) {
+            NavigationStack {
+                PromptLibraryView(
+                    activePresetId: viewModel.currentChat?.promptPresetId,
+                    onSelectPreset: { viewModel.setPromptPreset($0) }
+                )
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") { showPromptLibrary = false }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func pill(iconName: String, title: String, isActive: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: iconName)
+                .font(.system(size: 13))
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .lineLimit(1)
+        }
+        .foregroundColor(isActive ? Color.accentPrimary : .secondary)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(isActive ? Color.accentPrimary.opacity(0.12) : Color.secondary.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(isActive ? Color.accentPrimary.opacity(0.4) : Color.clear, lineWidth: 1)
+        )
+    }
+}
+
 struct PromptLibraryView: View {
     @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.colorScheme) private var colorScheme
@@ -38,6 +115,11 @@ struct PromptLibraryView: View {
     /// checkmark next to the active preset.
     var activePresetId: String? = nil
     var onSelectPreset: ((String?) -> Void)? = nil
+
+    /// When set, the detail screen offers "Start chat with this prompt".
+    var viewModel: TinfoilChat.ChatViewModel? = nil
+    /// Called after a chat is started so the presenter can dismiss itself.
+    var onStarted: (() -> Void)? = nil
 
     @State private var editorTarget: PromptEditorTarget?
     @State private var presetPendingDelete: PromptPreset?
@@ -117,6 +199,8 @@ struct PromptLibraryView: View {
                 presetId: preset.id,
                 activePresetId: activePresetId,
                 onSelectPreset: onSelectPreset,
+                viewModel: viewModel,
+                onStarted: onStarted,
                 onEdit: { editorTarget = .edit(presetId: $0) },
                 onRequestDelete: { presetPendingDelete = $0 }
             )
@@ -154,6 +238,8 @@ struct PromptDetailView: View {
     let presetId: String
     var activePresetId: String?
     var onSelectPreset: ((String?) -> Void)?
+    var viewModel: TinfoilChat.ChatViewModel?
+    var onStarted: (() -> Void)?
     var onEdit: (String) -> Void
     var onRequestDelete: (PromptPreset) -> Void
 
@@ -180,25 +266,38 @@ struct PromptDetailView: View {
         let isActive = activePresetId == preset.id
         Form {
             Section {
-                HStack(spacing: 12) {
-                    Image(systemName: preset.iconName)
-                        .font(.system(size: 20))
-                        .foregroundColor(.secondary)
-                        .frame(width: 28)
-                    VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 12) {
+                        Image(systemName: preset.iconName)
+                            .font(.system(size: 20))
+                            .foregroundColor(.secondary)
+                            .frame(width: 28, alignment: .center)
                         Text(preset.name)
                             .font(.headline)
-                        if !preset.description.isEmpty {
-                            Text(preset.description)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        Text(preset.isBuiltIn ? "Built-in" : "Custom")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .textCase(.uppercase)
+                        Spacer(minLength: 0)
                     }
-                    Spacer()
+                    if !preset.description.isEmpty {
+                        Text(preset.description)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    Text(preset.isBuiltIn ? "Built-in" : "Custom")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .textCase(.uppercase)
+                }
+
+                if viewModel != nil {
+                    Button {
+                        viewModel?.startChat(withPresetId: preset.id)
+                        onStarted?()
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Image(systemName: "plus.bubble")
+                            Text("Start chat with this prompt")
+                        }
+                    }
                 }
 
                 if onSelectPreset != nil {

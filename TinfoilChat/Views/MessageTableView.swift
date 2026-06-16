@@ -332,7 +332,6 @@ struct MessageTableView: UIViewRepresentable {
                         WelcomeView(
                             isDarkMode: parent.isDarkMode,
                             authManager: authManager,
-                            viewModel: parent.viewModel,
                             onRequestSignIn: parent.onRequestSignIn
                         )
                         .padding(.vertical, 16)

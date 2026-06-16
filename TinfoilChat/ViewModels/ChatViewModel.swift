@@ -1071,6 +1071,12 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Starts a fresh chat preloaded with the given prompt preset.
+    func startChat(withPresetId presetId: String) {
+        createNewChat()
+        setPromptPreset(presetId)
+    }
+
     private func chatForProjectMove(_ chatId: String) -> Chat? {
         if let location = findChatLocation(chatId) {
             return chat(at: location)

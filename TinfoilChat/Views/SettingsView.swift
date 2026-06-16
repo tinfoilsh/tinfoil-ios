@@ -568,7 +568,10 @@ struct SettingsView: View {
                 }
             }
 
-            NavigationLink(destination: PromptLibraryView()) {
+            NavigationLink(destination: PromptLibraryView(
+                viewModel: chatViewModel,
+                onStarted: { dismiss() }
+            )) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Prompts")

@@ -269,7 +269,6 @@ struct UIKitScrollView: UIViewRepresentable {
                     WelcomeView(
                         isDarkMode: isDarkMode,
                         authManager: authManager,
-                        viewModel: viewModel,
                         onRequestSignIn: onRequestSignIn
                     )
                     .padding(.vertical, 16)
