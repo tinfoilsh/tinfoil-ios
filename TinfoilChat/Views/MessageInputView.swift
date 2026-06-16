@@ -203,6 +203,43 @@ struct MessageInputView: View {
         }
     }
 
+    /// Small label shown above the input when a prompt preset is active for the
+    /// current chat. Resolving the preset only touches ProfileManager when an id
+    /// is set, so a fresh launch (no preset) never forces its initialization.
+    @ViewBuilder
+    private var promptPresetLabel: some View {
+        if let presetId = viewModel.currentChat?.promptPresetId,
+           let preset = ProfileManager.shared.promptPreset(for: presetId) {
+            HStack(spacing: 6) {
+                Image(systemName: preset.iconName)
+                    .font(.system(size: 11, weight: .medium))
+                Text(preset.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Button {
+                    viewModel.setPromptPreset(nil)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear prompt")
+            }
+            .foregroundColor(Color.accentPrimary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                Capsule()
+                    .fill(Color.accentPrimary.opacity(0.12))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(Color.accentPrimary.opacity(0.35), lineWidth: 1)
+            )
+            .transition(.opacity)
+        }
+    }
+
     /// The indicator is hidden on a blank chat, matching the webapp's
     /// welcome screen behavior.
     private var showContextIndicator: Bool {
@@ -253,6 +290,7 @@ struct MessageInputView: View {
     private func genUIInputContainer(pending: PendingInputToolCall) -> some View {
         VStack(spacing: 8) {
             rateLimitLabel
+            promptPresetLabel
 
             GenUIInputAreaView(
                 pending: pending,
@@ -307,6 +345,7 @@ struct MessageInputView: View {
             // iOS 26+ with liquid glass effect
             VStack(spacing: 4) {
                 rateLimitLabel
+                promptPresetLabel
 
                 VStack(spacing: 0) {
                 // Attachment preview bar
@@ -406,6 +445,7 @@ struct MessageInputView: View {
             // Older iOS with material effect
             VStack(spacing: 4) {
                 rateLimitLabel
+                promptPresetLabel
 
                 VStack(spacing: 0) {
                 // Attachment preview bar
