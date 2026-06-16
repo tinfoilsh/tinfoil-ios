@@ -227,26 +227,50 @@ class CloudSyncService: ObservableObject {
         }
 
         guard let remoteKeyId = response.keyId else {
-            if response.hasData {
-                // Un-migrated legacy data with no registered key: pushing
-                // now would only earn a stale-key rejection. Defer; the
-                // migration path adopts the key and the next pass clears
-                // this gate.
-                return false
-            }
-            // Only ever bind a key the user has actually committed and
-            // only while cloud sync is on. During an activation ceremony
-            // the new key is staged in memory only; a concurrent
-            // background write must not register it before the ceremony
-            // finishes (a transient failure would roll the client back
-            // while the server stays bound to the discarded key).
+            // No key is registered. Only ever bind a key the user has
+            // actually committed and only while cloud sync is on. During
+            // an activation ceremony the new key is staged in memory
+            // only; a concurrent background write must not register it
+            // before the ceremony finishes (a transient failure would
+            // roll the client back while the server stays bound to the
+            // discarded key).
             guard SettingsManager.shared.isCloudSyncEnabled,
                   let persistedKey = EncryptionService.shared.persistedPrimaryKey(),
                   let persistedBytes = try? EncryptionService.shared.getAlternativeKeyBytes(persistedKey)
             else {
                 return false
             }
-            return await registerKeyForEmptyRemote(keyB64: dataToBase64(persistedBytes))
+            // The upload encrypts under the active in-memory CEK, but the
+            // gate only ever binds the committed key. If a ceremony has
+            // staged a different key in memory, registering the committed
+            // key now would bind the account to a key the upload won't
+            // use, and every push would then be rejected as a stale key.
+            // Defer until the active key and the committed key agree (the
+            // ceremony commits or rolls back) so the registered key and
+            // the upload key are always the same.
+            guard let activeKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek),
+                  let committedKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: persistedBytes),
+                  activeKeyId == committedKeyId
+            else {
+                return false
+            }
+            let persistedB64 = dataToBase64(persistedBytes)
+            if response.hasData {
+                // Un-migrated legacy data with no registered key: the
+                // controlplane rejects every push as a stale key until
+                // the local CEK is adopted as the current key. Adopt it
+                // here (created_via=recovery) so the write path
+                // establishes its own precondition instead of deferring
+                // forever while it waits for the out-of-band migration
+                // kick.
+                let adopted = await LegacyBlobMigration.adoptLocalKeyForMigration(
+                    keyB64: persistedB64)
+                if adopted {
+                    SyncHealthStore.shared.reportKeyHealthy()
+                }
+                return adopted
+            }
+            return await registerKeyForEmptyRemote(keyB64: persistedB64)
         }
 
         let localKeyId: String
