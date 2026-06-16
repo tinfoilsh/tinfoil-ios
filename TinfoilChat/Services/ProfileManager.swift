@@ -34,6 +34,9 @@ class ProfileManager: ObservableObject {
 
     // User-created prompt presets (synced through the shared profile row)
     @Published var customPromptPresets: [SyncedPromptPreset] = []
+
+    // Preset ids pinned as homescreen favorites (built-in or custom)
+    @Published var favoritePromptPresetIds: [String] = []
     
     // Sync state
     @Published var isSyncing: Bool = false
@@ -191,6 +194,7 @@ class ProfileManager: ObservableObject {
             isUsingCustomPrompt: isUsingCustomPrompt,
             customSystemPrompt: customSystemPrompt,
             customPromptPresets: customPromptPresets,
+            favoritePromptPresetIds: favoritePromptPresetIds,
             selectedModel: selectedModel,
             reasoningEffort: reasoningEffort,
             thinkingEnabled: thinkingEnabled,
@@ -241,6 +245,9 @@ class ProfileManager: ObservableObject {
         }
         if let customPromptPresets = profile.customPromptPresets {
             self.customPromptPresets = customPromptPresets
+        }
+        if let favoritePromptPresetIds = profile.favoritePromptPresetIds {
+            self.favoritePromptPresetIds = favoritePromptPresetIds
         }
         if let selectedModel = profile.selectedModel {
             UserDefaults.standard.set(selectedModel, forKey: Constants.StorageKeys.Settings.selectedModel)
@@ -376,6 +383,14 @@ class ProfileManager: ObservableObject {
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
+
+        $favoritePromptPresetIds
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
+                self?.saveToKeychain()
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Prompt Presets
@@ -426,6 +441,35 @@ class ProfileManager: ObservableObject {
     /// Delete a user preset.
     func deletePromptPreset(id: String) {
         customPromptPresets.removeAll { $0.id == id }
+        favoritePromptPresetIds.removeAll { $0 == id }
+    }
+
+    // MARK: - Favorites
+
+    /// Presets pinned as homescreen favorites, resolved in pinned order.
+    /// Ids that no longer resolve (e.g. a deleted custom preset synced from
+    /// another device) are skipped.
+    var favoritePromptPresets: [PromptPreset] {
+        favoritePromptPresetIds.compactMap { promptPreset(for: $0) }
+    }
+
+    func isFavoritePreset(_ id: String) -> Bool {
+        favoritePromptPresetIds.contains(id)
+    }
+
+    /// Whether another preset can still be pinned given the favorites cap.
+    var canAddFavorite: Bool {
+        favoritePromptPresetIds.count < Constants.PromptLibrary.maxFavorites
+    }
+
+    /// Toggle a preset's favorite status. Pinning is ignored once the cap is
+    /// reached; unpinning always works.
+    func toggleFavoritePreset(_ id: String) {
+        if let index = favoritePromptPresetIds.firstIndex(of: id) {
+            favoritePromptPresetIds.remove(at: index)
+        } else if canAddFavorite {
+            favoritePromptPresetIds.append(id)
+        }
     }
 
     /// Duplicate a built-in or user preset into a new editable user preset.
@@ -648,6 +692,7 @@ class ProfileManager: ObservableObject {
                p1.isUsingCustomPrompt != p2.isUsingCustomPrompt ||
                p1.customSystemPrompt != p2.customSystemPrompt ||
                p1.customPromptPresets != p2.customPromptPresets ||
+               p1.favoritePromptPresetIds != p2.favoritePromptPresetIds ||
                p1.selectedModel != p2.selectedModel ||
                p1.reasoningEffort != p2.reasoningEffort ||
                p1.thinkingEnabled != p2.thinkingEnabled ||
@@ -736,6 +781,7 @@ class ProfileManager: ObservableObject {
         isUsingCustomPrompt = false
         customSystemPrompt = ""
         customPromptPresets = []
+        favoritePromptPresetIds = []
         
         // Clear from keychain
         keychainHelper.delete(for: keychainKey, service: keychainService)

@@ -35,16 +35,24 @@ func ensureSystemTags(_ prompt: String) -> String {
 /// opens the full library.
 struct PromptSuggestionsBar: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
+    @ObservedObject private var profileManager = ProfileManager.shared
     var onOpenLibrary: () -> Void
-
-    private static let suggestionCount = 3
 
     private var activePresetId: String? {
         viewModel.currentChat?.promptPresetId
     }
 
+    /// User-pinned favorites when set, otherwise the first built-in presets.
+    private var suggestions: [PromptPreset] {
+        let favorites = profileManager.favoritePromptPresets
+        if !favorites.isEmpty {
+            return favorites
+        }
+        return Array(PromptPreset.builtIns.prefix(Constants.PromptLibrary.homeSuggestionCount))
+    }
+
     var body: some View {
-        let suggested = Array(PromptPreset.builtIns.prefix(Self.suggestionCount))
+        let suggested = suggestions
         let columns = [
             GridItem(.flexible(), spacing: 8),
             GridItem(.flexible(), spacing: 8)
@@ -123,6 +131,8 @@ struct PromptLibraryView: View {
                 }
             } header: {
                 Text("Built-in")
+            } footer: {
+                Text("Pin up to \(Constants.PromptLibrary.maxFavorites) favorites to show them on the home screen.")
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
@@ -208,6 +218,12 @@ struct PromptLibraryView: View {
                     }
                 }
                 Spacer()
+                if profileManager.isFavoritePreset(preset.id) {
+                    Image(systemName: "star.fill")
+                        .font(.caption)
+                        .foregroundColor(.yellow)
+                        .accessibilityLabel("Favorite")
+                }
                 if activePresetId == preset.id {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.caption)
@@ -215,6 +231,19 @@ struct PromptLibraryView: View {
                         .accessibilityLabel("Active")
                 }
             }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            let isFavorite = profileManager.isFavoritePreset(preset.id)
+            Button {
+                profileManager.toggleFavoritePreset(preset.id)
+            } label: {
+                Label(
+                    isFavorite ? "Unfavorite" : "Favorite",
+                    systemImage: isFavorite ? "star.slash" : "star"
+                )
+            }
+            .tint(.yellow)
+            .disabled(!isFavorite && !profileManager.canAddFavorite)
         }
     }
 }
@@ -308,6 +337,17 @@ struct PromptDetailView: View {
                         }
                     }
                 }
+
+                let isFavorite = profileManager.isFavoritePreset(preset.id)
+                Button {
+                    profileManager.toggleFavoritePreset(preset.id)
+                } label: {
+                    HStack {
+                        Image(systemName: isFavorite ? "star.slash" : "star")
+                        Text(isFavorite ? "Remove from Favorites" : "Add to Favorites")
+                    }
+                }
+                .disabled(!isFavorite && !profileManager.canAddFavorite)
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
