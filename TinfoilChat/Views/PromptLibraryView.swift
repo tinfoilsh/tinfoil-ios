@@ -35,7 +35,7 @@ func ensureSystemTags(_ prompt: String) -> String {
 /// opens the full library.
 struct PromptSuggestionsBar: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
-    @State private var showPromptLibrary = false
+    var onOpenLibrary: () -> Void
 
     private static let suggestionCount = 3
 
@@ -61,7 +61,7 @@ struct PromptSuggestionsBar: View {
             }
 
             Button {
-                showPromptLibrary = true
+                onOpenLibrary()
             } label: {
                 pill(iconName: "square.grid.2x2", title: "More", isActive: false)
             }
@@ -69,19 +69,6 @@ struct PromptSuggestionsBar: View {
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
-        .sheet(isPresented: $showPromptLibrary) {
-            NavigationStack {
-                PromptLibraryView(
-                    activePresetId: viewModel.currentChat?.promptPresetId,
-                    onSelectPreset: { viewModel.setPromptPreset($0) }
-                )
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Done") { showPromptLibrary = false }
-                    }
-                }
-            }
-        }
     }
 
     @ViewBuilder
@@ -287,11 +274,18 @@ struct PromptDetailView: View {
                         .textCase(.uppercase)
                 }
 
-                if viewModel != nil {
+                if let viewModel {
                     Button {
-                        viewModel?.startChat(withPresetId: preset.id)
-                        onStarted?()
+                        let presetId = preset.id
+                        let started = onStarted
+                        // Dismiss first, then mutate the view model on the next
+                        // runloop tick so we never publish changes to an observed
+                        // object while SwiftUI is processing the dismissal update.
                         dismiss()
+                        DispatchQueue.main.async {
+                            started?()
+                            viewModel.startChat(withPresetId: presetId)
+                        }
                     } label: {
                         HStack {
                             Image(systemName: "plus.bubble")
@@ -300,10 +294,13 @@ struct PromptDetailView: View {
                     }
                 }
 
-                if onSelectPreset != nil {
+                if let onSelectPreset {
                     Button {
-                        onSelectPreset?(isActive ? nil : preset.id)
+                        let newId = isActive ? nil : preset.id
                         dismiss()
+                        DispatchQueue.main.async {
+                            onSelectPreset(newId)
+                        }
                     } label: {
                         HStack {
                             Image(systemName: isActive ? "xmark.circle" : "sparkles")
@@ -326,8 +323,11 @@ struct PromptDetailView: View {
 
             Section {
                 Button {
-                    profileManager.duplicatePromptPreset(id: preset.id)
+                    let presetId = preset.id
                     dismiss()
+                    DispatchQueue.main.async {
+                        profileManager.duplicatePromptPreset(id: presetId)
+                    }
                 } label: {
                     Label("Duplicate", systemImage: "plus.square.on.square")
                 }
@@ -340,8 +340,11 @@ struct PromptDetailView: View {
                     }
 
                     Button(role: .destructive) {
-                        onRequestDelete(preset)
+                        let target = preset
                         dismiss()
+                        DispatchQueue.main.async {
+                            onRequestDelete(target)
+                        }
                     } label: {
                         Label("Delete", systemImage: "trash")
                             .foregroundColor(.red)
