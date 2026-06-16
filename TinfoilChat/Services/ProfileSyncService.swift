@@ -23,6 +23,26 @@ class ProfileSyncService: ObservableObject {
     private var cachedProfile: ProfileData? = nil
     private var failedDecryptionData: String? = nil
 
+    /// Fields from the last fetched profile that this client does not
+    /// model, carried forward on every push so we never wipe settings
+    /// owned by another client.
+    private var unknownRemoteFields: [String: Any] = [:]
+
+    /// Top-level keys this client models. The profile is a single
+    /// full-replace blob shared across clients, so anything else in a
+    /// fetched profile belongs to a newer or other-platform client and
+    /// must survive our next push rather than being dropped when we
+    /// re-serialize only the keys we know about.
+    private static let knownProfileKeys: Set<String> = [
+        "isDarkMode", "themeMode", "language", "nickname", "profession",
+        "traits", "additionalContext", "isUsingPersonalization",
+        "isUsingCustomPrompt", "customSystemPrompt", "customPromptPresets",
+        "favoritePromptPresetIds", "selectedModel", "reasoningEffort",
+        "thinkingEnabled", "webSearchEnabled", "codeExecutionEnabled",
+        "piiCheckEnabled", "chatFont", "projectUploadPreference",
+        "version", "updatedAt",
+    ]
+
     private static let iso8601Formatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -96,6 +116,7 @@ class ProfileSyncService: ObservableObject {
                 // wedged by `hasFailedRemoteDecryption()`.
                 self.failedDecryptionData = nil
                 self.cachedProfile = nil
+                self.unknownRemoteFields = [:]
                 return nil
             }
             if !item.ok {
@@ -106,6 +127,7 @@ class ProfileSyncService: ObservableObject {
                     // `hasFailedRemoteDecryption()`.
                     self.failedDecryptionData = nil
                     self.cachedProfile = nil
+                    self.unknownRemoteFields = [:]
                     return nil
                 }
                 self.failedDecryptionData = "code:\(item.code ?? "UNKNOWN")"
@@ -117,6 +139,13 @@ class ProfileSyncService: ObservableObject {
                 return nil
             }
             var decoded = try JSONDecoder().decode(ProfileData.self, from: plaintext)
+            // Capture fields we do not model so a later push carries
+            // them forward instead of wiping them.
+            if let raw = try? JSONSerialization.jsonObject(with: plaintext) as? [String: Any] {
+                self.unknownRemoteFields = raw.filter { !Self.knownProfileKeys.contains($0.key) }
+            } else {
+                self.unknownRemoteFields = [:]
+            }
             if let etag = item.etag, let version = Int(etag) {
                 decoded.version = version
             }
@@ -143,7 +172,7 @@ class ProfileSyncService: ObservableObject {
             profileWithMetadata.updatedAt = profile.updatedAt ?? Self.iso8601Formatter.string(from: Date())
             profileWithMetadata.version = baseVersion + 1
 
-            let plaintext = try JSONEncoder().encode(profileWithMetadata)
+            let plaintext = try self.encodeProfilePayload(profileWithMetadata)
             let ifMatch: String? = baseVersion > 0 ? String(baseVersion) : nil
 
             let metadata: [String: AnyCodable] = [
@@ -196,6 +225,22 @@ class ProfileSyncService: ObservableObject {
         }
     }
 
+    /// Encode a profile for upload, merging back any fields this client
+    /// does not model so a push never drops settings owned by another
+    /// client. Known fields always win the merge.
+    private func encodeProfilePayload(_ profile: ProfileData) throws -> Data {
+        let encoded = try JSONEncoder().encode(profile)
+        guard !unknownRemoteFields.isEmpty,
+              var dict = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        else {
+            return encoded
+        }
+        for (key, value) in unknownRemoteFields where dict[key] == nil {
+            dict[key] = value
+        }
+        return try JSONSerialization.data(withJSONObject: dict)
+    }
+
     /// Parse an ISO-8601 timestamp, tolerating values written with or
     /// without fractional seconds so cross-device and cross-client
     /// profiles compare correctly.
@@ -231,6 +276,7 @@ class ProfileSyncService: ObservableObject {
     func clearCache() {
         cachedProfile = nil
         failedDecryptionData = nil
+        unknownRemoteFields = [:]
     }
 
     // MARK: - Sync status
