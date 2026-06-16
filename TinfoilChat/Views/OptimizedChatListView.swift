@@ -327,6 +327,7 @@ struct UIKitScrollView: UIViewRepresentable {
                                 isLoading: false,
                                 messageIndex: actualIndex
                             )
+                            .markdownStyleHost(isDarkMode: isDarkMode)
                             .id(message.id)
                             .if(isAIMessage && actualIndex == messages.count - 1) { view in
                                 view.onAppear {
@@ -465,6 +466,7 @@ struct StreamingMessageContainer: View {
                 isLoading: isLoading,
                 messageIndex: messageIndex
             )
+            .markdownStyleHost(isDarkMode: isDarkMode)
             .background(
                 GeometryReader { geometry in
                     Color.clear

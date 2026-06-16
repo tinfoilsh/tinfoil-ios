@@ -760,7 +760,7 @@ struct ObservableMessageCell: View {
 /// time per cell instead of once per `LaTeXMarkdownView` / `SegmentView`
 /// inside the cell, which is what was driving the long `compareLists` /
 /// `EnvironmentBox.update` hangs in production.
-private struct MarkdownStyleHost: ViewModifier {
+struct MarkdownStyleHost: ViewModifier {
     let isDarkMode: Bool
 
     func body(content: Content) -> some View {
@@ -771,7 +771,7 @@ private struct MarkdownStyleHost: ViewModifier {
 }
 
 extension View {
-    fileprivate func markdownStyleHost(isDarkMode: Bool) -> some View {
+    func markdownStyleHost(isDarkMode: Bool) -> some View {
         modifier(MarkdownStyleHost(isDarkMode: isDarkMode))
     }
 }
