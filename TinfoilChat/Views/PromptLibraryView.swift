@@ -80,16 +80,16 @@ struct PromptSuggestionsBar: View {
                 .font(.system(size: 13, weight: .medium))
                 .lineLimit(1)
         }
-        .foregroundColor(isActive ? Color.accentPrimary : .secondary)
+        .foregroundColor(isActive ? Color.adaptiveAccent : .secondary)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(isActive ? Color.accentPrimary.opacity(0.12) : Color.secondary.opacity(0.12))
+                .fill(isActive ? Color.adaptiveAccent.opacity(0.12) : Color.secondary.opacity(0.12))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(isActive ? Color.accentPrimary.opacity(0.4) : Color.clear, lineWidth: 1)
+                .stroke(isActive ? Color.adaptiveAccent.opacity(0.4) : Color.clear, lineWidth: 1)
         )
     }
 }
