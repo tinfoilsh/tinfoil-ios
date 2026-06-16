@@ -55,6 +55,12 @@ enum Constants {
         /// Individual markdown segments larger than this are split at
         /// paragraph boundaries to bound CoreText measurement time.
         static let maxMarkdownSegmentCharacters = 8_000
+        /// Assistant messages larger than this render without inline text
+        /// selection. The selection overlay installs a custom UITextInput per
+        /// fragment, which is the most expensive and crash-prone path on long
+        /// content; users can still select large messages via the full-text
+        /// selection sheet.
+        static let maxInlineSelectionCharacters = 10_000
     }
 
     enum StreamingBuffer {

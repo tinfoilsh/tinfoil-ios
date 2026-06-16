@@ -47,7 +47,8 @@ struct MessageView: View {
     }
 
     private var inlineAssistantTextSelectionEnabled: Bool {
-        !(isLoading && isLastMessage)
+        guard !(isLoading && isLastMessage) else { return false }
+        return message.content.count <= Constants.Rendering.maxInlineSelectionCharacters
     }
 
     /// Runs of adjacent segments collapsed for inline rendering. Adjacent
