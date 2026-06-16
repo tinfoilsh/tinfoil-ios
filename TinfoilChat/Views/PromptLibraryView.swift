@@ -35,16 +35,29 @@ func ensureSystemTags(_ prompt: String) -> String {
 /// opens the full library.
 struct PromptSuggestionsBar: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
+    @ObservedObject private var profileManager = ProfileManager.shared
     var onOpenLibrary: () -> Void
-
-    private static let suggestionCount = 3
 
     private var activePresetId: String? {
         viewModel.currentChat?.promptPresetId
     }
 
+    /// User-pinned favorites, with any remaining slots filled by the default
+    /// built-in presets so the home screen always offers a full set.
+    private var suggestions: [PromptPreset] {
+        let target = Constants.PromptLibrary.homeSuggestionCount
+        var result = profileManager.favoritePromptPresets
+        let pinnedIds = Set(result.map { $0.id })
+        for preset in PromptPreset.builtIns where result.count < target {
+            if !pinnedIds.contains(preset.id) {
+                result.append(preset)
+            }
+        }
+        return Array(result.prefix(target))
+    }
+
     var body: some View {
-        let suggested = Array(PromptPreset.builtIns.prefix(Self.suggestionCount))
+        let suggested = suggestions
         let columns = [
             GridItem(.flexible(), spacing: 8),
             GridItem(.flexible(), spacing: 8)
@@ -123,6 +136,8 @@ struct PromptLibraryView: View {
                 }
             } header: {
                 Text("Built-in")
+            } footer: {
+                Text("Pin up to \(Constants.PromptLibrary.maxFavorites) favorites to show them on the home screen.")
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
@@ -192,11 +207,12 @@ struct PromptLibraryView: View {
                 onRequestDelete: { presetPendingDelete = $0 }
             )
         } label: {
-            HStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
                 Image(systemName: preset.iconName)
                     .font(.system(size: 16))
                     .foregroundColor(.secondary)
                     .frame(width: 24)
+                    .alignmentGuide(.top) { $0[.top] - 2 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(preset.name)
                         .font(.body)
@@ -208,6 +224,12 @@ struct PromptLibraryView: View {
                     }
                 }
                 Spacer()
+                if profileManager.isFavoritePreset(preset.id) {
+                    Image(systemName: "star.fill")
+                        .font(.caption)
+                        .foregroundColor(.yellow)
+                        .accessibilityLabel("Favorite")
+                }
                 if activePresetId == preset.id {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.caption)
@@ -215,6 +237,19 @@ struct PromptLibraryView: View {
                         .accessibilityLabel("Active")
                 }
             }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            let isFavorite = profileManager.isFavoritePreset(preset.id)
+            Button {
+                profileManager.toggleFavoritePreset(preset.id)
+            } label: {
+                Label(
+                    isFavorite ? "Unfavorite" : "Favorite",
+                    systemImage: isFavorite ? "star.slash" : "star"
+                )
+            }
+            .tint(.yellow)
+            .disabled(!profileManager.canToggleFavorite(preset.id))
         }
     }
 }
@@ -253,25 +288,25 @@ struct PromptDetailView: View {
         let isActive = activePresetId == preset.id
         Form {
             Section {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 12) {
-                        Image(systemName: preset.iconName)
-                            .font(.system(size: 20))
-                            .foregroundColor(.secondary)
-                            .frame(width: 28, alignment: .center)
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: preset.iconName)
+                        .font(.system(size: 20))
+                        .foregroundColor(.secondary)
+                        .frame(width: 28, alignment: .center)
+                    VStack(alignment: .leading, spacing: 6) {
                         Text(preset.name)
                             .font(.headline)
-                        Spacer(minLength: 0)
-                    }
-                    if !preset.description.isEmpty {
-                        Text(preset.description)
-                            .font(.subheadline)
+                        if !preset.description.isEmpty {
+                            Text(preset.description)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        Text(preset.isBuiltIn ? "Built-in" : "Custom")
+                            .font(.caption2)
                             .foregroundColor(.secondary)
+                            .textCase(.uppercase)
                     }
-                    Text(preset.isBuiltIn ? "Built-in" : "Custom")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .textCase(.uppercase)
+                    Spacer(minLength: 0)
                 }
 
                 if let viewModel {
@@ -308,6 +343,17 @@ struct PromptDetailView: View {
                         }
                     }
                 }
+
+                let isFavorite = profileManager.isFavoritePreset(preset.id)
+                Button {
+                    profileManager.toggleFavoritePreset(preset.id)
+                } label: {
+                    HStack {
+                        Image(systemName: isFavorite ? "star.slash" : "star")
+                        Text(isFavorite ? "Remove from Favorites" : "Add to Favorites")
+                    }
+                }
+                .disabled(!profileManager.canToggleFavorite(preset.id))
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
 

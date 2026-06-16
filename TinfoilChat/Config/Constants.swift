@@ -120,6 +120,13 @@ enum Constants {
         static let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
     }
 
+    enum PromptLibrary {
+        /// Maximum number of prompt presets a user can pin as favorites.
+        static let maxFavorites = 3
+        /// Number of prompt suggestions shown on the welcome screen.
+        static let homeSuggestionCount = 3
+    }
+
     enum Pagination {
         static let chatsPerPage = 20
         static let projectsPerPage = 20

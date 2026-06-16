@@ -391,6 +391,9 @@ struct ProfileData: Codable {
     var isUsingCustomPrompt: Bool?
     var customSystemPrompt: String?
     var customPromptPresets: [SyncedPromptPreset]?
+    /// Ordered preset ids the user pinned as homescreen favorites.
+    /// Mixes `builtin:*` and `user:*` ids, shared with the webapp.
+    var favoritePromptPresetIds: [String]?
 
     // Shared chat defaults
     var selectedModel: String?
