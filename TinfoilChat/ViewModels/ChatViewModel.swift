@@ -1051,6 +1051,26 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Sets (or clears) the prompt-library preset for the current chat. The
+    /// preset's system prompt overrides the default for this conversation.
+    func setPromptPreset(_ presetId: String?) {
+        guard var chat = currentChat else { return }
+        if let updated = updateChatInPlace(chat.id, update: { c in
+            c.promptPresetId = presetId
+            c.locallyModified = true
+            c.updatedAt = Date()
+        }) {
+            saveChat(updated)
+        } else {
+            // Chat not yet in either array (e.g. a transient blank chat):
+            // update the in-memory current chat so the preset still applies.
+            chat.promptPresetId = presetId
+            chat.locallyModified = true
+            chat.updatedAt = Date()
+            currentChat = chat
+        }
+    }
+
     private func chatForProjectMove(_ chatId: String) -> Chat? {
         if let location = findChatLocation(chatId) {
             return chat(at: location)
@@ -1645,8 +1665,10 @@ class ChatViewModel: ObservableObject {
                 let profileManager = ProfileManager.shared
                 var systemPrompt: String
                 
-                // Use custom prompt if enabled (from ProfileManager), otherwise use default
-                if let customPrompt = profileManager.getCustomSystemPrompt() {
+                // Precedence: per-chat prompt preset > custom prompt toggle > default
+                if let preset = profileManager.promptPreset(for: currentChat?.promptPresetId) {
+                    systemPrompt = preset.systemPrompt
+                } else if let customPrompt = profileManager.getCustomSystemPrompt() {
                     systemPrompt = customPrompt
                 } else if settingsManager.isUsingCustomPrompt && !settingsManager.customSystemPrompt.isEmpty {
                     systemPrompt = settingsManager.customSystemPrompt

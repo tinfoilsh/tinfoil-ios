@@ -572,12 +572,14 @@ struct ChatContainer: View {
 struct WelcomeView: View {
     let isDarkMode: Bool
     @ObservedObject var authManager: AuthManager
+    @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     let onRequestSignIn: () -> Void
     
     var body: some View {
         TabbedWelcomeView(
             isDarkMode: isDarkMode,
             authManager: authManager,
+            viewModel: viewModel,
             onRequestSignIn: onRequestSignIn
         )
     }
@@ -652,10 +654,12 @@ private struct TypewriterText: View {
 struct TabbedWelcomeView: View {
     let isDarkMode: Bool
     @ObservedObject var authManager: AuthManager
+    @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     let onRequestSignIn: () -> Void
     @ObservedObject private var settings = SettingsManager.shared
     @State private var isPrivacyExpanded = false
     @State private var showLinks = false
+    @State private var showPromptLibrary = false
 
     private static let privacyText = "Your messages are encrypted directly to the AI models running inside secure hardware enclaves. These are hardware-isolated environments powered by confidential computing GPUs with verifiable confidentiality and integrity guarantees. Not even Tinfoil can access your data. This applies to all chats, images, documents, and voice input. Our open-source stack lets you verify this yourself by inspecting the hardware attestation."
 
@@ -759,9 +763,85 @@ struct TabbedWelcomeView: View {
             .padding(.horizontal, 12)
             .opacity(isPrivacyExpanded ? 1 : 0)
             .allowsHitTesting(isPrivacyExpanded)
+
+            promptSuggestions
         }
         .padding(.top, 24)
         .padding(.bottom, 4)
+        .sheet(isPresented: $showPromptLibrary) {
+            NavigationStack {
+                PromptLibraryView(
+                    activePresetId: viewModel.currentChat?.promptPresetId,
+                    onSelectPreset: { viewModel.setPromptPreset($0) }
+                )
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") { showPromptLibrary = false }
+                    }
+                }
+            }
+        }
+    }
+
+    private static let suggestionCount = 3
+
+    private var activePresetId: String? {
+        viewModel.currentChat?.promptPresetId
+    }
+
+    @ViewBuilder
+    private var promptSuggestions: some View {
+        let suggested = Array(PromptPreset.builtIns.prefix(Self.suggestionCount))
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(suggested) { preset in
+                    let isActive = activePresetId == preset.id
+                    Button {
+                        viewModel.setPromptPreset(isActive ? nil : preset.id)
+                    } label: {
+                        promptPill(
+                            iconName: preset.iconName,
+                            title: preset.name,
+                            isActive: isActive
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button {
+                    showPromptLibrary = true
+                } label: {
+                    promptPill(
+                        iconName: "square.grid.2x2",
+                        title: "More",
+                        isActive: false
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    @ViewBuilder
+    private func promptPill(iconName: String, title: String, isActive: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: iconName)
+                .font(.system(size: 12))
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+        }
+        .foregroundColor(isActive ? Color.accentPrimary : .secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isActive ? Color.accentPrimary.opacity(0.12) : Color.secondary.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isActive ? Color.accentPrimary.opacity(0.4) : Color.clear, lineWidth: 1)
+        )
     }
 
     /// Gets the display name for the user - prioritizes nickname from settings, falls back to first name from auth

@@ -568,6 +568,19 @@ struct SettingsView: View {
                 }
             }
 
+            NavigationLink(destination: PromptLibraryView()) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Prompts")
+                            .font(.body)
+                        Text("Browse and manage prompt presets")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                }
+            }
+
             NavigationLink(destination: PersonalizationView()) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {

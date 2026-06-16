@@ -36,6 +36,9 @@ struct StoredChat: Codable {
     // Project association (used by React, preserved by iOS)
     var projectId: String?
 
+    // Active prompt-library preset for this chat (shared with React via presetId)
+    var promptPresetId: String?
+
     // For tracking streaming state
     var hasActiveStream: Bool?
     
@@ -101,6 +104,7 @@ struct StoredChat: Codable {
         self.dataCorrupted = chat.dataCorrupted
         self.formatVersion = chat.formatVersion
         self.projectId = chat.projectId
+        self.promptPresetId = chat.promptPresetId
         self.hasActiveStream = chat.hasActiveStream
     }
     
@@ -134,7 +138,8 @@ struct StoredChat: Codable {
             decryptionFailed: decryptionFailed ?? false,
             dataCorrupted: dataCorrupted ?? false,
             formatVersion: formatVersion,
-            projectId: projectId
+            projectId: projectId,
+            promptPresetId: promptPresetId
         )
 
         if let hasActiveStream = hasActiveStream {
@@ -150,6 +155,7 @@ struct StoredChat: Codable {
         case language, userId
         case syncVersion, syncedAt, locallyModified
         case decryptionFailed, dataCorrupted, formatVersion, projectId
+        case promptPresetId = "presetId"
     }
 
     func encode(to encoder: Encoder) throws {
@@ -181,6 +187,7 @@ struct StoredChat: Codable {
         try container.encodeIfPresent(dataCorrupted, forKey: .dataCorrupted)
         try container.encodeIfPresent(formatVersion, forKey: .formatVersion)
         try container.encodeIfPresent(projectId, forKey: .projectId)
+        try container.encodeIfPresent(promptPresetId, forKey: .promptPresetId)
         // hasActiveStream is transient UI state — never encode it to the sync blob
     }
     
@@ -240,6 +247,7 @@ struct StoredChat: Codable {
         dataCorrupted = try container.decodeIfPresent(Bool.self, forKey: .dataCorrupted)
         formatVersion = try container.decodeIfPresent(Int.self, forKey: .formatVersion)
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
+        promptPresetId = try container.decodeIfPresent(String.self, forKey: .promptPresetId)
         // hasActiveStream is transient UI state — always reset to nil on decode
         hasActiveStream = nil
     }

@@ -31,6 +31,9 @@ class ProfileManager: ObservableObject {
     // Custom system prompt
     @Published var isUsingCustomPrompt: Bool = false
     @Published var customSystemPrompt: String = ""
+
+    // User-created prompt presets (synced through the shared profile row)
+    @Published var customPromptPresets: [SyncedPromptPreset] = []
     
     // Sync state
     @Published var isSyncing: Bool = false
@@ -50,7 +53,6 @@ class ProfileManager: ObservableObject {
     private var isApplyingProfile: Bool = false  // Flag to prevent observer loops
     private var isPulling: Bool = false
     private var isPushing: Bool = false
-    private var customPromptPresets: [SyncedPromptPreset]?
     private var codeExecutionEnabled: Bool?
     private var piiCheckEnabled: Bool?
     private var chatFont: String?
@@ -163,7 +165,7 @@ class ProfileManager: ObservableObject {
             isUsingPersonalization: isUsingPersonalization,
             isUsingCustomPrompt: isUsingCustomPrompt,
             customSystemPrompt: customSystemPrompt,
-            customPromptPresets: customPromptPresets,
+            customPromptPresets: customPromptPresets.isEmpty ? nil : customPromptPresets,
             selectedModel: selectedModel,
             reasoningEffort: reasoningEffort,
             thinkingEnabled: thinkingEnabled,
@@ -336,6 +338,75 @@ class ProfileManager: ObservableObject {
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
+
+        $customPromptPresets
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
+                self?.saveToKeychain()
+            }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - Prompt Presets
+
+    /// All presets surfaced in the prompt library: built-ins followed by the
+    /// user's custom presets.
+    var allPromptPresets: [PromptPreset] {
+        PromptPreset.builtIns + customPromptPresets.map { PromptPreset(from: $0) }
+    }
+
+    /// Resolve a preset by id across built-ins and user presets.
+    func promptPreset(for id: String?) -> PromptPreset? {
+        guard let id else { return nil }
+        return allPromptPresets.first { $0.id == id }
+    }
+
+    private func generatePresetId() -> String {
+        let random = UUID().uuidString.prefix(8).lowercased()
+        let timestamp = String(Int(Date().timeIntervalSince1970 * 1000), radix: 36)
+        return "\(PromptPreset.userIdPrefix)\(timestamp)-\(random)"
+    }
+
+    /// Create a new user preset and return its library representation.
+    @discardableResult
+    func createPromptPreset(name: String, description: String, systemPrompt: String) -> PromptPreset {
+        let now = Date().timeIntervalSince1970 * 1000
+        let preset = SyncedPromptPreset(
+            id: generatePresetId(),
+            name: name,
+            description: description,
+            systemPrompt: systemPrompt,
+            createdAt: now,
+            updatedAt: now
+        )
+        customPromptPresets.append(preset)
+        return PromptPreset(from: preset)
+    }
+
+    /// Update an existing user preset in place.
+    func updatePromptPreset(id: String, name: String, description: String, systemPrompt: String) {
+        guard let index = customPromptPresets.firstIndex(where: { $0.id == id }) else { return }
+        customPromptPresets[index].name = name
+        customPromptPresets[index].description = description
+        customPromptPresets[index].systemPrompt = systemPrompt
+        customPromptPresets[index].updatedAt = Date().timeIntervalSince1970 * 1000
+    }
+
+    /// Delete a user preset.
+    func deletePromptPreset(id: String) {
+        customPromptPresets.removeAll { $0.id == id }
+    }
+
+    /// Duplicate a built-in or user preset into a new editable user preset.
+    @discardableResult
+    func duplicatePromptPreset(id: String) -> PromptPreset? {
+        guard let source = promptPreset(for: id) else { return nil }
+        return createPromptPreset(
+            name: "\(source.name) (copy)",
+            description: source.description,
+            systemPrompt: source.systemPrompt
+        )
     }
     
     // MARK: - Cloud Sync
@@ -616,6 +687,7 @@ class ProfileManager: ObservableObject {
         isUsingPersonalization = false
         isUsingCustomPrompt = false
         customSystemPrompt = ""
+        customPromptPresets = []
         
         // Clear from keychain
         keychainHelper.delete(for: keychainKey, service: keychainService)
