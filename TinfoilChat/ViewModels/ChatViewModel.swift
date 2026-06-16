@@ -66,7 +66,9 @@ class ChatViewModel: ObservableObject {
                 reasoningEffort.rawValue,
                 forKey: Constants.StorageKeys.Settings.reasoningEffort
             )
-            ProfileManager.shared.sharedSettingsDidChange()
+            if !isLoadingPersistedSettings {
+                ProfileManager.shared.sharedSettingsDidChange()
+            }
         }
     }
     @Published var thinkingEnabled: Bool = true {
@@ -75,9 +77,18 @@ class ChatViewModel: ObservableObject {
                 thinkingEnabled,
                 forKey: Constants.StorageKeys.Settings.thinkingEnabled
             )
-            ProfileManager.shared.sharedSettingsDidChange()
+            if !isLoadingPersistedSettings {
+                ProfileManager.shared.sharedSettingsDidChange()
+            }
         }
     }
+
+    // While true, persisted-setting didSet observers skip the shared-settings
+    // sync callback. Loading stored values during init is not a user edit, and
+    // touching ProfileManager here would lazily initialize it (and publish its
+    // applied profile) in the middle of the SwiftUI update that creates this
+    // view model.
+    private var isLoadingPersistedSettings = false
     @Published var imageViewerImages: [Attachment] = []
     @Published var imageViewerIndex: Int = 0
     @Published var showImageViewer: Bool = false
@@ -355,6 +366,7 @@ class ChatViewModel: ObservableObject {
         // Load persisted reasoning preferences. Both default to the most
         // permissive setting (thinking on, medium effort) when no value has
         // been saved yet, matching the webapp.
+        isLoadingPersistedSettings = true
         if let savedEffortRaw = UserDefaults.standard.string(
             forKey: Constants.StorageKeys.Settings.reasoningEffort
         ), let savedEffort = ReasoningEffort(rawValue: savedEffortRaw) {
@@ -367,6 +379,7 @@ class ChatViewModel: ObservableObject {
                 forKey: Constants.StorageKeys.Settings.thinkingEnabled
             )
         }
+        isLoadingPersistedSettings = false
 
         if let savedTab = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.cloudSyncActiveTab),
            let tab = ChatStorageTab(rawValue: savedTab) {
