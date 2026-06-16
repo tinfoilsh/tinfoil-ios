@@ -558,9 +558,6 @@ class ProfileManager: ObservableObject {
             if let cloudProfile = try await profileSync.fetchProfile() {
                 let cloudVersion = cloudProfile.version ?? 0
 
-                // DEBUG[profile-sync]: remove before merge.
-                print("[profile-sync] syncFromCloud cloudVersion=\(cloudVersion) lastSyncedVersion=\(lastSyncedVersion) hasPendingEdit=\(hasPendingEdit) willApply=\(!hasPendingEdit && (cloudVersion > lastSyncedVersion || hasProfileChanged(cloudProfile, lastSyncedProfile))) diff=\(profileDiffFields(cloudProfile, lastSyncedProfile))")
-
                 if hasPendingEdit {
                     // Record the server version so the pending push rebases
                     // onto it as a CAS update instead of a create; the
@@ -621,9 +618,6 @@ class ProfileManager: ObservableObject {
         
         let profile = createProfileData()
 
-        // DEBUG[profile-sync]: remove before merge.
-        print("[profile-sync] syncToCloud decide dirty=\(hasPendingLocalProfileChanges) willPush=\(hasProfileChanged(profile, lastSyncedProfile)) diff=\(profileDiffFields(profile, lastSyncedProfile)) baseVersion=\(lastSyncedVersion) updatedAt=\(String(describing: profile.updatedAt))")
-
         // Only push if there is a real change vs last synced baseline.
         // When nothing diverges, clear the pending flag so a phantom
         // dirty marker can't permanently block pulls from the cloud.
@@ -665,8 +659,6 @@ class ProfileManager: ObservableObject {
                 // If local state changed during the sync, schedule another upload
                 let currentAfter = createProfileData()
                 if hasProfileChanged(currentAfter, lastSyncedProfile) {
-                    // DEBUG[profile-sync]: remove before merge.
-                    print("[profile-sync] syncToCloud re-arm diff=\(profileDiffFields(currentAfter, lastSyncedProfile))")
                     debounceCloudSync()
                 }
             }
@@ -722,36 +714,6 @@ class ProfileManager: ObservableObject {
         baseline.version = version
         persistProfileToKeychain(baseline)
         lastSyncedProfile = baseline
-    }
-
-    // DEBUG[profile-sync]: temporary diagnostic. Names the fields that
-    // differ between two profiles so we can see what keeps the profile
-    // "dirty". Remove before merging to main.
-    private func profileDiffFields(_ p1: ProfileData?, _ p2: ProfileData?) -> [String] {
-        guard let a = p1, let b = p2 else {
-            return (p1 == nil && p2 == nil) ? [] : ["<one-side-nil>"]
-        }
-        var fields: [String] = []
-        if a.isDarkMode != b.isDarkMode { fields.append("isDarkMode") }
-        if a.language != b.language { fields.append("language") }
-        if a.nickname != b.nickname { fields.append("nickname") }
-        if a.profession != b.profession { fields.append("profession") }
-        if a.traits != b.traits { fields.append("traits") }
-        if a.additionalContext != b.additionalContext { fields.append("additionalContext") }
-        if a.isUsingPersonalization != b.isUsingPersonalization { fields.append("isUsingPersonalization") }
-        if a.isUsingCustomPrompt != b.isUsingCustomPrompt { fields.append("isUsingCustomPrompt") }
-        if a.customSystemPrompt != b.customSystemPrompt { fields.append("customSystemPrompt") }
-        if a.customPromptPresets != b.customPromptPresets { fields.append("customPromptPresets") }
-        if a.favoritePromptPresetIds != b.favoritePromptPresetIds { fields.append("favoritePromptPresetIds") }
-        if a.selectedModel != b.selectedModel { fields.append("selectedModel") }
-        if a.reasoningEffort != b.reasoningEffort { fields.append("reasoningEffort") }
-        if a.thinkingEnabled != b.thinkingEnabled { fields.append("thinkingEnabled") }
-        if a.webSearchEnabled != b.webSearchEnabled { fields.append("webSearchEnabled") }
-        if a.codeExecutionEnabled != b.codeExecutionEnabled { fields.append("codeExecutionEnabled") }
-        if a.piiCheckEnabled != b.piiCheckEnabled { fields.append("piiCheckEnabled") }
-        if a.chatFont != b.chatFont { fields.append("chatFont") }
-        if a.projectUploadPreference != b.projectUploadPreference { fields.append("projectUploadPreference") }
-        return fields
     }
 
     /// Check if two profiles are different (excluding metadata)
