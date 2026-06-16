@@ -165,7 +165,7 @@ class ProfileManager: ObservableObject {
             isUsingPersonalization: isUsingPersonalization,
             isUsingCustomPrompt: isUsingCustomPrompt,
             customSystemPrompt: customSystemPrompt,
-            customPromptPresets: customPromptPresets.isEmpty ? nil : customPromptPresets,
+            customPromptPresets: customPromptPresets,
             selectedModel: selectedModel,
             reasoningEffort: reasoningEffort,
             thinkingEnabled: thinkingEnabled,
