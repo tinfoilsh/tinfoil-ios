@@ -234,12 +234,6 @@ class CloudSyncService: ObservableObject {
             // before the ceremony finishes (a transient failure would
             // roll the client back while the server stays bound to the
             // discarded key).
-            guard SettingsManager.shared.isCloudSyncEnabled,
-                  let persistedKey = EncryptionService.shared.persistedPrimaryKey(),
-                  let persistedBytes = try? EncryptionService.shared.getAlternativeKeyBytes(persistedKey)
-            else {
-                return false
-            }
             // The upload encrypts under the active in-memory CEK, but the
             // gate only ever binds the committed key. If a ceremony has
             // staged a different key in memory, registering the committed
@@ -248,9 +242,8 @@ class CloudSyncService: ObservableObject {
             // Defer until the active key and the committed key agree (the
             // ceremony commits or rolls back) so the registered key and
             // the upload key are always the same.
-            guard let activeKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek),
-                  let committedKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: persistedBytes),
-                  activeKeyId == committedKeyId
+            guard SettingsManager.shared.isCloudSyncEnabled,
+                  let persistedBytes = LegacyBlobMigration.committedKeyIfActiveMatches()
             else {
                 return false
             }
@@ -1558,6 +1551,10 @@ class CloudSyncService: ObservableObject {
     func clearSyncStatus() {
         UserDefaults.standard.removeObject(forKey: syncStatusKey)
         UserDefaults.standard.removeObject(forKey: allChatsSyncStatusKey)
+        // Drop any in-flight key registration so the next signed-in user
+        // never awaits a task started under the previous user's key.
+        emptyRemoteRegistration?.cancel()
+        emptyRemoteRegistration = nil
     }
 
     // MARK: - Sync Status Cache Helpers
