@@ -244,7 +244,7 @@ struct PromptLibraryView: View {
                 )
             }
             .tint(.yellow)
-            .disabled(!isFavorite && !profileManager.canAddFavorite)
+            .disabled(!profileManager.canToggleFavorite(preset.id))
         }
     }
 }
@@ -348,7 +348,7 @@ struct PromptDetailView: View {
                         Text(isFavorite ? "Remove from Favorites" : "Add to Favorites")
                     }
                 }
-                .disabled(!isFavorite && !profileManager.canAddFavorite)
+                .disabled(!profileManager.canToggleFavorite(preset.id))
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
 

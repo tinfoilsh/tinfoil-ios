@@ -458,8 +458,18 @@ class ProfileManager: ObservableObject {
     }
 
     /// Whether another preset can still be pinned given the favorites cap.
+    /// Capacity is measured against favorites that actually resolve to a
+    /// preset, so stale ids (e.g. a custom preset deleted on another device,
+    /// or one not yet synced here) never count toward the cap and block
+    /// adding a valid favorite.
     var canAddFavorite: Bool {
-        favoritePromptPresetIds.count < Constants.PromptLibrary.maxFavorites
+        favoritePromptPresets.count < Constants.PromptLibrary.maxFavorites
+    }
+
+    /// Whether the favorite toggle for a preset should be enabled: already
+    /// pinned presets can always be unpinned, others only while under the cap.
+    func canToggleFavorite(_ id: String) -> Bool {
+        isFavoritePreset(id) || canAddFavorite
     }
 
     /// Toggle a preset's favorite status. Pinning is ignored once the cap is
