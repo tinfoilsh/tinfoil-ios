@@ -87,8 +87,15 @@ enum LegacyBlobMigration {
             // passes. Safe because we already hold the CEK and a legacy
             // passkey wrapping it stays promotable afterwards. Mirrors the
             // webapp's migration adoption.
+            // Only ever bind the committed key, and only when it matches
+            // the active in-memory CEK. During a key-activation ceremony
+            // the new key is staged in memory only; registering it here
+            // would bind the account to a key the user may roll back. When
+            // they diverge the helper returns nil and adoption is skipped,
+            // so the gate below defers this sweep until the ceremony lands.
             if current.keyId == nil, current.hasData,
-                await adoptLocalKeyForMigration(keyB64: targetKeyB64)
+                let safeKey = committedKeyIfActiveMatches(),
+                await adoptLocalKeyForMigration(keyB64: dataToBase64(safeKey))
             {
                 current = try await SyncEnclaveAPI.keyCurrent()
             }
@@ -281,6 +288,26 @@ enum LegacyBlobMigration {
         if completedSweep, report.totalBlocked > 0, let fingerprint {
             defaults.set(fingerprint, forKey: key)
         }
+    }
+
+    /// The committed primary CEK bytes, but only when they match the
+    /// active in-memory CEK. Returns nil to mean "defer adoption": there
+    /// is no committed key, it cannot be read, or a key-activation
+    /// ceremony has staged a different key in memory that must not be
+    /// bound to the account yet. Callers register the returned bytes so a
+    /// staged, not-yet-committed key is never adopted as the current key.
+    /// Mirrors the webapp's staged-key adoption guard.
+    static func committedKeyIfActiveMatches() -> Data? {
+        guard let persistedKey = EncryptionService.shared.persistedPrimaryKey(),
+            let persistedBytes = try? EncryptionService.shared.getAlternativeKeyBytes(persistedKey),
+            let activeBytes = try? EncryptionService.shared.getKeyBytesOrThrow(),
+            let committedKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: persistedBytes),
+            let activeKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: activeBytes),
+            activeKeyId == committedKeyId
+        else {
+            return nil
+        }
+        return persistedBytes
     }
 
     /// Register the local primary CEK as the enclave's current key for a
