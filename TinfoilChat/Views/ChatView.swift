@@ -323,7 +323,7 @@ struct ChatContainer: View {
                                 .font(.system(size: 10, weight: .medium))
                                 .lineLimit(1)
                         }
-                        .foregroundColor(Color.accentPrimary)
+                        .foregroundColor(toolbarContentColor.opacity(0.7))
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel("Prompt: \(preset.name)")
                     }
