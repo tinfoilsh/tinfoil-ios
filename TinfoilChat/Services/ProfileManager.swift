@@ -9,6 +9,10 @@ import Foundation
 import Combine
 import SwiftUI
 
+extension Notification.Name {
+    static let profileSharedSettingsDidChange = Notification.Name("com.tinfoil.chat.profile.shared-settings-did-change")
+}
+
 @MainActor
 class ProfileManager: ObservableObject {
     static let shared = ProfileManager()
@@ -46,6 +50,11 @@ class ProfileManager: ObservableObject {
     private var isApplyingProfile: Bool = false  // Flag to prevent observer loops
     private var isPulling: Bool = false
     private var isPushing: Bool = false
+    private var customPromptPresets: [SyncedPromptPreset]?
+    private var codeExecutionEnabled: Bool?
+    private var piiCheckEnabled: Bool?
+    private var chatFont: String?
+    private var projectUploadPreference: String?
     
     // Keychain keys
     private let keychainKey = "userProfile"
@@ -132,6 +141,18 @@ class ProfileManager: ObservableObject {
     
     /// Create ProfileData from current settings
     private func createProfileData() -> ProfileData {
+        let selectedModel = AppConfig.shared.currentModel?.id
+            ?? UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.selectedModel)
+        let reasoningEffort = UserDefaults.standard.string(
+            forKey: Constants.StorageKeys.Settings.reasoningEffort
+        ) ?? ReasoningEffort.medium.rawValue
+        let thinkingEnabled: Bool
+        if UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.thinkingEnabled) != nil {
+            thinkingEnabled = UserDefaults.standard.bool(forKey: Constants.StorageKeys.Settings.thinkingEnabled)
+        } else {
+            thinkingEnabled = true
+        }
+
         return ProfileData(
             isDarkMode: isDarkMode,
             language: language,
@@ -142,6 +163,15 @@ class ProfileManager: ObservableObject {
             isUsingPersonalization: isUsingPersonalization,
             isUsingCustomPrompt: isUsingCustomPrompt,
             customSystemPrompt: customSystemPrompt,
+            customPromptPresets: customPromptPresets,
+            selectedModel: selectedModel,
+            reasoningEffort: reasoningEffort,
+            thinkingEnabled: thinkingEnabled,
+            webSearchEnabled: SettingsManager.shared.webSearchEnabled,
+            codeExecutionEnabled: codeExecutionEnabled,
+            piiCheckEnabled: piiCheckEnabled,
+            chatFont: chatFont,
+            projectUploadPreference: projectUploadPreference,
             version: lastSyncedVersion,  // Will be incremented by ProfileSyncService
             updatedAt: ISO8601DateFormatter().string(from: Date())
         )
@@ -178,11 +208,52 @@ class ProfileManager: ObservableObject {
         if let customSystemPrompt = profile.customSystemPrompt {
             self.customSystemPrompt = customSystemPrompt
         }
+        if let customPromptPresets = profile.customPromptPresets {
+            self.customPromptPresets = customPromptPresets
+        }
+        if let selectedModel = profile.selectedModel {
+            UserDefaults.standard.set(selectedModel, forKey: Constants.StorageKeys.Settings.selectedModel)
+            applySelectedModel(selectedModel)
+        }
+        if let reasoningEffort = profile.reasoningEffort,
+           ReasoningEffort(rawValue: reasoningEffort) != nil {
+            UserDefaults.standard.set(reasoningEffort, forKey: Constants.StorageKeys.Settings.reasoningEffort)
+        }
+        if let thinkingEnabled = profile.thinkingEnabled {
+            UserDefaults.standard.set(thinkingEnabled, forKey: Constants.StorageKeys.Settings.thinkingEnabled)
+        }
+        if let webSearchEnabled = profile.webSearchEnabled {
+            SettingsManager.shared.webSearchEnabled = webSearchEnabled
+        }
+        if let codeExecutionEnabled = profile.codeExecutionEnabled {
+            self.codeExecutionEnabled = codeExecutionEnabled
+        }
+        if let piiCheckEnabled = profile.piiCheckEnabled {
+            self.piiCheckEnabled = piiCheckEnabled
+        }
+        if let chatFont = profile.chatFont {
+            self.chatFont = chatFont
+        }
+        if let projectUploadPreference = profile.projectUploadPreference {
+            self.projectUploadPreference = projectUploadPreference
+        }
         if let version = profile.version {
             self.lastSyncedVersion = version
         }
-        
+
+        NotificationCenter.default.post(
+            name: .profileSharedSettingsDidChange,
+            object: profile
+        )
+
         isApplyingProfile = false  // Re-enable observers
+    }
+
+    private func applySelectedModel(_ modelId: String) {
+        guard let model = AppConfig.shared.availableModels.first(where: { $0.id == modelId }) else {
+            return
+        }
+        AppConfig.shared.currentModel = model
     }
     
     // MARK: - Change Observers
@@ -462,7 +533,20 @@ class ProfileManager: ObservableObject {
                p1.additionalContext != p2.additionalContext ||
                p1.isUsingPersonalization != p2.isUsingPersonalization ||
                p1.isUsingCustomPrompt != p2.isUsingCustomPrompt ||
-               p1.customSystemPrompt != p2.customSystemPrompt
+               p1.customSystemPrompt != p2.customSystemPrompt ||
+               p1.customPromptPresets != p2.customPromptPresets ||
+               p1.selectedModel != p2.selectedModel ||
+               p1.reasoningEffort != p2.reasoningEffort ||
+               p1.thinkingEnabled != p2.thinkingEnabled ||
+               p1.webSearchEnabled != p2.webSearchEnabled ||
+               p1.codeExecutionEnabled != p2.codeExecutionEnabled ||
+               p1.piiCheckEnabled != p2.piiCheckEnabled ||
+               p1.chatFont != p2.chatFont ||
+               p1.projectUploadPreference != p2.projectUploadPreference
+    }
+
+    func sharedSettingsDidChange() {
+        saveToKeychain()
     }
     
     /// Generate personalization prompt for chat as a `<user_preferences>` XML block.

@@ -333,6 +333,16 @@ struct GenerateConversationIdResponse: Codable {
 
 // MARK: - Profile Sync Models
 
+/// Custom prompt preset synced through the shared profile row.
+struct SyncedPromptPreset: Codable, Equatable {
+    var id: String
+    var name: String
+    var description: String
+    var systemPrompt: String
+    var createdAt: Double
+    var updatedAt: Double
+}
+
 /// Profile data structure matching React implementation
 struct ProfileData: Codable {
     // Theme settings
@@ -352,6 +362,17 @@ struct ProfileData: Codable {
     // Custom system prompt settings
     var isUsingCustomPrompt: Bool?
     var customSystemPrompt: String?
+    var customPromptPresets: [SyncedPromptPreset]?
+
+    // Shared chat defaults
+    var selectedModel: String?
+    var reasoningEffort: String?
+    var thinkingEnabled: Bool?
+    var webSearchEnabled: Bool?
+    var codeExecutionEnabled: Bool?
+    var piiCheckEnabled: Bool?
+    var chatFont: String?
+    var projectUploadPreference: String?
     
     // Metadata
     var version: Int?

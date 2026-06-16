@@ -66,6 +66,7 @@ class ChatViewModel: ObservableObject {
                 reasoningEffort.rawValue,
                 forKey: Constants.StorageKeys.Settings.reasoningEffort
             )
+            ProfileManager.shared.sharedSettingsDidChange()
         }
     }
     @Published var thinkingEnabled: Bool = true {
@@ -74,6 +75,7 @@ class ChatViewModel: ObservableObject {
                 thinkingEnabled,
                 forKey: Constants.StorageKeys.Settings.thinkingEnabled
             )
+            ProfileManager.shared.sharedSettingsDidChange()
         }
     }
     @Published var imageViewerImages: [Attachment] = []
@@ -197,6 +199,7 @@ class ChatViewModel: ObservableObject {
     private var autoSyncTimer: Timer?
     private var didBecomeActiveObserver: NSObjectProtocol?
     private var willResignActiveObserver: NSObjectProtocol?
+    private var sharedSettingsObserver: NSObjectProtocol?
     private var networkStatusCancellable: AnyCancellable?
     private var streamUpdateTimer: Timer?
     private var pendingStreamUpdate: Chat?
@@ -394,6 +397,7 @@ class ChatViewModel: ObservableObject {
 
         // Setup app lifecycle observers
         setupAppLifecycleObservers()
+        setupSharedSettingsObserver()
 
         // Setup network status observer for automatic retry on reconnection
         setupNetworkStatusObserver()
@@ -431,6 +435,39 @@ class ChatViewModel: ObservableObject {
         }
         if let observer = willResignActiveObserver {
             NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = sharedSettingsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    private func setupSharedSettingsObserver() {
+        sharedSettingsObserver = NotificationCenter.default.addObserver(
+            forName: .profileSharedSettingsDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let profile = notification.object as? ProfileData else { return }
+            Task { @MainActor in
+                self?.applySharedSettings(profile)
+            }
+        }
+    }
+
+    private func applySharedSettings(_ profile: ProfileData) {
+        if let selectedModel = profile.selectedModel,
+           let model = AppConfig.shared.availableModels.first(where: { $0.id == selectedModel }) {
+            currentModel = model
+        }
+        if let effort = profile.reasoningEffort,
+           let parsedEffort = ReasoningEffort(rawValue: effort) {
+            reasoningEffort = parsedEffort
+        }
+        if let thinkingEnabled = profile.thinkingEnabled {
+            self.thinkingEnabled = thinkingEnabled
+        }
+        if let webSearchEnabled = profile.webSearchEnabled {
+            isWebSearchEnabled = webSearchEnabled
         }
     }
     
@@ -3139,6 +3176,7 @@ class ChatViewModel: ObservableObject {
         self.currentModel = modelType
         // This will trigger the didSet in AppConfig which persists to UserDefaults
         AppConfig.shared.currentModel = modelType
+        ProfileManager.shared.sharedSettingsDidChange()
         
         // Update the current chat's model if requested
         if shouldUpdateChat, var chat = currentChat {

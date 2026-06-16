@@ -77,6 +77,7 @@ class SettingsManager: ObservableObject {
     @Published var webSearchEnabled: Bool {
         didSet {
             UserDefaults.standard.set(webSearchEnabled, forKey: Constants.StorageKeys.Settings.webSearchEnabled)
+            ProfileManager.shared.sharedSettingsDidChange()
         }
     }
 
