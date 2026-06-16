@@ -73,11 +73,19 @@ class SettingsManager: ObservableObject {
         }
     }
 
+    // While true, setting-change observers skip notifying ProfileManager. This
+    // is set while a synced profile is being applied, both to avoid redundant
+    // sync callbacks and to prevent re-entering ProfileManager.shared while its
+    // singleton is still being initialized (applyProfile runs inside init).
+    var isApplyingSharedProfile = false
+
     // Web search toggle
     @Published var webSearchEnabled: Bool {
         didSet {
             UserDefaults.standard.set(webSearchEnabled, forKey: Constants.StorageKeys.Settings.webSearchEnabled)
-            ProfileManager.shared.sharedSettingsDidChange()
+            if !isApplyingSharedProfile {
+                ProfileManager.shared.sharedSettingsDidChange()
+            }
         }
     }
 

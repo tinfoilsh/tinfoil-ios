@@ -182,6 +182,10 @@ class ProfileManager: ObservableObject {
     /// Apply profile data to published properties
     private func applyProfile(_ profile: ProfileData) {
         isApplyingProfile = true  // Prevent observer loops
+        // Suppress SettingsManager's sync callbacks while applying, so writing
+        // shared settings here does not re-enter this still-initializing
+        // singleton (applyProfile can run from within init).
+        SettingsManager.shared.isApplyingSharedProfile = true
         
         if let isDarkMode = profile.isDarkMode {
             self.isDarkMode = isDarkMode
@@ -248,6 +252,7 @@ class ProfileManager: ObservableObject {
             object: profile
         )
 
+        SettingsManager.shared.isApplyingSharedProfile = false
         isApplyingProfile = false  // Re-enable observers
     }
 
