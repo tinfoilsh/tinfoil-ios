@@ -566,14 +566,9 @@ class ProfileManager: ObservableObject {
                     // thinking values), which would otherwise read back as a
                     // phantom local change and wedge sync behind a
                     // never-clearing dirty flag while looping STALE_BLOB pushes.
-                    var syncedProfile = createProfileData()
-                    syncedProfile.version = cloudVersion
+                    commitSyncedBaseline(createProfileData(), version: cloudVersion)
 
-                    // Save to keychain without triggering local change observers
-                    persistProfileToKeychain(syncedProfile)
-                    
                     lastSyncedVersion = cloudVersion
-                    lastSyncedProfile = syncedProfile
                     clearLocalProfileChanged()
                     lastSyncDate = Date()
                     syncError = nil
@@ -644,15 +639,9 @@ class ProfileManager: ObservableObject {
                     // Baseline mirrors what we would re-serialize, not the
                     // raw remote, so fields we emit but the peer omits don't
                     // read back as a phantom change and re-arm the push loop.
-                    var adopted = createProfileData()
-                    adopted.version = lastSyncedVersion
-                    lastSyncedProfile = adopted
-                    persistProfileToKeychain(adopted)
+                    commitSyncedBaseline(createProfileData(), version: lastSyncedVersion)
                 } else {
-                    var syncedProfile = profile
-                    syncedProfile.version = lastSyncedVersion
-                    lastSyncedProfile = syncedProfile
-                    persistProfileToKeychain(syncedProfile)
+                    commitSyncedBaseline(profile, version: lastSyncedVersion)
                 }
                 clearLocalProfileChanged()
                 lastSyncDate = Date()
@@ -693,10 +682,7 @@ class ProfileManager: ObservableObject {
                 // Baseline mirrors what we would re-serialize, not the raw
                 // remote, so peer-omitted fields don't read back as a
                 // phantom local change after decryption recovery.
-                var syncedProfile = createProfileData()
-                syncedProfile.version = lastSyncedVersion
-                persistProfileToKeychain(syncedProfile)
-                lastSyncedProfile = syncedProfile
+                commitSyncedBaseline(createProfileData(), version: lastSyncedVersion)
                 clearLocalProfileChanged()
                 syncError = nil
             }
@@ -706,7 +692,21 @@ class ProfileManager: ObservableObject {
     }
     
     // MARK: - Helpers
-    
+
+    /// Record `snapshot` as the synced baseline at `version`: stamp the
+    /// version, persist it to the keychain (without triggering local
+    /// change observers), and set it as the in-memory baseline. Callers
+    /// pass the round-tripped local snapshot (createProfileData()) rather
+    /// than the raw remote so fields this client always emits but a peer
+    /// omits never read back as a phantom local change that would wedge
+    /// sync behind a never-clearing dirty flag.
+    private func commitSyncedBaseline(_ snapshot: ProfileData, version: Int) {
+        var baseline = snapshot
+        baseline.version = version
+        persistProfileToKeychain(baseline)
+        lastSyncedProfile = baseline
+    }
+
     /// Check if two profiles are different (excluding metadata)
     private func hasProfileChanged(_ profile1: ProfileData?, _ profile2: ProfileData?) -> Bool {
         guard let p1 = profile1, let p2 = profile2 else {
