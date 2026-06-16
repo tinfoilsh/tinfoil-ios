@@ -54,6 +54,9 @@ class ChatViewModel: ObservableObject {
     @Published var scrollTargetOffset: CGFloat = 0 
     /// When set to true, the input field should become first responder (focus keyboard)
     @Published var shouldFocusInput: Bool = false
+    // Set when a flow wants the input focused only after a presenting sheet has
+    // finished dismissing, so the keyboard rises in the chat's layout.
+    var focusInputAfterDismiss = false
     @Published var isScrollInteractionActive: Bool = false
     @Published var isAtBottom: Bool = true
     @Published var scrollToBottomTrigger: UUID = UUID()
@@ -1084,10 +1087,22 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    /// Starts a fresh chat preloaded with the given prompt preset.
+    /// Starts a fresh chat preloaded with the given prompt preset. Focus is
+    /// deferred until the presenting sheet finishes dismissing (see
+    /// `focusInputIfPending`), otherwise the keyboard would rise inside the
+    /// dismissing sheet's layout instead of the chat's input area.
     func startChat(withPresetId presetId: String) {
-        createNewChat()
+        createNewChat(focusInput: false)
         setPromptPreset(presetId)
+        focusInputAfterDismiss = true
+    }
+
+    /// Focuses the input if a flow requested it be deferred until a sheet
+    /// dismissal completed. Call from the sheet's `onDismiss`.
+    func focusInputIfPending() {
+        guard focusInputAfterDismiss else { return }
+        focusInputAfterDismiss = false
+        shouldFocusInput = true
     }
 
     private func chatForProjectMove(_ chatId: String) -> Chat? {

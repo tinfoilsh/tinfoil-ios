@@ -114,7 +114,9 @@ struct ChatContainer: View {
                 .environment(Clerk.shared)
                 .environmentObject(authManager)
         }
-        .sheet(isPresented: $showSettings) {
+        .sheet(isPresented: $showSettings, onDismiss: {
+            viewModel.focusInputIfPending()
+        }) {
             SettingsView()
                 .environment(Clerk.shared)
                 .environmentObject(authManager)
@@ -122,6 +124,7 @@ struct ChatContainer: View {
         }
         .sheet(isPresented: $viewModel.showSidebarSettings, onDismiss: {
             viewModel.shouldOpenCloudSync = false
+            viewModel.focusInputIfPending()
         }) {
             SettingsView(shouldOpenCloudSync: viewModel.shouldOpenCloudSync)
                 .environment(Clerk.shared)
