@@ -559,12 +559,21 @@ class ProfileManager: ObservableObject {
                 // Apply if cloud is newer by version OR content differs from our last-synced snapshot
                 if cloudVersion > lastSyncedVersion || hasProfileChanged(cloudProfile, lastSyncedProfile) {
                     applyProfile(cloudProfile)
-                    
+
+                    // Use the round-tripped local snapshot as the baseline
+                    // rather than the raw remote: the remote may omit fields
+                    // this client always emits (e.g. defaulted reasoning or
+                    // thinking values), which would otherwise read back as a
+                    // phantom local change and wedge sync behind a
+                    // never-clearing dirty flag while looping STALE_BLOB pushes.
+                    var syncedProfile = createProfileData()
+                    syncedProfile.version = cloudVersion
+
                     // Save to keychain without triggering local change observers
-                    persistProfileToKeychain(cloudProfile)
+                    persistProfileToKeychain(syncedProfile)
                     
                     lastSyncedVersion = cloudVersion
-                    lastSyncedProfile = cloudProfile
+                    lastSyncedProfile = syncedProfile
                     clearLocalProfileChanged()
                     lastSyncDate = Date()
                     syncError = nil
@@ -632,7 +641,10 @@ class ProfileManager: ObservableObject {
                     // race; adopt its settings locally so both devices
                     // converge instead of keeping our now-stale edit.
                     applyProfile(remoteProfile)
-                    var adopted = remoteProfile
+                    // Baseline mirrors what we would re-serialize, not the
+                    // raw remote, so fields we emit but the peer omits don't
+                    // read back as a phantom change and re-arm the push loop.
+                    var adopted = createProfileData()
                     adopted.version = lastSyncedVersion
                     lastSyncedProfile = adopted
                     persistProfileToKeychain(adopted)
@@ -675,11 +687,16 @@ class ProfileManager: ObservableObject {
         do {
             if let decryptedProfile = try await profileSync.retryDecryptionWithNewKey() {
                 applyProfile(decryptedProfile)
-                persistProfileToKeychain(decryptedProfile)
                 if let version = decryptedProfile.version {
                     lastSyncedVersion = version
                 }
-                lastSyncedProfile = decryptedProfile
+                // Baseline mirrors what we would re-serialize, not the raw
+                // remote, so peer-omitted fields don't read back as a
+                // phantom local change after decryption recovery.
+                var syncedProfile = createProfileData()
+                syncedProfile.version = lastSyncedVersion
+                persistProfileToKeychain(syncedProfile)
+                lastSyncedProfile = syncedProfile
                 clearLocalProfileChanged()
                 syncError = nil
             }
