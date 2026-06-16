@@ -197,6 +197,8 @@ class ProfileSyncService: ObservableObject {
         }
 
         do {
+            // DEBUG[profile-sync]: remove before merge.
+            print("[profile-sync] saveProfile push baseVersion=\(profile.version ?? 0) updatedAt=\(String(describing: profile.updatedAt))")
             let result = try await pushAtVersion(profile.version ?? 0)
             return (result.success, result.version, nil)
         } catch let error as SyncEnclaveError where Self.isStaleBlobConflict(error) {
@@ -204,6 +206,13 @@ class ProfileSyncService: ObservableObject {
             // version our push was not based on. Re-read it and
             // arbitrate last-write-wins by content modification time.
             let remote = try await fetchProfile()
+
+            // DEBUG[profile-sync]: remove before merge.
+            let remoteWon = remote != nil && SyncConflictResolver.remoteWins(
+                local: Self.parseISODate(profile.updatedAt),
+                remote: Self.parseISODate(remote?.updatedAt)
+            )
+            print("[profile-sync] saveProfile conflict (STALE_BLOB) localUpdatedAt=\(String(describing: profile.updatedAt)) remoteUpdatedAt=\(String(describing: remote?.updatedAt)) remoteVersion=\(String(describing: remote?.version)) remoteWins=\(remoteWon)")
 
             if let remote = remote,
                SyncConflictResolver.remoteWins(
