@@ -1262,6 +1262,17 @@ struct MarkdownText: View {
     }
 }
 
+/// Paragraph style for user message bubbles. Matches the GitHub look but drops
+/// the outer block spacing so the bubble hugs its text instead of relying on a
+/// negative bottom padding to trim the trailing gap.
+private struct UserBubbleParagraphStyle: StructuredText.ParagraphStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .textual.lineSpacing(.fontScaled(0.25))
+            .textual.blockSpacing(.init(top: 0, bottom: 0))
+    }
+}
+
 /// A specialized markdown text view for user messages
 struct AdaptiveMarkdownText: View {
     let content: String
@@ -1277,8 +1288,8 @@ struct AdaptiveMarkdownText: View {
     var body: some View {
         StructuredText(markdown: content)
             .textual.highlighterTheme(.default)
+            .textual.paragraphStyle(UserBubbleParagraphStyle())
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.bottom, -16)
             .padding(.horizontal, horizontalPadding)
     }
 }
