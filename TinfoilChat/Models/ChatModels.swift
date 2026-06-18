@@ -1377,9 +1377,9 @@ class SessionTokenManager {
         Task { [weak self] in
             guard let self else { return }
             _ = await self.fetchFreshSessionToken()
-            self.stateLock.lock()
-            self.backgroundRefreshInFlight = false
-            self.stateLock.unlock()
+            self.stateLock.withLock {
+                self.backgroundRefreshInFlight = false
+            }
         }
     }
 

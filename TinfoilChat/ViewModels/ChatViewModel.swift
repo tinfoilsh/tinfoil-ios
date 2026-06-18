@@ -2114,7 +2114,7 @@ class ChatViewModel: ObservableObject {
                     if let deltas = chunk.choices.first?.delta.toolCalls {
                         thinkingClosedByContent = false
                         for delta in deltas {
-                            let index = delta.index ?? 0
+                            let index = delta.index
                             let existing = streamingToolCalls[index]
                             let mergedId = delta.id ?? existing?.id ?? ""
                             let mergedName = delta.function?.name ?? existing?.name ?? ""
