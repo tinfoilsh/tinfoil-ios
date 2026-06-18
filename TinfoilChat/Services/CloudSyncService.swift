@@ -1848,8 +1848,21 @@ class CloudSyncService: ObservableObject {
             // pre-upload client ids.
             try await applyAttachmentRewrites(chatId: chat.id, rewrites: result.rewrites)
         }
-        await markChatAsSynced(chat.id, version: newVersion)
-        SyncHealthStore.shared.reportChatSynced(chat.id)
+        // Guard against clobbering an edit made while this upload was in
+        // flight. We uploaded the snapshot captured before the request;
+        // if the on-disk copy has advanced past it, the freshest content
+        // was never sent. Clearing locallyModified here would mark that
+        // edit synced and it would never upload. Adopt the new etag as
+        // the CAS base but keep the dirty flag set so the next cycle
+        // re-uploads the newer content.
+        let current = await loadChatFromStorage(chat.id)
+        let editedDuringUpload = current.map { $0.updatedAt > chat.updatedAt } ?? false
+        if editedDuringUpload {
+            await rebaseSyncVersion(chat.id, version: newVersion)
+        } else {
+            await markChatAsSynced(chat.id, version: newVersion)
+            SyncHealthStore.shared.reportChatSynced(chat.id)
+        }
     }
 
     /// Apply enclave-minted attachment ids/keys to the freshest local
