@@ -25,6 +25,12 @@ struct TinfoilChatApp: App {
         StorageKeysMigration.migrateIfNeeded()
         Clerk.configure(publishableKey: AppConfig.shared.clerkPublishableKey)
         _clerk = State(initialValue: Clerk.shared)
+        // Build the profile manager before any view can read it. Its
+        // initializer applies the stored profile, which writes shared
+        // settings on other observable singletons; doing that lazily
+        // from a view's property initializer would publish those
+        // changes mid view update.
+        _ = ProfileManager.shared
     }
     
     var body: some Scene {

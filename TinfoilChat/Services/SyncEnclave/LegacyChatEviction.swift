@@ -54,8 +54,8 @@ enum LegacyChatEviction {
                 _ = try await storage.deleteChatIfEvictable(
                     chatId: entry.id,
                     userId: userId,
-                    shouldEvict: shouldEvict,
-                    shouldEvictOnLoadError: isPermanentlyUnreadable
+                    shouldEvict: { shouldEvict($0) },
+                    shouldEvictOnLoadError: { isPermanentlyUnreadable($0) }
                 )
             } catch {
                 allDeletesSucceeded = false

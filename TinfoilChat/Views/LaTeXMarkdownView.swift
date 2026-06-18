@@ -123,10 +123,10 @@ struct LaTeXMarkdownView: View, Equatable {
     @State private var segments: [ContentSegment]? = nil
 
     // Pre-compiled regex patterns (compiled once, reused across all renders)
-    private static let codeBlockRegex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```", options: [])
-    private static let inlineCodeRegex = try? NSRegularExpression(pattern: "`[^`]+`", options: [])
-    private static let displayLatexRegex = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators])
-    private static let inlineLatexRegex = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: [])
+    private nonisolated static let codeBlockRegex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```", options: [])
+    private nonisolated static let inlineCodeRegex = try? NSRegularExpression(pattern: "`[^`]+`", options: [])
+    private nonisolated static let displayLatexRegex = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators])
+    private nonisolated static let inlineLatexRegex = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: [])
     static func == (lhs: LaTeXMarkdownView, rhs: LaTeXMarkdownView) -> Bool {
         lhs.content == rhs.content &&
         lhs.isDarkMode == rhs.isDarkMode &&
