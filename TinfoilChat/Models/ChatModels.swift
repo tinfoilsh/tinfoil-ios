@@ -984,7 +984,159 @@ struct Message: Identifiable, Codable, Equatable {
         if !toolCalls.isEmpty {
             try container.encode(toolCalls, forKey: .toolCalls)
         }
-        try container.encodeIfPresent(timeline, forKey: .timeline)
+        try container.encodeIfPresent(buildSyncTimeline(), forKey: .timeline)
+    }
+
+    /// Builds a complete, webapp-compatible `timeline` for the wire.
+    ///
+    /// The webapp renders an assistant message exclusively from its
+    /// `timeline` blocks and suppresses the flat `content` whenever a
+    /// non-empty timeline exists. A timeline that omits content /
+    /// thinking / web-search blocks therefore makes those vanish on
+    /// web, and an absent timeline drops GenUI tool calls entirely
+    /// (the webapp's flat-field fallback never reconstructs tool_call
+    /// blocks). iOS keeps its ordered `segments` as the source of
+    /// truth, so this reconstructs the equivalent `TimelineBlock[]`
+    /// (mirroring the webapp's TimelineBuilder shapes) so chats
+    /// round-trip losslessly.
+    ///
+    /// A timeline carrying block types iOS cannot model (e.g.
+    /// `code_exec`) is preserved verbatim rather than rebuilt, so a
+    /// webapp-origin message never loses blocks on a round-trip.
+    private func buildSyncTimeline() -> [JSONValue]? {
+        guard role == .assistant else { return timeline }
+        guard let segments, !segments.isEmpty else { return timeline }
+
+        let representable: Set<String> = ["thinking", "content", "web_search", "url_fetches", "tool_call"]
+        if let timeline {
+            for block in timeline {
+                if let type = block.objectValue?["type"]?.stringValue, !representable.contains(type) {
+                    return timeline
+                }
+            }
+        }
+
+        let searchById = Dictionary(
+            (webSearches ?? []).map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let fetchById = Dictionary(
+            urlFetches.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let toolById = Dictionary(
+            toolCalls.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        // iOS streams thinking as a single concatenated `thoughts`
+        // string rendered above the ordered segments, not as a
+        // `.thinking` segment (only webapp-origin messages carry one).
+        // Without a thinking block the webapp drops the thought box, so
+        // synthesize one up front when segments don't already model it.
+        let hasThinkingSegment = segments.contains { if case .thinking = $0 { return true }; return false }
+        var blocks: [JSONValue] = []
+        if !hasThinkingSegment,
+           let thoughts, !thoughts.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            var thinkingBlock: [String: JSONValue] = [
+                "type": .string("thinking"),
+                "id": .string("thinking-pre"),
+                "content": .string(thoughts),
+                "isThinking": .bool(false),
+            ]
+            if let thinkingDuration { thinkingBlock["duration"] = .number(thinkingDuration) }
+            blocks.append(.object(thinkingBlock))
+        }
+        var pendingFetches: [JSONValue] = []
+
+        func flushFetches() {
+            guard !pendingFetches.isEmpty else { return }
+            blocks.append(.object([
+                "type": .string("url_fetches"),
+                "id": .string("url-fetches-\(blocks.count)"),
+                "fetches": .array(pendingFetches),
+            ]))
+            pendingFetches = []
+        }
+
+        func resolutionFields(for toolCallId: String) -> [String: JSONValue] {
+            guard let timeline,
+                  let resolved = timeline.first(where: {
+                      $0.objectValue?["type"]?.stringValue == "tool_call"
+                          && $0.objectValue?["toolCallId"]?.stringValue == toolCallId
+                  })?.objectValue else { return [:] }
+            var fields: [String: JSONValue] = [:]
+            if let resolvedAt = resolved["resolvedAt"] { fields["resolvedAt"] = resolvedAt }
+            if let resolution = resolved["resolution"] { fields["resolution"] = resolution }
+            return fields
+        }
+
+        for segment in segments {
+            if case .urlFetch(let fetchId) = segment {
+                guard let fetch = fetchById[fetchId] else { continue }
+                pendingFetches.append(.object([
+                    "id": .string(fetch.id),
+                    "url": .string(fetch.url),
+                    "status": .string(fetch.status.rawValue),
+                ]))
+                continue
+            }
+
+            flushFetches()
+
+            switch segment {
+            case .text(let text):
+                blocks.append(.object([
+                    "type": .string("content"),
+                    "id": .string("content-\(blocks.count)"),
+                    "content": .string(text),
+                ]))
+            case .thinking(let content, let isThinking, let duration):
+                var block: [String: JSONValue] = [
+                    "type": .string("thinking"),
+                    "id": .string("thinking-\(blocks.count)"),
+                    "content": .string(content),
+                    "isThinking": .bool(isThinking),
+                ]
+                if let duration { block["duration"] = .number(duration) }
+                blocks.append(.object(block))
+            case .webSearch(let searchId):
+                var state: [String: JSONValue] = [:]
+                if let search = searchById[searchId] {
+                    if let query = search.query { state["query"] = .string(query) }
+                    state["status"] = .string(search.status.rawValue)
+                    if let sources = search.sources {
+                        state["sources"] = .array(sources.map {
+                            .object(["title": .string($0.title), "url": .string($0.url)])
+                        })
+                    }
+                    if let reason = search.reason { state["reason"] = .string(reason) }
+                } else {
+                    state["status"] = .string(WebSearchStatus.completed.rawValue)
+                }
+                blocks.append(.object([
+                    "type": .string("web_search"),
+                    "id": .string(searchId),
+                    "state": .object(state),
+                ]))
+            case .toolCall(let toolCallId):
+                guard let tool = toolById[toolCallId] else { continue }
+                var block: [String: JSONValue] = [
+                    "type": .string("tool_call"),
+                    "id": .string("tool-call-\(blocks.count)"),
+                    "toolCallId": .string(toolCallId),
+                    "name": .string(tool.name),
+                    "arguments": .string(tool.arguments),
+                ]
+                block.merge(resolutionFields(for: toolCallId)) { _, new in new }
+                blocks.append(.object(block))
+            case .urlFetch:
+                break
+            }
+        }
+        flushFetches()
+
+        return blocks.isEmpty ? timeline : blocks
     }
 
     // MARK: - Legacy Format Reconstruction

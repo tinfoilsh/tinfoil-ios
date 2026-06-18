@@ -223,6 +223,78 @@ struct MessageSegmentDecodeTests {
     }
 
     @Test @MainActor
+    func encodesCompleteTimelineForIOSStreamedMessage() throws {
+        // An iOS-streamed assistant message keeps thinking in the flat
+        // `thoughts` field (not as a segment) and only records text /
+        // tool-call ordering in `segments`, with no `timeline`. Encoding
+        // must reconstruct a full timeline (thinking + content +
+        // tool_call) so the webapp, which renders solely from the
+        // timeline, shows the reasoning and the generated cards.
+        let json = """
+        {
+          "id": "m1",
+          "role": "assistant",
+          "content": "It's sunny in SF.",
+          "thoughts": "Let me check the weather.",
+          "thinkingDuration": 2.0,
+          "timestamp": "2026-04-21T12:00:00.000Z",
+          "toolCalls": [
+            { "id": "call_1", "name": "render_stat_cards", "arguments": "{\\"temp\\":68}" }
+          ],
+          "segments": [
+            { "type": "text", "text": "It's sunny in SF." },
+            { "type": "tool_call", "toolCallId": "call_1" }
+          ]
+        }
+        """
+
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        #expect(message.timeline == nil)
+
+        let encoded = try JSONEncoder().encode(message)
+        let roundTripped = try JSONDecoder().decode(Message.self, from: encoded)
+        let timeline = try #require(roundTripped.timeline)
+
+        #expect(timeline.count == 3)
+        #expect(timeline[0].objectValue?["type"]?.stringValue == "thinking")
+        #expect(timeline[0].objectValue?["content"]?.stringValue == "Let me check the weather.")
+        #expect(timeline[1].objectValue?["type"]?.stringValue == "content")
+        #expect(timeline[1].objectValue?["content"]?.stringValue == "It's sunny in SF.")
+        #expect(timeline[2].objectValue?["type"]?.stringValue == "tool_call")
+        #expect(timeline[2].objectValue?["toolCallId"]?.stringValue == "call_1")
+        #expect(timeline[2].objectValue?["name"]?.stringValue == "render_stat_cards")
+    }
+
+    @Test @MainActor
+    func preservesTimelineWithUnsupportedBlockTypes() throws {
+        // A webapp-origin timeline carrying a block iOS cannot model
+        // (e.g. code_exec) must round-trip verbatim rather than being
+        // rebuilt from the derived segments, so no blocks are lost.
+        let json = """
+        {
+          "id": "m1",
+          "role": "assistant",
+          "content": "Done.",
+          "timestamp": "2026-04-21T12:00:00.000Z",
+          "timeline": [
+            { "type": "content", "id": "content-0", "content": "Running code." },
+            { "type": "code_exec", "id": "code-0", "code": "print(1)" },
+            { "type": "content", "id": "content-1", "content": "Done." }
+          ]
+        }
+        """
+
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        let encoded = try JSONEncoder().encode(message)
+        let roundTripped = try JSONDecoder().decode(Message.self, from: encoded)
+        let timeline = try #require(roundTripped.timeline)
+
+        #expect(timeline.count == 3)
+        #expect(timeline[1].objectValue?["type"]?.stringValue == "code_exec")
+        #expect(roundTripped.timeline == message.timeline)
+    }
+
+    @Test @MainActor
     func readsResolutionFromTimelineToolCallBlock() throws {
         let resolvedAtMillis: Int = 1_714_060_800_000
         let json = """
