@@ -205,6 +205,7 @@ class ProfileManager: ObservableObject {
             webSearchEnabled: SettingsManager.shared.webSearchEnabled,
             codeExecutionEnabled: codeExecutionEnabled,
             piiCheckEnabled: piiCheckEnabled,
+            genUIEnabled: SettingsManager.shared.genUIEnabled,
             chatFont: chatFont,
             projectUploadPreference: projectUploadPreference,
             version: lastSyncedVersion,  // Will be incremented by ProfileSyncService
@@ -272,6 +273,9 @@ class ProfileManager: ObservableObject {
         }
         if let piiCheckEnabled = profile.piiCheckEnabled {
             self.piiCheckEnabled = piiCheckEnabled
+        }
+        if let genUIEnabled = profile.genUIEnabled {
+            SettingsManager.shared.genUIEnabled = genUIEnabled
         }
         if let chatFont = profile.chatFont {
             self.chatFont = chatFont
@@ -739,6 +743,7 @@ class ProfileManager: ObservableObject {
                p1.webSearchEnabled != p2.webSearchEnabled ||
                p1.codeExecutionEnabled != p2.codeExecutionEnabled ||
                p1.piiCheckEnabled != p2.piiCheckEnabled ||
+               p1.genUIEnabled != p2.genUIEnabled ||
                p1.chatFont != p2.chatFont ||
                p1.projectUploadPreference != p2.projectUploadPreference
     }
@@ -804,8 +809,23 @@ class ProfileManager: ObservableObject {
     
     /// Get custom system prompt if enabled
     func getCustomSystemPrompt() -> String? {
-        guard isUsingCustomPrompt, !customSystemPrompt.isEmpty else { return nil }
-        return customSystemPrompt
+        guard isUsingCustomPrompt else { return nil }
+        return Self.normalizeSystemPromptForSending(customSystemPrompt)
+    }
+
+    static func normalizeSystemPromptForSending(_ prompt: String) -> String {
+        systemPromptHasContent(prompt) ? prompt : ""
+    }
+
+    static func systemPromptHasContent(_ prompt: String) -> Bool {
+        var result = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if result.hasPrefix("<system>") {
+            result = String(result.dropFirst("<system>".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if result.hasSuffix("</system>") {
+            result = String(result.dropLast("</system>".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return !result.isEmpty
     }
     
     /// Clear all profile data

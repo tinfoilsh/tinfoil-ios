@@ -184,4 +184,48 @@ struct ChatQueryBuilderReasoningTests {
         #expect(kwargs?["thinking"] as? Bool == true)
         #expect(kwargs?["reasoning_effort"] as? String == "max")
     }
+
+    @Test @MainActor
+    func emptyPromptDoesNotEmitSystemMessage() throws {
+        let query = ChatQueryBuilder.buildQuery(
+            modelId: "gpt-oss-120b",
+            systemPrompt: "",
+            rules: "",
+            conversationMessages: [
+                Message(role: .user, content: "hello")
+            ],
+            stream: false,
+            genUIEnabled: false
+        )
+
+        let messages = try encodedMessages(from: query)
+        #expect(messages.count == 1)
+        #expect(messages.first?["role"] as? String == "user")
+        #expect(messages.first?["content"] as? String == "hello")
+    }
+
+    @Test @MainActor
+    func emptyPromptDoesNotEmitSyntheticSystemWrapper() throws {
+        let query = ChatQueryBuilder.buildQuery(
+            modelId: "deepseek-v4-pro",
+            systemPrompt: "",
+            rules: "",
+            conversationMessages: [
+                Message(role: .user, content: "hello")
+            ],
+            stream: false,
+            genUIEnabled: false
+        )
+
+        let messages = try encodedMessages(from: query)
+        #expect(messages.count == 1)
+        #expect(messages.first?["role"] as? String == "user")
+        #expect(messages.first?["content"] as? String == "hello")
+    }
+
+    private func encodedMessages(from query: ChatQuery) throws -> [[String: Any]] {
+        let data = try JSONEncoder().encode(query)
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return object?["messages"] as? [[String: Any]] ?? []
+    }
 }

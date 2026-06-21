@@ -89,6 +89,16 @@ class SettingsManager: ObservableObject {
         }
     }
 
+    // Generative UI toggle. When off, no render_* tool capabilities are sent.
+    @Published var genUIEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(genUIEnabled, forKey: Constants.StorageKeys.Settings.genUIEnabled)
+            if !isApplyingSharedProfile {
+                ProfileManager.shared.sharedSettingsDidChange()
+            }
+        }
+    }
+
     // Cloud sync toggle
     @Published var isCloudSyncEnabled: Bool {
         didSet {
@@ -134,6 +144,9 @@ class SettingsManager: ObservableObject {
         // Initialize web search setting
         self.webSearchEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.webSearchEnabled) as? Bool ?? true
 
+        // Initialize Generative UI setting (defaults to on)
+        self.genUIEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.genUIEnabled) as? Bool ?? true
+
         // Initialize cloud sync setting
         // If no explicit value has been stored, auto-enable for existing users who already have an encryption key
         if let storedValue = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.cloudSyncEnabled) as? Bool {
@@ -173,6 +186,7 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.webSearchEnabled)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.genUIEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.cloudSyncEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.localOnlyModeEnabled)
 
@@ -187,6 +201,7 @@ class SettingsManager: ObservableObject {
         isUsingCustomPrompt = false
         customSystemPrompt = ""
         webSearchEnabled = true
+        genUIEnabled = true
         isCloudSyncEnabled = false
         isLocalOnlyModeEnabled = false
     }
@@ -517,8 +532,12 @@ struct SettingsView: View {
         Section {
             Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
                 .tint(Color.accentPrimary)
+            Toggle("Generative UI", isOn: $settings.genUIEnabled)
+                .tint(Color.accentPrimary)
         } header: {
             Text("Preferences")
+        } footer: {
+            Text("Let the AI render interactive widgets like charts and timelines. When off, no tool capabilities are sent to the model.")
         }
         .listRowBackground(Color.cardSurface(for: colorScheme))
     }
