@@ -45,6 +45,22 @@ enum Constants {
         static let iPadInputBottomPadding: CGFloat = 16
     }
 
+    enum Accessibility {
+        /// VoiceOver status announcements posted as generation state changes,
+        /// giving non-visual users a live cue equivalent to the web app's
+        /// aria-live region.
+        static let generatingResponse = "Generating response"
+        static let responseComplete = "Response complete"
+        static let generationStopped = "Generation stopped"
+        static let responseFailed = "Response failed"
+
+        /// Name of the VoiceOver custom rotor used to jump between messages
+        /// in the conversation pane.
+        static let messagesRotorName = "Messages"
+
+        static let scrollToLatestMessage = "Scroll to latest message"
+    }
+
     enum Rendering {
         /// Code blocks larger than this skip JS-based syntax highlighting
         /// to avoid blocking the main thread via JavaScriptCore.

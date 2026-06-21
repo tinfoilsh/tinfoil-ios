@@ -70,6 +70,7 @@ struct ChatListView: View {
                         }
                         .buttonStyle(.glass)
                         .clipShape(Circle())
+                        .accessibilityLabel(Constants.Accessibility.scrollToLatestMessage)
                     } else {
                         Button(action: {
                             userHasScrolled = false
@@ -83,6 +84,7 @@ struct ChatListView: View {
                                 .background(Color.gray.opacity(0.8))
                                 .clipShape(Circle())
                         }
+                        .accessibilityLabel(Constants.Accessibility.scrollToLatestMessage)
                     }
                 }
                 .padding(.bottom, 16)
