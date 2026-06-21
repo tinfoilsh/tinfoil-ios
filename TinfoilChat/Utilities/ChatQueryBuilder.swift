@@ -79,7 +79,9 @@ struct ChatQueryBuilder {
 
         if useSystemRole {
             let fullPrompt = rules.isEmpty ? effectiveSystemPrompt : effectiveSystemPrompt + "\n\n" + rules
-            messages.append(.system(.init(content: .textContent(fullPrompt))))
+            if !fullPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                messages.append(.system(.init(content: .textContent(fullPrompt))))
+            }
         }
 
         let recentMessages = TokenEstimation.selectMessagesWithinBudget(conversationMessages, contextWindow: contextWindow)
@@ -92,8 +94,10 @@ struct ChatQueryBuilder {
                 // For models that don't use system role (e.g. DeepSeek): inject system instructions as a separate user message
                 if !hasAddedSystemInstructions {
                     let rawInstructions = rules.isEmpty ? effectiveSystemPrompt : effectiveSystemPrompt + "\n\n" + rules
-                    let systemContent = "<system>\n\(rawInstructions)\n</system>"
-                    messages.append(.user(.init(content: .string(systemContent))))
+                    if !rawInstructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        let systemContent = "<system>\n\(rawInstructions)\n</system>"
+                        messages.append(.user(.init(content: .string(systemContent))))
+                    }
                     hasAddedSystemInstructions = true
                 }
 

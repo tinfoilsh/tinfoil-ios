@@ -1699,14 +1699,17 @@ class ChatViewModel: ObservableObject {
                 let settingsManager = SettingsManager.shared
                 let profileManager = ProfileManager.shared
                 var systemPrompt: String
+                var suppressDefaultRules = false
                 
                 // Precedence: per-chat prompt preset > custom prompt toggle > default
                 if let preset = profileManager.promptPreset(for: currentChat?.promptPresetId) {
                     systemPrompt = preset.systemPrompt
                 } else if let customPrompt = profileManager.getCustomSystemPrompt() {
                     systemPrompt = customPrompt
-                } else if settingsManager.isUsingCustomPrompt && !settingsManager.customSystemPrompt.isEmpty {
-                    systemPrompt = settingsManager.customSystemPrompt
+                    suppressDefaultRules = !ProfileManager.systemPromptHasContent(customPrompt)
+                } else if settingsManager.isUsingCustomPrompt {
+                    systemPrompt = ProfileManager.normalizeSystemPromptForSending(settingsManager.customSystemPrompt)
+                    suppressDefaultRules = !ProfileManager.systemPromptHasContent(systemPrompt)
                 } else {
                     systemPrompt = AppConfig.shared.systemPrompt
                 }
@@ -1762,7 +1765,7 @@ class ChatViewModel: ObservableObject {
                 )
                 
                 // Process rules with same replacements
-                var processedRules = AppConfig.shared.rules
+                var processedRules = suppressDefaultRules ? "" : AppConfig.shared.rules
                 if !processedRules.isEmpty {
                     processedRules = processedRules.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
                     processedRules = processedRules.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
