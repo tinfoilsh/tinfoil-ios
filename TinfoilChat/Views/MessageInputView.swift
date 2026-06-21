@@ -18,6 +18,9 @@ struct MessageInputView: View {
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject private var authManager: AuthManager
     @State private var textHeight: CGFloat = Layout.defaultHeight
+    /// Reflects whether the editor has grown beyond a single line, so callers
+    /// can hide content that would otherwise be pushed off-screen.
+    var isInputExpanded: Binding<Bool>? = nil
     var isKeyboardVisible: Bool = false
 
     private var isDarkMode: Bool { colorScheme == .dark }
@@ -68,6 +71,15 @@ struct MessageInputView: View {
     @ViewBuilder
     var body: some View {
         inputContent
+            .onChange(of: textHeight) { _, newHeight in
+                guard let isInputExpanded else { return }
+                let expanded = newHeight > Layout.minimumHeight + 1
+                if isInputExpanded.wrappedValue != expanded {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isInputExpanded.wrappedValue = expanded
+                    }
+                }
+            }
             .alert("Microphone Access Required", isPresented: $viewModel.showMicrophonePermissionAlert) {
                 Button("Open Settings") {
                     openSettings()

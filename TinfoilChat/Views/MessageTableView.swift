@@ -200,13 +200,34 @@ struct MessageTableView: UIViewRepresentable {
                 }
             }
 
+            // Capture the user's intent before any layout change. If they were
+            // actively scrolling through the response, keep their reading
+            // position; otherwise follow down to the end of the finished message.
+            let wasFollowing = !userHasScrolled
+
             DispatchQueue.main.async {
                 UIView.performWithoutAnimation {
-                    context.coordinator.isUserMessageScrollMode = false
+                    // Temporarily inflate the bottom inset so the collapsing
+                    // streaming buffer cannot clamp the offset and snap the view
+                    // to the bottom before the final inset is settled below.
                     let currentOffset = tableView.contentOffset.y
-                    context.coordinator.updateContentInset()
+                    tableView.contentInset.bottom = tableView.bounds.height
                     tableView.layoutIfNeeded()
                     tableView.contentOffset.y = currentOffset
+                }
+
+                DispatchQueue.main.async {
+                    if wasFollowing {
+                        context.coordinator.isUserMessageScrollMode = false
+                        context.coordinator.scrollToBottom(animated: false)
+                    } else {
+                        UIView.performWithoutAnimation {
+                            let currentOffset = tableView.contentOffset.y
+                            context.coordinator.updateContentInset()
+                            tableView.layoutIfNeeded()
+                            tableView.contentOffset.y = currentOffset
+                        }
+                    }
                 }
             }
         }
@@ -466,6 +487,11 @@ struct MessageTableView: UIViewRepresentable {
                 }
             } else if parent.isLoading && isUserMessageScrollMode {
                 targetInset = insetForUserMessageAtTop(tableView)
+            } else if isUserMessageScrollMode {
+                // Streaming has ended but the user is still reading with their
+                // message near the top; keep enough bottom inset to hold that
+                // position instead of snapping to the bottom of the response.
+                targetInset = max(0, insetForUserMessageAtTop(tableView))
             } else {
                 targetInset = 0
             }
