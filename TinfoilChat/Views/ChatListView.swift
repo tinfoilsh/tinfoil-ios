@@ -16,6 +16,7 @@ struct ChatListView: View {
 
     @State private var isAtBottom = true
     @State private var userHasScrolled = false
+    @State private var isInputExpanded = false
     @State private var showPromptLibrary = false
     @State private var isKeyboardVisible = false
     @State private var keyboardHeight: CGFloat = 0
@@ -90,15 +91,17 @@ struct ChatListView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
-                if messages.isEmpty {
+                if messages.isEmpty && !isInputExpanded {
                     PromptSuggestionsBar(
                         viewModel: viewModel,
                         onOpenLibrary: { showPromptLibrary = true }
                     )
+                    .transition(.opacity)
                 }
                 MessageInputView(
                     messageText: $messageText,
                     viewModel: viewModel,
+                    isInputExpanded: $isInputExpanded,
                     isKeyboardVisible: isKeyboardVisible
                 )
                 .environmentObject(viewModel.authManager ?? AuthManager())
