@@ -39,7 +39,7 @@ class ProfileSyncService: ObservableObject {
         "isUsingCustomPrompt", "customSystemPrompt", "customPromptPresets",
         "favoritePromptPresetIds", "selectedModel", "reasoningEffort",
         "thinkingEnabled", "webSearchEnabled", "codeExecutionEnabled",
-        "piiCheckEnabled", "chatFont", "projectUploadPreference",
+        "piiCheckEnabled", "genUIEnabled", "chatFont", "projectUploadPreference",
         "version", "updatedAt",
     ]
 

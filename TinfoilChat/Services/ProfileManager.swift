@@ -205,6 +205,7 @@ class ProfileManager: ObservableObject {
             webSearchEnabled: SettingsManager.shared.webSearchEnabled,
             codeExecutionEnabled: codeExecutionEnabled,
             piiCheckEnabled: piiCheckEnabled,
+            genUIEnabled: SettingsManager.shared.genUIEnabled,
             chatFont: chatFont,
             projectUploadPreference: projectUploadPreference,
             version: lastSyncedVersion,  // Will be incremented by ProfileSyncService
@@ -272,6 +273,9 @@ class ProfileManager: ObservableObject {
         }
         if let piiCheckEnabled = profile.piiCheckEnabled {
             self.piiCheckEnabled = piiCheckEnabled
+        }
+        if let genUIEnabled = profile.genUIEnabled {
+            SettingsManager.shared.genUIEnabled = genUIEnabled
         }
         if let chatFont = profile.chatFont {
             self.chatFont = chatFont
@@ -739,6 +743,7 @@ class ProfileManager: ObservableObject {
                p1.webSearchEnabled != p2.webSearchEnabled ||
                p1.codeExecutionEnabled != p2.codeExecutionEnabled ||
                p1.piiCheckEnabled != p2.piiCheckEnabled ||
+               p1.genUIEnabled != p2.genUIEnabled ||
                p1.chatFont != p2.chatFont ||
                p1.projectUploadPreference != p2.projectUploadPreference
     }

@@ -402,6 +402,7 @@ struct ProfileData: Codable {
     var webSearchEnabled: Bool?
     var codeExecutionEnabled: Bool?
     var piiCheckEnabled: Bool?
+    var genUIEnabled: Bool?
     var chatFont: String?
     var projectUploadPreference: String?
     

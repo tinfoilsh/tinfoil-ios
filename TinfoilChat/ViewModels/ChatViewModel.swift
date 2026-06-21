@@ -1788,7 +1788,8 @@ class ChatViewModel: ObservableObject {
                     isMultimodal: self.currentModel.isMultimodal,
                     reasoningConfig: self.currentModel.reasoningConfig,
                     reasoningEffort: self.reasoningEffort,
-                    thinkingEnabled: self.thinkingEnabled
+                    thinkingEnabled: self.thinkingEnabled,
+                    genUIEnabled: SettingsManager.shared.genUIEnabled
                 )
 
                 // Web search state tracking
