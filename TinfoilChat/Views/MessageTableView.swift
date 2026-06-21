@@ -45,6 +45,7 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         context.coordinator.tableView = tableView
+        tableView.accessibilityCustomRotors = [context.coordinator.makeMessagesRotor()]
 
         return tableView
     }
@@ -571,6 +572,47 @@ struct MessageTableView: UIViewRepresentable {
 
             let userMessageIndexPath = IndexPath(row: numberOfRows - 2, section: 0)
             tableView.scrollToRow(at: userMessageIndexPath, at: .top, animated: animated)
+        }
+
+        /// VoiceOver rotor that lets users flick up/down to jump between
+        /// whole messages instead of stepping element-by-element from the top.
+        func makeMessagesRotor() -> UIAccessibilityCustomRotor {
+            UIAccessibilityCustomRotor(name: Constants.Accessibility.messagesRotorName) { [weak self] predicate in
+                guard let self = self, let tableView = self.tableView else { return nil }
+                let rowCount = tableView.numberOfRows(inSection: 0)
+                guard rowCount > 0, !self.parent.messages.isEmpty else { return nil }
+
+                let forward = predicate.searchDirection == .next
+                let targetRow: Int
+                if let currentRow = self.rowForRotorElement(predicate.currentItem.targetElement, in: tableView) {
+                    targetRow = forward ? currentRow + 1 : currentRow - 1
+                } else {
+                    targetRow = forward ? 0 : rowCount - 1
+                }
+
+                guard targetRow >= 0, targetRow < rowCount else { return nil }
+
+                let indexPath = IndexPath(row: targetRow, section: 0)
+                tableView.scrollToRow(at: indexPath, at: .middle, animated: false)
+                tableView.layoutIfNeeded()
+                guard let cell = tableView.cellForRow(at: indexPath) else { return nil }
+                return UIAccessibilityCustomRotorItemResult(targetElement: cell, targetRange: nil)
+            }
+        }
+
+        /// Resolves the table row that owns the currently focused accessibility
+        /// element by mapping its on-screen frame back into table coordinates.
+        private func rowForRotorElement(_ element: Any?, in tableView: UITableView) -> Int? {
+            guard let object = element as? NSObject,
+                  let window = tableView.window else { return nil }
+
+            let screenFrame = object.accessibilityFrame
+            guard !screenFrame.isNull, !screenFrame.isEmpty else { return nil }
+
+            let windowFrame = window.convert(screenFrame, from: window.screen.coordinateSpace)
+            let tableFrame = tableView.convert(windowFrame, from: window)
+            let center = CGPoint(x: tableFrame.midX, y: tableFrame.midY)
+            return tableView.indexPathForRow(at: center)?.row
         }
 
         func checkIfAtBottom() {

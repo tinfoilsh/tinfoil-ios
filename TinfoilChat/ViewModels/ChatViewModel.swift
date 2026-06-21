@@ -1619,6 +1619,7 @@ class ChatViewModel: ObservableObject {
 
         // Update UI state
         isLoading = true
+        AccessibilityAnnouncer.announce(Constants.Accessibility.generatingResponse)
 
         // Create initial empty assistant message as a placeholder
         let assistantMessage = Message(role: .assistant, content: "", isCollapsed: true)
@@ -2570,6 +2571,8 @@ class ChatViewModel: ObservableObject {
                     // the first assistant response to appear truncated.
                     self.updateChat(chat)
                     self.isLoading = false
+                    AccessibilityAnnouncer.announce(Constants.Accessibility.responseComplete)
+                    HapticFeedback.trigger(.success)
 
                     return chat
                 }
@@ -2624,6 +2627,8 @@ class ChatViewModel: ObservableObject {
                 // Handle error
                 await MainActor.run {
                     self.isLoading = false
+                    AccessibilityAnnouncer.announce(Constants.Accessibility.responseFailed)
+                    HapticFeedback.trigger(.error)
                     self.thinkingSummary = ""
                     self.webSearchSummary = ""
 
@@ -2850,6 +2855,7 @@ class ChatViewModel: ObservableObject {
         currentTask?.cancel()
         currentTask = nil
         isLoading = false
+        AccessibilityAnnouncer.announce(Constants.Accessibility.generationStopped)
         thinkingSummary = ""
         webSearchSummary = ""
 
