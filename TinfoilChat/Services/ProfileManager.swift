@@ -620,7 +620,7 @@ class ProfileManager: ObservableObject {
         // Avoid overlapping uploads
         guard !isPushing else { return }
         
-        let profile = createProfileData()
+        var profile = createProfileData()
 
         // Only push if there is a real change vs last synced baseline.
         // When nothing diverges, clear the pending flag so a phantom
@@ -629,7 +629,23 @@ class ProfileManager: ObservableObject {
             clearLocalProfileChanged()
             return
         }
-        
+
+        // Stamp a fresh edit clock on every field changed since the last
+        // sync, carrying forward the existing clocks for the rest. One
+        // tick covers this push because it is a single local write event;
+        // the deviceId tiebreak keeps it ordered against peers.
+        let baseClocks = profileSync.getCachedProfile()?.fieldClocks
+            ?? lastSyncedProfile?.fieldClocks ?? [:]
+        let changedFields = ProfileMerge.changedProfileFields(
+            local: profile, baseline: lastSyncedProfile
+        )
+        var fieldClocks = baseClocks
+        if !changedFields.isEmpty {
+            let tick = EditClockStore.nextClock()
+            for field in changedFields { fieldClocks[field] = tick }
+        }
+        profile.fieldClocks = fieldClocks
+
         isPushing = true
         updateSyncingState()
         

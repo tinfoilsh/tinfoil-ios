@@ -40,7 +40,7 @@ class ProfileSyncService: ObservableObject {
         "favoritePromptPresetIds", "selectedModel", "reasoningEffort",
         "thinkingEnabled", "webSearchEnabled", "codeExecutionEnabled",
         "piiCheckEnabled", "genUIEnabled", "chatFont", "projectUploadPreference",
-        "version", "updatedAt",
+        "version", "updatedAt", "fieldClocks", "clockVersion",
     ]
 
     private static let iso8601Formatter: ISO8601DateFormatter = {
@@ -149,6 +149,13 @@ class ProfileSyncService: ObservableObject {
             if let etag = item.etag, let version = Int(etag) {
                 decoded.version = version
             }
+            // Advance the local logical clock past every remote field
+            // clock so a later local edit outranks what we observed.
+            if let fieldClocks = decoded.fieldClocks {
+                for clock in fieldClocks.values {
+                    EditClockStore.observe(clock.v)
+                }
+            }
             self.cachedProfile = decoded
             self.failedDecryptionData = nil
             return decoded
@@ -162,15 +169,23 @@ class ProfileSyncService: ObservableObject {
         guard await isAuthenticated() else { return (false, nil, nil) }
         let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
 
+        // The working copy that gets pushed. On a conflict it is
+        // replaced by the field-level merge before re-push.
+        var working = profile
+
         // Push the local profile under a given base version. The
         // controlplane treats a missing/zero version as create-only and
         // any positive version as a CAS update gated on the row's etag.
         func pushAtVersion(_ baseVersion: Int) async throws -> (success: Bool, version: Int?) {
-            var profileWithMetadata = profile
+            var profileWithMetadata = working
             // Preserve the caller's edit time so other devices can
             // arbitrate last-write-wins; only stamp now when absent.
-            profileWithMetadata.updatedAt = profile.updatedAt ?? Self.iso8601Formatter.string(from: Date())
+            profileWithMetadata.updatedAt = working.updatedAt ?? Self.iso8601Formatter.string(from: Date())
             profileWithMetadata.version = baseVersion + 1
+            // The field clocks are current as of the version this push
+            // creates, so a remote reader trusts them (version ==
+            // clockVersion) instead of falling back to updatedAt.
+            profileWithMetadata.clockVersion = baseVersion + 1
 
             let plaintext = try self.encodeProfilePayload(profileWithMetadata)
             let ifMatch: String? = baseVersion > 0 ? String(baseVersion) : nil
@@ -201,27 +216,31 @@ class ProfileSyncService: ObservableObject {
             return (result.success, result.version, nil)
         } catch let error as SyncEnclaveError where Self.isStaleBlobConflict(error) {
             // Optimistic-concurrency conflict: the server holds a
-            // version our push was not based on. Re-read it and
-            // arbitrate last-write-wins by content modification time.
+            // version our push was not based on. Re-read it and merge
+            // field by field so neither device's edits are lost, then
+            // re-push the merged result onto the server's version.
             let remote = try await fetchProfile()
 
-            if let remote = remote,
-               SyncConflictResolver.remoteWins(
-                   local: Self.parseISODate(profile.updatedAt),
-                   remote: Self.parseISODate(remote.updatedAt)
-               ) {
-                // The remote is the strictly newer write. Adopt it
-                // instead of clobbering, and hand it back so the caller
-                // can apply it locally; both devices then converge.
-                self.cachedProfile = remote
-                return (true, remote.version, remote)
+            guard let remote = remote else {
+                // The remote vanished between the conflict and our
+                // re-read; re-push local as a fresh create.
+                let result = try await pushAtVersion(0)
+                return (result.success, result.version, nil)
             }
 
-            // Our local edit is the last write. Rebase onto the
-            // server's current version and re-push so local wins
-            // instead of looping on STALE_BLOB forever.
-            let result = try await pushAtVersion(remote?.version ?? 0)
-            return (result.success, result.version, nil)
+            let (merged, adoptedRemote) = ProfileMerge.mergeProfiles(
+                local: profile, remote: remote
+            )
+            working = merged
+
+            let result = try await pushAtVersion(remote.version ?? 0)
+            // Hand the merged profile back so the caller applies any
+            // fields adopted from the remote and both devices converge.
+            return (
+                result.success,
+                result.version,
+                adoptedRemote ? (self.cachedProfile ?? merged) : nil
+            )
         }
     }
 
@@ -239,19 +258,6 @@ class ProfileSyncService: ObservableObject {
             dict[key] = value
         }
         return try JSONSerialization.data(withJSONObject: dict)
-    }
-
-    /// Parse an ISO-8601 timestamp, tolerating values written with or
-    /// without fractional seconds so cross-device and cross-client
-    /// profiles compare correctly.
-    private static func parseISODate(_ string: String?) -> Date? {
-        guard let string = string else { return nil }
-        if let date = iso8601Formatter.date(from: string) {
-            return date
-        }
-        let fallback = ISO8601DateFormatter()
-        fallback.formatOptions = [.withInternetDateTime]
-        return fallback.date(from: string)
     }
 
     /// A STALE_BLOB (HTTP 412) push means our If-Match version no longer
