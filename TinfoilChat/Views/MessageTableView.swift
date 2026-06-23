@@ -34,7 +34,7 @@ struct MessageTableView: UIViewRepresentable {
         tableView.dataSource = context.coordinator
         tableView.keyboardDismissMode = .onDrag
         tableView.allowsSelection = false
-        tableView.estimatedRowHeight = 100
+        tableView.estimatedRowHeight = Constants.HeightEstimation.fallbackHeight
         tableView.rowHeight = UITableView.automaticDimension
         tableView.showsVerticalScrollIndicator = true
         tableView.contentInsetAdjustmentBehavior = .automatic
@@ -102,6 +102,7 @@ struct MessageTableView: UIViewRepresentable {
                 context.coordinator.shownMessageIds.removeAll()
                 context.coordinator.heightCache.removeAll()
                 context.coordinator.messageHeightCache.removeAll()
+                context.coordinator.contentEstimateCache.removeAll()
             } else {
                 // Drop any wrappers and cached heights that belong to messages
                 // that no longer exist. Without this, long sessions accumulate
@@ -115,6 +116,7 @@ struct MessageTableView: UIViewRepresentable {
                         context.coordinator.messageWrappers.removeValue(forKey: messageId)
                         context.coordinator.shownMessageIds.remove(messageId)
                         context.coordinator.messageHeightCache.removeValue(forKey: messageId)
+                        context.coordinator.contentEstimateCache.removeValue(forKey: messageId)
                     }
                     context.coordinator.heightCache.removeAll()
                 }
@@ -308,6 +310,7 @@ struct MessageTableView: UIViewRepresentable {
         var isUserMessageScrollMode = false
         var heightCache: [IndexPath: CGFloat] = [:]
         var messageHeightCache: [String: CGFloat] = [:]
+        var contentEstimateCache: [String: CGFloat] = [:]
         var shownMessageIds: Set<String> = []
         var isKeyboardTransitioning = false
 
@@ -410,12 +413,45 @@ struct MessageTableView: UIViewRepresentable {
             }
             // Fall back to message-ID-based cache (survives reloadData)
             if indexPath.row < parent.messages.count {
-                let messageId = parent.messages[indexPath.row].id
-                if let cachedHeight = messageHeightCache[messageId] {
+                let message = parent.messages[indexPath.row]
+                if let cachedHeight = messageHeightCache[message.id] {
                     return cachedHeight
                 }
+                // No measured height yet: approximate from the message content
+                // so the table's contentSize is close to correct before the
+                // row is displayed. A flat guess here would make contentSize
+                // lurch as each taller-than-guessed row is revealed, which is
+                // what made scrolling up snap back to the bottom.
+                return contentBasedEstimate(for: message, width: tableView.bounds.width)
             }
-            return 100
+            return Constants.HeightEstimation.fallbackHeight
+        }
+
+        /// Approximate row height for a message that has never been measured,
+        /// derived from its text length, reasoning pill, and attachments.
+        private func contentBasedEstimate(for message: Message, width: CGFloat) -> CGFloat {
+            if let cached = contentEstimateCache[message.id] {
+                return cached
+            }
+
+            let contentWidth = max(120, width - Constants.HeightEstimation.horizontalChrome)
+            let charsPerLine = max(1, contentWidth / Constants.HeightEstimation.averageCharacterWidth)
+
+            let wrappedLines = (CGFloat(message.content.count) / charsPerLine).rounded(.up)
+            let explicitLines = CGFloat(message.content.reduce(into: 1) { count, character in
+                if character == "\n" { count += 1 }
+            })
+            let lines = max(1, max(wrappedLines, explicitLines))
+
+            var height = lines * Constants.HeightEstimation.lineHeight + Constants.HeightEstimation.verticalChrome
+            if let thoughts = message.thoughts, !thoughts.isEmpty {
+                height += Constants.HeightEstimation.thoughtsHeight
+            }
+            height += CGFloat(message.attachments.count) * Constants.HeightEstimation.attachmentHeight
+
+            let result = max(height, Constants.HeightEstimation.minimumHeight)
+            contentEstimateCache[message.id] = result
+            return result
         }
 
         func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
@@ -457,6 +493,41 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+            // Cache the settled height once a row leaves the screen. By this
+            // point any asynchronously rendered content (LaTeX, generative-UI
+            // cards) has laid out, so this is the most accurate height to pin
+            // the row to on its next appearance.
+            guard indexPath.row < parent.messages.count else { return }
+            let isLastMessage = indexPath.row == parent.messages.count - 1
+            if parent.isLoading && isLastMessage { return }
+            let height = cell.frame.size.height
+            guard height > 0 else { return }
+            messageHeightCache[parent.messages[indexPath.row].id] = height
+            heightCache[indexPath] = height
+        }
+
+        func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+            // While the user is actively scrolling, pin already-measured rows to
+            // their cached height. Re-measuring self-sizing rows mid-scroll makes
+            // contentSize oscillate (a row reports a slightly different height
+            // each time it re-enters), and UIKit answers every change by shifting
+            // contentOffset - the feedback loop that snaps the view back and makes
+            // scrolling up impossible. When stationary, rows resize normally so
+            // reasoning toggles and late-rendering content settle correctly.
+            guard tableView.isDragging || tableView.isDecelerating else {
+                return UITableView.automaticDimension
+            }
+            guard indexPath.row < parent.messages.count else {
+                return UITableView.automaticDimension
+            }
+            let isLastMessage = indexPath.row == parent.messages.count - 1
+            if parent.isLoading && isLastMessage {
+                return UITableView.automaticDimension
+            }
+            if let cached = messageHeightCache[parent.messages[indexPath.row].id] {
+                return cached
+            }
+            return UITableView.automaticDimension
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
