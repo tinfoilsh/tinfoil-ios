@@ -35,6 +35,13 @@ struct Chat: Identifiable, Codable {
     var syncedAt: Date?
     var locallyModified: Bool = true
     var updatedAt: Date
+
+    // Logical edit clock for conflict arbitration. Round-tripped across
+    // platforms; clockVersion records the syncVersion the clock was
+    // maintained at so a reader knows whether to trust it.
+    var clock: Int?
+    var writer: String?
+    var clockVersion: Int?
     
     // For handling encrypted chats that failed to decrypt
     var decryptionFailed: Bool = false
@@ -179,6 +186,7 @@ struct Chat: Identifiable, Codable {
         case id, title, titleState, messages, createdAt, modelType, language, userId
         case syncVersion, syncedAt, locallyModified, updatedAt
         case decryptionFailed, dataCorrupted, formatVersion, isLocalOnly, projectId, promptPresetId
+        case clock, writer, clockVersion
     }
 
     init(from decoder: Decoder) throws {
@@ -208,6 +216,9 @@ struct Chat: Identifiable, Codable {
         isLocalOnly = try container.decodeIfPresent(Bool.self, forKey: .isLocalOnly) ?? false
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
         promptPresetId = try container.decodeIfPresent(String.self, forKey: .promptPresetId)
+        clock = try container.decodeIfPresent(Int.self, forKey: .clock)
+        writer = try container.decodeIfPresent(String.self, forKey: .writer)
+        clockVersion = try container.decodeIfPresent(Int.self, forKey: .clockVersion)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -235,6 +246,9 @@ struct Chat: Identifiable, Codable {
         try container.encode(isLocalOnly, forKey: .isLocalOnly)
         try container.encodeIfPresent(projectId, forKey: .projectId)
         try container.encodeIfPresent(promptPresetId, forKey: .promptPresetId)
+        try container.encodeIfPresent(clock, forKey: .clock)
+        try container.encodeIfPresent(writer, forKey: .writer)
+        try container.encodeIfPresent(clockVersion, forKey: .clockVersion)
     }
     
     // MARK: - Haptic Feedback Methods
