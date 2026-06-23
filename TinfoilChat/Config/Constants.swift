@@ -87,6 +87,31 @@ enum Constants {
         static let maxCellHeight: CGFloat = 200_000
     }
 
+    /// Heuristics for estimating a message row's height before it has been
+    /// measured by the table. Accurate estimates keep the scroll view's
+    /// `contentSize` stable while scrolling up through never-displayed rows,
+    /// which prevents UIKit from shifting the offset and snapping the view
+    /// back toward the bottom.
+    enum HeightEstimation {
+        /// Horizontal space consumed by cell and bubble padding, subtracted
+        /// from the table width to approximate the wrapping text width.
+        static let horizontalChrome: CGFloat = 32
+        /// Approximate width of one character at the message body font.
+        static let averageCharacterWidth: CGFloat = 7.2
+        /// Approximate height of one wrapped line of body text.
+        static let lineHeight: CGFloat = 20
+        /// Vertical padding and chrome around a message's text.
+        static let verticalChrome: CGFloat = 56
+        /// Extra height for a collapsed reasoning/thoughts pill.
+        static let thoughtsHeight: CGFloat = 50
+        /// Approximate height contributed by each image attachment.
+        static let attachmentHeight: CGFloat = 220
+        /// Smallest estimate we ever return for a populated row.
+        static let minimumHeight: CGFloat = 60
+        /// Fallback estimate used when no message backs the row.
+        static let fallbackHeight: CGFloat = 100
+    }
+
     enum Streaming {
         /// Minimum interval between SwiftUI invalidations during a streaming
         /// response. Updating any faster forces SwiftUI to walk a long
