@@ -169,8 +169,8 @@ enum Constants {
     }
 
     enum Sync {
-        static let chatSyncIntervalSeconds: TimeInterval = 60.0
-        static let profileSyncIntervalSeconds: TimeInterval = 300.0  // 5 minutes
+        static let chatSyncIntervalSeconds: TimeInterval = 20.0
+        static let profileSyncIntervalSeconds: TimeInterval = 60.0  // 1 minute
         static let clientInitTimeoutSeconds: TimeInterval = 60.0
         static let backgroundTaskName = "CompleteStreamingResponse"
         static let maxReverseTimestamp: Int = 9999999999999
