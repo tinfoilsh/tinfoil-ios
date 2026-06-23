@@ -109,12 +109,24 @@ enum ProfileMerge {
             return (local, false)
         }
 
-        var mergedClocks = local.fieldClocks ?? [:]
+        // Build the merged clocks from scratch, carrying only clocks we
+        // actually trust. Seeding from local.fieldClocks would smuggle
+        // untrusted/stale clocks into the output, which the next push
+        // re-stamps as trusted (clockVersion == version) and corrupts
+        // future conflict resolution.
+        var mergedClocks: [String: EditClock] = [:]
         var adoptedRemote = false
 
         for field in mergeFields {
-            guard remoteDict[field] != nil else { continue }
             let lc = localTrusted ? local.fieldClocks?[field] : nil
+
+            // Remote omits this field: keep the local value and its
+            // clock, but only when the local clock is trusted.
+            guard remoteDict[field] != nil else {
+                if let lc = lc { mergedClocks[field] = lc }
+                continue
+            }
+
             let rc = remoteTrusted ? remote.fieldClocks?[field] : nil
             let takeRemote = SyncConflictResolver.remoteWins(
                 localClock: lc,
@@ -124,6 +136,9 @@ enum ProfileMerge {
             )
             if takeRemote {
                 mergedDict[field] = remoteDict[field]
+                // Record a clock for the adopted value only if the remote
+                // clock is trusted; otherwise leave it absent so future
+                // reads fall back to updatedAt for this field.
                 if let rc = rc { mergedClocks[field] = rc }
                 adoptedRemote = true
             } else if let lc = lc {

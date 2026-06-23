@@ -90,6 +90,31 @@ struct ProfileMergeTests {
         #expect(result.adoptedRemote == false)
     }
 
+    @Test("does not carry untrusted local clocks into the merged output")
+    func dropsUntrustedLocalClocks() {
+        var local = ProfileData(nickname: "local", profession: "local-job")
+        local.version = 4
+        local.clockVersion = 2
+        local.fieldClocks = [
+            "nickname": EditClock(v: 99, w: "A"),
+            "profession": EditClock(v: 99, w: "A"),
+        ]
+        local.updatedAt = "2024-01-02T00:00:00.000Z"
+
+        var remote = ProfileData(nickname: "remote")
+        remote.version = 5
+        remote.clockVersion = 2
+        remote.fieldClocks = ["nickname": EditClock(v: 1, w: "B")]
+        remote.updatedAt = "2024-01-01T00:00:00.000Z"
+
+        let result = ProfileMerge.mergeProfiles(local: local, remote: remote)
+
+        #expect(result.merged.nickname == "local")
+        #expect(result.merged.profession == "local-job")
+        // No trusted clock existed for either field, so none is carried.
+        #expect(result.merged.fieldClocks == nil)
+    }
+
     @Test("falls back to updatedAt when clocks are untrusted")
     func untrustedFallback() {
         var local = ProfileData(nickname: "local")
@@ -132,6 +157,25 @@ struct ProfileMergeTests {
 
 @Suite("Clock-aware conflict resolution")
 struct EditClockArbitrationTests {
+
+    // Reset the shared counter before each test so cases that push it to
+    // the ceiling don't bleed into the monotonicity assertions.
+    init() {
+        UserDefaults.standard.removeObject(forKey: "tinfoil-sync-edit-clock")
+    }
+
+    @Test("ignores remote clock values above the ceiling without trapping")
+    func ceilingGuard() {
+        // A hostile or corrupt remote clock must not poison the counter
+        // into an overflow trap on the next tick.
+        EditClockStore.observe(Int.max)
+        #expect(EditClockStore.nextClock().v == 1)
+
+        EditClockStore.observe(EditClockStore.maxCounter)
+        #expect(EditClockStore.nextClock().v == EditClockStore.maxCounter)
+        // A further tick stays pinned at the ceiling rather than trapping.
+        #expect(EditClockStore.nextClock().v == EditClockStore.maxCounter)
+    }
 
     @Test("prefers the higher clock counter over wall-clock time")
     func clockBeatsTime() {
