@@ -547,9 +547,37 @@ class CloudSyncService: ObservableObject {
             }
 
             let localChat = await loadChatFromStorage(chatId)
+
+            // A chat's edit clock is trusted only when it was maintained
+            // at the row's current synced version; otherwise a
+            // clock-unaware write intervened and we fall back to
+            // updatedAt arbitration.
+            func trustedClock(
+                clock: Int?, writer: String?, clockVersion: Int?, syncVersion: Int
+            ) -> EditClock? {
+                guard let clock = clock, let writer = writer,
+                      let clockVersion = clockVersion, clockVersion == syncVersion
+                else { return nil }
+                return EditClock(v: clock, w: writer)
+            }
+
+            let localClock = localChat.flatMap {
+                trustedClock(
+                    clock: $0.clock, writer: $0.writer,
+                    clockVersion: $0.clockVersion, syncVersion: $0.syncVersion
+                )
+            }
+            let remoteClock = trustedClock(
+                clock: downloadedChat.clock, writer: downloadedChat.writer,
+                clockVersion: downloadedChat.clockVersion,
+                syncVersion: downloadedChat.syncVersion
+            )
+
             let remoteWins = SyncConflictResolver.remoteWins(
-                local: localChat?.updatedAt,
-                remote: downloadedChat.updatedAt
+                localClock: localClock,
+                remoteClock: remoteClock,
+                localUpdatedAt: localChat?.updatedAt,
+                remoteUpdatedAt: downloadedChat.updatedAt
             )
 
             if !remoteWins {
