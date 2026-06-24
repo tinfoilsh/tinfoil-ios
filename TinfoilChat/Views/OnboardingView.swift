@@ -65,6 +65,7 @@ struct OnboardingView: View {
                                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: currentPage)
                         }
                     }
+                    .accessibilityHidden(true)
 
                     // Continue / Get Started button
                     let canContinue = currentPage != 0 || privacyEnabled

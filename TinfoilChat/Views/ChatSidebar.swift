@@ -605,6 +605,7 @@ struct ChatListItem: View {
                                 Circle()
                                     .fill(Color.blue)
                                     .frame(width: 8, height: 8)
+                                    .accessibilityHidden(true)
                             }
                             
                             Spacer()

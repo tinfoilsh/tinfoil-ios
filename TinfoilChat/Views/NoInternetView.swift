@@ -16,6 +16,7 @@ struct NoInternetView: View {
                 Image(systemName: "wifi.slash")
                     .font(.system(size: Constants.UI.initFailedIconSize))
                     .foregroundColor(.primary)
+                    .accessibilityHidden(true)
 
                 VStack(spacing: 12) {
                     Text("No Internet Connection")

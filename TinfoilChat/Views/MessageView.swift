@@ -961,11 +961,14 @@ private struct LongMessageAttachmentView: View {
             Image(systemName: "chevron.right")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode).opacity(0.5))
+                .accessibilityHidden(true)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture(perform: openAction)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Shows the full message")
     }
 }
 

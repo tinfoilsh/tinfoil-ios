@@ -67,6 +67,7 @@ struct ShareChatView: View {
             Spacer()
             Image(systemName: "bubble.left.fill")
                 .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
         }
         .padding(14)
         .background(cardColor)

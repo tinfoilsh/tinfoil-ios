@@ -21,6 +21,7 @@ struct InitializationFailedView: View {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: Constants.UI.initFailedIconSize))
                     .foregroundColor(.primary)
+                    .accessibilityHidden(true)
 
                 VStack(spacing: 12) {
                     Text("Failed to Initialize")

@@ -40,6 +40,7 @@ struct PasskeyRecoveryChoiceView: View {
                     .font(.system(size: 28))
                     .foregroundColor(.primary)
             }
+            .accessibilityHidden(true)
 
             Text("Passkey Not Found")
                 .font(.title2)
