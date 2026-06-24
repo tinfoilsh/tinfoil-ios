@@ -20,12 +20,12 @@ struct NoInternetView: View {
 
                 VStack(spacing: 12) {
                     Text("No Internet Connection")
-                        .font(.system(size: 28, weight: .medium))
+                        .font(.system(.title, weight: .medium))
                         .foregroundColor(.primary)
                         .multilineTextAlignment(.center)
 
                     Text("Please check your internet connection and try again.")
-                        .font(.system(size: 17))
+                        .font(.body)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
@@ -37,9 +37,9 @@ struct NoInternetView: View {
                 Button(action: retryAction) {
                     HStack(spacing: 8) {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(.callout, weight: .medium))
                         Text("Try Again")
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(.system(.body, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)

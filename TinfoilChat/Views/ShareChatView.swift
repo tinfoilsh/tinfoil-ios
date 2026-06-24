@@ -62,7 +62,7 @@ struct ShareChatView: View {
     private var titleCard: some View {
         HStack {
             Text(chatTitle ?? "Untitled")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(.callout, weight: .semibold))
                 .lineLimit(2)
             Spacer()
             Image(systemName: "bubble.left.fill")
@@ -79,7 +79,7 @@ struct ShareChatView: View {
     private var accessCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Who has access")
-                .font(.system(size: 13))
+                .font(.system(.footnote))
                 .foregroundStyle(.secondary)
                 .padding(.leading, 4)
                 .accessibilityAddTraits(.isHeader)

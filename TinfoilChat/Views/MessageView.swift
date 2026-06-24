@@ -667,7 +667,7 @@ struct MessageView: View {
                     // AI disclaimer - only on the last assistant message
                     if isLastMessage {
                         Text("AI can make mistakes. Verify important information.")
-                            .font(.system(size: 11))
+                            .font(.caption2)
                             .foregroundColor(isDarkMode ? .white.opacity(0.35) : .black.opacity(0.35))
                     }
                 }
@@ -942,15 +942,15 @@ private struct LongMessageAttachmentView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Long Message")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(.callout, weight: .semibold))
                     .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode))
 
                 Text(wordCountText)
-                    .font(.system(size: 12))
+                    .font(.caption)
                     .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode).opacity(0.6))
 
                 Text(previewText)
-                    .font(.system(size: 14))
+                    .font(.footnote)
                     .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode).opacity(0.85))
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
@@ -1323,7 +1323,7 @@ struct CollapsibleThinkingBox: View {
                     } else {
                         HStack(spacing: 4) {
                             Text("Thinking")
-                                .font(.system(size: 16))
+                                .font(.callout)
                                 .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                             InlineLoadingDotsView(isDarkMode: isDarkMode)
                         }
@@ -1820,7 +1820,7 @@ struct UserMessageEditView: View {
 
                 Button(action: onCancel) {
                     Text("Cancel")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(.caption, weight: .medium))
                         .foregroundColor(secondaryTextColor)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -1835,7 +1835,7 @@ struct UserMessageEditView: View {
                     }
                 }) {
                     Text("Save")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(.caption, weight: .medium))
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -1882,7 +1882,7 @@ private struct SourcesButton: View {
         Button(action: action) {
             HStack(spacing: 4) {
                 Text("Sources")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(.footnote, weight: .medium))
 
                 // Overlapping favicons
                 HStack(spacing: -6) {
@@ -1948,13 +1948,13 @@ private struct SourcesSheetView: View {
 
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(source.title)
-                                        .font(.system(size: 15, weight: .medium))
+                                        .font(.system(.subheadline, weight: .medium))
                                         .foregroundColor(isDarkMode ? .white : .black)
                                         .lineLimit(2)
                                         .multilineTextAlignment(.leading)
 
                                     Text(getDomain(from: source.url))
-                                        .font(.system(size: 13))
+                                        .font(.footnote)
                                         .foregroundColor(.secondary)
                                         .lineLimit(1)
                                 }

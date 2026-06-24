@@ -320,7 +320,7 @@ struct ChatContainer: View {
                             Image(systemName: preset.iconName)
                                 .font(.system(size: 9, weight: .semibold))
                             Text(preset.name)
-                                .font(.system(size: 10, weight: .medium))
+                                .font(.system(.caption2, weight: .medium))
                                 .lineLimit(1)
                         }
                         .foregroundColor(toolbarContentColor.opacity(0.7))
@@ -553,12 +553,12 @@ struct ChatContainer: View {
                     Image(systemName: "internaldrive")
                         .font(.system(size: 9))
                     Text("Local")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(.caption2, weight: .medium))
                 } else {
                     Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90.icloud")
                         .font(.system(size: 9))
                     Text("Cloud")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(.caption2, weight: .medium))
                 }
             }
             .foregroundColor(.secondary)

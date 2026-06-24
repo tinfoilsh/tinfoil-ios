@@ -262,7 +262,7 @@ struct ChatSidebar: View {
                 Task { await viewModel.loadMoreChats() }
             } label: {
                 Text("Load More")
-                    .font(.system(size: 16, weight: .regular))
+                    .font(.system(.callout, weight: .regular))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             }
@@ -274,7 +274,7 @@ struct ChatSidebar: View {
             } label: {
                 Text("Load More")
                     .foregroundColor(.primary)
-                    .font(.system(size: 16, weight: .regular))
+                    .font(.system(.callout, weight: .regular))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(
