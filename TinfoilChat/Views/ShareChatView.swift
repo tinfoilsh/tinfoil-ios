@@ -81,6 +81,7 @@ struct ShareChatView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .padding(.leading, 4)
+                .accessibilityAddTraits(.isHeader)
 
             accessOptions
             actionButton

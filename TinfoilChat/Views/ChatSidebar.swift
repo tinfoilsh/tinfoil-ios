@@ -458,6 +458,7 @@ struct ChatSidebar: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Chats")
+        .accessibilityAddTraits(.isHeader)
         .accessibilityValue(isChatsExpanded ? "Expanded" : "Collapsed")
         .accessibilityHint(isChatsExpanded ? "Collapses the chat list" : "Expands the chat list")
     }

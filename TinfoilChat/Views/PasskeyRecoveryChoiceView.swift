@@ -44,6 +44,7 @@ struct PasskeyRecoveryChoiceView: View {
             Text("Passkey Not Found")
                 .font(.title2)
                 .fontWeight(.bold)
+                .accessibilityAddTraits(.isHeader)
 
             Text("We couldn't find a matching passkey on this device. Your passkey might be in iCloud Keychain or a password manager that hasn't synced yet.")
                 .font(.subheadline)

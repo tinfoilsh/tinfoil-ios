@@ -154,6 +154,7 @@ private struct OnboardingPrivacyPage: View {
                     Text("Privacy First")
                         .font(.title)
                         .fontWeight(.bold)
+                        .accessibilityAddTraits(.isHeader)
                 }
 
                 Text("Tinfoil is built for people who believe their conversations are nobody else's business.")
@@ -410,6 +411,7 @@ private struct OnboardingEncryptionPage: View {
                     Text("Your Key, Your Data")
                         .font(.title)
                         .fontWeight(.bold)
+                        .accessibilityAddTraits(.isHeader)
 
                     Text("Every chat is encrypted with a key that only exists on your device. Nobody but you can read your conversations.")
                         .font(.subheadline)
@@ -504,6 +506,7 @@ private struct OnboardingModelsPage: View {
                     Text("Powerful Models")
                         .font(.title)
                         .fontWeight(.bold)
+                        .accessibilityAddTraits(.isHeader)
 
                     Text("Access leading AI models, all running inside secure hardware with verified privacy.")
                         .font(.subheadline)
