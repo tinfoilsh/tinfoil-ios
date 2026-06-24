@@ -233,6 +233,21 @@ private struct MapWidgetView: View {
         .task(id: locationsKey) {
             await resolvePins()
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(mapAccessibilityLabel)
+        .accessibilityAddTraits(.isImage)
+    }
+
+    private var mapAccessibilityLabel: String {
+        var parts: [String] = []
+        if let title = args.title, !title.isEmpty {
+            parts.append(title)
+        }
+        parts.append("Map with \(args.locations.count) location\(args.locations.count == 1 ? "" : "s")")
+        if let first = args.locations.first {
+            parts.append(first.name)
+        }
+        return parts.joined(separator: ", ")
     }
 
     private var locationsKey: String {

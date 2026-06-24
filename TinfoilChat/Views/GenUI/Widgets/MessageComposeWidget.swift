@@ -107,6 +107,7 @@ private struct MessageComposeView: View {
                 .stroke(GenUIStyle.borderColor(isDarkMode), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: GenUIStyle.cornerRadius))
+        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
@@ -117,6 +118,7 @@ private struct MessageComposeView: View {
                 Circle().fill(Color(red: 1.0, green: 0.74, blue: 0.18)).frame(width: 10, height: 10)
                 Circle().fill(Color(red: 0.16, green: 0.78, blue: 0.25)).frame(width: 10, height: 10)
             }
+            .accessibilityHidden(true)
             Spacer()
             Text(args.title ?? "New Message")
                 .font(.caption.weight(.medium))

@@ -133,6 +133,21 @@ private struct ClockFaceView: View {
         }
         .frame(maxWidth: .infinity)
         .genUICard(isDarkMode: isDarkMode, padding: 16)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(clockAccessibilityLabel)
+        .accessibilityAddTraits(.updatesFrequently)
+    }
+
+    private var clockAccessibilityLabel: String {
+        var parts: [String] = []
+        if let label = args.label, !label.isEmpty {
+            parts.append(label)
+        }
+        parts.append("Clock")
+        if let tz = args.timeZone {
+            parts.append(tz)
+        }
+        return parts.joined(separator: ", ")
     }
 
     private func timeString(for date: Date) -> String {
@@ -515,6 +530,21 @@ private struct CountdownView: View {
         .genUICard(isDarkMode: isDarkMode, padding: 0)
         .onAppear(perform: configure)
         .onDisappear { alarm.stop() }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(timerAccessibilityLabel)
+    }
+
+    private var timerAccessibilityLabel: String {
+        var parts: [String] = []
+        if let title = args.title ?? args.label, !title.isEmpty {
+            parts.append(title)
+        } else {
+            parts.append("Timer")
+        }
+        if let duration = args.durationSeconds, duration > 0 {
+            parts.append("\(Int(duration)) seconds")
+        }
+        return parts.joined(separator: ", ")
     }
 
     private func configure() {

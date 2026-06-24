@@ -78,6 +78,7 @@ private struct TimelineEventsView: View {
                                 .padding(.top, 4)
                         }
                         .frame(width: 14)
+                        .accessibilityHidden(true)
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(event.date.uppercased())
@@ -95,6 +96,8 @@ private struct TimelineEventsView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("\(event.date), \(event.title)\(event.description.map { ", \($0)" } ?? "")")
                     }
                     // Hug the text's ideal height so the greedy connector
                     // line cannot stretch the row when a large height is
@@ -103,5 +106,6 @@ private struct TimelineEventsView: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
     }
 }
