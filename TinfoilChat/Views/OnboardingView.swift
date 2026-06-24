@@ -133,6 +133,7 @@ struct OnboardingView: View {
 
 private struct OnboardingPrivacyPage: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var isPrivacyEnabled: Bool
     @State private var isPrivateOn = false
     @State private var showExplanation = false
@@ -285,8 +286,10 @@ private struct OnboardingPrivacyPage: View {
                             lineWidth: 1
                         )
                         .onAppear {
-                            withAnimation(.linear(duration: 4.0).repeatForever(autoreverses: false)) {
-                                borderRotation = 360
+                            if !reduceMotion {
+                                withAnimation(.linear(duration: 4.0).repeatForever(autoreverses: false)) {
+                                    borderRotation = 360
+                                }
                             }
                         }
                 }

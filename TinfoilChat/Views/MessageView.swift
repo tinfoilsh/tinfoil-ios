@@ -1456,56 +1456,65 @@ struct NoHighlightButtonStyle: ButtonStyle {
 struct PulsingAnimation: ViewModifier {
     let delay: Double
     @State private var isPulsing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
-        content
-            .scaleEffect(isPulsing ? 1.0 : 0.6)
-            .opacity(isPulsing ? 1.0 : 0.3)
-            .animation(
-                Animation.easeInOut(duration: 0.6)
-                    .repeatForever(autoreverses: true)
-                    .delay(delay),
-                value: isPulsing
-            )
-            .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isPulsing = true
+        if reduceMotion {
+            content
+        } else {
+            content
+                .scaleEffect(isPulsing ? 1.0 : 0.6)
+                .opacity(isPulsing ? 1.0 : 0.3)
+                .animation(
+                    Animation.easeInOut(duration: 0.6)
+                        .repeatForever(autoreverses: true)
+                        .delay(delay),
+                    value: isPulsing
+                )
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        isPulsing = true
+                    }
                 }
-            }
+        }
     }
 }
 
 struct TextPulseAnimation: ViewModifier {
     @State private var offset: CGFloat = -1.0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
-        content
-            .overlay(
-                GeometryReader { geometry in
-                    let shimmerWidth = geometry.size.width * 0.4
-                    LinearGradient(
-                        colors: [
-                            .clear,
-                            .white.opacity(0.35),
-                            .clear
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: shimmerWidth)
-                    .offset(x: offset * (geometry.size.width + shimmerWidth))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        if reduceMotion {
+            content
+        } else {
+            content
+                .overlay(
+                    GeometryReader { geometry in
+                        let shimmerWidth = geometry.size.width * 0.4
+                        LinearGradient(
+                            colors: [
+                                .clear,
+                                .white.opacity(0.35),
+                                .clear
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: shimmerWidth)
+                        .offset(x: offset * (geometry.size.width + shimmerWidth))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .mask(content)
+                )
+                .onAppear {
+                    withAnimation(
+                        .easeInOut(duration: 2.0)
+                        .repeatForever(autoreverses: false)
+                    ) {
+                        offset = 1.0
+                    }
                 }
-                .mask(content)
-            )
-            .onAppear {
-                withAnimation(
-                    .easeInOut(duration: 2.0)
-                    .repeatForever(autoreverses: false)
-                ) {
-                    offset = 1.0
-                }
-            }
     }
 }
 

@@ -16,6 +16,7 @@ struct AnimatedConfidentialTitle: View {
     @State private var showLock = false
     @State private var animationTimer: Timer?
     @ObservedObject private var settings = SettingsManager.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     
     private let fullText = "Private Chat"
     private let typingSpeed = 0.05 // seconds per character
@@ -38,7 +39,13 @@ struct AnimatedConfidentialTitle: View {
         }
         .onAppear {
             hapticGenerator.prepare()
-            startTypingAnimation()
+            if reduceMotion {
+                displayedText = fullText
+                showLock = true
+                isLocked = true
+            } else {
+                startTypingAnimation()
+            }
         }
         .onDisappear {
             animationTimer?.invalidate()

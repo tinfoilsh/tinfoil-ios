@@ -16,6 +16,7 @@ struct MessageInputView: View {
     @Binding var messageText: String
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
     @EnvironmentObject private var authManager: AuthManager
     @State private var textHeight: CGFloat = Layout.defaultHeight
     /// Reflects whether the editor has grown beyond a single line, so callers
@@ -362,9 +363,9 @@ struct MessageInputView: View {
                                     Circle()
                                         .fill(Color.red.opacity(0.2))
                                         .frame(width: 44, height: 44)
-                                        .scaleEffect(isPulsing ? 1.1 : 0.9)
+                                        .scaleEffect(reduceMotion ? 1.0 : (isPulsing ? 1.1 : 0.9))
                                         .animation(
-                                            .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
+                                            reduceMotion ? nil : .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
                                             value: isPulsing
                                         )
                                 }
@@ -461,9 +462,9 @@ struct MessageInputView: View {
                                     Circle()
                                         .fill(Color.red.opacity(0.2))
                                         .frame(width: 44, height: 44)
-                                        .scaleEffect(isPulsing ? 1.1 : 0.9)
+                                        .scaleEffect(reduceMotion ? 1.0 : (isPulsing ? 1.1 : 0.9))
                                         .animation(
-                                            .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
+                                            reduceMotion ? nil : .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
                                             value: isPulsing
                                         )
                                 }
