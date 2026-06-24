@@ -367,6 +367,7 @@ struct ChatSidebar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Projects")
+            .accessibilityAddTraits(.isHeader)
             .accessibilityValue(isProjectsExpanded ? "Expanded" : "Collapsed")
             .accessibilityHint(isProjectsExpanded ? "Collapses the projects list" : "Expands the projects list")
 
