@@ -1338,11 +1338,13 @@ struct CollapsibleThinkingBox: View {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
+                    .accessibilityHidden(true)
             }
             .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(NoHighlightButtonStyle())
+        .accessibilityLabel("Thinking")
         .accessibilityHint("Shows the full reasoning")
     }
 }
