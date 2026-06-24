@@ -127,7 +127,7 @@ private struct SportsDataView: View {
             footer
         }
         .genUICard(isDarkMode: isDarkMode)
-        .accessibilityElement(children: .contain)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(sportsAccessibilityLabel)
     }
 
@@ -141,7 +141,12 @@ private struct SportsDataView: View {
         }
         if args.kind == "fixture" {
             if let home = args.home, let away = args.away {
-                parts.append("\(home.name) vs \(away.name)")
+                if let homeScore = home.score?.stringValue, !homeScore.isEmpty,
+                   let awayScore = away.score?.stringValue, !awayScore.isEmpty {
+                    parts.append("\(home.name) \(homeScore), \(away.name) \(awayScore)")
+                } else {
+                    parts.append("\(home.name) vs \(away.name)")
+                }
             }
             if let status = args.status, !status.isEmpty {
                 parts.append(status)

@@ -213,6 +213,9 @@ private struct MapWidgetView: View {
                     RoundedRectangle(cornerRadius: GenUIStyle.cornerRadius)
                         .stroke(GenUIStyle.borderColor(isDarkMode), lineWidth: 1)
                 )
+                .accessibilityElement()
+                .accessibilityLabel(mapAccessibilityLabel)
+                .accessibilityAddTraits(.isImage)
 
             if args.locations.count > 1 {
                 locationList
@@ -234,8 +237,6 @@ private struct MapWidgetView: View {
             await resolvePins()
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(mapAccessibilityLabel)
-        .accessibilityAddTraits(.isImage)
     }
 
     private var mapAccessibilityLabel: String {
