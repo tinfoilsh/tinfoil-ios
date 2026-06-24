@@ -84,6 +84,7 @@ class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsD
         cancelButton.layer.cornerRadius = 8
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
         cancelButton.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+        cancelButton.accessibilityLabel = "Cancel QR scan"
 
         view.addSubview(cancelButton)
 
@@ -104,6 +105,7 @@ class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsD
         overlayView.translatesAutoresizingMaskIntoConstraints = false
         // Ensure overlay does not intercept touches intended for buttons beneath
         overlayView.isUserInteractionEnabled = false
+        overlayView.isAccessibilityElement = false
         view.addSubview(overlayView)
         
         NSLayoutConstraint.activate([
@@ -165,6 +167,14 @@ class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsD
             DispatchQueue.global(qos: .background).async {
                 self.captureSession.startRunning()
             }
+        }
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+
+        if UIAccessibility.isVoiceOverRunning {
+            UIAccessibility.post(notification: .announcement, argument: "QR code scanner active. Point your camera at a QR code containing an encryption key.")
         }
     }
     
