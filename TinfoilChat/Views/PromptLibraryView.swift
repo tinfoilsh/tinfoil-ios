@@ -90,7 +90,7 @@ struct PromptSuggestionsBar: View {
             Image(systemName: iconName)
                 .font(.system(size: 13))
             Text(title)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(.footnote, weight: .medium))
                 .lineLimit(1)
         }
         .foregroundColor(isActive ? Color.adaptiveAccent : .secondary)

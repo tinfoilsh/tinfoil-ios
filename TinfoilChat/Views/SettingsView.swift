@@ -425,6 +425,7 @@ struct SettingsView: View {
                         Image(systemName: "chevron.right")
                             .font(.caption2)
                             .foregroundColor(Color(UIColor.quaternaryLabel))
+                            .accessibilityHidden(true)
                     }
                 }
 
@@ -816,6 +817,7 @@ struct SettingsView: View {
                         Image(systemName: "arrow.up.forward.square")
                             .font(.footnote)
                             .foregroundColor(Color(UIColor.tertiaryLabel))
+                            .accessibilityHidden(true)
                     }
                 }
             } else {
@@ -878,6 +880,7 @@ struct SettingsView: View {
                     Image(systemName: "arrow.up.forward.square")
                         .font(.footnote)
                         .foregroundColor(Color(UIColor.tertiaryLabel))
+                        .accessibilityHidden(true)
                 }
             }
 
@@ -891,6 +894,7 @@ struct SettingsView: View {
                     Image(systemName: "arrow.up.forward.square")
                         .font(.footnote)
                         .foregroundColor(Color(UIColor.tertiaryLabel))
+                        .accessibilityHidden(true)
                 }
             }
         } header: {

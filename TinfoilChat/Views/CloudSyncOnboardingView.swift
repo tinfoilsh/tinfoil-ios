@@ -215,6 +215,7 @@ struct CloudSyncOnboardingView: View {
                 Text("Enable Cloud Sync?")
                     .font(.title)
                     .fontWeight(.bold)
+                    .accessibilityAddTraits(.isHeader)
 
                 // Description
                 Text("Cloud sync enables encrypted syncing of chats across your devices.")
@@ -309,6 +310,7 @@ struct CloudSyncOnboardingView: View {
                 Text("Encryption Key")
                     .font(.title)
                     .fontWeight(.bold)
+                    .accessibilityAddTraits(.isHeader)
 
                 // Description
                 Text(
@@ -392,6 +394,7 @@ struct CloudSyncOnboardingView: View {
                 Text("Success!")
                     .font(.title)
                     .fontWeight(.bold)
+                    .accessibilityAddTraits(.isHeader)
 
                 // Description
                 Text(
@@ -476,6 +479,7 @@ struct CloudSyncOnboardingView: View {
                 Text("Restore Encryption Key")
                     .font(.title)
                     .fontWeight(.bold)
+                    .accessibilityAddTraits(.isHeader)
 
                 // Description
                 Text("Enter or upload your personal encryption key.")

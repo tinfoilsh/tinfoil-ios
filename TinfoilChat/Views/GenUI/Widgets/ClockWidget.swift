@@ -117,6 +117,7 @@ private struct ClockFaceView: View {
                 ClockDial(date: date, timeZone: timeZone, showSeconds: showSeconds, isDarkMode: isDarkMode)
                     .frame(width: 160, height: 160)
             }
+            .accessibilityHidden(true)
 
             TimelineView(.periodic(from: .now, by: 1.0)) { context in
                 VStack(spacing: 2) {
@@ -129,10 +130,31 @@ private struct ClockFaceView: View {
                             .foregroundColor(GenUIStyle.mutedText(isDarkMode))
                     }
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(clockAccessibilityLabel(for: context.date))
+                .accessibilityAddTraits(.updatesFrequently)
             }
         }
         .frame(maxWidth: .infinity)
         .genUICard(isDarkMode: isDarkMode, padding: 16)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func clockAccessibilityLabel(for date: Date) -> String {
+        var parts: [String] = [spokenTimeString(for: date)]
+        if showDate {
+            parts.append(dateString(for: date))
+        } else if let tz = args.timeZone {
+            parts.append(tz)
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private func spokenTimeString(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeZone = timeZone
+        formatter.timeStyle = showSeconds ? .medium : .short
+        return formatter.string(from: date)
     }
 
     private func timeString(for date: Date) -> String {
@@ -457,6 +479,9 @@ private struct CountdownView: View {
                     Text(formatRemaining(max(0, remaining)))
                         .font(.system(size: 36, weight: .light, design: .monospaced))
                         .foregroundColor(GenUIStyle.primaryText(isDarkMode))
+                        .accessibilityElement()
+                        .accessibilityLabel(spokenRemaining(max(0, remaining)))
+                        .accessibilityAddTraits(.updatesFrequently)
                 }
                 .frame(width: 200, height: 200)
                 .opacity(finishedNow && alarmMode == .flash && !flashOn ? 0.4 : 1.0)
@@ -515,6 +540,16 @@ private struct CountdownView: View {
         .genUICard(isDarkMode: isDarkMode, padding: 0)
         .onAppear(perform: configure)
         .onDisappear { alarm.stop() }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func spokenRemaining(_ remaining: TimeInterval) -> String {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.hour, .minute, .second]
+        formatter.unitsStyle = .full
+        formatter.zeroFormattingBehavior = .dropLeading
+        let value = formatter.string(from: max(0, remaining)) ?? "0 seconds"
+        return "\(value) remaining"
     }
 
     private func configure() {

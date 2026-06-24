@@ -107,8 +107,12 @@ private struct SingleImageView: View {
                     .stroke(GenUIStyle.borderColor(isDarkMode), lineWidth: 1)
             )
             .contentShape(Rectangle())
+            .accessibilityElement()
             .accessibilityLabel(accessibilityText(for: image))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint(image.link?.isEmpty == false ? "Opens link" : "Opens full screen")
             .onTapGesture { handleTap() }
+            .accessibilityAction { handleTap() }
 
             if let caption = image.caption, !caption.isEmpty {
                 Text(caption)
@@ -229,8 +233,12 @@ private struct ImageGridView: View {
                         .stroke(GenUIStyle.borderColor(isDarkMode), lineWidth: 1)
                 )
                 .contentShape(Rectangle())
+                .accessibilityElement()
                 .accessibilityLabel(accessibilityText(for: image))
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint(image.link?.isEmpty == false ? "Opens link" : "Opens full screen")
                 .onTapGesture { handleTap(index: index, image: image) }
+                .accessibilityAction { handleTap(index: index, image: image) }
 
             if let caption = image.caption, !caption.isEmpty {
                 Text(caption)

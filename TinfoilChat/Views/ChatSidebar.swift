@@ -262,7 +262,7 @@ struct ChatSidebar: View {
                 Task { await viewModel.loadMoreChats() }
             } label: {
                 Text("Load More")
-                    .font(.system(size: 16, weight: .regular))
+                    .font(.system(.callout, weight: .regular))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             }
@@ -274,7 +274,7 @@ struct ChatSidebar: View {
             } label: {
                 Text("Load More")
                     .foregroundColor(.primary)
-                    .font(.system(size: 16, weight: .regular))
+                    .font(.system(.callout, weight: .regular))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(
@@ -367,6 +367,7 @@ struct ChatSidebar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Projects")
+            .accessibilityAddTraits(.isHeader)
             .accessibilityValue(isProjectsExpanded ? "Expanded" : "Collapsed")
             .accessibilityHint(isProjectsExpanded ? "Collapses the projects list" : "Expands the projects list")
 
@@ -457,6 +458,7 @@ struct ChatSidebar: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Chats")
+        .accessibilityAddTraits(.isHeader)
         .accessibilityValue(isChatsExpanded ? "Expanded" : "Collapsed")
         .accessibilityHint(isChatsExpanded ? "Collapses the chat list" : "Expands the chat list")
     }
@@ -603,6 +605,7 @@ struct ChatListItem: View {
                                 Circle()
                                     .fill(Color.blue)
                                     .frame(width: 8, height: 8)
+                                    .accessibilityHidden(true)
                             }
                             
                             Spacer()

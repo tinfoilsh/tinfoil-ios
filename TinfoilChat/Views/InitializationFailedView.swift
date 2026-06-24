@@ -21,15 +21,16 @@ struct InitializationFailedView: View {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: Constants.UI.initFailedIconSize))
                     .foregroundColor(.primary)
+                    .accessibilityHidden(true)
 
                 VStack(spacing: 12) {
                     Text("Failed to Initialize")
-                        .font(.system(size: 28, weight: .medium))
+                        .font(.system(.title, weight: .medium))
                         .foregroundColor(.primary)
                         .multilineTextAlignment(.center)
 
                     Text(errorMessage)
-                        .font(.system(size: 17))
+                        .font(.body)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
@@ -41,9 +42,9 @@ struct InitializationFailedView: View {
                 Button(action: retryAction) {
                     HStack(spacing: 8) {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(.callout, weight: .medium))
                         Text("Try Again")
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(.system(.body, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)

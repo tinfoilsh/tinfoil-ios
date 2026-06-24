@@ -127,6 +127,34 @@ private struct SportsDataView: View {
             footer
         }
         .genUICard(isDarkMode: isDarkMode)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(sportsAccessibilityLabel)
+    }
+
+    private var sportsAccessibilityLabel: String {
+        var parts: [String] = []
+        if let sport = args.sport, !sport.isEmpty {
+            parts.append(sport)
+        }
+        if let title = titleText {
+            parts.append(title)
+        }
+        if args.kind == "fixture" {
+            if let home = args.home, let away = args.away {
+                if let homeScore = home.score?.stringValue, !homeScore.isEmpty,
+                   let awayScore = away.score?.stringValue, !awayScore.isEmpty {
+                    parts.append("\(home.name) \(homeScore), \(away.name) \(awayScore)")
+                } else {
+                    parts.append("\(home.name) vs \(away.name)")
+                }
+            }
+            if let status = args.status, !status.isEmpty {
+                parts.append(status)
+            }
+        } else if args.kind == "standings" {
+            parts.append("Standings")
+        }
+        return parts.isEmpty ? "Sports data" : parts.joined(separator: ", ")
     }
 
     @ViewBuilder

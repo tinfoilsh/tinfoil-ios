@@ -41,6 +41,7 @@ struct WebSearchBox: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
+                        .accessibilityHidden(true)
                 }
             }
             .padding(.vertical, 8)
@@ -103,6 +104,7 @@ struct WebSearchBox: View {
                         .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
                         .font(.system(size: 14))
                         .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 5 }
+                        .accessibilityHidden(true)
 
                     Text("Searched the web on \(groupSize) quer\(groupSize == 1 ? "y" : "ies")")
                         .font(.subheadline)
@@ -121,6 +123,7 @@ struct WebSearchBox: View {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundColor(.red)
                     .font(.system(size: 14))
+                    .accessibilityHidden(true)
                 Text("Search failed")
                     .font(.subheadline)
                     .foregroundColor(.red.opacity(0.8))
@@ -131,6 +134,7 @@ struct WebSearchBox: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundColor(.orange)
                     .font(.system(size: 14))
+                    .accessibilityHidden(true)
                 Text(webSearchState.reason ?? "Search blocked")
                     .font(.subheadline)
                     .foregroundColor(.orange.opacity(0.8))
@@ -154,6 +158,7 @@ struct WebSearchBox: View {
                     .padding(.leading, 6)
             }
         }
+        .accessibilityHidden(true)
     }
 
 }

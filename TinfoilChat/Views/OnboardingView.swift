@@ -65,6 +65,7 @@ struct OnboardingView: View {
                                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: currentPage)
                         }
                     }
+                    .accessibilityHidden(true)
 
                     // Continue / Get Started button
                     let canContinue = currentPage != 0 || privacyEnabled
@@ -132,6 +133,7 @@ struct OnboardingView: View {
 
 private struct OnboardingPrivacyPage: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var isPrivacyEnabled: Bool
     @State private var isPrivateOn = false
     @State private var showExplanation = false
@@ -154,6 +156,7 @@ private struct OnboardingPrivacyPage: View {
                     Text("Privacy First")
                         .font(.title)
                         .fontWeight(.bold)
+                        .accessibilityAddTraits(.isHeader)
                 }
 
                 Text("Tinfoil is built for people who believe their conversations are nobody else's business.")
@@ -283,8 +286,10 @@ private struct OnboardingPrivacyPage: View {
                             lineWidth: 1
                         )
                         .onAppear {
-                            withAnimation(.linear(duration: 4.0).repeatForever(autoreverses: false)) {
-                                borderRotation = 360
+                            if !reduceMotion {
+                                withAnimation(.linear(duration: 4.0).repeatForever(autoreverses: false)) {
+                                    borderRotation = 360
+                                }
                             }
                         }
                 }
@@ -410,6 +415,7 @@ private struct OnboardingEncryptionPage: View {
                     Text("Your Key, Your Data")
                         .font(.title)
                         .fontWeight(.bold)
+                        .accessibilityAddTraits(.isHeader)
 
                     Text("Every chat is encrypted with a key that only exists on your device. Nobody but you can read your conversations.")
                         .font(.subheadline)
@@ -504,6 +510,7 @@ private struct OnboardingModelsPage: View {
                     Text("Powerful Models")
                         .font(.title)
                         .fontWeight(.bold)
+                        .accessibilityAddTraits(.isHeader)
 
                     Text("Access leading AI models, all running inside secure hardware with verified privacy.")
                         .font(.subheadline)
@@ -553,14 +560,16 @@ private struct OnboardingModelsPage: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(Array(models.enumerated()), id: \.element.id) { index, model in
-                        modelCard(model: model, isSelected: index == selectedModelIndex)
-                            .onTapGesture {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                    selectedModelIndex = index
-                                }
+                        let selectModel = {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                selectedModelIndex = index
                             }
+                        }
+                        modelCard(model: model, isSelected: index == selectedModelIndex)
+                            .onTapGesture(perform: selectModel)
                             .accessibilityElement(children: .combine)
                             .accessibilityAddTraits(index == selectedModelIndex ? [.isButton, .isSelected] : .isButton)
+                            .accessibilityAction(action: selectModel)
                     }
                 }
                 .padding(.horizontal, 24)

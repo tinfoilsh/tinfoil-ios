@@ -114,6 +114,7 @@ private struct ArtifactPreviewView: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(args.title ?? sourceLabel)
         .accessibilityHint("Opens preview")
         .sheet(isPresented: $showSheet) {
             ArtifactDetailSheet(args: args, isDarkMode: isDarkMode)
