@@ -193,23 +193,31 @@ struct MessageInputView: View {
                 )
                 .transition(.opacity)
         } else if let rl = viewModel.rateLimit, rl.remaining <= Constants.RateLimit.warningThreshold {
-            Text(rl.remaining <= 0
+            let isOutOfRequests = rl.remaining <= 0
+            Text(isOutOfRequests
                  ? "No requests left"
                  : "\(rl.remaining) request\(rl.remaining == 1 ? "" : "s") left")
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(rl.remaining <= 0 ? .orange : .secondary)
+                .foregroundColor(isOutOfRequests ? .orange : .secondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(
                     Capsule()
-                        .fill(rl.remaining <= 0
+                        .fill(isOutOfRequests
                               ? Color.orange.opacity(0.15)
                               : Color.secondary.opacity(0.12))
                 )
                 .transition(.opacity)
                 .animation(.easeInOut(duration: 0.25), value: rl.remaining)
                 .onTapGesture {
-                    if rl.remaining <= 0 {
+                    if isOutOfRequests {
+                        viewModel.showRateLimitPaywall = true
+                    }
+                }
+                .accessibilityAddTraits(isOutOfRequests ? .isButton : [])
+                .accessibilityHint(isOutOfRequests ? "Opens upgrade options" : "")
+                .accessibilityAction {
+                    if isOutOfRequests {
                         viewModel.showRateLimitPaywall = true
                     }
                 }

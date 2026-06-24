@@ -568,6 +568,11 @@ private struct OnboardingModelsPage: View {
                             }
                             .accessibilityElement(children: .combine)
                             .accessibilityAddTraits(index == selectedModelIndex ? [.isButton, .isSelected] : .isButton)
+                            .accessibilityAction {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                    selectedModelIndex = index
+                                }
+                            }
                     }
                 }
                 .padding(.horizontal, 24)

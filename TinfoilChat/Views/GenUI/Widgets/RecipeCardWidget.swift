@@ -295,6 +295,7 @@ private struct RecipeCardView: View {
                         )
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(scale == recipeScale ? .isSelected : [])
             }
         }
         .padding(4)
