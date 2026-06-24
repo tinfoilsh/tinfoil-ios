@@ -25,6 +25,34 @@ enum SyncConflictResolver {
         guard let remote = remote else { return false }
         return remote > local
     }
+
+    /// Clock-aware arbitration. When both sides carry a trusted edit
+    /// clock the winner is the higher `(v, w)` pair, a total order that
+    /// removes wall-clock skew from the decision and converges across
+    /// devices. When either clock is absent it falls back to the
+    /// timestamp arbitration so behavior matches a clock-unaware client.
+    ///
+    /// Callers MUST pass clocks only when both are trusted (the row's
+    /// server version equals the stamped clockVersion); otherwise pass
+    /// nil so the timestamp fallback governs.
+    static func remoteWins(
+        localClock: EditClock?,
+        remoteClock: EditClock?,
+        localUpdatedAt: Date?,
+        remoteUpdatedAt: Date?
+    ) -> Bool {
+        if let localClock = localClock, let remoteClock = remoteClock {
+            if remoteClock.v != localClock.v {
+                return remoteClock.v > localClock.v
+            }
+            if remoteClock.w != localClock.w {
+                return remoteClock.w > localClock.w
+            }
+            // Identical clock: the same logical write. No overwrite.
+            return false
+        }
+        return remoteWins(local: localUpdatedAt, remote: remoteUpdatedAt)
+    }
 }
 
 // MARK: - Sync Models
@@ -61,6 +89,14 @@ struct StoredChat: Codable {
 
     // For tracking streaming state
     var hasActiveStream: Bool?
+
+    // Logical edit clock for conflict arbitration, round-tripped across
+    // platforms so a peer's clock is never dropped. clockVersion records
+    // the syncVersion the clock was maintained at; a reader trusts the
+    // clock only when clockVersion equals the row's current version.
+    var clock: Int?
+    var writer: String?
+    var clockVersion: Int?
     
     /// Creates a placeholder for a chat the enclave declined to unseal
     /// (e.g. UNKNOWN_KEY). The ciphertext is never carried client-side
@@ -126,6 +162,9 @@ struct StoredChat: Codable {
         self.projectId = chat.projectId
         self.promptPresetId = chat.promptPresetId
         self.hasActiveStream = chat.hasActiveStream
+        self.clock = chat.clock
+        self.writer = chat.writer
+        self.clockVersion = chat.clockVersion
     }
     
     @MainActor
@@ -166,6 +205,10 @@ struct StoredChat: Codable {
             chat.hasActiveStream = hasActiveStream
         }
 
+        chat.clock = clock
+        chat.writer = writer
+        chat.clockVersion = clockVersion
+
         return chat
     }
     
@@ -176,6 +219,7 @@ struct StoredChat: Codable {
         case syncVersion, syncedAt, locallyModified
         case decryptionFailed, dataCorrupted, formatVersion, projectId
         case promptPresetId = "presetId"
+        case clock, writer, clockVersion
     }
 
     func encode(to encoder: Encoder) throws {
@@ -208,6 +252,9 @@ struct StoredChat: Codable {
         try container.encodeIfPresent(formatVersion, forKey: .formatVersion)
         try container.encodeIfPresent(projectId, forKey: .projectId)
         try container.encodeIfPresent(promptPresetId, forKey: .promptPresetId)
+        try container.encodeIfPresent(clock, forKey: .clock)
+        try container.encodeIfPresent(writer, forKey: .writer)
+        try container.encodeIfPresent(clockVersion, forKey: .clockVersion)
         // hasActiveStream is transient UI state — never encode it to the sync blob
     }
     
@@ -268,6 +315,9 @@ struct StoredChat: Codable {
         formatVersion = try container.decodeIfPresent(Int.self, forKey: .formatVersion)
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
         promptPresetId = try container.decodeIfPresent(String.self, forKey: .promptPresetId)
+        clock = try container.decodeIfPresent(Int.self, forKey: .clock)
+        writer = try container.decodeIfPresent(String.self, forKey: .writer)
+        clockVersion = try container.decodeIfPresent(Int.self, forKey: .clockVersion)
         // hasActiveStream is transient UI state — always reset to nil on decode
         hasActiveStream = nil
     }
@@ -409,6 +459,13 @@ struct ProfileData: Codable {
     // Metadata
     var version: Int?
     var updatedAt: String?
+
+    // Per-field edit clocks and the row version they were maintained at.
+    // fieldClocks is trusted for the field-level merge only when
+    // clockVersion equals the profile row's server version; otherwise a
+    // clock-unaware write intervened and merge falls back to updatedAt.
+    var fieldClocks: [String: EditClock]?
+    var clockVersion: Int?
 }
 
 // MARK: - Sync Status Models
