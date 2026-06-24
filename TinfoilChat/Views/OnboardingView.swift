@@ -560,19 +560,16 @@ private struct OnboardingModelsPage: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(Array(models.enumerated()), id: \.element.id) { index, model in
-                        modelCard(model: model, isSelected: index == selectedModelIndex)
-                            .onTapGesture {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                    selectedModelIndex = index
-                                }
+                        let selectModel = {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                selectedModelIndex = index
                             }
+                        }
+                        modelCard(model: model, isSelected: index == selectedModelIndex)
+                            .onTapGesture(perform: selectModel)
                             .accessibilityElement(children: .combine)
                             .accessibilityAddTraits(index == selectedModelIndex ? [.isButton, .isSelected] : .isButton)
-                            .accessibilityAction {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                    selectedModelIndex = index
-                                }
-                            }
+                            .accessibilityAction(action: selectModel)
                     }
                 }
                 .padding(.horizontal, 24)
