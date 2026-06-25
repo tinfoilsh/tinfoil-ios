@@ -455,8 +455,14 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+            // Skip the streaming last row: while it is loading its frame is
+            // inflated by the streaming buffer (many screens tall). Caching that
+            // value would make heightForRowAt later pin the finished row to the
+            // buffer height - a giant blank cell the user scrolls through without
+            // ever seeing the response. didEndDisplaying guards this the same way.
+            let isStreamingLastRow = parent.isLoading && indexPath.row == parent.messages.count - 1
             let height = cell.frame.size.height
-            if height > 0 {
+            if height > 0 && !isStreamingLastRow {
                 heightCache[indexPath] = height
                 if indexPath.row < parent.messages.count {
                     messageHeightCache[parent.messages[indexPath.row].id] = height

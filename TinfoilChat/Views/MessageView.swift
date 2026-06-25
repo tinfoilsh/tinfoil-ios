@@ -1515,6 +1515,7 @@ struct TextPulseAnimation: ViewModifier {
                         offset = 1.0
                     }
                 }
+        }
     }
 }
 
