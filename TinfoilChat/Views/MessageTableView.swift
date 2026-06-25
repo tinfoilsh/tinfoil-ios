@@ -203,23 +203,18 @@ struct MessageTableView: UIViewRepresentable {
                 }
             }
 
-            // Capture the user's intent before any layout change. Follow down to
-            // the end when the user is at the bottom watching the response, or
-            // when they never scrolled and their message isn't pinned to the top.
-            // isUserMessageScrollMode is sticky (it isn't cleared when the user
-            // scrolls back down), so the actual bottom state has to be consulted
-            // too; otherwise a user who returned to the bottom stays stuck in the
-            // top-reading position instead of ending at the bottom. A tall
-            // response still being read from the top has isAtBottom == false, so
-            // it keeps its position rather than snapping to the bottom.
-            let wasFollowing = isAtBottom ||
-                (!userHasScrolled && !context.coordinator.isUserMessageScrollMode)
-
+            // Collapsing the streaming buffer changes contentSize dramatically.
+            // Preserve the user's exact reading position through that resize
+            // rather than scrolling to the end. The buffer being removed sits
+            // below the visible content, so holding the offset keeps whatever the
+            // user is looking at stationary: a reader at the top stays at the top,
+            // and one already at the bottom stays at the bottom (the empty space
+            // beneath them simply disappears) without an explicit jump.
             DispatchQueue.main.async {
                 UIView.performWithoutAnimation {
                     // Temporarily inflate the bottom inset so the collapsing
                     // streaming buffer cannot clamp the offset and snap the view
-                    // to the bottom before the final inset is settled below.
+                    // before the final inset is settled below.
                     let currentOffset = tableView.contentOffset.y
                     tableView.contentInset.bottom = tableView.bounds.height
                     tableView.layoutIfNeeded()
@@ -227,16 +222,11 @@ struct MessageTableView: UIViewRepresentable {
                 }
 
                 DispatchQueue.main.async {
-                    if wasFollowing {
-                        context.coordinator.isUserMessageScrollMode = false
-                        context.coordinator.scrollToBottom(animated: false)
-                    } else {
-                        UIView.performWithoutAnimation {
-                            let currentOffset = tableView.contentOffset.y
-                            context.coordinator.updateContentInset()
-                            tableView.layoutIfNeeded()
-                            tableView.contentOffset.y = currentOffset
-                        }
+                    UIView.performWithoutAnimation {
+                        let currentOffset = tableView.contentOffset.y
+                        context.coordinator.updateContentInset()
+                        tableView.layoutIfNeeded()
+                        tableView.contentOffset.y = currentOffset
                     }
                 }
             }
