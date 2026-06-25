@@ -569,7 +569,7 @@ private struct OnboardingModelsPage: View {
                             .onTapGesture(perform: selectModel)
                             .accessibilityElement(children: .combine)
                             .accessibilityAddTraits(index == selectedModelIndex ? [.isButton, .isSelected] : .isButton)
-                            .accessibilityAction(action: selectModel)
+                            .accessibilityAction(.default, selectModel)
                     }
                 }
                 .padding(.horizontal, 24)

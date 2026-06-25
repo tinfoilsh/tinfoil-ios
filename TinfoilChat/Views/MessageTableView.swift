@@ -203,16 +203,18 @@ struct MessageTableView: UIViewRepresentable {
                 }
             }
 
-            // Capture the user's intent before any layout change. If they were
-            // actively scrolling through the response, keep their reading
-            // position; otherwise follow down to the end of the finished message.
-            let wasFollowing = !userHasScrolled
-
+            // Collapsing the streaming buffer changes contentSize dramatically.
+            // Preserve the user's exact reading position through that resize
+            // rather than scrolling to the end. The buffer being removed sits
+            // below the visible content, so holding the offset keeps whatever the
+            // user is looking at stationary: a reader at the top stays at the top,
+            // and one already at the bottom stays at the bottom (the empty space
+            // beneath them simply disappears) without an explicit jump.
             DispatchQueue.main.async {
                 UIView.performWithoutAnimation {
                     // Temporarily inflate the bottom inset so the collapsing
                     // streaming buffer cannot clamp the offset and snap the view
-                    // to the bottom before the final inset is settled below.
+                    // before the final inset is settled below.
                     let currentOffset = tableView.contentOffset.y
                     tableView.contentInset.bottom = tableView.bounds.height
                     tableView.layoutIfNeeded()
@@ -220,16 +222,11 @@ struct MessageTableView: UIViewRepresentable {
                 }
 
                 DispatchQueue.main.async {
-                    if wasFollowing {
-                        context.coordinator.isUserMessageScrollMode = false
-                        context.coordinator.scrollToBottom(animated: false)
-                    } else {
-                        UIView.performWithoutAnimation {
-                            let currentOffset = tableView.contentOffset.y
-                            context.coordinator.updateContentInset()
-                            tableView.layoutIfNeeded()
-                            tableView.contentOffset.y = currentOffset
-                        }
+                    UIView.performWithoutAnimation {
+                        let currentOffset = tableView.contentOffset.y
+                        context.coordinator.updateContentInset()
+                        tableView.layoutIfNeeded()
+                        tableView.contentOffset.y = currentOffset
                     }
                 }
             }
@@ -455,8 +452,14 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+            // Skip the streaming last row: while it is loading its frame is
+            // inflated by the streaming buffer (many screens tall). Caching that
+            // value would make heightForRowAt later pin the finished row to the
+            // buffer height - a giant blank cell the user scrolls through without
+            // ever seeing the response. didEndDisplaying guards this the same way.
+            let isStreamingLastRow = parent.isLoading && indexPath.row == parent.messages.count - 1
             let height = cell.frame.size.height
-            if height > 0 {
+            if height > 0 && !isStreamingLastRow {
                 heightCache[indexPath] = height
                 if indexPath.row < parent.messages.count {
                     messageHeightCache[parent.messages[indexPath.row].id] = height
@@ -524,7 +527,16 @@ struct MessageTableView: UIViewRepresentable {
             if parent.isLoading && isLastMessage {
                 return UITableView.automaticDimension
             }
-            if let cached = messageHeightCache[parent.messages[indexPath.row].id] {
+            let message = parent.messages[indexPath.row]
+            // Messages with generative-UI widgets render asynchronously and can
+            // grow after their height was first cached. Pinning them to that
+            // stale height makes the taller content overflow onto adjacent rows
+            // (the table has clipsToBounds off), which stacks cells on top of
+            // each other. Always let these rows self-size.
+            if !message.toolCalls.isEmpty {
+                return UITableView.automaticDimension
+            }
+            if let cached = messageHeightCache[message.id] {
                 return cached
             }
             return UITableView.automaticDimension
