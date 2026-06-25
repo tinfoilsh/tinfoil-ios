@@ -204,11 +204,16 @@ struct MessageTableView: UIViewRepresentable {
             }
 
             // Capture the user's intent before any layout change. Follow down to
-            // the end only when the user was passively watching from the bottom.
-            // When their sent message is pinned to the top (the normal send
-            // flow), keep that reading position instead of snapping to the
-            // bottom of the finished response.
-            let wasFollowing = !userHasScrolled && !context.coordinator.isUserMessageScrollMode
+            // the end when the user is at the bottom watching the response, or
+            // when they never scrolled and their message isn't pinned to the top.
+            // isUserMessageScrollMode is sticky (it isn't cleared when the user
+            // scrolls back down), so the actual bottom state has to be consulted
+            // too; otherwise a user who returned to the bottom stays stuck in the
+            // top-reading position instead of ending at the bottom. A tall
+            // response still being read from the top has isAtBottom == false, so
+            // it keeps its position rather than snapping to the bottom.
+            let wasFollowing = isAtBottom ||
+                (!userHasScrolled && !context.coordinator.isUserMessageScrollMode)
 
             DispatchQueue.main.async {
                 UIView.performWithoutAnimation {
