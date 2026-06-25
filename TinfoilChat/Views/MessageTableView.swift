@@ -532,7 +532,16 @@ struct MessageTableView: UIViewRepresentable {
             if parent.isLoading && isLastMessage {
                 return UITableView.automaticDimension
             }
-            if let cached = messageHeightCache[parent.messages[indexPath.row].id] {
+            let message = parent.messages[indexPath.row]
+            // Messages with generative-UI widgets render asynchronously and can
+            // grow after their height was first cached. Pinning them to that
+            // stale height makes the taller content overflow onto adjacent rows
+            // (the table has clipsToBounds off), which stacks cells on top of
+            // each other. Always let these rows self-size.
+            if !message.toolCalls.isEmpty {
+                return UITableView.automaticDimension
+            }
+            if let cached = messageHeightCache[message.id] {
                 return cached
             }
             return UITableView.automaticDimension
