@@ -329,6 +329,11 @@ struct MessageInputView: View {
             VStack(spacing: 4) {
                 rateLimitLabel
 
+                // Host both interactive glass effects (the input container and
+                // the send button) in one container so their gravity-well anchor
+                // views attach here instead of directly under the hosting
+                // controller's view, which UIKit warns against for hosted cells.
+                GlassEffectContainer {
                 VStack(spacing: 0) {
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {
@@ -420,6 +425,7 @@ struct MessageInputView: View {
                 .padding(.vertical, 8)
             }
             .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 26))
+            }
             }
             .padding(.horizontal, 12)
             .padding(.bottom, inputBottomPadding)
