@@ -3390,6 +3390,24 @@ class ChatViewModel: ObservableObject {
         await Chat.deleteAllChatsFromStorage(userId: currentUserId)
     }
 
+    /// Clear a persisted passkey-recovery skip and re-open recovery.
+    /// Backs the Settings and sidebar "unlock cloud sync" affordances.
+    /// Routes the manual setup / recovery outcomes to the onboarding
+    /// sheet, matching the sign-in flow.
+    func reattemptPasskeyRecovery() async {
+        let result = await passkeyManager.reenableRecoveryPrompt()
+        switch result {
+        case .manualSetupRequired:
+            cloudSyncOnboardingMode = .setup
+            showCloudSyncOnboarding = true
+        case .manualRecoveryRequired:
+            cloudSyncOnboardingMode = .recovery
+            showCloudSyncOnboarding = true
+        default:
+            break
+        }
+    }
+
     /// Handle sign-in by loading user's saved chats and triggering sync
     func handleSignIn() {
         #if DEBUG

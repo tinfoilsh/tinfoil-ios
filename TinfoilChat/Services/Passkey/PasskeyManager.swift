@@ -70,13 +70,41 @@ final class PasskeyManager: ObservableObject {
     /// captured so a "Skip for Now" can record exactly which keyId the
     /// user dismissed.
     private var pendingRecoveryKeyId: String?
-    /// Remote keyId the user explicitly skipped. The periodic sync
-    /// check must not re-surface the recovery sheet for this keyId,
-    /// otherwise Skip is overridden on the next tick. A genuinely new
-    /// keyId (another start_fresh) is not suppressed.
-    private var dismissedRecoveryKeyId: String?
 
-    private init() {}
+    /// True when the user skipped recovery for the current remote key
+    /// and has not since regained a usable key. Mirrors the webapp's
+    /// persistent recovery-dismissed flag and drives the Settings /
+    /// sidebar "unlock cloud sync" affordances.
+    @Published private(set) var recoverySkipped: Bool = false
+
+    private init() {
+        recoverySkipped = dismissedRecoveryKeyId != nil
+    }
+
+    /// Remote keyId the user explicitly skipped, persisted so the
+    /// recovery sheet stays dismissed across app launches (matching the
+    /// webapp). The periodic sync check must not re-surface the sheet
+    /// for this keyId; a genuinely new keyId (another start_fresh) is
+    /// not suppressed.
+    private var dismissedRecoveryKeyId: String? {
+        UserDefaults.standard.string(
+            forKey: Constants.StorageKeys.Secret.passkeyRecoveryDismissedKeyId
+        )
+    }
+
+    private func setDismissedRecoveryKeyId(_ keyId: String?) {
+        if let keyId {
+            UserDefaults.standard.set(
+                keyId,
+                forKey: Constants.StorageKeys.Secret.passkeyRecoveryDismissedKeyId
+            )
+        } else {
+            UserDefaults.standard.removeObject(
+                forKey: Constants.StorageKeys.Secret.passkeyRecoveryDismissedKeyId
+            )
+        }
+        recoverySkipped = keyId != nil
+    }
 
     // MARK: - Sign-Out Reset
 
@@ -86,7 +114,7 @@ final class PasskeyManager: ObservableObject {
         passkeyAddDeviceAvailable = false
         showPasskeyRecoveryChoice = false
         pendingRecoveryKeyId = nil
-        dismissedRecoveryKeyId = nil
+        setDismissedRecoveryKeyId(nil)
         onRecoveryComplete = nil
         onKeyRefreshedFromBackup = nil
         syncCheckTask?.cancel()
@@ -301,8 +329,24 @@ final class PasskeyManager: ObservableObject {
     /// Dismiss the recovery-choice sheet and remember which keyId the
     /// user skipped so the periodic sync check stops re-presenting it.
     func dismissRecoveryChoice() {
-        dismissedRecoveryKeyId = pendingRecoveryKeyId
+        setDismissedRecoveryKeyId(pendingRecoveryKeyId)
         showPasskeyRecoveryChoice = false
+    }
+
+    /// Clear a persisted recovery skip and re-run the recovery decision
+    /// tree. Backs the Settings and sidebar "unlock cloud sync"
+    /// affordances so a user who previously skipped can re-open
+    /// recovery. Mirrors the webapp's `showPasskeyRecoveryPrompt`.
+    /// Returns the recovery result so the caller can route the manual
+    /// setup / recovery cases to the onboarding sheet.
+    func reenableRecoveryPrompt() async -> PasskeyRecoveryResult {
+        pendingRecoveryKeyId = nil
+        setDismissedRecoveryKeyId(nil)
+        if EncryptionService.shared.hasEncryptionKey() {
+            await checkPasskeyStateForExistingKey()
+            return .success
+        }
+        return await attemptPasskeyKeyRecovery()
     }
 
     // MARK: - Recovery Choice Actions
@@ -366,6 +410,11 @@ final class PasskeyManager: ObservableObject {
         do {
             let state = try await SyncEnclaveAPI.keyCurrent()
             if let remoteKeyId = state.keyId, !state.bundles.isEmpty {
+                // A usable registered key with a local CEK means the
+                // user is no longer in a locked/skipped state, so drop
+                // any persisted recovery skip (e.g. left over from a
+                // manual unlock that bypassed the passkey flow).
+                setDismissedRecoveryKeyId(nil)
                 // Persist the keyId now so the periodic sync check has
                 // a baseline. Without this, a normal app launch (with
                 // a valid local CEK that matches the remote) would
@@ -595,7 +644,7 @@ final class PasskeyManager: ObservableObject {
         // A successful unlock clears any prior skip so a future genuine
         // mismatch can prompt again.
         pendingRecoveryKeyId = nil
-        dismissedRecoveryKeyId = nil
+        setDismissedRecoveryKeyId(nil)
     }
 
     private func cachedKeyIdHex() -> String? {

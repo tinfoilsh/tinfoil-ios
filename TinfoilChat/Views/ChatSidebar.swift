@@ -26,6 +26,7 @@ struct ChatSidebar: View {
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var cloudSync = CloudSyncService.shared
     @ObservedObject private var syncHealth = SyncHealthStore.shared
+    @ObservedObject private var passkeyManager = PasskeyManager.shared
 
     private var activeTab: ChatStorageTab {
         viewModel.activeStorageTab
@@ -139,8 +140,45 @@ struct ChatSidebar: View {
         }
     }
     
+    @ViewBuilder
+    private var recoveryBanner: some View {
+        if authManager.isAuthenticated
+            && passkeyManager.recoverySkipped
+            && !EncryptionService.shared.hasEncryptionKey() {
+            Button {
+                withAnimation { isOpen = false }
+                Task { await viewModel.reattemptPasskeyRecovery() }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "key.slash")
+                        .font(.subheadline)
+                        .foregroundColor(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Cloud sync is paused")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
+                        Text("Tap to unlock with your passkey")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.12))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     private var sidebarContent: some View {
         VStack(spacing: 0) {
+            recoveryBanner
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if authManager.isAuthenticated && settings.isCloudSyncEnabled {
