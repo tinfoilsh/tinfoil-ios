@@ -603,79 +603,13 @@ struct WelcomeView: View {
     }
 }
 
-/// Typewriter text that reveals characters one by one
-private struct TypewriterText: View {
-    let fullText: String
-    let isActive: Bool
-    let font: Font
-    let color: Color
-    var charsPerTick: Int = 2
-    var tickInterval: TimeInterval = 0.015
-    var onFinished: (() -> Void)? = nil
-
-    @State private var visibleCount: Int = 0
-    @State private var timer: Timer?
-
-    var body: some View {
-        // Render full text invisibly for stable layout, overlay the revealed portion
-        Text(fullText)
-            .font(font)
-            .foregroundColor(.clear)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .overlay(alignment: .topLeading) {
-                Text(String(fullText.prefix(visibleCount)))
-                    .font(font)
-                    .foregroundColor(color)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .onAppear {
-                if isActive {
-                    startTyping()
-                }
-            }
-            .onChange(of: isActive) { _, active in
-                if active {
-                    startTyping()
-                } else {
-                    stopTyping()
-                    visibleCount = 0
-                }
-            }
-            .onDisappear {
-                stopTyping()
-            }
-    }
-
-    private func startTyping() {
-        visibleCount = 0
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: tickInterval, repeats: true) { t in
-            if visibleCount < fullText.count {
-                visibleCount = min(visibleCount + charsPerTick, fullText.count)
-            } else {
-                t.invalidate()
-                timer = nil
-                onFinished?()
-            }
-        }
-    }
-
-    private func stopTyping() {
-        timer?.invalidate()
-        timer = nil
-    }
-}
-
 /// Welcome view shown when a chat has no messages
 struct TabbedWelcomeView: View {
     let isDarkMode: Bool
     @ObservedObject var authManager: AuthManager
     let onRequestSignIn: () -> Void
     @ObservedObject private var settings = SettingsManager.shared
-    @State private var isPrivacyExpanded = false
-    @State private var showLinks = false
+    @State private var showPrivacySheet = false
 
     private static let privacyText = "Your messages are encrypted directly to the AI models running inside secure hardware enclaves. These are hardware-isolated environments powered by confidential computing GPUs with verifiable confidentiality and integrity guarantees. Not even Tinfoil can access your data. This applies to all chats, images, documents, and voice input. Our open-source stack lets you verify this yourself by inspecting the hardware attestation."
 
@@ -699,89 +633,27 @@ struct TabbedWelcomeView: View {
             }
             .padding(.horizontal, 32)
 
-            // Collapsible privacy explainer
+            // Privacy explainer presented as a popup
             Button {
-                isPrivacyExpanded.toggle()
-                if !isPrivacyExpanded {
-                    showLinks = false
-                }
+                showPrivacySheet = true
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 13))
                     Text("Your chats are private by design")
                         .font(.system(size: 15, weight: .medium))
-                    Image(systemName: "chevron.down")
+                    Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
-                        .rotationEffect(.degrees(isPrivacyExpanded ? 180 : 0))
-                        .animation(.easeInOut(duration: 0.25), value: isPrivacyExpanded)
                 }
                 .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
-
-            VStack(spacing: 16) {
-                TypewriterText(
-                    fullText: Self.privacyText,
-                    isActive: isPrivacyExpanded,
-                    font: .system(size: 14),
-                    color: .primary.opacity(0.7),
-                    charsPerTick: 8,
-                    tickInterval: 0.012,
-                    onFinished: {
-                        withAnimation(.easeOut(duration: 0.3)) {
-                            showLinks = true
-                        }
-                    }
-                )
-
-                HStack(spacing: 10) {
-                    Button {
-                        UIApplication.shared.open(URL(string: "https://tinfoil.sh/technology")!)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "cpu")
-                                .font(.system(size: 12))
-                            Text("Technology")
-                                .font(.system(size: 13, weight: .medium))
-                        }
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.secondary.opacity(0.12))
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    Button {
-                        UIApplication.shared.open(URL(string: "https://github.com/tinfoilsh")!)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "chevron.left.forwardslash.chevron.right")
-                                .font(.system(size: 12))
-                            Text("Source Code")
-                                .font(.system(size: 13, weight: .medium))
-                        }
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.secondary.opacity(0.12))
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-                .opacity(showLinks ? 1 : 0)
-                .allowsHitTesting(showLinks)
-            }
-            .padding(.horizontal, 12)
-            .opacity(isPrivacyExpanded ? 1 : 0)
-            .allowsHitTesting(isPrivacyExpanded)
         }
         .padding(.top, 24)
         .padding(.bottom, 4)
+        .sheet(isPresented: $showPrivacySheet) {
+            PrivacyExplainerSheet(privacyText: Self.privacyText, isDarkMode: isDarkMode)
+        }
     }
 
     /// Gets the display name for the user - prioritizes nickname from settings, falls back to first name from auth
@@ -797,6 +669,90 @@ struct TabbedWelcomeView: View {
         }
 
         return ""
+    }
+}
+
+/// Popup explaining how chats stay private, shown from the welcome screen
+struct PrivacyExplainerSheet: View {
+    let privacyText: String
+    let isDarkMode: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(.green)
+                        Text("Your chats are private by design")
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+
+                    Text(privacyText)
+                        .font(.system(size: 15))
+                        .foregroundColor(.primary.opacity(0.8))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 10) {
+                        Button {
+                            UIApplication.shared.open(URL(string: "https://tinfoil.sh/technology")!)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "cpu")
+                                    .font(.system(size: 12))
+                                Text("Technology")
+                                    .font(.system(size: 13, weight: .medium))
+                            }
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.secondary.opacity(0.12))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        Button {
+                            UIApplication.shared.open(URL(string: "https://github.com/tinfoilsh")!)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "chevron.left.forwardslash.chevron.right")
+                                    .font(.system(size: 12))
+                                Text("Source Code")
+                                    .font(.system(size: 13, weight: .medium))
+                            }
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.secondary.opacity(0.12))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
+            }
+            .background(Color.sheetBackground(isDarkMode: isDarkMode).ignoresSafeArea())
+            .navigationTitle("Privacy")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 18, weight: .medium))
+                    }
+                    .accessibilityLabel("Close")
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 
