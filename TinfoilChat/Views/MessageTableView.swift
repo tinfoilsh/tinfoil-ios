@@ -47,6 +47,14 @@ struct MessageTableView: UIViewRepresentable {
         context.coordinator.tableView = tableView
         tableView.accessibilityCustomRotors = [context.coordinator.makeMessagesRotor()]
 
+        let tapGesture = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleBackgroundTap)
+        )
+        tapGesture.cancelsTouchesInView = false
+        tapGesture.delegate = context.coordinator
+        tableView.addGestureRecognizer(tapGesture)
+
         return tableView
     }
 
@@ -285,7 +293,7 @@ struct MessageTableView: UIViewRepresentable {
         Coordinator(self)
     }
 
-    class Coordinator: NSObject, UITableViewDelegate, UITableViewDataSource {
+    class Coordinator: NSObject, UITableViewDelegate, UITableViewDataSource, UIGestureRecognizerDelegate {
         var parent: MessageTableView
         weak var tableView: UITableView?
         var lastScrollTrigger: UUID?
@@ -328,6 +336,14 @@ struct MessageTableView: UIViewRepresentable {
                 messageWrappers[message.id] = wrapper
                 return wrapper
             }
+        }
+
+        @objc func handleBackgroundTap() {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            return true
         }
 
         func numberOfSections(in tableView: UITableView) -> Int {
