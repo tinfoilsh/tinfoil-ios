@@ -66,6 +66,16 @@ final class PasskeyManager: ObservableObject {
     private var syncCheckTask: Task<Void, Never>?
     private let passkeyService = PasskeyService.shared
 
+    /// Remote keyId currently surfaced in the recovery-choice sheet,
+    /// captured so a "Skip for Now" can record exactly which keyId the
+    /// user dismissed.
+    private var pendingRecoveryKeyId: String?
+    /// Remote keyId the user explicitly skipped. The periodic sync
+    /// check must not re-surface the recovery sheet for this keyId,
+    /// otherwise Skip is overridden on the next tick. A genuinely new
+    /// keyId (another start_fresh) is not suppressed.
+    private var dismissedRecoveryKeyId: String?
+
     private init() {}
 
     // MARK: - Sign-Out Reset
@@ -75,6 +85,8 @@ final class PasskeyManager: ObservableObject {
         passkeySetupAvailable = false
         passkeyAddDeviceAvailable = false
         showPasskeyRecoveryChoice = false
+        pendingRecoveryKeyId = nil
+        dismissedRecoveryKeyId = nil
         onRecoveryComplete = nil
         onKeyRefreshedFromBackup = nil
         syncCheckTask?.cancel()
@@ -92,7 +104,7 @@ final class PasskeyManager: ObservableObject {
         do {
             state = try await SyncEnclaveAPI.keyCurrent()
         } catch {
-            showPasskeyRecoveryChoice = true
+            surfaceRecoveryChoice(forKeyId: nil)
             return .recoveryFailed
         }
 
@@ -119,7 +131,7 @@ final class PasskeyManager: ObservableObject {
                     return await applyUnlockResult(legacyResult)
                 }
             }
-            showPasskeyRecoveryChoice = true
+            surfaceRecoveryChoice(forKeyId: state.keyId)
             return .recoveryFailed
         }
 
@@ -199,7 +211,7 @@ final class PasskeyManager: ObservableObject {
             do {
                 try await applyRecoveredCek(cek: recoveredCek)
             } catch {
-                showPasskeyRecoveryChoice = true
+                surfaceRecoveryChoice(forKeyId: remoteKeyId)
                 return .passkeyPromptShown
             }
             persistEnclaveKeyId(keyIdHex)
@@ -207,7 +219,7 @@ final class PasskeyManager: ObservableObject {
             onKeyRefreshedFromBackup?()
             return .resolvedSilently
         }
-        showPasskeyRecoveryChoice = true
+        surfaceRecoveryChoice(forKeyId: remoteKeyId)
         return .passkeyPromptShown
     }
 
@@ -222,14 +234,14 @@ final class PasskeyManager: ObservableObject {
             do {
                 try await applyRecoveredCek(cek: cek)
             } catch {
-                showPasskeyRecoveryChoice = true
+                surfaceRecoveryChoice(forKeyId: keyIdHex)
                 return .recoveryFailed
             }
             persistEnclaveKeyId(keyIdHex)
             activatePasskey()
             return .success
         case .failure:
-            showPasskeyRecoveryChoice = true
+            surfaceRecoveryChoice(forKeyId: nil)
             return .recoveryFailed
         }
     }
@@ -271,6 +283,26 @@ final class PasskeyManager: ObservableObject {
             #endif
             return false
         }
+    }
+
+    // MARK: - Recovery Choice Presentation
+
+    /// Surface the recovery-choice sheet for a given remote keyId,
+    /// unless the user already skipped recovery for that same keyId.
+    /// Records the keyId so a later Skip can suppress re-prompting.
+    private func surfaceRecoveryChoice(forKeyId keyId: String?) {
+        if let keyId, keyId == dismissedRecoveryKeyId {
+            return
+        }
+        pendingRecoveryKeyId = keyId
+        showPasskeyRecoveryChoice = true
+    }
+
+    /// Dismiss the recovery-choice sheet and remember which keyId the
+    /// user skipped so the periodic sync check stops re-presenting it.
+    func dismissRecoveryChoice() {
+        dismissedRecoveryKeyId = pendingRecoveryKeyId
+        showPasskeyRecoveryChoice = false
     }
 
     // MARK: - Recovery Choice Actions
@@ -560,6 +592,10 @@ final class PasskeyManager: ObservableObject {
     /// WebAuthn ceremony, gated on `.platform` attachment.
     private func persistEnclaveKeyId(_ keyIdHex: String) {
         UserDefaults.standard.set(keyIdHex, forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId)
+        // A successful unlock clears any prior skip so a future genuine
+        // mismatch can prompt again.
+        pendingRecoveryKeyId = nil
+        dismissedRecoveryKeyId = nil
     }
 
     private func cachedKeyIdHex() -> String? {
@@ -602,7 +638,7 @@ final class PasskeyManager: ObservableObject {
                !state.bundles.values.contains(where: { $0.credentialId == credentialId }) {
                 // Our credential is gone too — the only path forward
                 // is a fresh recovery from another device.
-                showPasskeyRecoveryChoice = true
+                surfaceRecoveryChoice(forKeyId: remoteKeyId)
                 return
             }
 
@@ -619,7 +655,7 @@ final class PasskeyManager: ObservableObject {
                     persistEnclaveKeyId(keyIdHex)
                     onKeyRefreshedFromBackup?()
                 } catch {
-                    showPasskeyRecoveryChoice = true
+                    surfaceRecoveryChoice(forKeyId: remoteKeyId)
                 }
             case .failure(.enclaveUnavailable, _):
                 // Transient enclave/network failure — the keyId is
@@ -628,7 +664,7 @@ final class PasskeyManager: ObservableObject {
                 // recovery / start-fresh prompt.
                 break
             case .failure:
-                showPasskeyRecoveryChoice = true
+                surfaceRecoveryChoice(forKeyId: remoteKeyId)
             }
         } catch {
             // Non-fatal — try again on the next tick.
