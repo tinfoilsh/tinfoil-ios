@@ -366,7 +366,15 @@ struct CloudSyncSettingsView: View {
                     passkeyBundleInventory
                 }
 
-                if passkeyManager.passkeyAddDeviceAvailable && EncryptionService.shared.hasEncryptionKey() {
+                if passkeyManager.recoverySkipped {
+                    passkeyActionButton(
+                        title: "Unlock Cloud Sync",
+                        subtitle: "Use your passkey to unlock and resume syncing chats across devices."
+                    ) {
+                        await MainActor.run { dismiss() }
+                        await viewModel.reattemptPasskeyRecovery()
+                    }
+                } else if passkeyManager.passkeyAddDeviceAvailable && EncryptionService.shared.hasEncryptionKey() {
                     passkeyActionButton(
                         title: "Set Up Passkey on This Device",
                         subtitle: "Your other devices use a passkey already. Add one here for one-tap access."
@@ -400,14 +408,6 @@ struct CloudSyncSettingsView: View {
                         default:
                             break
                         }
-                    }
-                } else if passkeyManager.recoverySkipped && !EncryptionService.shared.hasEncryptionKey() {
-                    passkeyActionButton(
-                        title: "Unlock Cloud Sync",
-                        subtitle: "Use your passkey to unlock and resume syncing chats across devices."
-                    ) {
-                        await MainActor.run { dismiss() }
-                        await viewModel.reattemptPasskeyRecovery()
                     }
                 }
             } header: {

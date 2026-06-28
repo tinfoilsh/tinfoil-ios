@@ -342,11 +342,22 @@ final class PasskeyManager: ObservableObject {
     func reenableRecoveryPrompt() async -> PasskeyRecoveryResult {
         pendingRecoveryKeyId = nil
         setDismissedRecoveryKeyId(nil)
-        if EncryptionService.shared.hasEncryptionKey() {
+        guard EncryptionService.shared.hasEncryptionKey() else {
+            return await attemptPasskeyKeyRecovery()
+        }
+        // A local key is present but it may be stale (rotated away by a
+        // `start_fresh` on another device). Re-run the mismatch resolver
+        // so a stale device re-enters recovery instead of being treated
+        // as already unlocked.
+        switch await resolveKeyMismatchAtLaunch() {
+        case .manualRecoveryRequired:
+            return .manualRecoveryRequired
+        case .noMismatch:
             await checkPasskeyStateForExistingKey()
             return .success
+        case .resolvedSilently, .passkeyPromptShown:
+            return .success
         }
-        return await attemptPasskeyKeyRecovery()
     }
 
     // MARK: - Recovery Choice Actions
@@ -410,24 +421,35 @@ final class PasskeyManager: ObservableObject {
         do {
             let state = try await SyncEnclaveAPI.keyCurrent()
             if let remoteKeyId = state.keyId, !state.bundles.isEmpty {
-                // A usable registered key with a local CEK means the
-                // user is no longer in a locked/skipped state, so drop
-                // any persisted recovery skip (e.g. left over from a
-                // manual unlock that bypassed the passkey flow).
-                setDismissedRecoveryKeyId(nil)
-                // Persist the keyId now so the periodic sync check has
-                // a baseline. Without this, a normal app launch (with
-                // a valid local CEK that matches the remote) would
-                // look like a `start_fresh` rotation on the next
-                // refresh tick and force the user through recovery.
-                if cachedKeyIdHex() == nil,
-                   let cek = try? EncryptionService.shared.getKeyBytesOrThrow(),
-                   let localKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek),
-                   localKeyId == remoteKeyId {
-                    UserDefaults.standard.set(
-                        remoteKeyId,
-                        forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId
-                    )
+                // Derive the local key id so we can tell whether this
+                // device is actually on the current key or is holding a
+                // stale CEK that a `start_fresh` elsewhere rotated away.
+                let localKeyId: String? = {
+                    guard let cek = try? EncryptionService.shared.getKeyBytesOrThrow() else {
+                        return nil
+                    }
+                    return try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+                }()
+                let isOnCurrentKey = localKeyId == remoteKeyId
+
+                if isOnCurrentKey {
+                    // The device is genuinely on the current key, so the
+                    // user is no longer in a locked/skipped state. Drop
+                    // any persisted recovery skip (e.g. left over from a
+                    // manual unlock that bypassed the passkey flow). A
+                    // stale device keeps its skip so it stays suppressed.
+                    setDismissedRecoveryKeyId(nil)
+                    // Persist the keyId now so the periodic sync check has
+                    // a baseline. Without this, a normal app launch (with
+                    // a valid local CEK that matches the remote) would
+                    // look like a `start_fresh` rotation on the next
+                    // refresh tick and force the user through recovery.
+                    if cachedKeyIdHex() == nil {
+                        UserDefaults.standard.set(
+                            remoteKeyId,
+                            forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId
+                        )
+                    }
                 }
 
                 // The bundle map is keyed by credential id. If this
