@@ -3403,6 +3403,12 @@ class ChatViewModel: ObservableObject {
         case .manualRecoveryRequired:
             cloudSyncOnboardingMode = .recovery
             showCloudSyncOnboarding = true
+        case .success:
+            // A silent re-unlock applied the key but, unlike the prompt-driven
+            // recovery paths, fires no completion callback. Resume loading and
+            // sync so the now-decryptable chats refresh immediately instead of
+            // waiting for a later sign-in or manual refresh.
+            handleSignIn()
         default:
             break
         }
