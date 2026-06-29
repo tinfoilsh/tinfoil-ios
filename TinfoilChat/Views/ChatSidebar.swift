@@ -26,7 +26,6 @@ struct ChatSidebar: View {
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var cloudSync = CloudSyncService.shared
     @ObservedObject private var syncHealth = SyncHealthStore.shared
-    @ObservedObject private var passkeyManager = PasskeyManager.shared
 
     private var activeTab: ChatStorageTab {
         viewModel.activeStorageTab
@@ -142,7 +141,7 @@ struct ChatSidebar: View {
     
     @ViewBuilder
     private var recoveryBanner: some View {
-        if authManager.isAuthenticated && settings.isCloudSyncEnabled && passkeyManager.recoverySkipped {
+        if authManager.isAuthenticated && settings.isCloudSyncEnabled && viewModel.isPasskeyRecoverySkipped {
             Button {
                 withAnimation { isOpen = false }
                 Task { await viewModel.reattemptPasskeyRecovery() }

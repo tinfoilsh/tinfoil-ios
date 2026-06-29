@@ -123,6 +123,7 @@ class ChatViewModel: ObservableObject {
     @Published var isFirstTimeUser: Bool = false
     @Published var showEncryptionSetup: Bool = false
     @Published var shouldShowKeyImport: Bool = false
+    @Published private(set) var isPasskeyRecoverySkipped: Bool = false
     private let passkeyManager = PasskeyManager.shared
     private let cloudSync = CloudSyncService.shared
     private let streamingTracker = StreamingTracker.shared
@@ -417,6 +418,12 @@ class ChatViewModel: ObservableObject {
 
         // Setup network status observer for automatic retry on reconnection
         setupNetworkStatusObserver()
+
+        // Mirror the passkey recovery-skipped state so views observe it through the
+        // view model rather than reaching into the passkey service directly.
+        passkeyManager.$recoverySkipped
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$isPasskeyRecoverySkipped)
 
         // Initial sync will be triggered when authManager is set (see authManager didSet)
 
