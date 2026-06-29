@@ -633,7 +633,6 @@ struct TabbedWelcomeView: View {
             }
             .padding(.horizontal, 32)
 
-            // Privacy explainer presented as a popup
             Button {
                 showPrivacySheet = true
             } label: {
