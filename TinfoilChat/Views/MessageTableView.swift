@@ -47,6 +47,14 @@ struct MessageTableView: UIViewRepresentable {
         context.coordinator.tableView = tableView
         tableView.accessibilityCustomRotors = [context.coordinator.makeMessagesRotor()]
 
+        let tapGesture = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleBackgroundTap)
+        )
+        tapGesture.cancelsTouchesInView = false
+        tapGesture.delegate = context.coordinator
+        tableView.addGestureRecognizer(tapGesture)
+
         return tableView
     }
 
@@ -83,6 +91,8 @@ struct MessageTableView: UIViewRepresentable {
 
         if chatIdChanged {
             context.coordinator.lastChatId = currentChatId
+            context.coordinator.preservedOffsetAfterStreaming = nil
+            context.coordinator.isCollapsingStreamingBuffer = false
 
             if !isIdConversion {
                 context.coordinator.messageWrappers.removeAll()
@@ -183,9 +193,24 @@ struct MessageTableView: UIViewRepresentable {
         context.coordinator.lastIsLoading = isLoading
 
         if isLoadingChanged && !isLoading {
+            let preservedOffset = tableView.contentOffset.y
+            context.coordinator.preservedOffsetAfterStreaming = preservedOffset
+            context.coordinator.isCollapsingStreamingBuffer = true
+            context.coordinator.shouldScrollToBottomAfterLayout = false
+
+            UIView.performWithoutAnimation {
+                let temporaryInset = max(tableView.contentInset.bottom, preservedOffset + tableView.bounds.height)
+                tableView.contentInset.bottom = temporaryInset
+                tableView.verticalScrollIndicatorInsets.bottom = temporaryInset
+                tableView.contentOffset.y = preservedOffset
+            }
+
+            var finishedWrapper: ObservableMessageWrapper?
+
             // Streaming just ended - update the last message wrapper to reflect final state (including any errors)
             if let lastMessage = messages.last,
                let wrapper = context.coordinator.messageWrappers[lastMessage.id] {
+                finishedWrapper = wrapper
                 let isArchived = messages.count - 1 < archivedMessagesStartIndex
                 let showArchiveSeparator = messages.count - 1 == archivedMessagesStartIndex && archivedMessagesStartIndex > 0
                 wrapper.update(
@@ -197,10 +222,6 @@ struct MessageTableView: UIViewRepresentable {
                     showArchiveSeparator: showArchiveSeparator,
                     messageIndex: messages.count - 1
                 )
-
-                DispatchQueue.main.async {
-                    wrapper.resetBuffer()
-                }
             }
 
             // Collapsing the streaming buffer changes contentSize dramatically.
@@ -211,22 +232,28 @@ struct MessageTableView: UIViewRepresentable {
             // and one already at the bottom stays at the bottom (the empty space
             // beneath them simply disappears) without an explicit jump.
             DispatchQueue.main.async {
-                UIView.performWithoutAnimation {
-                    // Temporarily inflate the bottom inset so the collapsing
-                    // streaming buffer cannot clamp the offset and snap the view
-                    // before the final inset is settled below.
-                    let currentOffset = tableView.contentOffset.y
-                    tableView.contentInset.bottom = tableView.bounds.height
-                    tableView.layoutIfNeeded()
-                    tableView.contentOffset.y = currentOffset
-                }
-
+                finishedWrapper?.resetBuffer()
                 DispatchQueue.main.async {
+                    guard context.coordinator.lastChatId == currentChatId else {
+                        context.coordinator.isCollapsingStreamingBuffer = false
+                        // The user switched chats before the collapse ran. Recompute the inset for
+                        // the now-visible chat so the temporary streaming inset doesn't linger as
+                        // blank space in the reused table view.
+                        context.coordinator.updateContentInset()
+                        return
+                    }
                     UIView.performWithoutAnimation {
-                        let currentOffset = tableView.contentOffset.y
+                        tableView.beginUpdates()
+                        tableView.endUpdates()
+                        context.coordinator.isCollapsingStreamingBuffer = false
                         context.coordinator.updateContentInset()
                         tableView.layoutIfNeeded()
-                        tableView.contentOffset.y = currentOffset
+                        // Skip the offset restore if a newer scroll action (scroll-to-bottom or
+                        // scroll-to-user) cleared the preserved offset while this collapse was
+                        // pending, so the more recent scroll intent isn't overridden.
+                        if let preserved = context.coordinator.preservedOffsetAfterStreaming {
+                            tableView.contentOffset.y = preserved
+                        }
                     }
                 }
             }
@@ -237,6 +264,7 @@ struct MessageTableView: UIViewRepresentable {
             context.coordinator.shouldScrollToUserMessageAfterLayout = true
             context.coordinator.shouldScrollToBottomAfterLayout = false
             context.coordinator.isUserMessageScrollMode = true
+            context.coordinator.preservedOffsetAfterStreaming = nil
 
             DispatchQueue.main.async {
                 context.coordinator.scrollToUserMessage(animated: false)
@@ -259,6 +287,7 @@ struct MessageTableView: UIViewRepresentable {
             context.coordinator.shouldScrollToBottomAfterLayout = true
             context.coordinator.shouldScrollToUserMessageAfterLayout = false
             context.coordinator.isUserMessageScrollMode = false
+            context.coordinator.preservedOffsetAfterStreaming = nil
 
             DispatchQueue.main.async {
                 context.coordinator.scrollToBottom(animated: false)
@@ -285,7 +314,7 @@ struct MessageTableView: UIViewRepresentable {
         Coordinator(self)
     }
 
-    class Coordinator: NSObject, UITableViewDelegate, UITableViewDataSource {
+    class Coordinator: NSObject, UITableViewDelegate, UITableViewDataSource, UIGestureRecognizerDelegate {
         var parent: MessageTableView
         weak var tableView: UITableView?
         var lastScrollTrigger: UUID?
@@ -305,6 +334,8 @@ struct MessageTableView: UIViewRepresentable {
         /// Stays true while streaming after user sent a message, adjusting the
         /// bottom inset so the user message can be scrolled to the top of the screen.
         var isUserMessageScrollMode = false
+        var preservedOffsetAfterStreaming: CGFloat?
+        var isCollapsingStreamingBuffer = false
         var heightCache: [IndexPath: CGFloat] = [:]
         var messageHeightCache: [String: CGFloat] = [:]
         var contentEstimateCache: [String: CGFloat] = [:]
@@ -328,6 +359,30 @@ struct MessageTableView: UIViewRepresentable {
                 messageWrappers[message.id] = wrapper
                 return wrapper
             }
+        }
+
+        @objc func handleBackgroundTap() {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            return true
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            // Only treat taps on non-interactive areas as background taps. Taps on buttons,
+            // editable text fields, and the inline message editor must not dismiss the keyboard.
+            var view = touch.view
+            while let current = view {
+                if current is UIControl || current is UITextField {
+                    return false
+                }
+                if let textView = current as? UITextView, textView.isEditable {
+                    return false
+                }
+                view = current.superview
+            }
+            return true
         }
 
         func numberOfSections(in tableView: UITableView) -> Int {
@@ -453,11 +508,9 @@ struct MessageTableView: UIViewRepresentable {
 
         func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
             // Skip the streaming last row: while it is loading its frame is
-            // inflated by the streaming buffer (many screens tall). Caching that
-            // value would make heightForRowAt later pin the finished row to the
-            // buffer height - a giant blank cell the user scrolls through without
-            // ever seeing the response. didEndDisplaying guards this the same way.
-            let isStreamingLastRow = parent.isLoading && indexPath.row == parent.messages.count - 1
+            // inflated by the streaming buffer. Caching that value would poison
+            // future estimates after the buffer collapses.
+            let isStreamingLastRow = isStreamingRow(at: indexPath)
             let height = cell.frame.size.height
             if height > 0 && !isStreamingLastRow {
                 heightCache[indexPath] = height
@@ -496,50 +549,22 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-            // Cache the settled height once a row leaves the screen. By this
-            // point any asynchronously rendered content (LaTeX, generative-UI
-            // cards) has laid out, so this is the most accurate height to pin
-            // the row to on its next appearance.
+            // Cache measured heights for future estimates only. Rows still use
+            // automatic sizing so late SwiftUI layout cannot overflow a pinned
+            // cell height.
             guard indexPath.row < parent.messages.count else { return }
-            let isLastMessage = indexPath.row == parent.messages.count - 1
-            if parent.isLoading && isLastMessage { return }
+            if isStreamingRow(at: indexPath) { return }
             let height = cell.frame.size.height
             guard height > 0 else { return }
             messageHeightCache[parent.messages[indexPath.row].id] = height
             heightCache[indexPath] = height
         }
 
-        func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-            // While the user is actively scrolling, pin already-measured rows to
-            // their cached height. Re-measuring self-sizing rows mid-scroll makes
-            // contentSize oscillate (a row reports a slightly different height
-            // each time it re-enters), and UIKit answers every change by shifting
-            // contentOffset - the feedback loop that snaps the view back and makes
-            // scrolling up impossible. When stationary, rows resize normally so
-            // reasoning toggles and late-rendering content settle correctly.
-            guard tableView.isDragging || tableView.isDecelerating else {
-                return UITableView.automaticDimension
-            }
-            guard indexPath.row < parent.messages.count else {
-                return UITableView.automaticDimension
-            }
-            let isLastMessage = indexPath.row == parent.messages.count - 1
-            if parent.isLoading && isLastMessage {
-                return UITableView.automaticDimension
-            }
+        private func isStreamingRow(at indexPath: IndexPath) -> Bool {
+            guard indexPath.row < parent.messages.count else { return false }
+            guard indexPath.row == parent.messages.count - 1 else { return false }
             let message = parent.messages[indexPath.row]
-            // Messages with generative-UI widgets render asynchronously and can
-            // grow after their height was first cached. Pinning them to that
-            // stale height makes the taller content overflow onto adjacent rows
-            // (the table has clipsToBounds off), which stacks cells on top of
-            // each other. Always let these rows self-size.
-            if !message.toolCalls.isEmpty {
-                return UITableView.automaticDimension
-            }
-            if let cached = messageHeightCache[message.id] {
-                return cached
-            }
-            return UITableView.automaticDimension
+            return parent.isLoading || messageWrappers[message.id]?.isLoading == true
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -549,6 +574,7 @@ struct MessageTableView: UIViewRepresentable {
 
         func updateContentInset() {
             guard !isUpdatingContentInset else { return }
+            guard !isCollapsingStreamingBuffer else { return }
             guard let tableView = tableView else { return }
             isUpdatingContentInset = true
             defer { isUpdatingContentInset = false }
@@ -575,7 +601,9 @@ struct MessageTableView: UIViewRepresentable {
                 // Streaming has ended but the user is still reading with their
                 // message near the top; keep enough bottom inset to hold that
                 // position instead of snapping to the bottom of the response.
-                targetInset = max(0, insetForUserMessageAtTop(tableView))
+                targetInset = max(0, insetForUserMessageAtTop(tableView), insetForPreservedOffset(tableView))
+            } else if preservedOffsetAfterStreaming != nil {
+                targetInset = max(0, insetForPreservedOffset(tableView))
             } else {
                 targetInset = 0
             }
@@ -596,6 +624,11 @@ struct MessageTableView: UIViewRepresentable {
             let userMessageIndexPath = IndexPath(row: numberOfRows - 2, section: 0)
             let userMessageY = tableView.rectForRow(at: userMessageIndexPath).origin.y
             return userMessageY + tableView.bounds.height - tableView.contentSize.height
+        }
+
+        private func insetForPreservedOffset(_ tableView: UITableView) -> CGFloat {
+            guard let preservedOffsetAfterStreaming else { return 0 }
+            return preservedOffsetAfterStreaming + tableView.bounds.height - tableView.contentSize.height
         }
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {

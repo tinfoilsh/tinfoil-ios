@@ -362,6 +362,7 @@ enum Constants {
             static let encryptionKeySetUp = "tinfoil-secret-encryption-key-set-up"
             static let passkeyEnclaveKeyId = "tinfoil-secret-passkey-enclave-key-id"
             static let passkeyEnclaveCredentialId = "tinfoil-secret-passkey-enclave-credential-id"
+            static let passkeyRecoveryDismissedKeyId = "tinfoil-secret-passkey-recovery-dismissed-key-id"
 
             static func cloudKeyAuthorization(userId: String) -> String {
                 "tinfoil-secret-cloud-key-authorization-\(userId)"

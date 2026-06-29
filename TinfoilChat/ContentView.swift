@@ -82,7 +82,7 @@ struct ContentView: View {
                     await passkeyManager.startFreshWithNewKey()
                 },
                 onSkip: {
-                    passkeyManager.showPasskeyRecoveryChoice = false
+                    passkeyManager.dismissRecoveryChoice()
                 },
                 onManualKeyEntry: {
                     passkeyManager.showPasskeyRecoveryChoice = false

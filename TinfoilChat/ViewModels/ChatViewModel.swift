@@ -123,6 +123,7 @@ class ChatViewModel: ObservableObject {
     @Published var isFirstTimeUser: Bool = false
     @Published var showEncryptionSetup: Bool = false
     @Published var shouldShowKeyImport: Bool = false
+    @Published private(set) var isPasskeyRecoverySkipped: Bool = false
     private let passkeyManager = PasskeyManager.shared
     private let cloudSync = CloudSyncService.shared
     private let streamingTracker = StreamingTracker.shared
@@ -417,6 +418,12 @@ class ChatViewModel: ObservableObject {
 
         // Setup network status observer for automatic retry on reconnection
         setupNetworkStatusObserver()
+
+        // Mirror the passkey recovery-skipped state so views observe it through the
+        // view model rather than reaching into the passkey service directly.
+        passkeyManager.$recoverySkipped
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$isPasskeyRecoverySkipped)
 
         // Initial sync will be triggered when authManager is set (see authManager didSet)
 
@@ -3388,6 +3395,30 @@ class ChatViewModel: ObservableObject {
         // wipe and resurrect the signed-out user's chat files.
         await pendingSaveTask?.value
         await Chat.deleteAllChatsFromStorage(userId: currentUserId)
+    }
+
+    /// Clear a persisted passkey-recovery skip and re-open recovery.
+    /// Backs the Settings and sidebar "unlock cloud sync" affordances.
+    /// Routes the manual setup / recovery outcomes to the onboarding
+    /// sheet, matching the sign-in flow.
+    func reattemptPasskeyRecovery() async {
+        let result = await passkeyManager.reenableRecoveryPrompt()
+        switch result {
+        case .manualSetupRequired:
+            cloudSyncOnboardingMode = .setup
+            showCloudSyncOnboarding = true
+        case .manualRecoveryRequired:
+            cloudSyncOnboardingMode = .recovery
+            showCloudSyncOnboarding = true
+        case .success:
+            // A silent re-unlock applied the key but, unlike the prompt-driven
+            // recovery paths, fires no completion callback. Resume loading and
+            // sync so the now-decryptable chats refresh immediately instead of
+            // waiting for a later sign-in or manual refresh.
+            handleSignIn()
+        default:
+            break
+        }
     }
 
     /// Handle sign-in by loading user's saved chats and triggering sync

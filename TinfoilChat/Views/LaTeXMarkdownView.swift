@@ -11,6 +11,30 @@ import Textual
 import SwiftMath
 import UIKit
 
+/// Resolves a citation's favicon bytes from the attested metadata enclave so citation chips never
+/// reach an external icon host directly.
+private func citationFaviconData(for url: URL) async -> Data? {
+    try? await LinkMetadataService.shared.metadata(for: url.absoluteString).faviconBytes
+}
+
+/// Renders markdown through `StructuredText` with the shared Tinfoil citation treatment, used by
+/// both the parsed-segment and fallback render paths.
+private func citationStructuredText(
+    _ markdown: String,
+    isStreaming: Bool,
+    citationUrls: Set<String>?,
+    textSelectionEnabled: Bool
+) -> some View {
+    StructuredText(markdown: markdown)
+        .textual.highlighterTheme(isStreaming ? .plain : .default)
+        .textual.citations(isStreaming ? [] : (citationUrls ?? []))
+        .textual.citationFaviconProvider(citationFaviconData)
+        .if(textSelectionEnabled) { view in
+            view.textual.textSelection(.enabled)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+}
+
 private enum SegmentKind: Sendable {
     case markdown(String)
     case latex(String, isDisplay: Bool)
@@ -42,12 +66,12 @@ private struct SegmentView: View {
                     in: LaTeXMarkdownView.stripCitations(from: text),
                     citationUrls: citationUrls
                 )
-            StructuredText(markdown: strippedText)
-                .textual.highlighterTheme(isStreaming ? .plain : .default)
-                .if(textSelectionEnabled) { view in
-                    view.textual.textSelection(.enabled)
-                }
-                .fixedSize(horizontal: false, vertical: true)
+            citationStructuredText(
+                strippedText,
+                isStreaming: isStreaming,
+                citationUrls: citationUrls,
+                textSelectionEnabled: textSelectionEnabled
+            )
         case .latex(let latex, let isDisplay):
             LaTeXView(
                 latex: latex,
@@ -204,12 +228,12 @@ struct LaTeXMarkdownView: View, Equatable {
                 in: LaTeXMarkdownView.stripCitations(from: content),
                 citationUrls: citationUrls
             )
-        return StructuredText(markdown: strippedText)
-            .textual.highlighterTheme(isStreaming ? .plain : .default)
-            .if(textSelectionEnabled) { view in
-                view.textual.textSelection(.enabled)
-            }
-            .fixedSize(horizontal: false, vertical: true)
+        return citationStructuredText(
+            strippedText,
+            isStreaming: isStreaming,
+            citationUrls: citationUrls,
+            textSelectionEnabled: textSelectionEnabled
+        )
     }
 
     /// Rewrite standard markdown links whose URL matches an annotated web-search
