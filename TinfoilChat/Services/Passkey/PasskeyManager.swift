@@ -329,7 +329,12 @@ final class PasskeyManager: ObservableObject {
     /// Dismiss the recovery-choice sheet and remember which keyId the
     /// user skipped so the periodic sync check stops re-presenting it.
     func dismissRecoveryChoice() {
-        setDismissedRecoveryKeyId(pendingRecoveryKeyId)
+        // Only persist a concrete keyId. Skipping a sheet with no pending
+        // keyId must not clear an existing skip, or the periodic check
+        // would re-present recovery for a keyId the user already skipped.
+        if let keyId = pendingRecoveryKeyId {
+            setDismissedRecoveryKeyId(keyId)
+        }
         showPasskeyRecoveryChoice = false
     }
 
