@@ -236,6 +236,10 @@ struct MessageTableView: UIViewRepresentable {
                 DispatchQueue.main.async {
                     guard context.coordinator.lastChatId == currentChatId else {
                         context.coordinator.isCollapsingStreamingBuffer = false
+                        // The user switched chats before the collapse ran. Recompute the inset for
+                        // the now-visible chat so the temporary streaming inset doesn't linger as
+                        // blank space in the reused table view.
+                        context.coordinator.updateContentInset()
                         return
                     }
                     UIView.performWithoutAnimation {
