@@ -248,7 +248,12 @@ struct MessageTableView: UIViewRepresentable {
                         context.coordinator.isCollapsingStreamingBuffer = false
                         context.coordinator.updateContentInset()
                         tableView.layoutIfNeeded()
-                        tableView.contentOffset.y = preservedOffset
+                        // Skip the offset restore if a newer scroll action (scroll-to-bottom or
+                        // scroll-to-user) cleared the preserved offset while this collapse was
+                        // pending, so the more recent scroll intent isn't overridden.
+                        if let preserved = context.coordinator.preservedOffsetAfterStreaming {
+                            tableView.contentOffset.y = preserved
+                        }
                     }
                 }
             }
