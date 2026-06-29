@@ -141,8 +141,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/textual",
       "state" : {
-        "revision" : "e765ae4da8c501e06c34d6059321d5e80e1759a3",
-        "version" : "0.0.8"
+        "revision" : "829dc540350fd6e635ab196aac26e13d385f4849",
+        "version" : "0.0.9"
       }
     },
     {

@@ -44,6 +44,7 @@ private struct SegmentView: View {
                 )
             StructuredText(markdown: strippedText)
                 .textual.highlighterTheme(isStreaming ? .plain : .default)
+                .textual.citations(isStreaming ? [] : (citationUrls ?? []))
                 .if(textSelectionEnabled) { view in
                     view.textual.textSelection(.enabled)
                 }
@@ -206,6 +207,7 @@ struct LaTeXMarkdownView: View, Equatable {
             )
         return StructuredText(markdown: strippedText)
             .textual.highlighterTheme(isStreaming ? .plain : .default)
+            .textual.citations(isStreaming ? [] : (citationUrls ?? []))
             .if(textSelectionEnabled) { view in
                 view.textual.textSelection(.enabled)
             }
