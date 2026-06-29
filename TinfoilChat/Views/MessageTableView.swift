@@ -369,6 +369,22 @@ struct MessageTableView: UIViewRepresentable {
             return true
         }
 
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            // Only treat taps on non-interactive areas as background taps. Taps on buttons,
+            // editable text fields, and the inline message editor must not dismiss the keyboard.
+            var view = touch.view
+            while let current = view {
+                if current is UIControl || current is UITextField {
+                    return false
+                }
+                if let textView = current as? UITextView, textView.isEditable {
+                    return false
+                }
+                view = current.superview
+            }
+            return true
+        }
+
         func numberOfSections(in tableView: UITableView) -> Int {
             return 1
         }
