@@ -142,7 +142,7 @@ struct ChatSidebar: View {
     
     @ViewBuilder
     private var recoveryBanner: some View {
-        if authManager.isAuthenticated && passkeyManager.recoverySkipped {
+        if authManager.isAuthenticated && settings.isCloudSyncEnabled && passkeyManager.recoverySkipped {
             Button {
                 withAnimation { isOpen = false }
                 Task { await viewModel.reattemptPasskeyRecovery() }
