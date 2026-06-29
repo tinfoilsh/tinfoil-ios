@@ -696,42 +696,8 @@ struct PrivacyExplainerSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     HStack(spacing: 10) {
-                        Button {
-                            UIApplication.shared.open(URL(string: "https://tinfoil.sh/technology")!)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "cpu")
-                                    .font(.system(size: 12))
-                                Text("Technology")
-                                    .font(.system(size: 13, weight: .medium))
-                            }
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.secondary.opacity(0.12))
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        Button {
-                            UIApplication.shared.open(URL(string: "https://github.com/tinfoilsh")!)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "chevron.left.forwardslash.chevron.right")
-                                    .font(.system(size: 12))
-                                Text("Source Code")
-                                    .font(.system(size: 13, weight: .medium))
-                            }
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.secondary.opacity(0.12))
-                            )
-                        }
-                        .buttonStyle(.plain)
+                        linkButton(icon: "cpu", title: "Technology", urlString: "https://tinfoil.sh/technology")
+                        linkButton(icon: "chevron.left.forwardslash.chevron.right", title: "Source Code", urlString: "https://github.com/tinfoilsh")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -753,6 +719,27 @@ struct PrivacyExplainerSheet: View {
             }
         }
         .presentationDetents([.medium])
+    }
+
+    private func linkButton(icon: String, title: String, urlString: String) -> some View {
+        Button {
+            UIApplication.shared.open(URL(string: urlString)!)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+            }
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.secondary.opacity(0.12))
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
