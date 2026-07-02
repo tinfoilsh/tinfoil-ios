@@ -44,6 +44,10 @@ struct ChatQueryBuilder {
     ///     graded effort. Ignored for models that do not.
     ///   - thinkingEnabled: Whether thinking is on for models that support a
     ///     toggle. Ignored for models that do not.
+    ///   - autoCandidates: When set, the request is sent as an Auto selection:
+    ///     `model` becomes `AutoModel.requestModel` and the ordered candidates
+    ///     (with per-candidate reasoning params) are attached under
+    ///     `AutoModel.optionsField` for the router to resolve.
     /// - Returns: A configured ChatQuery
     @MainActor
     static func buildQuery(
@@ -58,13 +62,18 @@ struct ChatQueryBuilder {
         reasoningConfig: ReasoningConfig? = nil,
         reasoningEffort: ReasoningEffort = .medium,
         thinkingEnabled: Bool = true,
-        genUIEnabled: Bool = true
+        genUIEnabled: Bool = true,
+        autoCandidates: [ModelType]? = nil
     ) -> ChatQuery {
 
         var messages: [ChatQuery.ChatCompletionMessageParam] = []
 
-        // Most models support system role; DeepSeek is the known exception
-        let useSystemRole = !modelId.hasPrefix("deepseek")
+        // Most models support system role; DeepSeek is the known exception.
+        // For Auto requests the representative `modelId` drives this, but if
+        // any candidate needs the synthetic `<system>` message we prepend for
+        // all so a DeepSeek resolution never loses its instructions.
+        let candidatesNeedPrepend = autoCandidates?.contains { $0.modelName.hasPrefix("deepseek") } ?? false
+        let useSystemRole = !modelId.hasPrefix("deepseek") && !candidatesNeedPrepend
 
         // Append the GenUI prompt hint so the model knows it can call
         // render_* tools instead of replying with markdown for structured
@@ -197,15 +206,37 @@ struct ChatQueryBuilder {
             (tools?.isEmpty == false) ? .auto : nil
         let parallelToolCalls: Bool? = (tools?.isEmpty == false) ? true : nil
 
-        let extraBody = makeReasoningExtraBody(
-            reasoningConfig: reasoningConfig,
-            reasoningEffort: reasoningEffort,
-            thinkingEnabled: thinkingEnabled
-        )
+        let requestModel: String
+        let extraBody: [String: OpenAIJSON]?
+        if let autoCandidates, !autoCandidates.isEmpty {
+            // Send `model: "auto"` with an ordered candidate list. Each option
+            // carries its own pre-built reasoning params so the router can
+            // splice the resolved candidate's body without re-deriving them.
+            requestModel = AutoModel.requestModel
+            let options: [OpenAIJSON] = autoCandidates.map { candidate in
+                let params = makeReasoningExtraBody(
+                    reasoningConfig: candidate.reasoningConfig,
+                    reasoningEffort: reasoningEffort,
+                    thinkingEnabled: thinkingEnabled
+                ) ?? [:]
+                return .object([
+                    "model": .string(candidate.modelName),
+                    "params": .object(params)
+                ])
+            }
+            extraBody = [AutoModel.optionsField: .array(options)]
+        } else {
+            requestModel = modelId
+            extraBody = makeReasoningExtraBody(
+                reasoningConfig: reasoningConfig,
+                reasoningEffort: reasoningEffort,
+                thinkingEnabled: thinkingEnabled
+            )
+        }
 
         return ChatQuery(
             messages: messages,
-            model: modelId,
+            model: requestModel,
             parallelToolCalls: parallelToolCalls,
             toolChoice: toolChoice,
             tools: tools,
