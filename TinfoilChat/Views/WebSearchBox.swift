@@ -343,12 +343,19 @@ private struct WebSearchQueryRow: View {
         instance.sources ?? []
     }
 
+    private var displayQuery: String {
+        if let query = instance.query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return query
+        }
+        return "Web search"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 10) {
                 statusIcon
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(instance.query ?? "Web search")
+                    Text(displayQuery)
                         .font(.system(size: 15, weight: .medium))
                         .foregroundColor(isDarkMode ? .white : .black.opacity(0.85))
                         .multilineTextAlignment(.leading)
