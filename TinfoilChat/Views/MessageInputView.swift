@@ -161,10 +161,9 @@ struct MessageInputView: View {
                 .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
             }
             .sheet(isPresented: $viewModel.showRateLimitPaywall) {
-                PaywallView(displayCloseButton: true)
-                    .onPurchaseCompleted { _ in
-                        viewModel.showRateLimitPaywall = false
-                    }
+                GatedPaywallView {
+                    viewModel.showRateLimitPaywall = false
+                }
                     .onDisappear {
                         Task {
                             await authManager.fetchSubscriptionStatus()

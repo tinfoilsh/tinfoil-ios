@@ -993,11 +993,10 @@ struct SettingsView: View {
                 .environmentObject(authManager)
         }
         .sheet(isPresented: $showPremiumModal) {
-            PaywallView(displayCloseButton: true)
-                .onPurchaseCompleted { _ in
-                    showPremiumModal = false
-                    // The subscription status will update automatically via webhook
-                }
+            GatedPaywallView {
+                showPremiumModal = false
+                // The subscription status will update automatically via webhook
+            }
                 .onDisappear {
                     // Check subscription status when paywall is dismissed
                     Task {

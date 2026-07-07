@@ -132,11 +132,10 @@ struct ChatContainer: View {
                 .environmentObject(viewModel)
         }
         .sheet(isPresented: $showPremiumModal) {
-            PaywallView(displayCloseButton: true)
-                .onPurchaseCompleted { _ in
-                    showPremiumModal = false
-                    shouldCreateNewChatAfterSubscription = true
-                }
+            GatedPaywallView {
+                showPremiumModal = false
+                shouldCreateNewChatAfterSubscription = true
+            }
                 .onDisappear {
                     // Quick check when paywall is dismissed
                     Task {
