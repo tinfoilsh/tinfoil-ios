@@ -82,18 +82,20 @@ class RevenueCatManager: ObservableObject {
     /// produce webhooks without a user identifier that the backend rejects,
     /// so callers must block the paywall until this returns true.
     func ensureLoggedIn(_ userId: String) async -> Bool {
-        if Purchases.shared.appUserID == userId {
-            setClerkUserId(userId)
-            return true
-        }
         do {
+            // logIn also refreshes customerInfo when already identified,
+            // so always call it rather than short-circuiting on appUserID.
             let (customerInfo, _) = try await Purchases.shared.logIn(userId)
             self.customerInfo = customerInfo
             // Also set clerk_user_id as attribute
             setClerkUserId(userId)
             return true
         } catch {
-            return false
+            // A transient failure must not block the paywall if the SDK is
+            // already identified as this user from a previous session.
+            guard Purchases.shared.appUserID == userId else { return false }
+            setClerkUserId(userId)
+            return true
         }
     }
     
