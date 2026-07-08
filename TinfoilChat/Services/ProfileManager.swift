@@ -175,8 +175,6 @@ class ProfileManager: ObservableObject {
     
     /// Create ProfileData from current settings
     private func createProfileData() -> ProfileData {
-        let selectedModel = AppConfig.shared.currentModel?.id
-            ?? UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.selectedModel)
         let reasoningEffort = UserDefaults.standard.string(
             forKey: Constants.StorageKeys.Settings.reasoningEffort
         ) ?? ReasoningEffort.medium.rawValue
@@ -199,7 +197,6 @@ class ProfileManager: ObservableObject {
             customSystemPrompt: customSystemPrompt,
             customPromptPresets: customPromptPresets,
             favoritePromptPresetIds: favoritePromptPresetIds,
-            selectedModel: selectedModel,
             reasoningEffort: reasoningEffort,
             thinkingEnabled: thinkingEnabled,
             webSearchEnabled: SettingsManager.shared.webSearchEnabled,
@@ -254,10 +251,6 @@ class ProfileManager: ObservableObject {
         if let favoritePromptPresetIds = profile.favoritePromptPresetIds {
             self.favoritePromptPresetIds = favoritePromptPresetIds
         }
-        if let selectedModel = profile.selectedModel {
-            UserDefaults.standard.set(selectedModel, forKey: Constants.StorageKeys.Settings.selectedModel)
-            applySelectedModel(selectedModel)
-        }
         if let reasoningEffort = profile.reasoningEffort,
            ReasoningEffort(rawValue: reasoningEffort) != nil {
             UserDefaults.standard.set(reasoningEffort, forKey: Constants.StorageKeys.Settings.reasoningEffort)
@@ -296,13 +289,6 @@ class ProfileManager: ObservableObject {
         isApplyingProfile = false  // Re-enable observers
     }
 
-    private func applySelectedModel(_ modelId: String) {
-        guard let model = AppConfig.shared.findSelectableModel(id: modelId) else {
-            return
-        }
-        AppConfig.shared.currentModel = model
-    }
-    
     // MARK: - Change Observers
     
     private func setupChangeObservers() {
@@ -753,7 +739,6 @@ class ProfileManager: ObservableObject {
                p1.customSystemPrompt != p2.customSystemPrompt ||
                p1.customPromptPresets != p2.customPromptPresets ||
                p1.favoritePromptPresetIds != p2.favoritePromptPresetIds ||
-               p1.selectedModel != p2.selectedModel ||
                p1.reasoningEffort != p2.reasoningEffort ||
                p1.thinkingEnabled != p2.thinkingEnabled ||
                p1.webSearchEnabled != p2.webSearchEnabled ||

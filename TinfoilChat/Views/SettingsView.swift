@@ -822,13 +822,6 @@ struct SettingsView: View {
                 }
             } else {
                 Button(action: {
-                    guard authManager.isAuthenticated else {
-                        showAuthView = true
-                        return
-                    }
-                    if let clerkUserId = authManager.localUserData?["id"] as? String {
-                        Purchases.shared.attribution.setAttributes(["clerk_user_id": clerkUserId])
-                    }
                     showPremiumModal = true
                 }) {
                     HStack(spacing: 8) {
@@ -907,7 +900,9 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 accountSection
-                subscriptionSection
+                if authManager.isAuthenticated {
+                    subscriptionSection
+                }
                 chatSettingsSection
                 preferencesSection
                 contactSection
@@ -993,11 +988,10 @@ struct SettingsView: View {
                 .environmentObject(authManager)
         }
         .sheet(isPresented: $showPremiumModal) {
-            PaywallView(displayCloseButton: true)
-                .onPurchaseCompleted { _ in
-                    showPremiumModal = false
-                    // The subscription status will update automatically via webhook
-                }
+            GatedPaywallView {
+                showPremiumModal = false
+                // The subscription status will update automatically via webhook
+            }
                 .onDisappear {
                     // Check subscription status when paywall is dismissed
                     Task {
