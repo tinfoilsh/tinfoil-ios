@@ -446,7 +446,6 @@ struct ProfileData: Codable {
     var favoritePromptPresetIds: [String]?
 
     // Shared chat defaults
-    var selectedModel: String?
     var reasoningEffort: String?
     var thinkingEnabled: Bool?
     var webSearchEnabled: Bool?

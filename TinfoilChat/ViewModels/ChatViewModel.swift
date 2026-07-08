@@ -478,10 +478,6 @@ class ChatViewModel: ObservableObject {
     }
 
     private func applySharedSettings(_ profile: ProfileData) {
-        if let selectedModel = profile.selectedModel,
-           let model = AppConfig.shared.availableModels.first(where: { $0.id == selectedModel }) {
-            currentModel = model
-        }
         if let effort = profile.reasoningEffort,
            let parsedEffort = ReasoningEffort(rawValue: effort) {
             reasoningEffort = parsedEffort
@@ -3264,7 +3260,6 @@ class ChatViewModel: ObservableObject {
         self.currentModel = modelType
         // This will trigger the didSet in AppConfig which persists to UserDefaults
         AppConfig.shared.currentModel = modelType
-        ProfileManager.shared.sharedSettingsDidChange()
         
         // Update the current chat's model if requested
         if shouldUpdateChat, var chat = currentChat {

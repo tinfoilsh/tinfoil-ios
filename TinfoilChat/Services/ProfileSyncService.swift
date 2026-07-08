@@ -37,7 +37,7 @@ class ProfileSyncService: ObservableObject {
         "isDarkMode", "themeMode", "language", "nickname", "profession",
         "traits", "additionalContext", "isUsingPersonalization",
         "isUsingCustomPrompt", "customSystemPrompt", "customPromptPresets",
-        "favoritePromptPresetIds", "selectedModel", "reasoningEffort",
+        "favoritePromptPresetIds", "reasoningEffort",
         "thinkingEnabled", "webSearchEnabled", "codeExecutionEnabled",
         "piiCheckEnabled", "genUIEnabled", "chatFont", "projectUploadPreference",
         "version", "updatedAt", "fieldClocks", "clockVersion",
