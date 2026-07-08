@@ -737,7 +737,23 @@ struct ModelSelectorSheetView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var availableModels: [ModelType] {
-        AppConfig.shared.filteredModelTypes()
+        AppConfig.shared.selectableModels
+    }
+
+    /// Auto entries have no asset icon; show a routing glyph instead.
+    @ViewBuilder
+    private func modelIcon(for model: ModelType) -> some View {
+        if model.isAuto {
+            Image(systemName: "shuffle")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 28, height: 28)
+        } else {
+            Image(model.iconName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 28, height: 28)
+        }
     }
 
     var body: some View {
@@ -749,10 +765,7 @@ struct ModelSelectorSheetView: View {
                     dismiss()
                 } label: {
                     HStack(spacing: 12) {
-                        Image(model.iconName)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 28, height: 28)
+                        modelIcon(for: model)
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(model.displayName)

@@ -1093,31 +1093,41 @@ struct ModelPicker: View {
 
     var body: some View {
         Menu {
-            let availableModels = AppConfig.shared.filteredModelTypes()
+            let selectableModels = AppConfig.shared.selectableModels
 
-            ForEach(availableModels) { model in
+            ForEach(selectableModels) { model in
                 Button(action: {
                     viewModel.changeModel(to: model)
                 }) {
                     Label {
                         Text(model.displayName)
                     } icon: {
-                        Image(model.iconName)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 20, height: 20)
+                        modelIcon(for: model, size: 20)
                     }
                 }
                 .disabled(viewModel.currentModel == model)
             }
         } label: {
-            Image(viewModel.currentModel.iconName)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 22, height: 22)
+            modelIcon(for: viewModel.currentModel, size: 22)
         }
         .accessibilityLabel("Select model")
         .accessibilityValue(viewModel.currentModel.displayName)
+    }
+
+    /// Auto entries have no asset icon; show a routing glyph instead.
+    @ViewBuilder
+    private func modelIcon(for model: ModelType, size: CGFloat) -> some View {
+        if model.isAuto {
+            Image(systemName: "shuffle")
+                .resizable()
+                .scaledToFit()
+                .frame(width: size, height: size)
+        } else {
+            Image(model.iconName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: size, height: size)
+        }
     }
 }
 

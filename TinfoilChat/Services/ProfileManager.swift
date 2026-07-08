@@ -297,7 +297,7 @@ class ProfileManager: ObservableObject {
     }
 
     private func applySelectedModel(_ modelId: String) {
-        guard let model = AppConfig.shared.availableModels.first(where: { $0.id == modelId }) else {
+        guard let model = AppConfig.shared.findSelectableModel(id: modelId) else {
             return
         }
         AppConfig.shared.currentModel = model

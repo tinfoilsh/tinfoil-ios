@@ -1699,8 +1699,22 @@ class ChatViewModel: ObservableObject {
                     forceRefresh: hasRetriedWithFreshKey
                 )
 
+                // Resolve the (possibly Auto) selection into a representative
+                // model plus an ordered candidate list. Preferences narrow the
+                // Auto candidates: multimodal when the turn carries images, and
+                // tool-calling when web search or GenUI tools may be used.
+                let turnHasImages = self.messages.contains { message in
+                    message.attachments.contains { $0.type == .image }
+                }
+                let modelSelection = AppConfig.shared.resolveModelSelection(
+                    currentModel,
+                    preferMultimodal: turnHasImages,
+                    preferToolCalling: self.isWebSearchEnabled || SettingsManager.shared.genUIEnabled
+                )
+                let representativeModel = modelSelection.representative
+
                 // Create the stream with proper parameters
-                let modelId = currentModel.modelName
+                let modelId = representativeModel.modelName
                 
                 // Add system message first with language preference
                 let settingsManager = SettingsManager.shared
@@ -1722,7 +1736,7 @@ class ChatViewModel: ObservableObject {
                 }
                 
                 // Replace MODEL_NAME placeholder with current model name
-                systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
+                systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: representativeModel.fullName)
                 
                 // Replace language placeholder - use ProfileManager language first, then settings preference
                 let languageToUse: String
@@ -1774,7 +1788,7 @@ class ChatViewModel: ObservableObject {
                 // Process rules with same replacements
                 var processedRules = suppressDefaultRules ? "" : AppConfig.shared.rules
                 if !processedRules.isEmpty {
-                    processedRules = processedRules.replacingOccurrences(of: "{MODEL_NAME}", with: currentModel.fullName)
+                    processedRules = processedRules.replacingOccurrences(of: "{MODEL_NAME}", with: representativeModel.fullName)
                     processedRules = processedRules.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
 
                     if !personalizationXML.isEmpty {
@@ -1793,13 +1807,14 @@ class ChatViewModel: ObservableObject {
                     systemPrompt: systemPrompt,
                     rules: processedRules,
                     conversationMessages: self.messages,
-                    contextWindow: self.currentModel.contextWindow,
+                    contextWindow: representativeModel.contextWindow,
                     webSearchEnabled: self.isWebSearchEnabled,
-                    isMultimodal: self.currentModel.isMultimodal,
-                    reasoningConfig: self.currentModel.reasoningConfig,
+                    isMultimodal: representativeModel.isMultimodal,
+                    reasoningConfig: representativeModel.reasoningConfig,
                     reasoningEffort: self.reasoningEffort,
                     thinkingEnabled: self.thinkingEnabled,
-                    genUIEnabled: SettingsManager.shared.genUIEnabled
+                    genUIEnabled: SettingsManager.shared.genUIEnabled,
+                    autoCandidates: modelSelection.autoCandidates
                 )
 
                 // Web search state tracking
@@ -3272,9 +3287,10 @@ class ChatViewModel: ObservableObject {
             setupTinfoilClient()
         }
 
-        // If current model is no longer in the available list, switch to first available model
-        let availableModels = AppConfig.shared.filteredModelTypes()
-        if !availableModels.contains(where: { $0.id == currentModel.id }), let firstModel = availableModels.first {
+        // If current model is no longer selectable, switch to first available model
+        let selectableModels = AppConfig.shared.selectableModels
+        if !selectableModels.contains(where: { $0.id == currentModel.id }),
+           let firstModel = AppConfig.shared.filteredModelTypes().first {
             changeModel(to: firstModel)
         }
         
