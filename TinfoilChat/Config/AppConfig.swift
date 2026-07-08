@@ -312,8 +312,7 @@ class AppConfig: ObservableObject {
             // Confirm current model is still valid
             if let currentModel = currentModel,
                !selectableModels.contains(currentModel) {
-                // Fall back to first available model
-                self.currentModel = availableModels.first
+                self.currentModel = defaultModel
             }
 
             // Clear any previous error
@@ -340,9 +339,14 @@ class AppConfig: ObservableObject {
            let model = findSelectableModel(id: savedModelId) {
             currentModel = model
         } else {
-            // Fall back to first available model
-            currentModel = availableModels.first
+            currentModel = defaultModel
         }
+    }
+
+    // Default selection: prefer Auto Fast, fall back to the first available
+    // model if no fast-tier models exist in the config.
+    private var defaultModel: ModelType? {
+        findSelectableModel(id: AutoModel.fastId) ?? availableModels.first
     }
     
     // MARK: - Public interface
