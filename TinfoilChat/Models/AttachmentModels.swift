@@ -19,6 +19,10 @@ enum AttachmentProcessingState: String, Codable, Equatable {
     case failed
 }
 
+func attachmentsAreReadyToSend(_ attachments: [Attachment]) -> Bool {
+    attachments.allSatisfy { $0.processingState == .completed }
+}
+
 struct Attachment: Identifiable, Equatable {
     var id: String
     let type: AttachmentType
@@ -29,6 +33,7 @@ struct Attachment: Identifiable, Equatable {
     var textContent: String?
     var description: String?
     var fileSize: Int64
+    var sharedImportRequestID: UUID?
     // Per-attachment AES-256 key as standard base64 (32 raw bytes → 44 chars).
     // Cross-platform contract: iOS uses Data.base64EncodedString(), React uses btoa().
     // v2 attachments live in buckets and are addressed through the sync enclave
@@ -48,6 +53,7 @@ struct Attachment: Identifiable, Equatable {
         textContent: String? = nil,
         description: String? = nil,
         fileSize: Int64 = 0,
+        sharedImportRequestID: UUID? = nil,
         encryptionKey: String? = nil,
         processingState: AttachmentProcessingState = .pending
     ) {
@@ -60,6 +66,7 @@ struct Attachment: Identifiable, Equatable {
         self.textContent = textContent
         self.description = description
         self.fileSize = fileSize
+        self.sharedImportRequestID = sharedImportRequestID
         self.encryptionKey = encryptionKey
         self.processingState = processingState
     }
@@ -88,6 +95,7 @@ extension Attachment: Codable {
         textContent = try container.decodeIfPresent(String.self, forKey: .textContent)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         fileSize = try container.decodeIfPresent(Int64.self, forKey: .fileSize) ?? 0
+        sharedImportRequestID = nil
         let modernKey = try container.decodeIfPresent(String.self, forKey: .encryptionKey)
         let legacyKey = try container.decodeIfPresent(String.self, forKey: .key)
         encryptionKey = modernKey ?? legacyKey

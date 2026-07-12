@@ -447,6 +447,10 @@ struct MessageInputView: View {
                     .glassEffect(.regular.interactive(), in: .circle)
                     .clipShape(.circle)
                     .tint(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
+                    .disabled(
+                        !viewModel.isLoading
+                        && !attachmentsAreReadyToSend(viewModel.pendingAttachments)
+                    )
                     .accessibilityLabel(viewModel.isLoading ? "Stop generating" : "Send message")
                     .padding(.trailing, 8)
                 }
@@ -547,6 +551,10 @@ struct MessageInputView: View {
                                 .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
                         }
                     }
+                    .disabled(
+                        !viewModel.isLoading
+                        && !attachmentsAreReadyToSend(viewModel.pendingAttachments)
+                    )
                     .accessibilityLabel(viewModel.isLoading ? "Stop generating" : "Send message")
                     .accessibleHitTarget()
                     .padding(.trailing, 8)

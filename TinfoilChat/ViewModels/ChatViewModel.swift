@@ -195,9 +195,11 @@ class ChatViewModel: ObservableObject {
 
     // Attachment properties
     @Published var pendingAttachments: [Attachment] = []
-    @Published var isProcessingAttachment: Bool = false
     @Published var attachmentError: String? = nil
     @Published var pendingImageThumbnails: [String: String] = [:]
+    var isProcessingAttachment: Bool {
+        pendingAttachments.contains { $0.processingState == .processing }
+    }
 
     // Project properties
     @Published var projects: [Project] = []
@@ -1472,6 +1474,7 @@ class ChatViewModel: ObservableObject {
         let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasAttachments = !pendingAttachments.isEmpty
         guard hasText || hasAttachments else { return }
+        guard attachmentsAreReadyToSend(pendingAttachments) else { return }
 
         // Block send when free-tier requests are exhausted
         #if DEBUG
@@ -1499,7 +1502,7 @@ class ChatViewModel: ObservableObject {
         isLoading = true
 
         let messageAttachments = pendingAttachments
-        clearPendingAttachments()
+        clearPendingAttachments(acknowledgeSharedImports: false)
 
         // Create and add user message — attachments carry all data
         let userMessage = Message(
@@ -1508,6 +1511,9 @@ class ChatViewModel: ObservableObject {
             attachments: messageAttachments
         )
         addMessage(userMessage)
+        for requestID in messageAttachments.compactMap(\.sharedImportRequestID) {
+            SharedImportCoordinator.shared.acknowledge(requestID: requestID)
+        }
 
         // If this is the first message, mark as modified (title will be generated after assistant reply)
         if var chat = currentChat, chat.messages.count == 1 {
@@ -1521,8 +1527,11 @@ class ChatViewModel: ObservableObject {
 
     // MARK: - Attachment Management
 
-    func addDocumentAttachment(url: URL, fileName: String) {
-        isProcessingAttachment = true
+    func addDocumentAttachment(
+        url: URL,
+        fileName: String,
+        sharedImportRequestID: UUID? = nil
+    ) {
         attachmentError = nil
 
         let attachmentId = UUID().uuidString.lowercased()
@@ -1530,6 +1539,7 @@ class ChatViewModel: ObservableObject {
             id: attachmentId,
             type: .document,
             fileName: fileName,
+            sharedImportRequestID: sharedImportRequestID,
             processingState: .processing
         )
         pendingAttachments.append(attachment)
@@ -1553,12 +1563,14 @@ class ChatViewModel: ObservableObject {
                 }
                 attachmentError = error.localizedDescription
             }
-            isProcessingAttachment = false
         }
     }
 
-    func addImageAttachment(data: Data, fileName: String) {
-        isProcessingAttachment = true
+    func addImageAttachment(
+        data: Data,
+        fileName: String,
+        sharedImportRequestID: UUID? = nil
+    ) {
         attachmentError = nil
 
         let attachmentId = UUID().uuidString.lowercased()
@@ -1567,6 +1579,7 @@ class ChatViewModel: ObservableObject {
             type: .image,
             fileName: fileName,
             fileSize: Int64(data.count),
+            sharedImportRequestID: sharedImportRequestID,
             processingState: .processing
         )
         pendingAttachments.append(attachment)
@@ -1596,23 +1609,33 @@ class ChatViewModel: ObservableObject {
                 }
                 attachmentError = error.localizedDescription
             }
-            isProcessingAttachment = false
         }
     }
 
     func removePendingAttachment(id: String) {
+        let sharedImportRequestID = pendingAttachments
+            .first(where: { $0.id == id })?
+            .sharedImportRequestID
         pendingAttachments.removeAll { $0.id == id }
         pendingImageThumbnails.removeValue(forKey: id)
+        if let sharedImportRequestID {
+            SharedImportCoordinator.shared.acknowledge(requestID: sharedImportRequestID)
+        }
         if pendingAttachments.isEmpty {
             attachmentError = nil
         }
     }
 
-    func clearPendingAttachments() {
+    func clearPendingAttachments(acknowledgeSharedImports: Bool = true) {
+        let sharedImportRequestIDs = pendingAttachments.compactMap(\.sharedImportRequestID)
         pendingAttachments.removeAll()
         pendingImageThumbnails.removeAll()
         attachmentError = nil
-        isProcessingAttachment = false
+        if acknowledgeSharedImports {
+            for requestID in sharedImportRequestIDs {
+                SharedImportCoordinator.shared.acknowledge(requestID: requestID)
+            }
+        }
     }
 
     /// Generates an assistant response for the current conversation (expects user message to already be in chat)

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		99AB00012FABC00100ABC001 /* TinfoilShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 99AB00032FABC00300ABC003 /* TinfoilShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		99DDBFA42F6869250038A729 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = 99DDBFA32F6869250038A729 /* Textual */; };
 		99EEFB1B2F9EE9E8005B3D75 /* TinfoilAI in Frameworks */ = {isa = PBXBuildFile; productRef = 99EEFB1A2F9EE9E8005B3D75 /* TinfoilAI */; };
 		99F154692F4F60C500E9174E /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154682F4F60C500E9174E /* ClerkKit */; };
@@ -19,6 +20,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		99AB00022FABC00200ABC002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 99F153BA2F4F5F0200E9174E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 99AB00082FABC00800ABC008;
+			remoteInfo = TinfoilShareExtension;
+		};
 		992FC2992F532EA800699029 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 99F153BA2F4F5F0200E9174E /* Project object */;
@@ -30,10 +38,19 @@
 
 /* Begin PBXFileReference section */
 		992FC2952F532EA800699029 /* TinfoilChatTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TinfoilChatTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		99AB00032FABC00300ABC003 /* TinfoilShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TinfoilShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		99F153C22F4F5F0200E9174E /* TinfoilChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TinfoilChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		99AB00042FABC00400ABC004 /* Exceptions for "TinfoilShareExtension" folder in "TinfoilShareExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				TinfoilShareExtension.entitlements,
+			);
+			target = 99AB00082FABC00800ABC008 /* TinfoilShareExtension */;
+		};
 		99F1547E2F4F622400E9174E /* Exceptions for "TinfoilChat" folder in "TinfoilChat" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -49,6 +66,19 @@
 			path = TinfoilChatTests;
 			sourceTree = "<group>";
 		};
+		99AB00052FABC00500ABC005 /* TinfoilShareExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				99AB00042FABC00400ABC004 /* Exceptions for "TinfoilShareExtension" folder in "TinfoilShareExtension" target */,
+			);
+			path = TinfoilShareExtension;
+			sourceTree = "<group>";
+		};
+		99AB00062FABC00600ABC006 /* TinfoilShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TinfoilShared;
+			sourceTree = "<group>";
+		};
 		99F153C42F4F5F0200E9174E /* TinfoilChat */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -61,6 +91,13 @@
 
 /* Begin PBXFrameworksBuildPhase section */
 		992FC2922F532EA800699029 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		99AB00072FABC00700ABC007 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -90,6 +127,8 @@
 			isa = PBXGroup;
 			children = (
 				99F153C42F4F5F0200E9174E /* TinfoilChat */,
+				99AB00062FABC00600ABC006 /* TinfoilShared */,
+				99AB00052FABC00500ABC005 /* TinfoilShareExtension */,
 				992FC2962F532EA800699029 /* TinfoilChatTests */,
 				99F154802F4F632500E9174E /* Frameworks */,
 				99F153C32F4F5F0200E9174E /* Products */,
@@ -100,6 +139,7 @@
 			isa = PBXGroup;
 			children = (
 				99F153C22F4F5F0200E9174E /* TinfoilChat.app */,
+				99AB00032FABC00300ABC003 /* TinfoilShareExtension.appex */,
 				992FC2952F532EA800699029 /* TinfoilChatTests.xctest */,
 			);
 			name = Products;
@@ -138,6 +178,29 @@
 			productReference = 992FC2952F532EA800699029 /* TinfoilChatTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		99AB00082FABC00800ABC008 /* TinfoilShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 99AB000F2FABC00F00ABC00F /* Build configuration list for PBXNativeTarget "TinfoilShareExtension" */;
+			buildPhases = (
+				99AB000A2FABC00A00ABC00A /* Sources */,
+				99AB00072FABC00700ABC007 /* Frameworks */,
+				99AB00092FABC00900ABC009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				99AB00052FABC00500ABC005 /* TinfoilShareExtension */,
+				99AB00062FABC00600ABC006 /* TinfoilShared */,
+			);
+			name = TinfoilShareExtension;
+			packageProductDependencies = (
+			);
+			productName = TinfoilShareExtension;
+			productReference = 99AB00032FABC00300ABC003 /* TinfoilShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		99F153C12F4F5F0200E9174E /* TinfoilChat */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 99F153CD2F4F5F0300E9174E /* Build configuration list for PBXNativeTarget "TinfoilChat" */;
@@ -145,14 +208,17 @@
 				99F153BE2F4F5F0200E9174E /* Sources */,
 				99F153BF2F4F5F0200E9174E /* Frameworks */,
 				99F153C02F4F5F0200E9174E /* Resources */,
+				99AB000C2FABC00C00ABC00C /* Embed Foundation Extensions */,
 				99F1547D2F4F615600E9174E /* ShellScript */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				99AB000B2FABC00B00ABC00B /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				99F153C42F4F5F0200E9174E /* TinfoilChat */,
+				99AB00062FABC00600ABC006 /* TinfoilShared */,
 			);
 			name = TinfoilChat;
 			packageProductDependencies = (
@@ -184,6 +250,9 @@
 						CreatedOnToolsVersion = 26.2;
 						TestTargetID = 99F153C12F4F5F0200E9174E;
 					};
+					99AB00082FABC00800ABC008 = {
+						CreatedOnToolsVersion = 26.2;
+					};
 					99F153C12F4F5F0200E9174E = {
 						CreatedOnToolsVersion = 26.2;
 					};
@@ -213,6 +282,7 @@
 			projectRoot = "";
 			targets = (
 				99F153C12F4F5F0200E9174E /* TinfoilChat */,
+				99AB00082FABC00800ABC008 /* TinfoilShareExtension */,
 				992FC2942F532EA800699029 /* TinfoilChatTests */,
 			);
 		};
@@ -220,6 +290,13 @@
 
 /* Begin PBXResourcesBuildPhase section */
 		992FC2932F532EA800699029 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		99AB00092FABC00900ABC009 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -234,6 +311,20 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		99AB000C2FABC00C00ABC00C /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				99AB00012FABC00100ABC001 /* TinfoilShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
 		99F1547D2F4F615600E9174E /* ShellScript */ = {
@@ -265,6 +356,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		99AB000A2FABC00A00ABC00A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		99F153BE2F4F5F0200E9174E /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -279,6 +377,11 @@
 			isa = PBXTargetDependency;
 			target = 99F153C12F4F5F0200E9174E /* TinfoilChat */;
 			targetProxy = 992FC2992F532EA800699029 /* PBXContainerItemProxy */;
+		};
+		99AB000B2FABC00B00ABC00B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 99AB00082FABC00800ABC008 /* TinfoilShareExtension */;
+			targetProxy = 99AB00022FABC00200ABC002 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -326,6 +429,67 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TinfoilChat.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TinfoilChat";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		99AB000D2FABC00D00ABC00D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = TinfoilShareExtension/TinfoilShareExtension.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8KSH668LZT;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TinfoilShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.4.6;
+				PRODUCT_BUNDLE_IDENTIFIER = sh.tinfoil.TinfoilChat.ShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		99AB000E2FABC00E00ABC00E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = TinfoilShareExtension/TinfoilShareExtension.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8KSH668LZT;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TinfoilShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.4.6;
+				PRODUCT_BUNDLE_IDENTIFIER = sh.tinfoil.TinfoilChat.ShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
@@ -544,6 +708,15 @@
 			buildConfigurations = (
 				992FC29C2F532EA800699029 /* Debug */,
 				992FC29D2F532EA800699029 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		99AB000F2FABC00F00ABC00F /* Build configuration list for PBXNativeTarget "TinfoilShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				99AB000D2FABC00D00ABC00D /* Debug */,
+				99AB000E2FABC00E00ABC00E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -409,14 +409,14 @@ enum Constants {
     enum Attachments {
         static let maxImageDimension: CGFloat = 768
         static let imageCompressionQuality: CGFloat = 0.85
-        static let maxFileSizeBytes: Int64 = 20 * 1024 * 1024      // 20 MB
-        static let maxImageSizeBytes: Int64 = 10 * 1024 * 1024     // 10 MB
+        static let maxFileSizeBytes = SharedImportConfiguration.maximumDocumentSizeBytes
+        static let maxImageSizeBytes = SharedImportConfiguration.maximumImageSizeBytes
         static let previewThumbnailSize: CGFloat = 60
         static let thumbnailMaxDimension: CGFloat = 300
         static let previewMaxWidth: CGFloat = 200
         static let messageThumbnailSize: CGFloat = 80
         static let messageThumbnailColumns: Int = 3
-        static let supportedDocumentExtensions: Set<String> = ["pdf", "docx", "pptx", "xlsx", "txt", "md", "csv", "html", "json", "xml"]
+        static let supportedDocumentExtensions = SharedImportConfiguration.supportedDocumentExtensions
         static let supportedImageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic"]
         static let defaultImageMimeType = "image/jpeg"
     }
