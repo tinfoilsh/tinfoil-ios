@@ -52,14 +52,25 @@ private struct StatCardsView: View {
     let stats: [StatCardsWidget.Stat]
     let isDarkMode: Bool
 
+    private enum Layout {
+        static let gridSpacing: CGFloat = 8
+        static let contentSpacing: CGFloat = 6
+        static let cardPadding: CGFloat = 12
+    }
+
+    @State private var maximumCardContentHeight: CGFloat = 0
+
     private var columns: [GridItem] {
-        [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+        [
+            GridItem(.flexible(), spacing: Layout.gridSpacing),
+            GridItem(.flexible(), spacing: Layout.gridSpacing),
+        ]
     }
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 8) {
+        LazyVGrid(columns: columns, spacing: Layout.gridSpacing) {
             ForEach(Array(stats.enumerated()), id: \.offset) { _, stat in
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: Layout.contentSpacing) {
                     Text(stat.label)
                         .font(.caption.weight(.medium))
                         .foregroundColor(GenUIStyle.mutedText(isDarkMode))
@@ -80,11 +91,26 @@ private struct StatCardsView: View {
                         }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .genUICard(isDarkMode: isDarkMode, padding: 12)
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: StatCardHeightPreferenceKey.self,
+                            value: proxy.size.height
+                        )
+                    }
+                )
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: maximumCardContentHeight,
+                    alignment: .topLeading
+                )
+                .genUICard(isDarkMode: isDarkMode, padding: Layout.cardPadding)
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(statAccessibilityLabel(stat))
             }
+        }
+        .onPreferenceChange(StatCardHeightPreferenceKey.self) { height in
+            maximumCardContentHeight = height
         }
     }
 
@@ -96,5 +122,13 @@ private struct StatCardsView: View {
             label += ", trending down"
         }
         return label
+    }
+}
+
+struct StatCardHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
