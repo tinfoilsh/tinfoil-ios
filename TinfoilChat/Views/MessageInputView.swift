@@ -1,8 +1,28 @@
 import SwiftUI
 import UIKit
+import AVFoundation
 import PhotosUI
 import RevenueCat
 import RevenueCatUI
+
+enum CameraPermissionAction: Equatable {
+    case presentCamera
+    case requestAccess
+    case showSettingsAlert
+}
+
+func cameraPermissionAction(for status: AVAuthorizationStatus) -> CameraPermissionAction {
+    switch status {
+    case .authorized:
+        return .presentCamera
+    case .notDetermined:
+        return .requestAccess
+    case .denied, .restricted:
+        return .showSettingsAlert
+    @unknown default:
+        return .showSettingsAlert
+    }
+}
 
 /// Input area for typing messages, including attachments and send button
 struct MessageInputView: View {
@@ -49,6 +69,7 @@ struct MessageInputView: View {
 
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var pendingPickerAction: PickerAction?
+    @State private var showCameraPermissionAlert = false
 
     private enum PickerAction {
         case camera, photos, files
@@ -88,6 +109,14 @@ struct MessageInputView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("To use voice input, please enable microphone access in Settings.")
+            }
+            .alert("Camera Access Required", isPresented: $showCameraPermissionAlert) {
+                Button("Open Settings") {
+                    openSettings()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("To take photos, please enable camera access in Settings.")
             }
             .alert("Transcription Error", isPresented: showAudioError) {
                 Button("OK", role: .cancel) {}
@@ -134,7 +163,7 @@ struct MessageInputView: View {
                 guard let action = pendingPickerAction else { return }
                 pendingPickerAction = nil
                 switch action {
-                case .camera: viewModel.showCamera = true
+                case .camera: requestCameraAccess()
                 case .photos: viewModel.showPhotoPicker = true
                 case .files: viewModel.showDocumentPicker = true
                 }
@@ -620,6 +649,25 @@ struct MessageInputView: View {
             } else {
                 await viewModel.startAudioRecording()
             }
+        }
+    }
+
+    private func requestCameraAccess() {
+        switch cameraPermissionAction(for: AVCaptureDevice.authorizationStatus(for: .video)) {
+        case .presentCamera:
+            viewModel.showCamera = true
+        case .requestAccess:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        viewModel.showCamera = true
+                    } else {
+                        showCameraPermissionAlert = true
+                    }
+                }
+            }
+        case .showSettingsAlert:
+            showCameraPermissionAlert = true
         }
     }
 
