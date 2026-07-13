@@ -31,6 +31,12 @@ struct MessageInputView: View {
         static let defaultHeight: CGFloat = 72
         static let minimumHeight: CGFloat = 72
         static let maximumHeight: CGFloat = 180
+        /// Drafts at or beyond these bounds cannot fit within `maximumHeight`
+        /// at any supported text size, so the editor skips the full TextKit
+        /// measurement pass that `sizeThatFits` would otherwise run over the
+        /// entire draft on the main thread.
+        static let overflowCharacterCount = 2_000
+        static let overflowNewlineCount = 10
     }
     
     @Binding var messageText: String
@@ -959,8 +965,7 @@ struct CustomTextEditor: UIViewRepresentable {
         uiView.isEditable = true
         context.coordinator.refreshAccessibility(uiView)
 
-        let size = uiView.sizeThatFits(CGSize(width: uiView.frame.width, height: CGFloat.greatestFiniteMagnitude))
-        let newHeight = min(MessageInputView.Layout.maximumHeight, max(MessageInputView.Layout.minimumHeight, size.height))
+        let newHeight = context.coordinator.measuredHeight(for: uiView)
 
         if textHeight != newHeight {
             DispatchQueue.main.async {
@@ -977,9 +982,47 @@ struct CustomTextEditor: UIViewRepresentable {
         var parent: CustomTextEditor
         var isEditing = false
         var hasFocusedFromFlag = false
+        private var lastMeasurement: (text: String, width: CGFloat, pointSize: CGFloat, height: CGFloat)?
 
         init(_ parent: CustomTextEditor) {
             self.parent = parent
+        }
+
+        /// Returns the editor height for the current draft, avoiding repeated
+        /// full-document TextKit layout: results are cached per text/width/font
+        /// so keyboard-driven SwiftUI updates don't re-measure an unchanged
+        /// draft, and drafts that trivially exceed the height cap skip
+        /// measurement entirely.
+        func measuredHeight(for textView: UITextView) -> CGFloat {
+            let text = textView.text ?? ""
+            let width = textView.frame.width
+            let pointSize = textView.font?.pointSize ?? 0
+
+            if let last = lastMeasurement,
+               last.text == text, last.width == width, last.pointSize == pointSize {
+                return last.height
+            }
+
+            let height: CGFloat
+            if Self.exceedsMaximumHeight(text) {
+                height = MessageInputView.Layout.maximumHeight
+            } else {
+                let size = textView.sizeThatFits(CGSize(width: width, height: CGFloat.greatestFiniteMagnitude))
+                height = min(MessageInputView.Layout.maximumHeight, max(MessageInputView.Layout.minimumHeight, size.height))
+            }
+
+            lastMeasurement = (text, width, pointSize, height)
+            return height
+        }
+
+        private static func exceedsMaximumHeight(_ text: String) -> Bool {
+            if text.count >= MessageInputView.Layout.overflowCharacterCount { return true }
+            var newlines = 0
+            for character in text where character == "\n" {
+                newlines += 1
+                if newlines >= MessageInputView.Layout.overflowNewlineCount { return true }
+            }
+            return false
         }
 
         /// Keeps VoiceOver from reading the gray placeholder as if it were
@@ -1038,8 +1081,7 @@ struct CustomTextEditor: UIViewRepresentable {
                 parent.text = textView.text
                 
                 // Calculate and update the height
-                let size = textView.sizeThatFits(CGSize(width: textView.frame.width, height: CGFloat.greatestFiniteMagnitude))
-                let newHeight = min(MessageInputView.Layout.maximumHeight, max(MessageInputView.Layout.minimumHeight, size.height))
+                let newHeight = measuredHeight(for: textView)
                 
                 if parent.textHeight != newHeight {
                     parent.textHeight = newHeight
