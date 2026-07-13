@@ -3243,7 +3243,7 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Saves a single chat to per-chat file storage and triggers cloud backup
-    private func saveChat(_ chat: Chat) {
+    private func saveChat(_ chat: Chat, shouldBackup: Bool = true) {
         guard !chat.isTemporary else { return }
         guard hasChatAccess else { return }
         guard !chat.messages.isEmpty || chat.decryptionFailed else { return }
@@ -3257,7 +3257,7 @@ class ChatViewModel: ObservableObject {
 
         // Trigger cloud backup if cloud sync is enabled, the chat is not local-only,
         // has messages, and no active stream.
-        if SettingsManager.shared.isCloudSyncEnabled && !chat.isLocalOnly && !chat.messages.isEmpty && !chat.hasActiveStream {
+        if shouldBackup && SettingsManager.shared.isCloudSyncEnabled && !chat.isLocalOnly && !chat.messages.isEmpty && !chat.hasActiveStream {
             let saveTask = pendingSaveTask
             Task {
                 await saveTask?.value
@@ -3335,7 +3335,7 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Handle sign-out by clearing current chats but preserving them in storage
-    func handleSignOut() {
+    func handleSignOut() async {
         // Allow a new sign-in flow after sign-out
         isSignInInProgress = false
         hasPerformedInitialSync = false
@@ -3349,15 +3349,15 @@ class ChatViewModel: ObservableObject {
         // so that hasChatAccess/currentUserId are available for the save.
         if hasChatAccess {
             for chat in localChats where !chat.messages.isEmpty {
-                saveChat(chat)
+                saveChat(chat, shouldBackup: false)
             }
             if let chat = currentChat, !chat.messages.isEmpty {
-                saveChat(chat)
+                saveChat(chat, shouldBackup: false)
             }
         }
 
         // Clear sync caches so stale state doesn't leak into the next session
-        cloudSync.clearSyncStatus()
+        await cloudSync.clearSyncStatus()
         DeletedChatsTracker.shared.clear()
         CloudKeyAuthorizationStore.shared.clearAuthorization(userId: currentUserId)
 

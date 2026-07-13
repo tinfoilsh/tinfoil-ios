@@ -334,9 +334,10 @@ enum Constants {
         enum Sync {
             static let chatStatus = "tinfoil-sync-chat-status"
             static let allChatsStatus = "tinfoil-sync-all-chats-status"
+            static let projectChatStatusPrefix = "tinfoil-sync-project-chat-status-"
 
             static func projectChatStatus(projectId: String) -> String {
-                "tinfoil-sync-project-chat-status-\(projectId)"
+                "\(projectChatStatusPrefix)\(projectId)"
             }
             static func lastSyncDate(userId: String) -> String {
                 "tinfoil-sync-last-sync-date-\(userId)"
