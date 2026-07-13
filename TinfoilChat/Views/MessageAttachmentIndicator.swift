@@ -209,6 +209,7 @@ struct ImageViewerOverlay: View {
     @State private var currentIndex: Int
     @State private var dragOffset: CGFloat = 0
     @State private var isDraggingVertically = false
+    @State private var isImageZoomed = false
 
     init(images: [Attachment], initialIndex: Int, onDismiss: @escaping () -> Void) {
         self.images = images
@@ -227,16 +228,24 @@ struct ImageViewerOverlay: View {
 
             TabView(selection: $currentIndex) {
                 ForEach(Array(images.enumerated()), id: \.element.id) { index, attachment in
-                    ZoomableImagePage(attachment: attachment)
-                        .tag(index)
+                    ZoomableImagePage(
+                        attachment: attachment,
+                        isZoomed: $isImageZoomed,
+                        isActive: index == currentIndex
+                    )
+                    .tag(index)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: images.count > 1 ? .automatic : .never))
             .ignoresSafeArea()
+            .onChange(of: currentIndex) { _, _ in
+                isImageZoomed = false
+            }
             .offset(y: dragOffset)
             .simultaneousGesture(
                 DragGesture(minimumDistance: 20)
                     .onChanged { value in
+                        guard !isImageZoomed else { return }
                         if !isDraggingVertically {
                             isDraggingVertically = abs(value.translation.height) > abs(value.translation.width)
                         }
@@ -332,8 +341,12 @@ private extension Array {
 
 struct ZoomableImagePage: View {
     let attachment: Attachment
+    @Binding var isZoomed: Bool
+    let isActive: Bool
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
     @State private var decodedImage: UIImage?
 
     private var fullSizeBase64: String? {
@@ -352,6 +365,7 @@ struct ZoomableImagePage: View {
                     .aspectRatio(contentMode: .fit)
                     .accessibilityLabel("Image")
                     .scaleEffect(scale)
+                    .offset(offset)
                     .gesture(
                         MagnifyGesture()
                             .onChanged { value in
@@ -360,12 +374,22 @@ struct ZoomableImagePage: View {
                             .onEnded { _ in
                                 lastScale = max(1.0, scale)
                                 scale = lastScale
+                                if lastScale == 1.0 {
+                                    resetPan()
+                                }
+                                isZoomed = lastScale > 1.0
                             }
                     )
+                    // Pan only while zoomed, so an un-zoomed image never
+                    // steals the TabView's horizontal page gesture or the
+                    // overlay's swipe-down-to-dismiss.
+                    .highPriorityGesture(isZoomed ? panWhenZoomed : nil)
                     .onTapGesture(count: 2) {
                         withAnimation {
                             scale = 1.0
                             lastScale = 1.0
+                            resetPan()
+                            isZoomed = false
                         }
                     }
             } else {
@@ -377,6 +401,13 @@ struct ZoomableImagePage: View {
                         .foregroundStyle(.white.opacity(0.5))
                         .font(.caption)
                 }
+            }
+        }
+        .onChange(of: isActive) { _, active in
+            if !active {
+                scale = 1.0
+                lastScale = 1.0
+                resetPan()
             }
         }
         .task(id: cacheKey) {
@@ -393,5 +424,23 @@ struct ZoomableImagePage: View {
             guard !Task.isCancelled else { return }
             decodedImage = await Base64ImageDecoder.decode(base64: fullSizeBase64, cacheKey: cacheKey)
         }
+    }
+
+    private var panWhenZoomed: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                offset = CGSize(
+                    width: lastOffset.width + value.translation.width,
+                    height: lastOffset.height + value.translation.height
+                )
+            }
+            .onEnded { _ in
+                lastOffset = offset
+            }
+    }
+
+    private func resetPan() {
+        offset = .zero
+        lastOffset = .zero
     }
 }
