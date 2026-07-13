@@ -448,7 +448,7 @@ struct LaTeXMarkdownView: View, Equatable {
     /// Parse content into segments of markdown and LaTeX
     private nonisolated static func parseContent(_ content: String) -> [ContentSegment] {
         if content.count > Constants.Rendering.maxFullParsingCharacters {
-            return [ContentSegment(id: "md_full_\(content.hashValue)", kind: .markdown(content))]
+            return splitLargeContent(content)
         }
 
         let nsContent = content as NSString
@@ -586,6 +586,47 @@ struct LaTeXMarkdownView: View, Equatable {
         return segments
     }
 
+    /// Segments content that exceeds the full-parsing cap. LaTeX and table
+    /// parsing is still skipped, but the text is split at paragraph
+    /// boundaries so no single segment forces an unbounded CoreText
+    /// measurement pass. Fenced code blocks are kept whole so splitting
+    /// never breaks a fence open.
+    private nonisolated static func splitLargeContent(_ content: String) -> [ContentSegment] {
+        var segments: [ContentSegment] = []
+
+        func appendMarkdown(_ text: String, at location: Int) {
+            guard !text.isEmpty else { return }
+            let baseId = "md_\(location)_\(text.hashValue)"
+            if text.count > Constants.Rendering.maxMarkdownSegmentCharacters {
+                segments.append(contentsOf: splitMarkdownSegment(text, baseId: baseId))
+            } else {
+                segments.append(ContentSegment(id: baseId, kind: .markdown(text)))
+            }
+        }
+
+        let nsContent = content as NSString
+        let fullRange = NSRange(location: 0, length: nsContent.length)
+        let codeMatches = Self.codeBlockRegex?.matches(in: content, options: [], range: fullRange) ?? []
+
+        var lastIndex = content.startIndex
+        for match in codeMatches {
+            guard let swiftRange = Range(match.range, in: content) else { continue }
+            if lastIndex < swiftRange.lowerBound {
+                appendMarkdown(String(content[lastIndex..<swiftRange.lowerBound]), at: match.range.location)
+            }
+            segments.append(ContentSegment(
+                id: "md_code_\(match.range.location)",
+                kind: .markdown(String(content[swiftRange]))
+            ))
+            lastIndex = swiftRange.upperBound
+        }
+        if lastIndex < content.endIndex {
+            appendMarkdown(String(content[lastIndex...]), at: nsContent.length)
+        }
+
+        return segments
+    }
+
     private nonisolated static func splitMarkdownSegment(_ text: String, baseId: String) -> [ContentSegment] {
         let paragraphs = text.components(separatedBy: "\n\n")
         var result: [ContentSegment] = []
@@ -613,7 +654,43 @@ struct LaTeXMarkdownView: View, Equatable {
             ))
         }
 
-        return result
+        // A single paragraph with no blank lines can still exceed the cap;
+        // hard-split it so no segment stays unbounded.
+        return result.flatMap { segment -> [ContentSegment] in
+            guard case .markdown(let text) = segment.kind,
+                  text.count > Constants.Rendering.maxMarkdownSegmentCharacters else {
+                return [segment]
+            }
+            return hardSplitMarkdown(text, baseId: segment.id)
+        }
+    }
+
+    /// Splits markdown into pieces no longer than the segment cap, preferring
+    /// the last newline before the cap so lines stay intact.
+    private nonisolated static func hardSplitMarkdown(_ text: String, baseId: String) -> [ContentSegment] {
+        let cap = Constants.Rendering.maxMarkdownSegmentCharacters
+        var pieces: [ContentSegment] = []
+        var remainder = Substring(text)
+        var subIndex = 0
+
+        while remainder.count > cap {
+            let capIndex = remainder.index(remainder.startIndex, offsetBy: cap)
+            let window = remainder[..<capIndex]
+            let splitIndex = window.lastIndex(of: "\n").map { remainder.index(after: $0) } ?? capIndex
+            pieces.append(ContentSegment(
+                id: "\(baseId)_hard_\(subIndex)",
+                kind: .markdown(String(remainder[..<splitIndex]))
+            ))
+            subIndex += 1
+            remainder = remainder[splitIndex...]
+        }
+        if !remainder.isEmpty {
+            pieces.append(ContentSegment(
+                id: "\(baseId)_hard_\(subIndex)",
+                kind: .markdown(String(remainder))
+            ))
+        }
+        return pieces
     }
 
     private nonisolated static func sanitizeLatex(_ latex: String) -> String {
