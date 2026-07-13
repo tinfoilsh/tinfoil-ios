@@ -11,7 +11,6 @@ import SwiftUI
 @preconcurrency import TinfoilAI
 import OpenAI
 import AVFoundation
-import os
 
 enum ChatStorageTab: String {
     case cloud
@@ -1836,51 +1835,39 @@ class ChatViewModel: ObservableObject {
                     autoCandidates: modelSelection.autoCandidates
                 )
 
-                // Web search state tracking
-                var collectedSources: [WebSearchSource] = []
-                var collectedAnnotations: [Annotation] = []
-                let isWebSearchEnabled = self.isWebSearchEnabled
-                // Track whether web search started before thinking (shared across callback and streaming loop)
-                let webSearchStartedFlag = OSAllocatedUnfairLock(initialState: false)
+                let hapticEnabled = SettingsManager.shared.hapticFeedbackEnabled
+                let hapticGenerator: UIImpactFeedbackGenerator? = hapticEnabled
+                    ? UIImpactFeedbackGenerator(style: .light)
+                    : nil
+                hapticGenerator?.prepare()
 
-                // Ordered content segments (text + inline event refs) that preserve
-                // the exact order in which events arrived relative to streamed text.
-                // Accessed only on the main actor (this Task and the
-                // applyWebSearchCallEvent closure both run MainActor-isolated).
-                var segments: [MessageSegment] = []
-                var webSearches: [WebSearchInstance] = []
-                var nextSearchId = 0
-
-                let allocateSearchId = { () -> String in
-                    defer { nextSearchId += 1 }
-                    return "ws-\(nextSearchId)"
+                // Carry over any partial message state (a retry after a
+                // mid-stream auth refresh resumes into the same message).
+                var initialResponseContent = ""
+                var initialThoughts: String? = nil
+                var initialGenerationTime: TimeInterval? = nil
+                var initialIsThinking = false
+                if let chat = self.currentChat,
+                   !chat.messages.isEmpty,
+                   let lastIndex = chat.messages.indices.last {
+                    initialResponseContent = chat.messages[lastIndex].content
+                    initialThoughts = chat.messages[lastIndex].thoughts
+                    initialGenerationTime = chat.messages[lastIndex].generationTimeSeconds
+                    initialIsThinking = chat.messages[lastIndex].isThinking
                 }
 
-                let appendText: (String) -> Void = { text in
-                    guard !text.isEmpty else { return }
-                    if case .text(let existing) = segments.last {
-                        segments[segments.count - 1] = .text(existing + text)
-                    } else {
-                        segments.append(.text(text))
-                    }
-                }
-
-                let upsertWebSearch: (WebSearchInstance) -> Void = { instance in
-                    if let idx = webSearches.firstIndex(where: { $0.id == instance.id }) {
-                        webSearches[idx] = instance
-                    } else {
-                        webSearches.append(instance)
-                        segments.append(.webSearch(searchId: instance.id))
-                    }
-                }
-
-                let findLatestSearchInstance = { (eventId: String?) -> WebSearchInstance? in
-                    if let eventId = eventId,
-                       let hit = webSearches.first(where: { $0.id == eventId }) {
-                        return hit
-                    }
-                    return webSearches.last
-                }
+                // All per-chunk parsing state (event markers, chunkers, the
+                // thinking state machine, tool calls, web search bookkeeping)
+                // lives in the processor so the stream can be consumed off
+                // the main actor.
+                let processor = StreamingResponseProcessor(
+                    isWebSearchEnabled: self.isWebSearchEnabled,
+                    hapticEnabled: hapticEnabled,
+                    responseContent: initialResponseContent,
+                    currentThoughts: initialThoughts,
+                    generationTimeSeconds: initialGenerationTime,
+                    isInThinkingMode: initialIsThinking
+                )
 
                 // Web search progress now rides inline with the model's
                 // content as `<tinfoil-event>` markers (opted into via
@@ -1910,7 +1897,7 @@ class ChatViewModel: ObservableObject {
                                 chat.messages[lastIndex].urlFetches.append(
                                     URLFetchState(id: fetchId, url: url, status: .fetching)
                                 )
-                                segments.append(.urlFetch(fetchId: fetchId))
+                                processor.appendURLFetchSegment(fetchId)
                             }
                         case .completed:
                             if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
@@ -1925,7 +1912,7 @@ class ChatViewModel: ObservableObject {
                                 chat.messages[lastIndex].urlFetches[idx].status = .blocked
                             }
                         }
-                        chat.messages[lastIndex].segments = segments
+                        chat.messages[lastIndex].segments = processor.currentSegments
                         self.updateChat(chat, throttleForStreaming: true)
                         return
                     }
@@ -1933,9 +1920,9 @@ class ChatViewModel: ObservableObject {
                     let existingSources = chat.messages[lastIndex].webSearchState?.sources ?? []
                     switch event.status {
                     case .inProgress, .searching:
-                        webSearchStartedFlag.withLock { $0 = true }
-                        let id = event.itemId ?? allocateSearchId()
-                        upsertWebSearch(
+                        processor.markWebSearchStarted()
+                        let id = event.itemId ?? processor.allocateSearchId()
+                        processor.upsertWebSearch(
                             WebSearchInstance(
                                 id: id,
                                 query: event.action?.query,
@@ -1955,7 +1942,7 @@ class ChatViewModel: ObservableObject {
                             guard let url = source.url, !url.isEmpty else { return nil }
                             return WebSearchSource(title: source.title ?? url, url: url)
                         }
-                        if let existing = findLatestSearchInstance(event.itemId) {
+                        if let existing = processor.findSearchInstance(matching: event.itemId) {
                             // Preserve any sources already collected for this
                             // instance when the completion payload doesn't
                             // carry a non-empty sources list of its own.
@@ -1965,7 +1952,7 @@ class ChatViewModel: ObservableObject {
                             } else {
                                 mergedSources = existing.sources
                             }
-                            upsertWebSearch(
+                            processor.upsertWebSearch(
                                 WebSearchInstance(
                                     id: existing.id,
                                     query: existing.query,
@@ -1990,8 +1977,8 @@ class ChatViewModel: ObservableObject {
                             guard let url = source.url, !url.isEmpty else { return nil }
                             return WebSearchSource(title: source.title ?? url, url: url)
                         } ?? []
-                        if let existing = findLatestSearchInstance(event.itemId) {
-                            upsertWebSearch(
+                        if let existing = processor.findSearchInstance(matching: event.itemId) {
+                            processor.upsertWebSearch(
                                 WebSearchInstance(
                                     id: existing.id,
                                     query: existing.query,
@@ -2004,9 +1991,9 @@ class ChatViewModel: ObservableObject {
                         chat.messages[lastIndex].webSearchState?.status = .failed
                         self.webSearchSummary = ""
                     case .blocked:
-                        let existing = findLatestSearchInstance(event.itemId)
-                        let id = existing?.id ?? event.itemId ?? allocateSearchId()
-                        upsertWebSearch(
+                        let existing = processor.findSearchInstance(matching: event.itemId)
+                        let id = existing?.id ?? event.itemId ?? processor.allocateSearchId()
+                        processor.upsertWebSearch(
                             WebSearchInstance(
                                 id: id,
                                 query: event.action?.query ?? existing?.query,
@@ -2022,513 +2009,94 @@ class ChatViewModel: ObservableObject {
                         )
                         self.webSearchSummary = ""
                     }
-                    chat.messages[lastIndex].segments = segments
-                    chat.messages[lastIndex].webSearches = webSearches
+                    chat.messages[lastIndex].segments = processor.currentSegments
+                    chat.messages[lastIndex].webSearches = processor.currentWebSearches
                     self.updateChat(chat, throttleForStreaming: true)
                 }
 
-                // Stateful parser for `<tinfoil-event>` markers embedded
-                // in the content stream. `isWebSearchEnabled` has no
-                // effect on parsing: when the router isn't asked to
-                // emit markers it sends none, so the parser is a pure
-                // pass-through.
-                var tinfoilEventParser = TinfoilEventParser()
+                // Consume the stream off the main actor: all per-chunk parsing
+                // happens in the processor on this detached task, and the main
+                // actor is only hopped to for rare event application, haptics,
+                // and the throttled snapshot updates.
+                let consumeTask = Task.detached(priority: .userInitiated) { [weak self] in
+                    var lastUIUpdateTime = Date.distantPast
+                    let uiUpdateInterval: TimeInterval = Constants.Streaming.uiUpdateInterval
+                    // Latest thoughts awaiting a summary request; forwarded with
+                    // the next throttled snapshot so summary generation does not
+                    // force a main-actor hop per reasoning chunk.
+                    var pendingSummaryThoughts: String? = nil
 
-                // GenUI tool-call accumulator. The OpenAI streaming
-                // protocol sends a sequence of partial deltas keyed by
-                // `index`; each delta may carry an `id`, a `name`, and
-                // an `arguments` fragment. We coalesce them by index
-                // and write both:
-                //   - the flat `Message.toolCalls` array (mirrored from
-                //     webapp `MessageAssembler.toMessage`), and
-                //   - the canonical `Message.timeline` tool_call blocks
-                //     that the webapp uses to track resolution state.
-                var streamingToolCalls: [Int: GenUIToolCall] = [:]
-                var timelineBlocks: [JSONValue] = []
-                let appendToolCallSegment: (String) -> Void = { toolCallId in
-                    if !segments.contains(where: {
-                        if case .toolCall(let id) = $0, id == toolCallId { return true }
-                        return false
-                    }) {
-                        segments.append(.toolCall(toolCallId: toolCallId))
-                    }
-                }
+                    for try await chunk in stream {
+                        if Task.isCancelled { break }
 
-                var thinkStartTime: Date? = nil
-                var hasThinkTag = false
-                var thoughtsBuffer = ""
-                var isInThinkingMode = false
-                var isUsingReasoningFormat = false
-                // True while thinking was closed by answer content (not by
-                // a tool boundary). Reasoning arriving in that state is the
-                // late tail of the previous thought — upstreams race the
-                // think-close boundary so the final reasoning fragment can
-                // land after content started — and is merged into the
-                // existing thoughts without re-entering thinking mode.
-                var thinkingClosedByContent = false
-                var didRecordWebSearchBeforeThinking = false
-                var webSearchBeforeThinking: Bool? = nil
-                var initialContentBuffer = ""
-                var isFirstChunk = true
-                var responseContent = ""
-                var currentThoughts: String? = nil
-                var generationTimeSeconds: TimeInterval? = nil
-                let hapticEnabled = SettingsManager.shared.hapticFeedbackEnabled
-                var hapticGenerator: UIImpactFeedbackGenerator?
-                var lastHapticTime = Date.distantPast
-                let minHapticInterval: TimeInterval = 0.1
-                let chunker = StreamingMarkdownChunker()
-                let thinkingChunker = ThinkingTextChunker()
-                var hapticChunkCount = 0
-                var hasStartedResponse = false
-                var lastUIUpdateTime = Date.distantPast
-                let uiUpdateInterval: TimeInterval = Constants.Streaming.uiUpdateInterval
+                        let parsed = processor.parse(chunk)
 
-                await MainActor.run {
-                    if let chat = self.currentChat,
-                       !chat.messages.isEmpty,
-                       let lastIndex = chat.messages.indices.last {
-                        responseContent = chat.messages[lastIndex].content
-                        currentThoughts = chat.messages[lastIndex].thoughts
-                        generationTimeSeconds = chat.messages[lastIndex].generationTimeSeconds
-                        isInThinkingMode = chat.messages[lastIndex].isThinking
-                    }
-                    if hapticEnabled {
-                        hapticGenerator = UIImpactFeedbackGenerator(style: .light)
-                        hapticGenerator?.prepare()
-                    }
-                }
-
-                for try await chunk in stream {
-                    if Task.isCancelled { break }
-
-                    // Inline haptic feedback
-                    if hapticEnabled, let generator = hapticGenerator {
-                        if isInThinkingMode {
-                            if hapticChunkCount < 5 {
-                                let now = Date()
-                                if now.timeIntervalSince(lastHapticTime) >= minHapticInterval {
-                                    generator.impactOccurred(intensity: 0.5)
-                                    lastHapticTime = now
-                                    hapticChunkCount += 1
-                                }
-                            }
-                        } else {
-                            if !hasStartedResponse {
-                                hasStartedResponse = true
-                                hapticChunkCount = 0
-                            }
-                            if hapticChunkCount < 5 {
-                                let now = Date()
-                                if now.timeIntervalSince(lastHapticTime) >= minHapticInterval {
-                                    generator.impactOccurred(intensity: 0.5)
-                                    lastHapticTime = now
-                                    hapticChunkCount += 1
-                                }
-                            }
-                        }
-                    }
-
-                    var content = chunk.choices.first?.delta.content ?? ""
-                    // Strip router-emitted `<tinfoil-event>` markers
-                    // from the delta before any downstream logic sees
-                    // it, and dispatch the decoded events so the same
-                    // UI surfaces the legacy callback populated. The
-                    // enclosing class is @MainActor and Task inherits
-                    // that isolation, so applyWebSearchCallEvent runs
-                    // synchronously on the main actor here.
-                    if !content.isEmpty {
-                        let parsed = tinfoilEventParser.consume(content)
+                        // Apply decoded marker events on the main actor before
+                        // processing the chunk's text. The loop suspends until
+                        // each event lands, so event handling stays ordered
+                        // relative to the streamed text around it and the
+                        // processor is never touched concurrently.
                         for event in parsed.events {
-                            applyWebSearchCallEvent(event)
+                            await applyWebSearchCallEvent(event)
                         }
-                        if !parsed.events.isEmpty {
-                            thinkingClosedByContent = false
-                        }
-                        content = parsed.text
-                    }
-                    let hasReasoningContent = chunk.choices.first?.delta.reasoning != nil
-                    let reasoningContent = chunk.choices.first?.delta.reasoning ?? ""
-                    var didMutateState = false
 
-                    // Accumulate GenUI tool-call deltas. Mirrors the
-                    // webapp's normalizer: deltas may carry only
-                    // partial fragments and we merge them by index.
-                    // Each merged tool call is also reflected on the
-                    // canonical `timeline` so the wire format matches
-                    // `TimelineToolCallBlock` exactly.
-                    if let deltas = chunk.choices.first?.delta.toolCalls {
-                        thinkingClosedByContent = false
-                        for delta in deltas {
-                            let index = delta.index
-                            let existing = streamingToolCalls[index]
-                            let mergedId = delta.id ?? existing?.id ?? ""
-                            let mergedName = delta.function?.name ?? existing?.name ?? ""
-                            let mergedArgs = (existing?.arguments ?? "") + (delta.function?.arguments ?? "")
-                            let updated = GenUIToolCall(
-                                id: mergedId,
-                                name: mergedName,
-                                arguments: mergedArgs
-                            )
-                            streamingToolCalls[index] = updated
-                            if !mergedId.isEmpty {
-                                appendToolCallSegment(mergedId)
-                                TimelineToolCalls.upsertStreamingBlock(
-                                    in: &timelineBlocks,
-                                    toolCallId: mergedId,
-                                    name: mergedName,
-                                    arguments: mergedArgs
-                                )
-                            }
-                            didMutateState = true
-                        }
-                    }
+                        let outcome = processor.process(parsed)
 
-                    // Collect sources from annotations (no deduplication to preserve citation index mapping)
-                    if isWebSearchEnabled, let annotations = chunk.choices.first?.delta.annotations {
-                        var didCollectNewSource = false
-                        for annotation in annotations where annotation.type == "url_citation" {
-                            if let citation = annotation.urlCitation {
-                                let source = WebSearchSource(
-                                    title: citation.title ?? citation.url,
-                                    url: citation.url
-                                )
-                                collectedSources.append(source)
-                                collectedAnnotations.append(
-                                    Annotation(
-                                        type: "url_citation",
-                                        url_citation: URLCitation(
-                                            title: citation.title ?? citation.url,
-                                            url: citation.url,
-                                            start_index: nil,
-                                            end_index: nil
-                                        )
-                                    )
-                                )
-                                didCollectNewSource = true
-                                didMutateState = true
+                        if outcome.shouldTickHaptic {
+                            await MainActor.run {
+                                hapticGenerator?.impactOccurred(intensity: 0.5)
                             }
                         }
-                        // Mirror the running sources onto the most recent WebSearchInstance.
-                        // When the router sent `.completed` before any sources, we held the
-                        // instance at `.searching` to avoid a zero-source completed pill;
-                        // promote it now that a source has arrived.
-                        if didCollectNewSource, let idx = webSearches.indices.last {
-                            let lastSearch = webSearches[idx]
-                            let promotedStatus: WebSearchStatus = lastSearch.status == .searching
-                                ? .completed
-                                : lastSearch.status
-                            webSearches[idx] = WebSearchInstance(
-                                id: lastSearch.id,
-                                query: lastSearch.query,
-                                status: promotedStatus,
-                                sources: collectedSources,
-                                reason: lastSearch.reason
-                            )
-                        }
-                    }
 
-                    if hasReasoningContent && !isUsingReasoningFormat && !isInThinkingMode {
-                        isUsingReasoningFormat = true
-                        isInThinkingMode = true
-                        isFirstChunk = false
-                        thinkingClosedByContent = false
-                        thinkStartTime = Date()
-                        if !didRecordWebSearchBeforeThinking {
-                            didRecordWebSearchBeforeThinking = true
-                            webSearchBeforeThinking = webSearchStartedFlag.withLock { $0 }
-                        }
-                        thoughtsBuffer = reasoningContent
-                        thinkingChunker.appendToken(reasoningContent)
-                        currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                        didMutateState = true
-                        // Reset summary service for new thinking session
-                        Task { @MainActor in
-                            ThinkingSummaryService.shared.reset()
-                        }
-                        // Some routers attach content to the same chunk as
-                        // the first reasoning delta; close the thinking
-                        // session and emit it so the text isn't dropped.
-                        if !content.isEmpty {
-                            if let startTime = thinkStartTime {
-                                generationTimeSeconds = Date().timeIntervalSince(startTime)
-                            }
-                            isInThinkingMode = false
-                            thinkingClosedByContent = true
-                            thinkStartTime = nil
-                            thinkingChunker.finalize()
-                            if responseContent.isEmpty {
-                                responseContent = content
-                            } else {
-                                responseContent += content
-                            }
-                            chunker.appendToken(content)
-                            appendText(content)
-                        }
-                    } else if isUsingReasoningFormat {
-                        if !reasoningContent.isEmpty {
-                            if isInThinkingMode {
-                                thoughtsBuffer += reasoningContent
-                                thinkingChunker.appendToken(reasoningContent)
-                                currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                                didMutateState = true
-                                // Generate thinking summary (reuse existing client)
-                                let currentThoughtsForSummary = thoughtsBuffer
-                                Task { @MainActor [weak self] in
-                                    ThinkingSummaryService.shared.generateSummary(thoughts: currentThoughtsForSummary) { summary in
-                                        self?.thinkingSummary = summary
-                                    }
+                        for action in outcome.summaryActions {
+                            switch action {
+                            case .beginThinkingSession:
+                                pendingSummaryThoughts = nil
+                                await MainActor.run {
+                                    ThinkingSummaryService.shared.reset()
                                 }
-                            } else if thinkingClosedByContent {
-                                // Late tail of the thought that content
-                                // already closed. Merge it into the existing
-                                // thoughts without re-entering thinking mode,
-                                // so the answer isn't split around a phantom
-                                // thought.
-                                thoughtsBuffer += reasoningContent
-                                thinkingChunker.appendTail(reasoningContent)
-                                currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                                didMutateState = true
-                            } else {
-                                // Reasoning resumed after a tool boundary —
-                                // a new thinking phase of the next model turn.
-                                isInThinkingMode = true
-                                thoughtsBuffer += reasoningContent
-                                thinkingChunker.appendToken(reasoningContent)
-                                currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                                didMutateState = true
-                                let currentThoughtsForSummary = thoughtsBuffer
-                                Task { @MainActor [weak self] in
-                                    ThinkingSummaryService.shared.generateSummary(thoughts: currentThoughtsForSummary) { summary in
-                                        self?.thinkingSummary = summary
-                                    }
-                                }
-                            }
-                        }
-
-                        if !content.isEmpty && isInThinkingMode {
-                            if let startTime = thinkStartTime {
-                                generationTimeSeconds = Date().timeIntervalSince(startTime)
-                            }
-                            isInThinkingMode = false
-                            thinkingClosedByContent = true
-                            thinkStartTime = nil
-                            thinkingChunker.finalize()
-                            currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                            // Clear thinking summary and cancel any in-flight summary generation
-                            Task { @MainActor [weak self] in
-                                ThinkingSummaryService.shared.reset()
-                                self?.thinkingSummary = ""
-                            }
-                            // Inline appendToResponse
-                            if responseContent.isEmpty {
-                                responseContent = content
-                            } else {
-                                responseContent += content
-                            }
-                            chunker.appendToken(content)
-                            appendText(content)
-                            didMutateState = true
-                        } else if !content.isEmpty {
-                            if responseContent.isEmpty {
-                                responseContent = content
-                            } else {
-                                responseContent += content
-                            }
-                            chunker.appendToken(content)
-                            appendText(content)
-                            isInThinkingMode = false
-                            didMutateState = true
-                        }
-                    } else if !isUsingReasoningFormat && !content.isEmpty {
-                        if isFirstChunk {
-                            initialContentBuffer += content
-
-                            if initialContentBuffer.contains("<think>") || initialContentBuffer.count > 5 {
-                                isFirstChunk = false
-                                let processContent = initialContentBuffer
-                                initialContentBuffer = ""
-
-                                if let thinkRange = processContent.range(of: "<think>") {
-                                    isInThinkingMode = true
-                                    hasThinkTag = true
-                                    thinkStartTime = Date()
-                                    if !didRecordWebSearchBeforeThinking {
-                                        didRecordWebSearchBeforeThinking = true
-                                        webSearchBeforeThinking = webSearchStartedFlag.withLock { $0 }
-                                    }
-                                    let afterThink = String(processContent[thinkRange.upperBound...])
-                                    thoughtsBuffer = afterThink
-                                    thinkingChunker.appendToken(afterThink)
-                                    currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                                    didMutateState = true
-                                    // Reset summary service for new thinking session
-                                    Task { @MainActor in
-                                        ThinkingSummaryService.shared.reset()
-                                    }
-                                } else {
-                                    if responseContent.isEmpty {
-                                        responseContent = processContent
-                                    } else {
-                                        responseContent += processContent
-                                    }
-                                    chunker.appendToken(processContent)
-                                    appendText(processContent)
-                                    didMutateState = true
-                                }
-                            }
-                        } else if hasThinkTag {
-                            if let endRange = content.range(of: "</think>") {
-                                let beforeEnd = String(content[..<endRange.lowerBound])
-                                thoughtsBuffer += beforeEnd
-                                thinkingChunker.appendToken(beforeEnd)
-                                thinkingChunker.finalize()
-                                currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                                isInThinkingMode = false
-                                // Clear thinking summary and cancel any in-flight summary generation
-                                Task { @MainActor [weak self] in
+                            case .endThinkingSession:
+                                pendingSummaryThoughts = nil
+                                await MainActor.run {
                                     ThinkingSummaryService.shared.reset()
                                     self?.thinkingSummary = ""
                                 }
+                            case .generate(let thoughts):
+                                pendingSummaryThoughts = thoughts
+                            }
+                        }
 
-                                let afterEnd = String(content[endRange.upperBound...])
-                                if responseContent.isEmpty {
-                                    responseContent = afterEnd
-                                } else {
-                                    responseContent += afterEnd
-                                }
-                                chunker.appendToken(afterEnd)
-                                appendText(afterEnd)
-
-                                if let startTime = thinkStartTime {
-                                    generationTimeSeconds = Date().timeIntervalSince(startTime)
-                                }
-
-                                hasThinkTag = false
-                                thinkStartTime = nil
-                                thoughtsBuffer = ""
-                                didMutateState = true
-                            } else {
-                                thoughtsBuffer += content
-                                thinkingChunker.appendToken(content)
-                                currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                                isInThinkingMode = true
-                                didMutateState = true
-                                // Generate thinking summary (reuse existing client)
-                                let currentThoughtsForSummary = thoughtsBuffer
-                                Task { @MainActor [weak self] in
-                                    ThinkingSummaryService.shared.generateSummary(thoughts: currentThoughtsForSummary) { summary in
+                        // Update UI at a throttled rate to avoid overwhelming SwiftUI with diffs
+                        let now = Date()
+                        if outcome.didMutateState && now.timeIntervalSince(lastUIUpdateTime) >= uiUpdateInterval {
+                            lastUIUpdateTime = now
+                            let snapshot = processor.snapshot()
+                            let thoughtsForSummary = pendingSummaryThoughts
+                            pendingSummaryThoughts = nil
+                            await MainActor.run {
+                                guard let self else { return }
+                                self.applyStreamSnapshot(snapshot, streamChatId: streamChatId)
+                                if let thoughtsForSummary {
+                                    ThinkingSummaryService.shared.generateSummary(thoughts: thoughtsForSummary) { [weak self] summary in
                                         self?.thinkingSummary = summary
                                     }
                                 }
                             }
-                        } else {
-                            if responseContent.isEmpty {
-                                responseContent = content
-                            } else {
-                                responseContent += content
-                            }
-                            chunker.appendToken(content)
-                            appendText(content)
-                            didMutateState = true
                         }
                     }
 
-                    // Update UI at a throttled rate to avoid overwhelming SwiftUI with diffs
-                    let now = Date()
-                    if didMutateState && now.timeIntervalSince(lastUIUpdateTime) >= uiUpdateInterval {
-                        lastUIUpdateTime = now
-                        // The streaming loop and `applyWebSearchCallEvent` both run on
-                        // MainActor, so this block executes synchronously with respect to
-                        // event dispatch; reading `segments` / `webSearches` directly here
-                        // is safe and gives the latest values (no stale snapshot race).
-                        guard self.currentChat?.id == streamChatId else { continue }
-                        guard var chat = self.currentChat,
-                              chat.hasActiveStream,
-                              !chat.messages.isEmpty,
-                              let lastIndex = chat.messages.indices.last else {
-                            continue
-                        }
-
-                        chat.messages[lastIndex].content = responseContent
-                        chat.messages[lastIndex].thoughts = currentThoughts
-                        chat.messages[lastIndex].thinkingChunks = thinkingChunker.getAllChunks()
-                        chat.messages[lastIndex].isThinking = isInThinkingMode
-                        chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
-                        chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
-                        chat.messages[lastIndex].segments = segments.isEmpty ? nil : segments
-                        chat.messages[lastIndex].webSearches = webSearches.isEmpty ? nil : webSearches
-                        chat.messages[lastIndex].toolCalls = streamingToolCalls
-                            .sorted(by: { $0.key < $1.key })
-                            .map { $0.value }
-                            .filter { !$0.id.isEmpty }
-                        if !timelineBlocks.isEmpty {
-                            chat.messages[lastIndex].timeline = timelineBlocks
-                        }
-
-                        // Merge collected sources into the message's current webSearchState.
-                        if !collectedSources.isEmpty {
-                            var searchState = chat.messages[lastIndex].webSearchState ?? WebSearchState(status: .searching)
-                            searchState.sources = collectedSources
-                            chat.messages[lastIndex].webSearchState = searchState
-                        }
-                        if !collectedAnnotations.isEmpty {
-                            chat.messages[lastIndex].annotations = collectedAnnotations
-                        }
-
-                        self.updateChat(chat, throttleForStreaming: true)
-                    }
+                    processor.finishStream()
                 }
 
-                // Drain any bytes the tinfoil-event parser is still
-                // holding back at the stream boundary. Anything in the
-                // tail is either an unterminated marker body (router
-                // bug) or a trailing open-tag prefix; surface it as
-                // plain assistant content minus any stray tag bytes so
-                // no characters the model emitted are silently lost.
-                let tinfoilEventTail = tinfoilEventParser.flush()
-                if !tinfoilEventTail.isEmpty {
-                    let sanitizedTail = tinfoilEventTail
-                        .replacingOccurrences(of: "<tinfoil-event>", with: "")
-                        .replacingOccurrences(of: "</tinfoil-event>", with: "")
-                    if !sanitizedTail.isEmpty {
-                        if responseContent.isEmpty {
-                            responseContent = sanitizedTail
-                        } else {
-                            responseContent += sanitizedTail
-                        }
-                        _ = chunker.appendToken(sanitizedTail)
-                        appendText(sanitizedTail)
-                    }
+                // Propagate cancellation from cancelGeneration (which cancels
+                // the outer task) into the detached stream consumer.
+                try await withTaskCancellationHandler {
+                    try await consumeTask.value
+                } onCancel: {
+                    consumeTask.cancel()
                 }
 
-                // Handle any remaining content when stream ends
-                if isInThinkingMode && !thoughtsBuffer.isEmpty {
-                    if isUsingReasoningFormat {
-                        currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                    } else {
-                        currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                        if responseContent.isEmpty {
-                            responseContent = thoughtsBuffer
-                            currentThoughts = nil
-                            appendText(thoughtsBuffer)
-                        }
-                    }
-                    if let startTime = thinkStartTime {
-                        generationTimeSeconds = Date().timeIntervalSince(startTime)
-                    }
-                    isInThinkingMode = false
-                } else if isFirstChunk && !initialContentBuffer.isEmpty {
-                    if responseContent.isEmpty {
-                        responseContent = initialContentBuffer
-                    } else {
-                        responseContent += initialContentBuffer
-                    }
-                    _ = chunker.appendToken(initialContentBuffer)
-                    appendText(initialContentBuffer)
-                    isInThinkingMode = false
-                    currentThoughts = nil
-                }
+                let finalSnapshot = processor.snapshot()
 
                 // Finalize message content and prepare chat for save
                 // Look up the streaming chat by ID, not self.currentChat, because
@@ -2556,54 +2124,32 @@ class ChatViewModel: ObservableObject {
                     self.thinkingSummary = ""
                     self.webSearchSummary = ""
                     if !chat.messages.isEmpty, let lastIndex = chat.messages.indices.last {
-                        chunker.finalize()
-                        thinkingChunker.finalize()
-                        chat.messages[lastIndex].content = responseContent
-                        chat.messages[lastIndex].thoughts = currentThoughts
-                        chat.messages[lastIndex].thinkingChunks = thinkingChunker.getAllChunks()
+                        chat.messages[lastIndex].content = finalSnapshot.responseContent
+                        chat.messages[lastIndex].thoughts = finalSnapshot.thoughts
+                        chat.messages[lastIndex].thinkingChunks = finalSnapshot.thinkingChunks
                         chat.messages[lastIndex].isThinking = false
-                        chat.messages[lastIndex].generationTimeSeconds = generationTimeSeconds
-                        chat.messages[lastIndex].thinkingDuration = generationTimeSeconds
-                        chat.messages[lastIndex].webSearchBeforeThinking = webSearchBeforeThinking
-                        chat.messages[lastIndex].contentChunks = chunker.getAllChunks()
-                        chat.messages[lastIndex].segments = segments.isEmpty ? nil : segments
-                        chat.messages[lastIndex].toolCalls = streamingToolCalls
-                            .sorted(by: { $0.key < $1.key })
-                            .map { $0.value }
-                            .filter { !$0.id.isEmpty }
-                        if !timelineBlocks.isEmpty {
-                            chat.messages[lastIndex].timeline = timelineBlocks
+                        chat.messages[lastIndex].generationTimeSeconds = finalSnapshot.generationTimeSeconds
+                        chat.messages[lastIndex].thinkingDuration = finalSnapshot.generationTimeSeconds
+                        chat.messages[lastIndex].webSearchBeforeThinking = finalSnapshot.webSearchBeforeThinking
+                        chat.messages[lastIndex].contentChunks = finalSnapshot.contentChunks
+                        chat.messages[lastIndex].segments = finalSnapshot.segments.isEmpty ? nil : finalSnapshot.segments
+                        chat.messages[lastIndex].toolCalls = finalSnapshot.toolCalls
+                        if !finalSnapshot.timelineBlocks.isEmpty {
+                            chat.messages[lastIndex].timeline = finalSnapshot.timelineBlocks
                         }
-                        // Mirror the final sources onto the most recent WebSearchInstance,
-                        // promoting it out of the `.searching` holding state if the router
-                        // sent `.completed` before any sources landed.
-                        if !collectedSources.isEmpty,
-                           let idx = webSearches.indices.last {
-                            let lastSearch = webSearches[idx]
-                            let finalStatus: WebSearchStatus = lastSearch.status == .searching
-                                ? .completed
-                                : lastSearch.status
-                            webSearches[idx] = WebSearchInstance(
-                                id: lastSearch.id,
-                                query: lastSearch.query,
-                                status: finalStatus,
-                                sources: collectedSources,
-                                reason: lastSearch.reason
-                            )
-                        }
-                        chat.messages[lastIndex].webSearches = webSearches.isEmpty ? nil : webSearches
+                        chat.messages[lastIndex].webSearches = finalSnapshot.webSearches.isEmpty ? nil : finalSnapshot.webSearches
                         // Merge final collected sources into the aggregate webSearchState,
                         // promoting the same way.
-                        if !collectedSources.isEmpty {
+                        if !finalSnapshot.collectedSources.isEmpty {
                             var searchState = chat.messages[lastIndex].webSearchState ?? WebSearchState(status: .searching)
-                            searchState.sources = collectedSources
+                            searchState.sources = finalSnapshot.collectedSources
                             if searchState.status == .searching {
                                 searchState.status = .completed
                             }
                             chat.messages[lastIndex].webSearchState = searchState
                         }
-                        if !collectedAnnotations.isEmpty {
-                            chat.messages[lastIndex].annotations = collectedAnnotations
+                        if !finalSnapshot.collectedAnnotations.isEmpty {
+                            chat.messages[lastIndex].annotations = finalSnapshot.collectedAnnotations
                         }
                     }
 
@@ -2736,6 +2282,44 @@ class ChatViewModel: ObservableObject {
         }
     }
     
+    /// Applies one throttled streaming snapshot to the streaming chat's last
+    /// message. Snapshots are immutable values produced by the stream task's
+    /// processor, so this never reads live parsing state.
+    private func applyStreamSnapshot(_ snapshot: StreamingResponseProcessor.Snapshot, streamChatId: String?) {
+        guard self.currentChat?.id == streamChatId else { return }
+        guard var chat = self.currentChat,
+              chat.hasActiveStream,
+              !chat.messages.isEmpty,
+              let lastIndex = chat.messages.indices.last else {
+            return
+        }
+
+        chat.messages[lastIndex].content = snapshot.responseContent
+        chat.messages[lastIndex].thoughts = snapshot.thoughts
+        chat.messages[lastIndex].thinkingChunks = snapshot.thinkingChunks
+        chat.messages[lastIndex].isThinking = snapshot.isThinking
+        chat.messages[lastIndex].generationTimeSeconds = snapshot.generationTimeSeconds
+        chat.messages[lastIndex].contentChunks = snapshot.contentChunks
+        chat.messages[lastIndex].segments = snapshot.segments.isEmpty ? nil : snapshot.segments
+        chat.messages[lastIndex].webSearches = snapshot.webSearches.isEmpty ? nil : snapshot.webSearches
+        chat.messages[lastIndex].toolCalls = snapshot.toolCalls
+        if !snapshot.timelineBlocks.isEmpty {
+            chat.messages[lastIndex].timeline = snapshot.timelineBlocks
+        }
+
+        // Merge collected sources into the message's current webSearchState.
+        if !snapshot.collectedSources.isEmpty {
+            var searchState = chat.messages[lastIndex].webSearchState ?? WebSearchState(status: .searching)
+            searchState.sources = snapshot.collectedSources
+            chat.messages[lastIndex].webSearchState = searchState
+        }
+        if !snapshot.collectedAnnotations.isEmpty {
+            chat.messages[lastIndex].annotations = snapshot.collectedAnnotations
+        }
+
+        self.updateChat(chat, throttleForStreaming: true)
+    }
+
     /// Formats a user-friendly error message from the caught error
     private func formatUserFriendlyError(_ error: Error) -> String {
         let nsError = error as NSError
