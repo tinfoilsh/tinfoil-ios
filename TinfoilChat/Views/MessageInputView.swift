@@ -1129,12 +1129,32 @@ final class PastingTextView: UITextView {
         UIPasteboard.general.urls?.filter { $0.isFileURL } ?? []
     }
 
+    /// UIKit probes `canPerformAction` many times while assembling the edit
+    /// menu, and each `hasImages`/`urls` read is a synchronous XPC round trip
+    /// to the pasteboard service. Cache the answers per pasteboard
+    /// generation so only the first probe pays that cost.
+    private var cachedPasteboardState: (changeCount: Int, hasImages: Bool, hasFileURLs: Bool)?
+
+    private func pasteboardState() -> (hasImages: Bool, hasFileURLs: Bool) {
+        let changeCount = UIPasteboard.general.changeCount
+        if let cached = cachedPasteboardState, cached.changeCount == changeCount {
+            return (cached.hasImages, cached.hasFileURLs)
+        }
+        let state = (
+            changeCount: changeCount,
+            hasImages: UIPasteboard.general.hasImages,
+            hasFileURLs: !pasteboardFileURLs.isEmpty
+        )
+        cachedPasteboardState = state
+        return (state.hasImages, state.hasFileURLs)
+    }
+
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)) {
-            if allowsImagePaste && UIPasteboard.general.hasImages && onPasteImage != nil {
+            if allowsImagePaste && onPasteImage != nil && pasteboardState().hasImages {
                 return true
             }
-            if !pasteboardFileURLs.isEmpty && onPasteFile != nil {
+            if onPasteFile != nil && pasteboardState().hasFileURLs {
                 return true
             }
         }
