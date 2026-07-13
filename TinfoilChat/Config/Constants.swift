@@ -77,6 +77,9 @@ enum Constants {
         /// content; users can still select large messages via the full-text
         /// selection sheet.
         static let maxInlineSelectionCharacters = 10_000
+        /// Thinking/reasoning chunks larger than this are hard-split so no
+        /// single Text view forces an unbounded CoreText layout pass.
+        static let maxThinkingChunkCharacters = 8_000
     }
 
     enum StreamingBuffer {

@@ -1367,6 +1367,15 @@ struct ThoughtsSheetView: View {
     let generationTimeSeconds: Double?
     let isDarkMode: Bool
     @Environment(\.dismiss) private var dismiss
+    /// Chunks rebuilt from `thinkingText` when the message was loaded from
+    /// storage, where streaming chunks are not persisted. Chunked (and
+    /// laid out lazily) so a very large thought never becomes one Text view
+    /// whose CoreText layout blocks the main thread.
+    @State private var reconstructedChunks: [ThinkingChunk]? = nil
+
+    private var displayChunks: [ThinkingChunk] {
+        thinkingChunks.isEmpty ? (reconstructedChunks ?? []) : thinkingChunks
+    }
 
     private var titleText: String {
         if let seconds = generationTimeSeconds {
@@ -1378,16 +1387,15 @@ struct ThoughtsSheetView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if !thinkingChunks.isEmpty {
-                        ForEach(thinkingChunks) { chunk in
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if !displayChunks.isEmpty {
+                        ForEach(displayChunks) { chunk in
                             ThinkingChunkView(chunk: chunk, isDarkMode: isDarkMode)
                                 .equatable()
                         }
-                    } else {
-                        Text(thinkingText)
-                            .font(.system(.body))
-                            .foregroundColor(isDarkMode ? .white.opacity(0.9) : Color.black.opacity(0.8))
+                    } else if !thinkingText.isEmpty {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
                     }
                 }
                 .padding(16)
@@ -1399,6 +1407,13 @@ struct ThoughtsSheetView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .task {
+                guard thinkingChunks.isEmpty, reconstructedChunks == nil, !thinkingText.isEmpty else { return }
+                let text = thinkingText
+                reconstructedChunks = await Task.detached {
+                    ThinkingTextChunker.chunk(text)
+                }.value
             }
         }
     }
