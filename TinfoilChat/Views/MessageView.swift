@@ -981,7 +981,15 @@ private struct LongMessageDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                MarkdownText(content: message.content, isDarkMode: colorScheme == .dark)
+                // Inline Textual selection installs a custom UITextInput per
+                // fragment, whose first-responder pasteboard warm-up has hung
+                // the main thread on very long messages. Above the cap users
+                // still get plain-text selection via the Select Text sheet.
+                MarkdownText(
+                    content: message.content,
+                    isDarkMode: colorScheme == .dark,
+                    textSelectionEnabled: message.content.count <= Constants.Rendering.maxInlineSelectionCharacters
+                )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(20)
             }
@@ -1248,17 +1256,21 @@ struct MarkdownText: View {
     let content: String
     let isDarkMode: Bool
     let horizontalPadding: CGFloat
+    let textSelectionEnabled: Bool
 
-    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0) {
+    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0, textSelectionEnabled: Bool = true) {
         self.content = content
         self.isDarkMode = isDarkMode
         self.horizontalPadding = horizontalPadding
+        self.textSelectionEnabled = textSelectionEnabled
     }
 
     var body: some View {
         StructuredText(markdown: content)
             .textual.highlighterTheme(.default)
-            .textual.textSelection(.enabled)
+            .if(textSelectionEnabled) { view in
+                view.textual.textSelection(.enabled)
+            }
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, horizontalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
