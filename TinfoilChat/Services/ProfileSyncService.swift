@@ -11,6 +11,17 @@
 import ClerkKit
 import Foundation
 
+enum ProfileSyncError: LocalizedError {
+    case unresolvedConflicts([String])
+
+    var errorDescription: String? {
+        switch self {
+        case .unresolvedConflicts:
+            return "Profile changes conflict with changes from another device."
+        }
+    }
+}
+
 /// Service for managing profile synchronization with cloud.
 @MainActor
 class ProfileSyncService: ObservableObject {
@@ -18,6 +29,8 @@ class ProfileSyncService: ObservableObject {
 
     private let profileScope: SyncScope = .profile
     private let profileRowId = "profile"
+    private let unknownFieldsKey = "profileUnknownFields"
+    private let unknownFieldsService = "com.tinfoil.chat.profile"
 
     private var getToken: (() async -> String?)? = nil
     private var cachedProfile: ProfileData? = nil
@@ -49,7 +62,14 @@ class ProfileSyncService: ObservableObject {
         return formatter
     }()
 
-    private init() {}
+    private init() {
+        if let data = KeychainHelper.shared.load(
+            for: unknownFieldsKey,
+            service: unknownFieldsService
+        ), let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            unknownRemoteFields = fields
+        }
+    }
 
     // MARK: - Configuration
 
@@ -143,8 +163,10 @@ class ProfileSyncService: ObservableObject {
             // them forward instead of wiping them.
             if let raw = try? JSONSerialization.jsonObject(with: plaintext) as? [String: Any] {
                 self.unknownRemoteFields = raw.filter { !Self.knownProfileKeys.contains($0.key) }
+                self.persistUnknownRemoteFields()
             } else {
                 self.unknownRemoteFields = [:]
+                self.persistUnknownRemoteFields()
             }
             if let etag = item.etag, let version = Int(etag) {
                 decoded.version = version
@@ -165,7 +187,10 @@ class ProfileSyncService: ObservableObject {
     }
 
     /// Save profile to cloud through the enclave.
-    func saveProfile(_ profile: ProfileData) async throws -> (success: Bool, version: Int?, remoteProfile: ProfileData?) {
+    func saveProfile(
+        _ profile: ProfileData,
+        baseline: ProfileData?
+    ) async throws -> (success: Bool, version: Int?, remoteProfile: ProfileData?) {
         guard await isAuthenticated() else { return (false, nil, nil) }
         let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
 
@@ -191,7 +216,8 @@ class ProfileSyncService: ObservableObject {
             let ifMatch: String? = baseVersion > 0 ? String(baseVersion) : nil
 
             let metadata: [String: AnyCodable] = [
-                "version": AnyCodable(profileWithMetadata.version ?? 1)
+                "version": AnyCodable(profileWithMetadata.version ?? 1),
+                "profile_sync_protocol": AnyCodable(Constants.Sync.profileSyncProtocolVersion)
             ]
             let response = try await SyncEnclaveAPI.push(
                 EnclavePushRequest(
@@ -228,10 +254,18 @@ class ProfileSyncService: ObservableObject {
                 return (result.success, result.version, nil)
             }
 
-            let (merged, adoptedRemote) = ProfileMerge.mergeProfiles(
-                local: profile, remote: remote
+            guard let baseline else {
+                throw error
+            }
+            let merge = ProfileMerge.mergeProfiles(
+                baseline: baseline,
+                local: profile,
+                remote: remote
             )
-            working = merged
+            guard merge.conflicts.isEmpty else {
+                throw ProfileSyncError.unresolvedConflicts(merge.conflicts)
+            }
+            working = merge.merged
 
             let result = try await pushAtVersion(remote.version ?? 0)
             // Hand the merged profile back so the caller applies any
@@ -239,7 +273,7 @@ class ProfileSyncService: ObservableObject {
             return (
                 result.success,
                 result.version,
-                adoptedRemote ? (self.cachedProfile ?? merged) : nil
+                merge.adoptedRemote ? (self.cachedProfile ?? merge.merged) : nil
             )
         }
     }
@@ -260,11 +294,30 @@ class ProfileSyncService: ObservableObject {
         return try JSONSerialization.data(withJSONObject: dict)
     }
 
+    private func persistUnknownRemoteFields() {
+        guard !unknownRemoteFields.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: unknownRemoteFields)
+        else {
+            KeychainHelper.shared.delete(
+                for: unknownFieldsKey,
+                service: unknownFieldsService
+            )
+            return
+        }
+        KeychainHelper.shared.save(
+            data,
+            for: unknownFieldsKey,
+            service: unknownFieldsService
+        )
+    }
+
     /// A STALE_BLOB (HTTP 412) push means our If-Match version no longer
     /// matches the server: either the row advanced under another writer
     /// or we tried to create a profile that already exists.
     private static func isStaleBlobConflict(_ error: SyncEnclaveError) -> Bool {
-        error.code == WireCodes.staleBlob || error.status == 412
+        error.code == WireCodes.staleBlob
+            || error.status == 412
+            || (error.status == 409 && error.code == WireCodes.syncConflict)
     }
 
     /// Re-attempt a profile fetch after a key change. The enclave
@@ -283,6 +336,7 @@ class ProfileSyncService: ObservableObject {
         cachedProfile = nil
         failedDecryptionData = nil
         unknownRemoteFields = [:]
+        persistUnknownRemoteFields()
     }
 
     // MARK: - Sync status

@@ -153,6 +153,76 @@ struct ProfileMergeTests {
         let fields = ProfileMerge.changedProfileFields(local: local, baseline: baseline)
         #expect(Set(fields) == Set(["nickname", "traits"]))
     }
+
+    @Test("adopts populated remote fields when local stayed empty")
+    func staleEmptyAdoptsRemote() {
+        let baseline = ProfileData(nickname: "", customSystemPrompt: "")
+        let local = baseline
+        var remote = ProfileData(nickname: "Ada", customSystemPrompt: "Be concise")
+        remote.version = 2
+
+        let result = ProfileMerge.mergeProfiles(
+            baseline: baseline,
+            local: local,
+            remote: remote
+        )
+
+        #expect(result.merged.nickname == "Ada")
+        #expect(result.merged.customSystemPrompt == "Be concise")
+        #expect(result.conflicts.isEmpty)
+    }
+
+    @Test("combines independent local and remote edits")
+    func combinesIndependentEdits() {
+        let baseline = ProfileData(nickname: "Ada", profession: "Engineer")
+        let local = ProfileData(nickname: "Grace", profession: "Engineer")
+        var remote = ProfileData(nickname: "Ada", profession: "Researcher")
+        remote.version = 2
+
+        let result = ProfileMerge.mergeProfiles(
+            baseline: baseline,
+            local: local,
+            remote: remote
+        )
+
+        #expect(result.merged.nickname == "Grace")
+        #expect(result.merged.profession == "Researcher")
+        #expect(result.conflicts.isEmpty)
+    }
+
+    @Test("preserves an intentional local reset")
+    func preservesIntentionalReset() {
+        let baseline = ProfileData(customSystemPrompt: "Use headings")
+        let local = ProfileData(customSystemPrompt: "")
+        var remote = baseline
+        remote.version = 2
+
+        let result = ProfileMerge.mergeProfiles(
+            baseline: baseline,
+            local: local,
+            remote: remote
+        )
+
+        #expect(result.merged.customSystemPrompt == "")
+        #expect(result.conflicts.isEmpty)
+    }
+
+    @Test("retains local value and reports ambiguous conflict")
+    func reportsAmbiguousConflict() {
+        let baseline = ProfileData(nickname: "Ada")
+        let local = ProfileData(nickname: "Grace")
+        var remote = ProfileData(nickname: "Lin")
+        remote.version = 2
+
+        let result = ProfileMerge.mergeProfiles(
+            baseline: baseline,
+            local: local,
+            remote: remote
+        )
+
+        #expect(result.merged.nickname == "Grace")
+        #expect(result.conflicts == ["nickname"])
+    }
 }
 
 @Suite("Clock-aware conflict resolution")

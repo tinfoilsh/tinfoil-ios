@@ -208,6 +208,7 @@ class AuthManager: ObservableObject {
         // keys, or personalization bleed into the next account on a shared
         // device. This runs before isAuthenticated is cleared below so the
         // view model can still resolve the signing-out user's id for the wipe.
+        await ProfileManager.shared.clearLocalProfileForAccountRemoval()
         EncryptionService.shared.clearKey()
         await DeviceEncryptionService.shared.clearKey()
         if let chatViewModel {
@@ -219,7 +220,6 @@ class AuthManager: ObservableObject {
             await Chat.deleteAllChatsFromStorage(userId: localUserData?["id"] as? String)
         }
         SettingsManager.shared.clearAllSettings()
-        ProfileManager.shared.clearProfile()
 
         localUserData = nil
         isAuthenticated = false

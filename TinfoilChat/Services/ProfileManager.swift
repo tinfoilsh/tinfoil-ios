@@ -56,6 +56,12 @@ class ProfileManager: ObservableObject {
     private var isApplyingProfile: Bool = false  // Flag to prevent observer loops
     private var isPulling: Bool = false
     private var isPushing: Bool = false
+    private var isFullSyncInProgress: Bool = false
+    private var fullSyncWaiters: [CheckedContinuation<Void, Never>] = []
+    private var accountGeneration: Int = 0
+    private var themeMode: String?
+    private var localFieldClocks: [String: EditClock]?
+    private var localClockVersion: Int?
     private var codeExecutionEnabled: Bool?
     private var piiCheckEnabled: Bool?
     private var chatFont: String?
@@ -63,6 +69,7 @@ class ProfileManager: ObservableObject {
     
     // Keychain keys
     private let keychainKey = "userProfile"
+    private let profileBaselineKey = "userProfileSyncBaseline"
     private let keychainService = "com.tinfoil.chat.profile"
     private let profileDirtyKey = "com.tinfoil.chat.profile.dirty"
     // Content modification time of the pending local profile edit, used
@@ -95,9 +102,15 @@ class ProfileManager: ObservableObject {
         if let version = profile.version {
             lastSyncedVersion = version
         }
-        // Treat the loaded profile as the last synced baseline
-        if !hasPendingLocalProfileChanges {
+        if let baselineData = keychainHelper.load(
+            for: profileBaselineKey,
+            service: keychainService
+        ), let baseline = try? JSONDecoder().decode(ProfileData.self, from: baselineData) {
+            lastSyncedProfile = baseline
+            lastSyncedVersion = baseline.version ?? lastSyncedVersion
+        } else if !hasPendingLocalProfileChanges {
             lastSyncedProfile = profile
+            persistBaselineToKeychain(profile)
         }
     }
     
@@ -172,6 +185,14 @@ class ProfileManager: ObservableObject {
             helper.save(data, for: key, service: service)
         }
     }
+
+    private func persistBaselineToKeychain(_ profile: ProfileData) {
+        guard let data = try? JSONEncoder().encode(profile) else {
+            return
+        }
+
+        keychainHelper.save(data, for: profileBaselineKey, service: keychainService)
+    }
     
     /// Create ProfileData from current settings
     private func createProfileData() -> ProfileData {
@@ -187,6 +208,7 @@ class ProfileManager: ObservableObject {
 
         return ProfileData(
             isDarkMode: isDarkMode,
+            themeMode: themeMode,
             language: language,
             nickname: nickname,
             profession: profession,
@@ -206,7 +228,9 @@ class ProfileManager: ObservableObject {
             chatFont: chatFont,
             projectUploadPreference: projectUploadPreference,
             version: lastSyncedVersion,  // Will be incremented by ProfileSyncService
-            updatedAt: localProfileChangedAt()
+            updatedAt: localProfileChangedAt(),
+            fieldClocks: localFieldClocks,
+            clockVersion: localClockVersion
         )
     }
     
@@ -220,6 +244,9 @@ class ProfileManager: ObservableObject {
         
         if let isDarkMode = profile.isDarkMode {
             self.isDarkMode = isDarkMode
+        }
+        if let themeMode = profile.themeMode {
+            self.themeMode = themeMode
         }
         if let language = profile.language {
             self.language = language
@@ -279,6 +306,8 @@ class ProfileManager: ObservableObject {
         if let version = profile.version {
             self.lastSyncedVersion = version
         }
+        self.localFieldClocks = profile.fieldClocks
+        self.localClockVersion = profile.clockVersion
 
         NotificationCenter.default.post(
             name: .profileSharedSettingsDidChange,
@@ -510,7 +539,7 @@ class ProfileManager: ObservableObject {
         syncDebounceTimer?.invalidate()
         let timer = Timer(timeInterval: 2.0, repeats: false) { [weak self] _ in
             Task { @MainActor in
-                await self?.syncToCloud()
+                await self?.performFullSync()
             }
         }
         syncDebounceTimer = timer
@@ -520,69 +549,109 @@ class ProfileManager: ObservableObject {
     private func updateSyncingState() {
         isSyncing = isPulling || isPushing
     }
+
+    private func prepareLocalProfileForSync() -> ProfileData {
+        var profile = createProfileData()
+        let changedFields = ProfileMerge.changedProfileFields(
+            local: profile,
+            baseline: lastSyncedProfile
+        )
+        var clocks = profile.fieldClocks ?? lastSyncedProfile?.fieldClocks ?? [:]
+        let unstampedFields = changedFields.filter {
+            clocks[$0] == lastSyncedProfile?.fieldClocks?[$0]
+        }
+        if !unstampedFields.isEmpty {
+            let tick = EditClockStore.nextClock()
+            for field in unstampedFields {
+                clocks[field] = tick
+            }
+        }
+        profile.fieldClocks = clocks.isEmpty ? nil : clocks
+        profile.clockVersion = lastSyncedVersion
+        localFieldClocks = profile.fieldClocks
+        localClockVersion = profile.clockVersion
+        if !unstampedFields.isEmpty {
+            persistProfileToKeychain(profile)
+        }
+        return profile
+    }
     
     /// Sync profile from cloud
     func syncFromCloud() async {
+        await performFullSync()
+    }
+
+    private func syncFromCloud(generation: Int) async -> Bool {
         // Skip if not authenticated
         guard await profileSync.isAuthenticated() else {
-            return
+            return false
         }
 
         // Skip if no encryption key is set
         guard EncryptionService.shared.hasEncryptionKey() else {
-            return
+            return false
         }
 
-        // Prevent overlapping pulls
-        guard !isPulling else { return }
-        // A pending local edit must not be overwritten by the remote, but
-        // we still pull so we can learn the server's current version.
-        // Otherwise a client left "dirty" never establishes a base version
-        // and keeps trying to create the profile at version zero, which
-        // loops forever on STALE_BLOB and blocks all future pulls.
-        let hasPendingEdit = hasPendingLocalProfileChanges
         isPulling = true
         updateSyncingState()
-        
+        defer {
+            isPulling = false
+            updateSyncingState()
+        }
+
         do {
+            guard generation == accountGeneration else { return false }
             if let cloudProfile = try await profileSync.fetchProfile() {
+                guard generation == accountGeneration else { return false }
                 let cloudVersion = cloudProfile.version ?? 0
+                let localProfile = hasPendingLocalProfileChanges
+                    ? prepareLocalProfileForSync()
+                    : createProfileData()
 
-                if hasPendingEdit {
-                    // Record the server version so the pending push rebases
-                    // onto it as a CAS update instead of a create; the
-                    // last-write-wins arbitration on push decides the winner.
-                    if cloudVersion > lastSyncedVersion {
-                        lastSyncedVersion = cloudVersion
+                if let baseline = lastSyncedProfile {
+                    let merge = ProfileMerge.mergeProfiles(
+                        baseline: baseline,
+                        local: localProfile,
+                        remote: cloudProfile
+                    )
+                    guard merge.conflicts.isEmpty else {
+                        throw ProfileSyncError.unresolvedConflicts(merge.conflicts)
                     }
-                } else if cloudVersion > lastSyncedVersion || hasProfileChanged(cloudProfile, lastSyncedProfile) {
-                    // Apply if cloud is newer by version OR content differs from our last-synced snapshot
+                    applyProfile(merge.merged)
+                    persistProfileToKeychain(createProfileData())
+                    commitSyncedBaseline(cloudProfile, version: cloudVersion)
+                    if hasProfileChanged(merge.merged, cloudProfile) {
+                        markLocalProfileChanged()
+                    } else {
+                        clearLocalProfileChanged()
+                    }
+                } else if hasPendingLocalProfileChanges {
+                    throw ProfileSyncError.unresolvedConflicts(
+                        ProfileMerge.changedProfileFields(local: localProfile, baseline: nil)
+                    )
+                } else {
                     applyProfile(cloudProfile)
-
-                    // Use the round-tripped local snapshot as the baseline
-                    // rather than the raw remote: the remote may omit fields
-                    // this client always emits (e.g. defaulted reasoning or
-                    // thinking values), which would otherwise read back as a
-                    // phantom local change and wedge sync behind a
-                    // never-clearing dirty flag while looping STALE_BLOB pushes.
-                    commitSyncedBaseline(createProfileData(), version: cloudVersion)
-
-                    lastSyncedVersion = cloudVersion
+                    persistProfileToKeychain(createProfileData())
+                    commitSyncedBaseline(cloudProfile, version: cloudVersion)
                     clearLocalProfileChanged()
-                    lastSyncDate = Date()
-                    syncError = nil
                 }
             }
+            lastSyncDate = Date()
+            syncError = nil
+            return true
         } catch {
+            guard generation == accountGeneration else { return false }
             syncError = error.localizedDescription
+            return false
         }
-        
-        isPulling = false
-        updateSyncingState()
     }
     
     /// Sync profile to cloud
     func syncToCloud() async {
+        await performFullSync()
+    }
+
+    private func syncToCloud(generation: Int) async {
         // Skip if not authenticated but keep pending flag so we can retry later
         guard await profileSync.isAuthenticated() else {
             return
@@ -603,10 +672,8 @@ class ProfileManager: ObservableObject {
             return
         }
 
-        // Avoid overlapping uploads
-        guard !isPushing else { return }
-        
-        var profile = createProfileData()
+        guard generation == accountGeneration else { return }
+        var profile = prepareLocalProfileForSync()
 
         // Only push if there is a real change vs last synced baseline.
         // When nothing diverges, clear the pending flag so a phantom
@@ -616,27 +683,19 @@ class ProfileManager: ObservableObject {
             return
         }
 
-        // Stamp a fresh edit clock on every field changed since the last
-        // sync, carrying forward the existing clocks for the rest. One
-        // tick covers this push because it is a single local write event;
-        // the deviceId tiebreak keeps it ordered against peers.
-        let baseClocks = profileSync.getCachedProfile()?.fieldClocks
-            ?? lastSyncedProfile?.fieldClocks ?? [:]
-        let changedFields = ProfileMerge.changedProfileFields(
-            local: profile, baseline: lastSyncedProfile
-        )
-        var fieldClocks = baseClocks
-        if !changedFields.isEmpty {
-            let tick = EditClockStore.nextClock()
-            for field in changedFields { fieldClocks[field] = tick }
-        }
-        profile.fieldClocks = fieldClocks
-
         isPushing = true
         updateSyncingState()
-        
+        defer {
+            isPushing = false
+            updateSyncingState()
+        }
+
         do {
-            let result = try await profileSync.saveProfile(profile)
+            let result = try await profileSync.saveProfile(
+                profile,
+                baseline: lastSyncedProfile
+            )
+            guard generation == accountGeneration else { return }
             if result.success {
                 // Server returns the authoritative version; always adopt it
                 if let version = result.version {
@@ -650,60 +709,66 @@ class ProfileManager: ObservableObject {
                     // A concurrently-updated device won the last-write
                     // race; adopt its settings locally so both devices
                     // converge instead of keeping our now-stale edit.
-                    applyProfile(remoteProfile)
-                    // Baseline mirrors what we would re-serialize, not the
-                    // raw remote, so fields we emit but the peer omits don't
-                    // read back as a phantom change and re-arm the push loop.
-                    commitSyncedBaseline(createProfileData(), version: lastSyncedVersion)
+                    let postSaveMerge = ProfileMerge.mergeProfiles(
+                        baseline: profile,
+                        local: createProfileData(),
+                        remote: remoteProfile
+                    )
+                    applyProfile(postSaveMerge.merged)
+                    persistProfileToKeychain(createProfileData())
+                    commitSyncedBaseline(remoteProfile, version: lastSyncedVersion)
                 } else {
+                    profile.version = lastSyncedVersion
+                    profile.clockVersion = lastSyncedVersion
+                    localFieldClocks = profile.fieldClocks
+                    localClockVersion = profile.clockVersion
+                    persistProfileToKeychain(createProfileData())
                     commitSyncedBaseline(profile, version: lastSyncedVersion)
                 }
-                clearLocalProfileChanged()
-                lastSyncDate = Date()
-                syncError = nil
-                
-                // If local state changed during the sync, schedule another upload
                 let currentAfter = createProfileData()
                 if hasProfileChanged(currentAfter, lastSyncedProfile) {
+                    markLocalProfileChanged()
                     debounceCloudSync()
+                } else {
+                    clearLocalProfileChanged()
                 }
+                lastSyncDate = Date()
+                syncError = nil
             }
         } catch {
+            guard generation == accountGeneration else { return }
             syncError = error.localizedDescription
             // On error, allow future changes to trigger another attempt via debounce
         }
-        
-        isPushing = false
-        updateSyncingState()
     }
     
     /// Perform immediate sync (both directions)
     func performFullSync() async {
+        if isFullSyncInProgress {
+            await withCheckedContinuation { continuation in
+                fullSyncWaiters.append(continuation)
+            }
+            return
+        }
+        isFullSyncInProgress = true
+        defer {
+            isFullSyncInProgress = false
+            let waiters = fullSyncWaiters
+            fullSyncWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
+
+        let generation = accountGeneration
         // First pull from cloud
-        await syncFromCloud()
+        guard await syncFromCloud(generation: generation) else { return }
         
         // Then push any local changes (method will no-op if nothing changed)
-        await syncToCloud()
+        await syncToCloud(generation: generation)
     }
     
     /// Retry decryption with new encryption key
     func retryDecryptionWithNewKey() async {
-        do {
-            if let decryptedProfile = try await profileSync.retryDecryptionWithNewKey() {
-                applyProfile(decryptedProfile)
-                if let version = decryptedProfile.version {
-                    lastSyncedVersion = version
-                }
-                // Baseline mirrors what we would re-serialize, not the raw
-                // remote, so peer-omitted fields don't read back as a
-                // phantom local change after decryption recovery.
-                commitSyncedBaseline(createProfileData(), version: lastSyncedVersion)
-                clearLocalProfileChanged()
-                syncError = nil
-            }
-        } catch {
-            syncError = error.localizedDescription
-        }
+        await performFullSync()
     }
     
     // MARK: - Helpers
@@ -718,8 +783,10 @@ class ProfileManager: ObservableObject {
     private func commitSyncedBaseline(_ snapshot: ProfileData, version: Int) {
         var baseline = snapshot
         baseline.version = version
-        persistProfileToKeychain(baseline)
+        baseline.clockVersion = version
+        persistBaselineToKeychain(baseline)
         lastSyncedProfile = baseline
+        lastSyncedVersion = version
     }
 
     /// Check if two profiles are different (excluding metadata)
@@ -729,6 +796,7 @@ class ProfileManager: ObservableObject {
         }
         
         return p1.isDarkMode != p2.isDarkMode ||
+               p1.themeMode != p2.themeMode ||
                p1.language != p2.language ||
                p1.nickname != p2.nickname ||
                p1.profession != p2.profession ||
@@ -829,10 +897,10 @@ class ProfileManager: ObservableObject {
         return !result.isEmpty
     }
     
-    /// Clear all profile data
-    func clearProfile() {
-        // Reset to defaults
+    private func applyDefaultProfile() {
+        isApplyingProfile = true
         isDarkMode = true
+        themeMode = nil
         language = "English"
         nickname = ""
         profession = ""
@@ -843,17 +911,31 @@ class ProfileManager: ObservableObject {
         customSystemPrompt = ""
         customPromptPresets = []
         favoritePromptPresetIds = []
-        
-        // Clear from keychain
+        isApplyingProfile = false
+    }
+
+    func resetProfile() {
+        applyDefaultProfile()
+        persistProfileToKeychain(createProfileData())
+        markLocalProfileChanged()
+        debounceCloudSync()
+    }
+
+    func clearLocalProfileForAccountRemoval() async {
+        accountGeneration += 1
+        syncDebounceTimer?.invalidate()
+        if isFullSyncInProgress {
+            await withCheckedContinuation { continuation in
+                fullSyncWaiters.append(continuation)
+            }
+        }
+        applyDefaultProfile()
         keychainHelper.delete(for: keychainKey, service: keychainService)
-        
-        // Reset sync state
+        keychainHelper.delete(for: profileBaselineKey, service: keychainService)
         lastSyncedVersion = 0
         lastSyncedProfile = nil
         syncError = nil
         clearLocalProfileChanged()
-        
-        // Clear cloud cache
         profileSync.clearCache()
     }
 }
