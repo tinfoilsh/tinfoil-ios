@@ -20,13 +20,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		99AB00022FABC00200ABC002 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 99F153BA2F4F5F0200E9174E /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 99AB00082FABC00800ABC008;
-			remoteInfo = TinfoilShareExtension;
-		};
 		992FC2992F532EA800699029 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 99F153BA2F4F5F0200E9174E /* Project object */;
@@ -34,7 +27,28 @@
 			remoteGlobalIDString = 99F153C12F4F5F0200E9174E;
 			remoteInfo = TinfoilChat;
 		};
+		99AB00022FABC00200ABC002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 99F153BA2F4F5F0200E9174E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 99AB00082FABC00800ABC008;
+			remoteInfo = TinfoilShareExtension;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		99AB000C2FABC00C00ABC00C /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				99AB00012FABC00100ABC001 /* TinfoilShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		992FC2952F532EA800699029 /* TinfoilChatTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TinfoilChatTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -47,7 +61,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				TinfoilShareExtension.entitlements,
 			);
 			target = 99AB00082FABC00800ABC008 /* TinfoilShareExtension */;
 		};
@@ -217,8 +230,8 @@
 				99AB000B2FABC00B00ABC00B /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				99F153C42F4F5F0200E9174E /* TinfoilChat */,
 				99AB00062FABC00600ABC006 /* TinfoilShared */,
+				99F153C42F4F5F0200E9174E /* TinfoilChat */,
 			);
 			name = TinfoilChat;
 			packageProductDependencies = (
@@ -311,20 +324,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXCopyFilesBuildPhase section */
-		99AB000C2FABC00C00ABC00C /* Embed Foundation Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				99AB00012FABC00100ABC001 /* TinfoilShareExtension.appex in Embed Foundation Extensions */,
-			);
-			name = "Embed Foundation Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
 		99F1547D2F4F615600E9174E /* ShellScript */ = {
