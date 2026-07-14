@@ -31,6 +31,18 @@ final class ChatSearchController: ObservableObject {
         self.service = service
     }
 
+    /// Drop all cached state, including in-flight work. Called when the
+    /// authenticated user changes so one account's decrypted results
+    /// can never linger into another account's session.
+    func reset() {
+        searchTask?.cancel()
+        searchTask = nil
+        results = []
+        isSearching = false
+        isIndexing = false
+        available = true
+    }
+
     /// Debounce and run one search per term change. Cancelling the
     /// previous task ensures completions from a superseded term never
     /// set state or schedule a refresh.

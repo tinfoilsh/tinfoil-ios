@@ -79,7 +79,12 @@ struct ChatSidebar: View {
                 !$0.isBlankChat && $0.title.lowercased().contains(needle)
             }
         }
-        return chatSearch.results
+        // The index covers every synced chat, so results can include
+        // project chats; apply the same root-list exclusions so search
+        // never surfaces rows this list would not show.
+        return chatSearch.results.filter {
+            !$0.isTemporary && $0.projectId == nil && !$0.decryptionFailed
+        }
     }
 
     private var displayedChats: [Chat] {
@@ -151,6 +156,13 @@ struct ChatSidebar: View {
             }
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
+        }
+        // Covers sign-out (id -> nil) and account switches: search
+        // results hold decrypted titles, so they must never survive
+        // into another account's session.
+        .onChange(of: searchUserId) { _, _ in
+            chatSearchTerm = ""
+            chatSearch.reset()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CheckAuthState"))) { _ in
             Task {
