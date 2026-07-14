@@ -1893,6 +1893,11 @@ class ChatViewModel: ObservableObject {
                     var chat = self.chat(at: location)
                     guard !chat.messages.isEmpty,
                           let lastIndex = chat.messages.indices.last else { return }
+                    // webSearchSummary drives the status line of whichever
+                    // chat is on screen, so only surface new search progress
+                    // while the user is still viewing the streaming chat
+                    // (clearing it is always safe).
+                    let isViewingStreamChat = self.currentChat?.id == sid
 
                     if event.action?.type == "open_page", let url = event.action?.url {
                         let fetchId = event.itemId ?? url
@@ -1941,7 +1946,9 @@ class ChatViewModel: ObservableObject {
                             status: .searching,
                             sources: existingSources
                         )
-                        self.webSearchSummary = event.action?.query.map { "Searching the web: \($0)" } ?? "Searching the web"
+                        if isViewingStreamChat {
+                            self.webSearchSummary = event.action?.query.map { "Searching the web: \($0)" } ?? "Searching the web"
+                        }
                     case .completed:
                         let eventSources = event.sources?.compactMap { source -> WebSearchSource? in
                             guard let url = source.url, !url.isEmpty else { return nil }
