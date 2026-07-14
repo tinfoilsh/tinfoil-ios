@@ -191,7 +191,12 @@ class ProfileManager: ObservableObject {
             return
         }
 
-        keychainHelper.save(data, for: profileBaselineKey, service: keychainService)
+        let helper = keychainHelper
+        let key = profileBaselineKey
+        let service = keychainService
+        keychainQueue.async {
+            helper.save(data, for: key, service: service)
+        }
     }
     
     /// Create ProfileData from current settings
@@ -775,11 +780,12 @@ class ProfileManager: ObservableObject {
 
     /// Record `snapshot` as the synced baseline at `version`: stamp the
     /// version, persist it to the keychain (without triggering local
-    /// change observers), and set it as the in-memory baseline. Callers
-    /// pass the round-tripped local snapshot (createProfileData()) rather
-    /// than the raw remote so fields this client always emits but a peer
-    /// omits never read back as a phantom local change that would wedge
-    /// sync behind a never-clearing dirty flag.
+    /// change observers), and set it as the in-memory baseline. The
+    /// baseline is the last server state this client observed — the
+    /// common ancestor for three-way merges — so callers pass the
+    /// fetched remote, or the exact snapshot they just pushed. Passing a
+    /// local working copy instead would make its pending edits look
+    /// already-synced and let a later pull silently revert them.
     private func commitSyncedBaseline(_ snapshot: ProfileData, version: Int) {
         var baseline = snapshot
         baseline.version = version
@@ -930,6 +936,15 @@ class ProfileManager: ObservableObject {
             }
         }
         applyDefaultProfile()
+        // Reset non-published profile state too, so fields and CRDT
+        // clocks from the previous account never ride along into the
+        // next account's first sync.
+        localFieldClocks = nil
+        localClockVersion = nil
+        codeExecutionEnabled = nil
+        piiCheckEnabled = nil
+        chatFont = nil
+        projectUploadPreference = nil
         keychainHelper.delete(for: keychainKey, service: keychainService)
         keychainHelper.delete(for: profileBaselineKey, service: keychainService)
         lastSyncedVersion = 0
