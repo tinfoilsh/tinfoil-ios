@@ -155,6 +155,21 @@ enum Constants {
         /// How many full chat blobs to request per pull call. Keeps
         /// individual response payloads bounded when syncing many chats.
         static let pullBatchSize = 20
+
+        /// Encrypted chat search over the sync enclave. Mirrors the
+        /// webapp constants so both clients drive the enclave's
+        /// reindex lifecycle the same way.
+        enum Search {
+            static let debounceSeconds: TimeInterval = 0.3
+            static let resultLimit = 20
+            static let reindexPollIntervalSeconds: TimeInterval = 2.0
+            static let reindexPollBudgetSeconds: TimeInterval = 10 * 60.0
+            /// A failed rebuild puts further kicks on cooldown: every
+            /// attempt re-pulls and re-embeds the whole corpus, so
+            /// retrying on each query would loop a persistent failure
+            /// at full rebuild cost.
+            static let reindexFailureCooldownSeconds: TimeInterval = 60.0
+        }
     }
 
 

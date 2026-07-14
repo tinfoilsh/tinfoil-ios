@@ -484,6 +484,96 @@ struct EnclaveMigrateAllResponse: Decodable {
 /// sync API.
 struct EnclaveEmptyRequest: Encodable {}
 
+// MARK: - Encrypted chat search
+
+struct EnclaveSearchQueryRequest: Encodable {
+    /// User's CEK, base64 raw 32 bytes. The enclave derives the
+    /// search-index subkey from it; the index never leaves the
+    /// enclave unencrypted.
+    let key: String
+    let query: String
+    let limit: Int?
+}
+
+struct EnclaveSearchQueryResult: Decodable, Equatable {
+    /// Chat id; contents come from the normal pull path.
+    let id: String
+    let score: Double
+}
+
+struct EnclaveSearchQueryResponse: Decodable {
+    let results: [EnclaveSearchQueryResult]
+    let totalIndexed: Int
+    /// True when no readable index exists for the supplied key (never
+    /// built, different key, or the enclave's embedding model changed).
+    /// The client should kick `/v1/search/reindex` and poll status.
+    let needsReindex: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case results
+        case totalIndexed = "total_indexed"
+        case needsReindex = "needs_reindex"
+    }
+}
+
+// Go marshals an empty slice as JSON null and omits `needs_reindex`
+// when false; normalize both. Lives in an extension to keep the
+// auto-synthesized memberwise initializer for tests.
+extension EnclaveSearchQueryResponse {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            results: try c.decodeIfPresent([EnclaveSearchQueryResult].self, forKey: .results) ?? [],
+            totalIndexed: try c.decodeIfPresent(Int.self, forKey: .totalIndexed) ?? 0,
+            needsReindex: try c.decodeIfPresent(Bool.self, forKey: .needsReindex) ?? false
+        )
+    }
+}
+
+struct EnclaveSearchReindexRequest: Encodable {
+    /// Primary key first, then any legacy keys still sealing old rows.
+    let keys: [EnclavePullKey]
+}
+
+/// Wire shape returned by both the reindex kickoff and the status
+/// poll. Status is one of "idle" | "running" | "completed" | "failed";
+/// kept as a raw string so an unknown future state decodes instead of
+/// failing the poll loop.
+struct EnclaveSearchReindexStatusResponse: Decodable {
+    let jobId: String?
+    let status: String
+    let indexed: Int
+    let failed: Int
+    let totalIndexed: Int
+    /// True when the run stopped at its wall-clock budget before
+    /// draining every chat; a fresh kickoff resumes the build.
+    let partial: Bool
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status, indexed, failed, partial, error
+        case jobId = "job_id"
+        case totalIndexed = "total_indexed"
+    }
+}
+
+// Tolerant decoding lives in an extension to keep the auto-synthesized
+// memberwise initializer available (tests build status snapshots).
+extension EnclaveSearchReindexStatusResponse {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            jobId: try c.decodeIfPresent(String.self, forKey: .jobId),
+            status: try c.decode(String.self, forKey: .status),
+            indexed: try c.decodeIfPresent(Int.self, forKey: .indexed) ?? 0,
+            failed: try c.decodeIfPresent(Int.self, forKey: .failed) ?? 0,
+            totalIndexed: try c.decodeIfPresent(Int.self, forKey: .totalIndexed) ?? 0,
+            partial: try c.decodeIfPresent(Bool.self, forKey: .partial) ?? false,
+            error: try c.decodeIfPresent(String.self, forKey: .error)
+        )
+    }
+}
+
 // MARK: - Attachments
 
 struct EnclaveAttachmentPutRequest: Encodable {
@@ -658,6 +748,33 @@ enum SyncEnclaveAPI {
     static func migrateStatus() async throws -> EnclaveMigrateAllResponse {
         try await SyncEnclaveClient.shared.post(
             path: "/v1/blobs/migrate-status",
+            body: EnclaveEmptyRequest()
+        )
+    }
+
+    // MARK: Encrypted chat search
+
+    /// Rank the caller's synced chats against a natural-language query.
+    /// Returns chat ids + scores only; resolve titles/contents through
+    /// the normal pull path. `needsReindex == true` means the enclave
+    /// has no readable index for this key and the caller should drive
+    /// a reindex.
+    static func searchQuery(_ request: EnclaveSearchQueryRequest) async throws -> EnclaveSearchQueryResponse {
+        try await SyncEnclaveClient.shared.post(path: "/v1/search/query", body: request)
+    }
+
+    /// Kick off (or join) the enclave-side background job that rebuilds
+    /// the search index from the stored chat blobs. Returns the job's
+    /// current status snapshot; poll `searchReindexStatus()` until the
+    /// status is terminal.
+    static func searchReindex(_ request: EnclaveSearchReindexRequest) async throws -> EnclaveSearchReindexStatusResponse {
+        try await SyncEnclaveClient.shared.post(path: "/v1/search/reindex", body: request)
+    }
+
+    /// Poll the caller's current reindex job; `status: "idle"` when none.
+    static func searchReindexStatus() async throws -> EnclaveSearchReindexStatusResponse {
+        try await SyncEnclaveClient.shared.post(
+            path: "/v1/search/reindex-status",
             body: EnclaveEmptyRequest()
         )
     }
