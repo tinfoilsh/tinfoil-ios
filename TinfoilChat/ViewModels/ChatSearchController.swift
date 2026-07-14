@@ -1,0 +1,87 @@
+//
+//  ChatSearchController.swift
+//  TinfoilChat
+//
+//  Debounced encrypted search over synced chats, mirroring the
+//  webapp's `useChatSearch` hook. When the enclave reports it is
+//  rebuilding the index, the controller waits for the job to settle
+//  and re-runs the current term so results fill in without any user
+//  action.
+//
+
+import Foundation
+
+@MainActor
+final class ChatSearchController: ObservableObject {
+    /// Ranked, fully resolved hits for the current term.
+    @Published private(set) var results: [Chat] = []
+    /// True from the first keystroke until the current term's results land.
+    @Published private(set) var isSearching = false
+    /// True while the enclave rebuilds the index; results may be partial.
+    @Published private(set) var isIndexing = false
+    /// False when server-side search cannot run (no key loaded, enclave
+    /// without a search backend). Callers should fall back to filtering
+    /// locally loaded chats by title.
+    @Published private(set) var available = true
+
+    private let service: ChatSearchService
+    private var searchTask: Task<Void, Never>?
+
+    init(service: ChatSearchService = .shared) {
+        self.service = service
+    }
+
+    /// Debounce and run one search per term change. Cancelling the
+    /// previous task ensures completions from a superseded term never
+    /// set state or schedule a refresh.
+    func updateTerm(_ term: String, userId: String?) {
+        searchTask?.cancel()
+        searchTask = nil
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            results = []
+            isSearching = false
+            isIndexing = false
+            return
+        }
+        isSearching = true
+        searchTask = Task { [weak self] in
+            try? await Task.sleep(
+                nanoseconds: UInt64(Constants.SyncEnclave.Search.debounceSeconds * 1_000_000_000)
+            )
+            guard !Task.isCancelled else { return }
+            await self?.run(term: trimmed, userId: userId)
+        }
+    }
+
+    private func run(term: String, userId: String?) async {
+        do {
+            let outcome = try await service.searchSyncedChats(query: term)
+            guard !Task.isCancelled else { return }
+            available = outcome.available
+            isIndexing = outcome.indexing
+            let chats = await service.resolveSearchResultChats(outcome.results, userId: userId)
+            guard !Task.isCancelled else { return }
+            results = chats
+            isSearching = false
+            if outcome.indexing {
+                // Re-query only after a successful rebuild. Refreshing
+                // on a failed or skipped settle would report
+                // needs_reindex again and kick another full rebuild,
+                // looping a persistent failure at full embedding cost.
+                let settled = await service.ensureSearchIndex().value
+                guard !Task.isCancelled else { return }
+                if settled == .completed {
+                    await run(term: term, userId: userId)
+                } else {
+                    isIndexing = false
+                }
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            print("[ChatSearch] search failed: \(error)")
+            results = []
+            isSearching = false
+        }
+    }
+}

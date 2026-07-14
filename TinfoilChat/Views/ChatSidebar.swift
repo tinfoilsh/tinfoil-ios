@@ -23,6 +23,8 @@ struct ChatSidebar: View {
     @State private var isTabSwitching: Bool = false
     @State private var isProjectsExpanded: Bool = false
     @State private var isChatsExpanded: Bool = true
+    @State private var chatSearchTerm: String = ""
+    @StateObject private var chatSearch = ChatSearchController()
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var cloudSync = CloudSyncService.shared
     @ObservedObject private var syncHealth = SyncHealthStore.shared
@@ -49,6 +51,43 @@ struct ChatSidebar: View {
         // stay in storage so re-decryption can recover them once the
         // right key is active, at which point they reappear here.
         return source.filter { !$0.isTemporary && $0.projectId == nil && !$0.decryptionFailed }
+    }
+
+    // Encrypted server-side search over synced chats. Only offered on
+    // the cloud tab: local-only chats never reach the enclave, so the
+    // index cannot know about them.
+    private var isChatSearchEnabled: Bool {
+        authManager.isAuthenticated && settings.isCloudSyncEnabled
+            && !(settings.isLocalOnlyModeEnabled && activeTab == .local)
+    }
+
+    private var isChatSearchActive: Bool {
+        isChatSearchEnabled
+            && !chatSearchTerm.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var searchResultChats: [Chat] {
+        guard isChatSearchActive else { return [] }
+        // Enclave unavailable (older deploy, no key): degrade to
+        // filtering the locally loaded titles so the box still does
+        // something useful.
+        guard chatSearch.available else {
+            let needle = chatSearchTerm
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            return filteredChats.filter {
+                !$0.isBlankChat && $0.title.lowercased().contains(needle)
+            }
+        }
+        return chatSearch.results
+    }
+
+    private var displayedChats: [Chat] {
+        isChatSearchActive ? searchResultChats : filteredChats
+    }
+
+    private var searchUserId: String? {
+        authManager.localUserData?["id"] as? String
     }
 
     // Timer to update relative time strings
@@ -204,6 +243,12 @@ struct ChatSidebar: View {
                             .padding(.horizontal, 16)
                             .padding(.top, 8)
 
+                        if isChatSearchEnabled {
+                            chatSearchField
+                                .padding(.horizontal, 16)
+                                .padding(.top, 8)
+                        }
+
                         chatList
                             .padding(.horizontal, 16)
                             .padding(.top, 8)
@@ -230,9 +275,74 @@ struct ChatSidebar: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
+    private var chatSearchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            TextField("Search chats...", text: $chatSearchTerm)
+                .font(.subheadline)
+                .textFieldStyle(PlainTextFieldStyle())
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .accessibilityLabel("Search chats")
+            if !chatSearchTerm.isEmpty {
+                Button {
+                    chatSearchTerm = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(UIColor.secondarySystemBackground).opacity(0.3))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color.gray.opacity(0.1), lineWidth: 1)
+        )
+        .onChange(of: chatSearchTerm) { _, term in
+            chatSearch.updateTerm(term, userId: searchUserId)
+        }
+    }
+
+    @ViewBuilder
+    private var chatSearchStatusRow: some View {
+        if chatSearch.isIndexing {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle())
+                    .scaleEffect(0.8)
+                Text("Building search index...")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+        } else if chatSearch.isSearching && searchResultChats.isEmpty {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle())
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+        } else if searchResultChats.isEmpty {
+            Text("No matching chats")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+        }
+    }
+
     private var chatList: some View {
         VStack(spacing: 12) {
-            ForEach(Array(filteredChats.enumerated()), id: \.element.id) { _, chat in
+            ForEach(Array(displayedChats.enumerated()), id: \.element.id) { _, chat in
                 ChatListItem(
                     chat: chat,
                     isSelected: viewModel.currentChat?.id == chat.id,
@@ -271,7 +381,9 @@ struct ChatSidebar: View {
                 }
             }
 
-            if viewModel.hasMoreChats && activeTab != .local {
+            if isChatSearchActive {
+                chatSearchStatusRow
+            } else if viewModel.hasMoreChats && activeTab != .local {
                 if viewModel.isLoadingMore {
                     HStack {
                         ProgressView()
