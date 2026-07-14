@@ -62,6 +62,11 @@ final class ChatSearchService {
         var decodeRemoteChat: (EnclavePullItem) async -> Chat?
         var primaryKeyB64: () -> String?
         var pullKeys: () -> [EnclavePullKey]?
+        /// Primary plus retained legacy keys. Reindex is a sweep over
+        /// every stored blob, so it needs the alternatives too or chats
+        /// still sealed under an old CEK stay out of the index until
+        /// migration finishes.
+        var reindexKeys: () -> [EnclavePullKey]
         var sleep: (TimeInterval) async throws -> Void
         var now: () -> Date
     }
@@ -165,12 +170,22 @@ final class ChatSearchService {
         status != "running"
     }
 
+    /// "idle" means no job record exists. The enclave only retains a
+    /// finished job for a few minutes, so a poll that resumes late
+    /// (e.g. the app was suspended) can land after the record expired.
+    /// Treat that as completed: a re-query self-corrects if the index
+    /// is still incomplete, whereas mapping it to failure would start
+    /// the cooldown for a job that likely succeeded.
     private static func settleResult(_ status: String) -> ChatSearchReindexSettle {
-        status == "completed" ? .completed : .failed
+        switch status {
+        case "completed", "idle": return .completed
+        default: return .failed
+        }
     }
 
     private func runReindex() async throws -> ChatSearchReindexSettle {
-        guard let keys = deps.pullKeys(), !keys.isEmpty else { return .skipped }
+        let keys = deps.reindexKeys()
+        guard !keys.isEmpty else { return .skipped }
         let kicked = try await deps.searchReindex(EnclaveSearchReindexRequest(keys: keys))
         print("[ChatSearch] reindex kicked job=\(kicked.jobId ?? "nil") status=\(kicked.status)")
         if Self.isTerminalStatus(kicked.status) { return Self.settleResult(kicked.status) }
@@ -256,6 +271,7 @@ extension ChatSearchService.Dependencies {
         },
         primaryKeyB64: { try? CEKEncoding.requirePrimaryKeyB64() },
         pullKeys: { CEKEncoding.pullKeysIfAvailable() },
+        reindexKeys: { CEKEncoding.migrationKeys() },
         sleep: { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
         now: { Date() }
     )

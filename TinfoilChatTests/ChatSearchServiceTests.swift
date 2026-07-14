@@ -55,7 +55,8 @@ struct ChatSearchServiceTests {
         loadLocalChat: @escaping (String, String) async -> Chat? = { _, _ in nil },
         decodeRemoteChat: @escaping (EnclavePullItem) async -> Chat? = { _ in nil },
         primaryKeyB64: @escaping () -> String? = { "primary-b64" },
-        pullKeys: @escaping () -> [EnclavePullKey]? = { [EnclavePullKey(key: "primary-b64")] }
+        pullKeys: @escaping () -> [EnclavePullKey]? = { [EnclavePullKey(key: "primary-b64")] },
+        reindexKeys: @escaping () -> [EnclavePullKey] = { [EnclavePullKey(key: "primary-b64")] }
     ) -> ChatSearchService {
         ChatSearchService(dependencies: ChatSearchService.Dependencies(
             searchQuery: { request in
@@ -78,6 +79,7 @@ struct ChatSearchServiceTests {
             decodeRemoteChat: decodeRemoteChat,
             primaryKeyB64: primaryKeyB64,
             pullKeys: pullKeys,
+            reindexKeys: reindexKeys,
             sleep: { _ in },
             now: { recorder.now }
         ))
@@ -203,10 +205,34 @@ struct ChatSearchServiceTests {
     @Test
     func skipsTheKickWhenNoKeysAreLoaded() async {
         let recorder = Recorder()
-        let service = Self.makeService(recorder: recorder, pullKeys: { nil })
+        let service = Self.makeService(recorder: recorder, reindexKeys: { [] })
         let settled = await service.ensureSearchIndex().value
         #expect(settled == .skipped)
         #expect(recorder.reindexRequests.isEmpty)
+    }
+
+    @Test
+    func treatsAnIdleStatusPollAsACompletedRebuild() async {
+        // A finished job is only retained briefly server-side; a poll
+        // that resumes after suspension can land on "idle". That must
+        // not start the failure cooldown.
+        let recorder = Recorder()
+        let service = Self.makeService(
+            recorder: recorder,
+            searchReindex: { _ in Self.runningStatus() },
+            searchReindexStatus: {
+                EnclaveSearchReindexStatusResponse(
+                    jobId: nil, status: "idle", indexed: 0, failed: 0,
+                    totalIndexed: 4, partial: false, error: nil
+                )
+            }
+        )
+        let settled = await service.ensureSearchIndex().value
+        #expect(settled == .completed)
+
+        let rekick = await service.ensureSearchIndex().value
+        #expect(rekick == .completed)
+        #expect(recorder.reindexRequests.count == 2)
     }
 
     @Test
