@@ -170,13 +170,21 @@ final class ChatSearchService {
         status != "running"
     }
 
-    /// "idle" means no job record exists. The enclave only retains a
-    /// finished job for a few minutes, so a poll that resumes late
-    /// (e.g. the app was suspended) can land after the record expired.
-    /// Treat that as completed: a re-query self-corrects if the index
-    /// is still incomplete, whereas mapping it to failure would start
-    /// the cooldown for a job that likely succeeded.
-    private static func settleResult(_ status: String) -> ChatSearchReindexSettle {
+    /// Kickoff always materializes a job, so its terminal status is the
+    /// job's own result. An anomalous "idle" here means no job was
+    /// created and must not read as success, or it would clear the
+    /// failure cooldown and let callers re-query in a loop.
+    private static func kickoffSettleResult(_ status: String) -> ChatSearchReindexSettle {
+        status == "completed" ? .completed : .failed
+    }
+
+    /// In a poll, "idle" means no job record exists. The enclave only
+    /// retains a finished job for a few minutes, so a poll that resumes
+    /// late (e.g. the app was suspended) can land after the record
+    /// expired. Treat that as completed: a re-query self-corrects if
+    /// the index is still incomplete, whereas mapping it to failure
+    /// would start the cooldown for a job that likely succeeded.
+    private static func pollSettleResult(_ status: String) -> ChatSearchReindexSettle {
         switch status {
         case "completed", "idle": return .completed
         default: return .failed
@@ -188,7 +196,7 @@ final class ChatSearchService {
         guard !keys.isEmpty else { return .skipped }
         let kicked = try await deps.searchReindex(EnclaveSearchReindexRequest(keys: keys))
         print("[ChatSearch] reindex kicked job=\(kicked.jobId ?? "nil") status=\(kicked.status)")
-        if Self.isTerminalStatus(kicked.status) { return Self.settleResult(kicked.status) }
+        if Self.isTerminalStatus(kicked.status) { return Self.kickoffSettleResult(kicked.status) }
         let deadline = deps.now()
             .addingTimeInterval(Constants.SyncEnclave.Search.reindexPollBudgetSeconds)
         while deps.now() < deadline {
@@ -196,7 +204,7 @@ final class ChatSearchService {
             let status = try await deps.searchReindexStatus()
             if Self.isTerminalStatus(status.status) {
                 print("[ChatSearch] reindex settled job=\(status.jobId ?? "nil") status=\(status.status) indexed=\(status.indexed) failed=\(status.failed) partial=\(status.partial)")
-                return Self.settleResult(status.status)
+                return Self.pollSettleResult(status.status)
             }
         }
         return .timeout

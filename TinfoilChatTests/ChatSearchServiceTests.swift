@@ -236,6 +236,26 @@ struct ChatSearchServiceTests {
     }
 
     @Test
+    func treatsAnIdleKickoffResponseAsAFailureAndStartsTheCooldown() async {
+        // Kickoff always materializes a job, so an "idle" answer means
+        // none was created; success here would clear the cooldown and
+        // let callers loop.
+        let recorder = Recorder()
+        let service = Self.makeService(recorder: recorder, searchReindex: { _ in
+            EnclaveSearchReindexStatusResponse(
+                jobId: nil, status: "idle", indexed: 0, failed: 0,
+                totalIndexed: 0, partial: false, error: nil
+            )
+        })
+        let settled = await service.ensureSearchIndex().value
+        #expect(settled == .failed)
+
+        let rekick = await service.ensureSearchIndex().value
+        #expect(rekick == .skipped)
+        #expect(recorder.reindexRequests.count == 1)
+    }
+
+    @Test
     func putsKicksOnCooldownAfterAFailedRunInsteadOfLoopingRebuilds() async {
         let recorder = Recorder()
         let service = Self.makeService(recorder: recorder, searchReindex: { _ in
