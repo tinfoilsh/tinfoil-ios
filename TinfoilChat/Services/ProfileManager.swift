@@ -945,8 +945,20 @@ class ProfileManager: ObservableObject {
         piiCheckEnabled = nil
         chatFont = nil
         projectUploadPreference = nil
-        keychainHelper.delete(for: keychainKey, service: keychainService)
-        keychainHelper.delete(for: profileBaselineKey, service: keychainService)
+        // Delete on the same serial queue the persist helpers write on and
+        // wait for it, so a queued save from before removal can never land
+        // after the delete and resurrect the previous account's profile.
+        let helper = keychainHelper
+        let profileKey = keychainKey
+        let baselineKey = profileBaselineKey
+        let service = keychainService
+        await withCheckedContinuation { continuation in
+            keychainQueue.async {
+                helper.delete(for: profileKey, service: service)
+                helper.delete(for: baselineKey, service: service)
+                continuation.resume()
+            }
+        }
         lastSyncedVersion = 0
         lastSyncedProfile = nil
         syncError = nil
