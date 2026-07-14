@@ -1885,8 +1885,13 @@ class ChatViewModel: ObservableObject {
                 // progress without a second SSE channel.
                 let applyWebSearchCallEvent: @MainActor (TinfoilWebSearchCallEvent) -> Void = { [weak self] event in
                     guard let self = self else { return }
-                    guard var chat = self.currentChat,
-                          !chat.messages.isEmpty,
+                    // Look up the streaming chat by ID, not self.currentChat,
+                    // so an event landing after the user switched chats never
+                    // writes search state into the newly selected chat.
+                    guard let sid = streamChatId,
+                          let location = self.findChatLocation(sid) else { return }
+                    var chat = self.chat(at: location)
+                    guard !chat.messages.isEmpty,
                           let lastIndex = chat.messages.indices.last else { return }
 
                     if event.action?.type == "open_page", let url = event.action?.url {
