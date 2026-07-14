@@ -207,6 +207,45 @@ struct ProfileMergeTests {
         #expect(result.conflicts.isEmpty)
     }
 
+    @Test("keeps the local value when the remote omits a field")
+    func preservesLocalOnRemoteOmission() {
+        let baseline = ProfileData(nickname: "Ada", chatFont: "serif")
+        var local = ProfileData(nickname: "Ada", chatFont: "serif")
+        local.fieldClocks = ["chatFont": EditClock(v: 3, w: "A")]
+        // Remote comes from a client that does not model chatFont.
+        var remote = ProfileData(nickname: "Ada")
+        remote.version = 2
+
+        let result = ProfileMerge.mergeProfiles(
+            baseline: baseline,
+            local: trusted(local),
+            remote: remote
+        )
+
+        #expect(result.merged.chatFont == "serif")
+        #expect(result.conflicts.isEmpty)
+        #expect(result.merged.fieldClocks?["chatFont"] == EditClock(v: 3, w: "A"))
+    }
+
+    @Test("keeps the higher clock when both sides wrote the same value")
+    func keepsHigherClockOnEqualValues() {
+        let baseline = ProfileData(nickname: "Ada")
+        var local = ProfileData(nickname: "Grace")
+        local.fieldClocks = ["nickname": EditClock(v: 5, w: "A")]
+        var remote = ProfileData(nickname: "Grace")
+        remote.fieldClocks = ["nickname": EditClock(v: 9, w: "B")]
+
+        let result = ProfileMerge.mergeProfiles(
+            baseline: baseline,
+            local: trusted(local),
+            remote: trusted(remote)
+        )
+
+        #expect(result.merged.nickname == "Grace")
+        #expect(result.merged.fieldClocks?["nickname"] == EditClock(v: 9, w: "B"))
+        #expect(result.conflicts.isEmpty)
+    }
+
     @Test("retains local value and reports ambiguous conflict")
     func reportsAmbiguousConflict() {
         let baseline = ProfileData(nickname: "Ada")

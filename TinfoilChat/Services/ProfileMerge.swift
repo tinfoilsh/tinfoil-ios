@@ -121,15 +121,42 @@ enum ProfileMerge {
         for field in mergeFields {
             let baselineValue = baselineDict[field]
             let localValue = localDict[field]
-            let remoteValue = remoteDict[field]
             let localClock = localTrusted ? local.fieldClocks?[field] : nil
+
+            // Remote omits this field: keep the local value and its
+            // clock, mirroring the two-way merge. Omission means the
+            // peer does not model the field (resets are expressed as
+            // empty values, never as a missing key), so treating it as
+            // a deletion would wipe settings owned by this client.
+            guard remoteDict[field] != nil else {
+                if let localClock { mergedClocks[field] = localClock }
+                continue
+            }
+
+            let remoteValue = remoteDict[field]
             let remoteClock = remoteTrusted ? remote.fieldClocks?[field] : nil
 
             if valuesEqual(localValue, baselineValue) {
                 assign(remoteValue, field: field)
                 if let remoteClock { mergedClocks[field] = remoteClock }
                 adoptedRemote = adoptedRemote || !valuesEqual(localValue, remoteValue)
-            } else if valuesEqual(remoteValue, baselineValue) || valuesEqual(localValue, remoteValue) {
+            } else if valuesEqual(localValue, remoteValue) {
+                // Both sides converged on the same value. Keep the
+                // higher trusted clock so the CRDT ordering survives
+                // for future merges instead of silently rewinding to
+                // the local stamp.
+                if let localClock, let remoteClock {
+                    let remoteHigher = SyncConflictResolver.remoteWins(
+                        localClock: localClock,
+                        remoteClock: remoteClock,
+                        localUpdatedAt: nil,
+                        remoteUpdatedAt: nil
+                    )
+                    mergedClocks[field] = remoteHigher ? remoteClock : localClock
+                } else if let clock = localClock ?? remoteClock {
+                    mergedClocks[field] = clock
+                }
+            } else if valuesEqual(remoteValue, baselineValue) {
                 if let localClock { mergedClocks[field] = localClock }
             } else if let localClock, let remoteClock {
                 if SyncConflictResolver.remoteWins(
