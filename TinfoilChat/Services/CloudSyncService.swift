@@ -686,7 +686,26 @@ class CloudSyncService: ObservableObject {
     }
 
     // MARK: - Bulk Sync Operations
-    
+
+    /// Load full chat objects for every locally-modified or never-synced,
+    /// non-local-only chat. Returns nil when the account generation moved
+    /// on while loading.
+    private func loadUnsyncedChats(userId: String, generation: Int) async -> [Chat]? {
+        let index = (try? await EncryptedFileStorage.cloud.loadIndex(
+            userId: userId
+        )) ?? []
+        guard generation == accountGeneration else { return nil }
+        let unsyncedIds = index.filter {
+            ($0.locallyModified || $0.syncedAt == nil) && !$0.isLocalOnly
+        }.map(\.id)
+        let unsyncedChats = (try? await EncryptedFileStorage.cloud.loadChats(
+            chatIds: unsyncedIds,
+            userId: userId
+        )) ?? []
+        guard generation == accountGeneration else { return nil }
+        return unsyncedChats
+    }
+
     /// Backup all unsynced chats
     func backupUnsyncedChats() async -> SyncResult {
         let generation = accountGeneration
@@ -700,18 +719,9 @@ class CloudSyncService: ObservableObject {
             return result
         }
 
-        let index = (try? await EncryptedFileStorage.cloud.loadIndex(
-            userId: userId
-        )) ?? []
-        guard generation == accountGeneration else { return result }
-        let unsyncedIds = index.filter {
-            ($0.locallyModified || $0.syncedAt == nil) && !$0.isLocalOnly
-        }.map(\.id)
-        let unsyncedChats = (try? await EncryptedFileStorage.cloud.loadChats(
-            chatIds: unsyncedIds,
-            userId: userId
-        )) ?? []
-        guard generation == accountGeneration else { return result }
+        guard let unsyncedChats = await loadUnsyncedChats(
+            userId: userId, generation: generation
+        ) else { return result }
         
         
         // Filter out blank, empty, decryption failure, and streaming chats
@@ -1860,18 +1870,9 @@ class CloudSyncService: ObservableObject {
         }
         guard generation == accountGeneration else { return result }
 
-        let index = (try? await EncryptedFileStorage.cloud.loadIndex(
-            userId: userId
-        )) ?? []
-        guard generation == accountGeneration else { return result }
-        let unsyncedIds = index.filter {
-            ($0.locallyModified || $0.syncedAt == nil) && !$0.isLocalOnly
-        }.map(\.id)
-        let unsyncedChats = (try? await EncryptedFileStorage.cloud.loadChats(
-            chatIds: unsyncedIds,
-            userId: userId
-        )) ?? []
-        guard generation == accountGeneration else { return result }
+        guard let unsyncedChats = await loadUnsyncedChats(
+            userId: userId, generation: generation
+        ) else { return result }
         let unsyncedProjectChats = unsyncedChats.filter { $0.projectId == projectId }
 
         for chat in unsyncedProjectChats {
