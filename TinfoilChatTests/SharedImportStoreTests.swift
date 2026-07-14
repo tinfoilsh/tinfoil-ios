@@ -50,6 +50,15 @@ struct SharedImportStoreTests {
         #expect(fixture.store.pendingRequests().isEmpty)
     }
 
+    @Test("Keeps the extension when truncating an overlong file name")
+    func keepsExtensionWhenTruncating() {
+        let longStem = String(repeating: "a", count: 300)
+        let sanitized = SharedImportStore.sanitizedFileName("\(longStem).pdf")
+
+        #expect(sanitized.count <= SharedImportConfiguration.maximumFileNameLength)
+        #expect(sanitized.hasSuffix(".pdf"))
+    }
+
     @Test("Ignores requests with corrupted manifests")
     func ignoresCorruptedManifest() throws {
         let fixture = try makeFixture()

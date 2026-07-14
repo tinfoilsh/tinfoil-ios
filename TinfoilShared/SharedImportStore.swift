@@ -81,7 +81,6 @@ struct SharedImportStore {
         )
         let requestDirectory = directoryURL(for: requestID)
 
-        try? fileManager.removeItem(at: temporaryDirectory)
         try fileManager.createDirectory(
             at: temporaryDirectory,
             withIntermediateDirectories: false,
@@ -115,6 +114,8 @@ struct SharedImportStore {
     }
 
     func pendingRequests() -> [SharedImportRequest] {
+        removeStaleTemporaryDirectories()
+
         let directories = (try? fileManager.contentsOfDirectory(
             at: inboxURL,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -124,6 +125,30 @@ struct SharedImportStore {
         return directories
             .compactMap { loadRequest(from: $0) }
             .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// Removes staging directories abandoned by an interrupted share (the
+    /// extension was killed between copy and publish), so they don't retain
+    /// app-group storage indefinitely. Only directories older than the
+    /// staging lifetime are removed, to never race a share in progress.
+    private func removeStaleTemporaryDirectories() {
+        let cutoff = Date().addingTimeInterval(
+            -SharedImportConfiguration.staleStagingLifetimeSeconds
+        )
+        let entries = (try? fileManager.contentsOfDirectory(
+            at: inboxURL,
+            includingPropertiesForKeys: [.creationDateKey],
+            options: []
+        )) ?? []
+        for url in entries {
+            let name = url.lastPathComponent
+            guard name.hasPrefix("."), name.hasSuffix(".tmp") else { continue }
+            let created = (try? url.resourceValues(forKeys: [.creationDateKey]))?
+                .creationDate ?? .distantPast
+            if created < cutoff {
+                try? fileManager.removeItem(at: url)
+            }
+        }
     }
 
     func payloadURL(for request: SharedImportRequest) throws -> URL {
@@ -166,7 +191,20 @@ struct SharedImportStore {
         let sanitized = String(sanitizedScalars)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let fallbackName = sanitized.isEmpty ? "Shared File" : sanitized
-        return String(fallbackName.prefix(SharedImportConfiguration.maximumFileNameLength))
+        let maxLength = SharedImportConfiguration.maximumFileNameLength
+        guard fallbackName.count > maxLength else { return fallbackName }
+
+        // Truncate the stem, never the extension: enqueue and payload
+        // validation both classify by the final extension, so dropping
+        // it would stage a file that later fails validation silently.
+        let fileExtension = URL(fileURLWithPath: fallbackName).pathExtension
+        guard !fileExtension.isEmpty, fileExtension.count + 1 < maxLength else {
+            return String(fallbackName.prefix(maxLength))
+        }
+        let stem = URL(fileURLWithPath: fallbackName)
+            .deletingPathExtension()
+            .lastPathComponent
+        return "\(stem.prefix(maxLength - fileExtension.count - 1)).\(fileExtension)"
     }
 
     private func loadRequest(from directoryURL: URL) -> SharedImportRequest? {

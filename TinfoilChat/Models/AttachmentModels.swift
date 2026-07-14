@@ -95,6 +95,8 @@ extension Attachment: Codable {
         textContent = try container.decodeIfPresent(String.self, forKey: .textContent)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         fileSize = try container.decodeIfPresent(Int64.self, forKey: .fileSize) ?? 0
+        // sharedImportRequestID is transient share-inbox bookkeeping —
+        // never persisted, always reset on decode
         sharedImportRequestID = nil
         let modernKey = try container.decodeIfPresent(String.self, forKey: .encryptionKey)
         let legacyKey = try container.decodeIfPresent(String.self, forKey: .key)
