@@ -137,6 +137,7 @@ class ProfileSyncService: ObservableObject {
                 self.failedDecryptionData = nil
                 self.cachedProfile = nil
                 self.unknownRemoteFields = [:]
+                self.persistUnknownRemoteFields()
                 return nil
             }
             if !item.ok {
@@ -148,6 +149,7 @@ class ProfileSyncService: ObservableObject {
                     self.failedDecryptionData = nil
                     self.cachedProfile = nil
                     self.unknownRemoteFields = [:]
+                    self.persistUnknownRemoteFields()
                     return nil
                 }
                 self.failedDecryptionData = "code:\(item.code ?? "UNKNOWN")"
@@ -268,12 +270,13 @@ class ProfileSyncService: ObservableObject {
             working = merge.merged
 
             let result = try await pushAtVersion(remote.version ?? 0)
-            // Hand the merged profile back so the caller applies any
-            // fields adopted from the remote and both devices converge.
+            // Hand the pushed snapshot back so the caller applies the
+            // exact uploaded profile — values adopted from the remote
+            // and the merged field clocks — and both devices converge.
             return (
                 result.success,
                 result.version,
-                merge.adoptedRemote ? (self.cachedProfile ?? merge.merged) : nil
+                self.cachedProfile ?? merge.merged
             )
         }
     }
