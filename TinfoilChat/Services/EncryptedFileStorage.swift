@@ -273,10 +273,13 @@ actor EncryptedFileStorage {
             }
             await overlaySyncSidecar(&chat, userId: userId)
 
+            // The rewrites come from a server response, so tolerate
+            // duplicate client ids instead of trapping on them.
             let rewritesByClientId = Dictionary(
-                uniqueKeysWithValues: attachmentRewrites.map {
+                attachmentRewrites.map {
                     ($0.clientId, (serverId: $0.serverId, encryptionKey: $0.encryptionKey))
-                }
+                },
+                uniquingKeysWith: { first, _ in first }
             )
             var didRewriteAttachment = false
             for messageIndex in chat.messages.indices {
