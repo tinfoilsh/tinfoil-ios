@@ -104,10 +104,15 @@ class AuthManager: ObservableObject {
                     guard let self else { return }
                     await self.clearAuthState()
                     await RevenueCatManager.shared.logoutUser()
+                    // A sign-out may have completed while the cleanup
+                    // above was suspended; only restore auth state when
+                    // Clerk still reports the captured user.
+                    guard self.clerk?.user?.id == user.id else { return }
                     self.updateUserData(from: user)
                     self.isAuthenticated = true
                     self.saveAuthState()
                     await RevenueCatManager.shared.loginUser(user.id)
+                    guard self.clerk?.user?.id == user.id else { return }
                     if !self.hasTriggeredSignIn,
                        let chatVM = self.chatViewModel {
                         self.hasTriggeredSignIn = true
