@@ -977,6 +977,7 @@ private struct LongMessageDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showSelectText = false
 
     var body: some View {
         NavigationStack {
@@ -1003,6 +1004,16 @@ private struct LongMessageDetailView: View {
                         dismiss()
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Select Text") {
+                        showSelectText = true
+                    }
+                }
+            }
+            .sheet(isPresented: $showSelectText) {
+                UserMessageSelectView(content: message.content)
+                    .presentationDetents([.medium, .large])
+                    .iPadSheetSizing()
             }
         }
         .preferredColorScheme(.dark)
