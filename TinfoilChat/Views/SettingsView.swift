@@ -533,12 +533,17 @@ struct SettingsView: View {
         Section {
             Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
                 .tint(Color.accentPrimary)
-            Toggle("Generative UI", isOn: $settings.genUIEnabled)
-                .tint(Color.accentPrimary)
+            Toggle(isOn: $settings.genUIEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Generative UI")
+                    Text("Let the AI render interactive widgets like charts and timelines. When off, no tool capabilities are sent to the model.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .tint(Color.accentPrimary)
         } header: {
             Text("Preferences")
-        } footer: {
-            Text("Let the AI render interactive widgets like charts and timelines. When off, no tool capabilities are sent to the model.")
         }
         .listRowBackground(Color.cardSurface(for: colorScheme))
     }
