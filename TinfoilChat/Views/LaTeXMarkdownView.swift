@@ -448,7 +448,7 @@ struct LaTeXMarkdownView: View, Equatable {
     /// Parse content into segments of markdown and LaTeX
     private nonisolated static func parseContent(_ content: String) -> [ContentSegment] {
         if content.count > Constants.Rendering.maxFullParsingCharacters {
-            return [ContentSegment(id: "md_full_\(content.hashValue)", kind: .markdown(content))]
+            return splitLargeContent(content)
         }
 
         let nsContent = content as NSString
@@ -580,10 +580,108 @@ struct LaTeXMarkdownView: View, Equatable {
                   text.count > Constants.Rendering.maxMarkdownSegmentCharacters else {
                 return [segment]
             }
-            return splitMarkdownSegment(text, baseId: segment.id)
+            return splitFencePreservingSegment(text, baseId: segment.id)
         }
 
         return segments
+    }
+
+    /// Segments content that exceeds the full-parsing cap. LaTeX and table
+    /// parsing is still skipped, but the text is split at paragraph
+    /// boundaries so no single segment forces an unbounded CoreText
+    /// measurement pass. Fenced code blocks never have a fence split
+    /// open; oversized ones are re-fenced per chunk.
+    private nonisolated static func splitLargeContent(_ content: String) -> [ContentSegment] {
+        splitFencePreservingSegment(content, baseId: "md")
+    }
+
+    /// Splits oversized markdown without ever leaving an opening and
+    /// closing fence in different `StructuredText` segments (which would
+    /// render the surrounding text as malformed Markdown): prose is split
+    /// at paragraph boundaries and each fenced code block gets its own
+    /// segment, re-fenced per chunk when the block itself exceeds the cap.
+    private nonisolated static func splitFencePreservingSegment(
+        _ content: String, baseId: String
+    ) -> [ContentSegment] {
+        var segments: [ContentSegment] = []
+
+        func appendMarkdown(_ text: String, at location: Int) {
+            guard !text.isEmpty else { return }
+            let segmentId = "\(baseId)_\(location)_\(text.hashValue)"
+            if text.count > Constants.Rendering.maxMarkdownSegmentCharacters {
+                segments.append(contentsOf: splitMarkdownSegment(text, baseId: segmentId))
+            } else {
+                segments.append(ContentSegment(id: segmentId, kind: .markdown(text)))
+            }
+        }
+
+        let nsContent = content as NSString
+        let fullRange = NSRange(location: 0, length: nsContent.length)
+        let codeMatches = Self.codeBlockRegex?.matches(in: content, options: [], range: fullRange) ?? []
+
+        var lastIndex = content.startIndex
+        for match in codeMatches {
+            guard let swiftRange = Range(match.range, in: content) else { continue }
+            if lastIndex < swiftRange.lowerBound {
+                appendMarkdown(String(content[lastIndex..<swiftRange.lowerBound]), at: match.range.location)
+            }
+            segments.append(contentsOf: splitOversizedCodeBlock(
+                String(content[swiftRange]),
+                baseId: "\(baseId)_code_\(match.range.location)"
+            ))
+            lastIndex = swiftRange.upperBound
+        }
+        if lastIndex < content.endIndex {
+            appendMarkdown(String(content[lastIndex...]), at: nsContent.length)
+        }
+
+        return segments
+    }
+
+    /// Rewrites a fenced code block that exceeds the segment cap into
+    /// several smaller fenced blocks, repeating the opening fence (with
+    /// its language info) and the closing fence around each chunk. Every
+    /// chunk stays valid Markdown while no single segment forces an
+    /// unbounded CoreText measurement pass.
+    private nonisolated static func splitOversizedCodeBlock(
+        _ block: String, baseId: String
+    ) -> [ContentSegment] {
+        let cap = Constants.Rendering.maxMarkdownSegmentCharacters
+        guard block.count > cap,
+              block.hasSuffix("```"),
+              let headerEnd = block.firstIndex(of: "\n") else {
+            return [ContentSegment(id: baseId, kind: .markdown(block))]
+        }
+        let openingFence = String(block[..<headerEnd])
+        let bodyStart = block.index(after: headerEnd)
+        let bodyEnd = block.index(block.endIndex, offsetBy: -3)
+        guard bodyStart < bodyEnd else {
+            return [ContentSegment(id: baseId, kind: .markdown(block))]
+        }
+
+        var pieces: [Substring] = []
+        var remainder = block[bodyStart..<bodyEnd]
+        while let capIndex = remainder.index(
+            remainder.startIndex, offsetBy: cap, limitedBy: remainder.endIndex
+        ), capIndex != remainder.endIndex {
+            // Prefer splitting after the last newline inside the window so
+            // chunks break between lines instead of mid-line.
+            let window = remainder[..<capIndex]
+            let splitIndex = window.lastIndex(of: "\n").map { remainder.index(after: $0) } ?? capIndex
+            pieces.append(remainder[..<splitIndex])
+            remainder = remainder[splitIndex...]
+        }
+        if !remainder.isEmpty {
+            pieces.append(remainder)
+        }
+
+        return pieces.enumerated().map { index, piece in
+            let body = piece.hasSuffix("\n") ? String(piece) : String(piece) + "\n"
+            return ContentSegment(
+                id: "\(baseId)_part_\(index)",
+                kind: .markdown("\(openingFence)\n\(body)```")
+            )
+        }
     }
 
     private nonisolated static func splitMarkdownSegment(_ text: String, baseId: String) -> [ContentSegment] {
@@ -613,7 +711,43 @@ struct LaTeXMarkdownView: View, Equatable {
             ))
         }
 
-        return result
+        // A single paragraph with no blank lines can still exceed the cap;
+        // hard-split it so no segment stays unbounded.
+        return result.flatMap { segment -> [ContentSegment] in
+            guard case .markdown(let text) = segment.kind,
+                  text.count > Constants.Rendering.maxMarkdownSegmentCharacters else {
+                return [segment]
+            }
+            return hardSplitMarkdown(text, baseId: segment.id)
+        }
+    }
+
+    /// Splits markdown into pieces no longer than the segment cap, preferring
+    /// the last newline before the cap so lines stay intact.
+    private nonisolated static func hardSplitMarkdown(_ text: String, baseId: String) -> [ContentSegment] {
+        let cap = Constants.Rendering.maxMarkdownSegmentCharacters
+        var pieces: [ContentSegment] = []
+        var remainder = Substring(text)
+        var subIndex = 0
+
+        while remainder.count > cap {
+            let capIndex = remainder.index(remainder.startIndex, offsetBy: cap)
+            let window = remainder[..<capIndex]
+            let splitIndex = window.lastIndex(of: "\n").map { remainder.index(after: $0) } ?? capIndex
+            pieces.append(ContentSegment(
+                id: "\(baseId)_hard_\(subIndex)",
+                kind: .markdown(String(remainder[..<splitIndex]))
+            ))
+            subIndex += 1
+            remainder = remainder[splitIndex...]
+        }
+        if !remainder.isEmpty {
+            pieces.append(ContentSegment(
+                id: "\(baseId)_hard_\(subIndex)",
+                kind: .markdown(String(remainder))
+            ))
+        }
+        return pieces
     }
 
     private nonisolated static func sanitizeLatex(_ latex: String) -> String {

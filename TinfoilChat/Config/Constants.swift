@@ -77,6 +77,9 @@ enum Constants {
         /// content; users can still select large messages via the full-text
         /// selection sheet.
         static let maxInlineSelectionCharacters = 10_000
+        /// Thinking/reasoning chunks larger than this are hard-split so no
+        /// single Text view forces an unbounded CoreText layout pass.
+        static let maxThinkingChunkCharacters = 8_000
     }
 
     enum StreamingBuffer {
@@ -196,6 +199,7 @@ enum Constants {
     enum Sync {
         static let chatSyncIntervalSeconds: TimeInterval = 20.0
         static let profileSyncIntervalSeconds: TimeInterval = 60.0  // 1 minute
+        static let profileSyncProtocolVersion = 2
         static let clientInitTimeoutSeconds: TimeInterval = 60.0
         static let backgroundTaskName = "CompleteStreamingResponse"
         static let maxReverseTimestamp: Int = 9999999999999
@@ -333,9 +337,10 @@ enum Constants {
         enum Sync {
             static let chatStatus = "tinfoil-sync-chat-status"
             static let allChatsStatus = "tinfoil-sync-all-chats-status"
+            static let projectChatStatusPrefix = "tinfoil-sync-project-chat-status-"
 
             static func projectChatStatus(projectId: String) -> String {
-                "tinfoil-sync-project-chat-status-\(projectId)"
+                "\(projectChatStatusPrefix)\(projectId)"
             }
             static func lastSyncDate(userId: String) -> String {
                 "tinfoil-sync-last-sync-date-\(userId)"
@@ -409,14 +414,14 @@ enum Constants {
     enum Attachments {
         static let maxImageDimension: CGFloat = 768
         static let imageCompressionQuality: CGFloat = 0.85
-        static let maxFileSizeBytes: Int64 = 20 * 1024 * 1024      // 20 MB
-        static let maxImageSizeBytes: Int64 = 10 * 1024 * 1024     // 10 MB
+        static let maxFileSizeBytes = SharedImportConfiguration.maximumDocumentSizeBytes
+        static let maxImageSizeBytes = SharedImportConfiguration.maximumImageSizeBytes
         static let previewThumbnailSize: CGFloat = 60
         static let thumbnailMaxDimension: CGFloat = 300
         static let previewMaxWidth: CGFloat = 200
         static let messageThumbnailSize: CGFloat = 80
         static let messageThumbnailColumns: Int = 3
-        static let supportedDocumentExtensions: Set<String> = ["pdf", "docx", "pptx", "xlsx", "txt", "md", "csv", "html", "json", "xml"]
+        static let supportedDocumentExtensions = SharedImportConfiguration.supportedDocumentExtensions
         static let supportedImageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic"]
         static let defaultImageMimeType = "image/jpeg"
     }

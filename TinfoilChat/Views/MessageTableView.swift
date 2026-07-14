@@ -169,7 +169,12 @@ struct MessageTableView: UIViewRepresentable {
 
                 let coordinator = context.coordinator
                 DispatchQueue.main.async {
-                    guard let currentMessage = coordinator.parent.messages.last else { return }
+                    // The chat may have been swapped (e.g. a new chat created on
+                    // foregrounding) between enqueue and execution; updating the
+                    // stale wrapper or recalculating heights against the old row
+                    // set would desync the table from its datasource.
+                    guard coordinator.lastChatId == currentChatId,
+                          let currentMessage = coordinator.parent.messages.last else { return }
 
                     wrapper.update(
                         message: currentMessage,
@@ -181,7 +186,8 @@ struct MessageTableView: UIViewRepresentable {
                         messageIndex: coordinator.parent.messages.count - 1
                     )
 
-                    if needsBufferExtension && !coordinator.isKeyboardTransitioning {
+                    if needsBufferExtension && !coordinator.isKeyboardTransitioning &&
+                        tableView.numberOfRows(inSection: 0) == coordinator.parent.messages.count {
                         tableView.beginUpdates()
                         tableView.endUpdates()
                     }

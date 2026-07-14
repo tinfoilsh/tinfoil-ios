@@ -1,8 +1,28 @@
 import SwiftUI
 import UIKit
+import AVFoundation
 import PhotosUI
 import RevenueCat
 import RevenueCatUI
+
+enum CameraPermissionAction: Equatable {
+    case presentCamera
+    case requestAccess
+    case showSettingsAlert
+}
+
+func cameraPermissionAction(for status: AVAuthorizationStatus) -> CameraPermissionAction {
+    switch status {
+    case .authorized:
+        return .presentCamera
+    case .notDetermined:
+        return .requestAccess
+    case .denied, .restricted:
+        return .showSettingsAlert
+    @unknown default:
+        return .showSettingsAlert
+    }
+}
 
 /// Input area for typing messages, including attachments and send button
 struct MessageInputView: View {
@@ -11,6 +31,12 @@ struct MessageInputView: View {
         static let defaultHeight: CGFloat = 72
         static let minimumHeight: CGFloat = 72
         static let maximumHeight: CGFloat = 180
+        /// Drafts at or beyond these bounds cannot fit within `maximumHeight`
+        /// at any supported text size, so the editor skips the full TextKit
+        /// measurement pass that `sizeThatFits` would otherwise run over the
+        /// entire draft on the main thread.
+        static let overflowCharacterCount = 2_000
+        static let overflowNewlineCount = 10
     }
     
     @Binding var messageText: String
@@ -49,6 +75,7 @@ struct MessageInputView: View {
 
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var pendingPickerAction: PickerAction?
+    @State private var showCameraPermissionAlert = false
 
     private enum PickerAction {
         case camera, photos, files
@@ -88,6 +115,14 @@ struct MessageInputView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("To use voice input, please enable microphone access in Settings.")
+            }
+            .alert("Camera Access Required", isPresented: $showCameraPermissionAlert) {
+                Button("Open Settings") {
+                    openSettings()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("To take photos, please enable camera access in Settings.")
             }
             .alert("Transcription Error", isPresented: showAudioError) {
                 Button("OK", role: .cancel) {}
@@ -134,7 +169,7 @@ struct MessageInputView: View {
                 guard let action = pendingPickerAction else { return }
                 pendingPickerAction = nil
                 switch action {
-                case .camera: viewModel.showCamera = true
+                case .camera: requestCameraAccess()
                 case .photos: viewModel.showPhotoPicker = true
                 case .files: viewModel.showDocumentPicker = true
                 }
@@ -418,6 +453,10 @@ struct MessageInputView: View {
                     .glassEffect(.regular.interactive(), in: .circle)
                     .clipShape(.circle)
                     .tint(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
+                    .disabled(
+                        !viewModel.isLoading
+                        && !attachmentsAreReadyToSend(viewModel.pendingAttachments)
+                    )
                     .accessibilityLabel(viewModel.isLoading ? "Stop generating" : "Send message")
                     .padding(.trailing, 8)
                 }
@@ -518,6 +557,10 @@ struct MessageInputView: View {
                                 .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
                         }
                     }
+                    .disabled(
+                        !viewModel.isLoading
+                        && !attachmentsAreReadyToSend(viewModel.pendingAttachments)
+                    )
                     .accessibilityLabel(viewModel.isLoading ? "Stop generating" : "Send message")
                     .accessibleHitTarget()
                     .padding(.trailing, 8)
@@ -620,6 +663,25 @@ struct MessageInputView: View {
             } else {
                 await viewModel.startAudioRecording()
             }
+        }
+    }
+
+    private func requestCameraAccess() {
+        switch cameraPermissionAction(for: AVCaptureDevice.authorizationStatus(for: .video)) {
+        case .presentCamera:
+            viewModel.showCamera = true
+        case .requestAccess:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        viewModel.showCamera = true
+                    } else {
+                        showCameraPermissionAlert = true
+                    }
+                }
+            }
+        case .showSettingsAlert:
+            showCameraPermissionAlert = true
         }
     }
 
@@ -903,8 +965,7 @@ struct CustomTextEditor: UIViewRepresentable {
         uiView.isEditable = true
         context.coordinator.refreshAccessibility(uiView)
 
-        let size = uiView.sizeThatFits(CGSize(width: uiView.frame.width, height: CGFloat.greatestFiniteMagnitude))
-        let newHeight = min(MessageInputView.Layout.maximumHeight, max(MessageInputView.Layout.minimumHeight, size.height))
+        let newHeight = context.coordinator.measuredHeight(for: uiView)
 
         if textHeight != newHeight {
             DispatchQueue.main.async {
@@ -921,9 +982,47 @@ struct CustomTextEditor: UIViewRepresentable {
         var parent: CustomTextEditor
         var isEditing = false
         var hasFocusedFromFlag = false
+        private var lastMeasurement: (text: String, width: CGFloat, pointSize: CGFloat, height: CGFloat)?
 
         init(_ parent: CustomTextEditor) {
             self.parent = parent
+        }
+
+        /// Returns the editor height for the current draft, avoiding repeated
+        /// full-document TextKit layout: results are cached per text/width/font
+        /// so keyboard-driven SwiftUI updates don't re-measure an unchanged
+        /// draft, and drafts that trivially exceed the height cap skip
+        /// measurement entirely.
+        func measuredHeight(for textView: UITextView) -> CGFloat {
+            let text = textView.text ?? ""
+            let width = textView.frame.width
+            let pointSize = textView.font?.pointSize ?? 0
+
+            if let last = lastMeasurement,
+               last.text == text, last.width == width, last.pointSize == pointSize {
+                return last.height
+            }
+
+            let height: CGFloat
+            if Self.exceedsMaximumHeight(text) {
+                height = MessageInputView.Layout.maximumHeight
+            } else {
+                let size = textView.sizeThatFits(CGSize(width: width, height: CGFloat.greatestFiniteMagnitude))
+                height = min(MessageInputView.Layout.maximumHeight, max(MessageInputView.Layout.minimumHeight, size.height))
+            }
+
+            lastMeasurement = (text, width, pointSize, height)
+            return height
+        }
+
+        private static func exceedsMaximumHeight(_ text: String) -> Bool {
+            if text.count >= MessageInputView.Layout.overflowCharacterCount { return true }
+            var newlines = 0
+            for character in text where character == "\n" {
+                newlines += 1
+                if newlines >= MessageInputView.Layout.overflowNewlineCount { return true }
+            }
+            return false
         }
 
         /// Keeps VoiceOver from reading the gray placeholder as if it were
@@ -982,8 +1081,7 @@ struct CustomTextEditor: UIViewRepresentable {
                 parent.text = textView.text
                 
                 // Calculate and update the height
-                let size = textView.sizeThatFits(CGSize(width: textView.frame.width, height: CGFloat.greatestFiniteMagnitude))
-                let newHeight = min(MessageInputView.Layout.maximumHeight, max(MessageInputView.Layout.minimumHeight, size.height))
+                let newHeight = measuredHeight(for: textView)
                 
                 if parent.textHeight != newHeight {
                     parent.textHeight = newHeight
@@ -1031,12 +1129,32 @@ final class PastingTextView: UITextView {
         UIPasteboard.general.urls?.filter { $0.isFileURL } ?? []
     }
 
+    /// UIKit probes `canPerformAction` many times while assembling the edit
+    /// menu, and each `hasImages`/`urls` read is a synchronous XPC round trip
+    /// to the pasteboard service. Cache the answers per pasteboard
+    /// generation so only the first probe pays that cost.
+    private var cachedPasteboardState: (changeCount: Int, hasImages: Bool, hasFileURLs: Bool)?
+
+    private func pasteboardState() -> (hasImages: Bool, hasFileURLs: Bool) {
+        let changeCount = UIPasteboard.general.changeCount
+        if let cached = cachedPasteboardState, cached.changeCount == changeCount {
+            return (cached.hasImages, cached.hasFileURLs)
+        }
+        let state = (
+            changeCount: changeCount,
+            hasImages: UIPasteboard.general.hasImages,
+            hasFileURLs: !pasteboardFileURLs.isEmpty
+        )
+        cachedPasteboardState = state
+        return (state.hasImages, state.hasFileURLs)
+    }
+
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)) {
-            if allowsImagePaste && UIPasteboard.general.hasImages && onPasteImage != nil {
+            if allowsImagePaste && onPasteImage != nil && pasteboardState().hasImages {
                 return true
             }
-            if !pasteboardFileURLs.isEmpty && onPasteFile != nil {
+            if onPasteFile != nil && pasteboardState().hasFileURLs {
                 return true
             }
         }

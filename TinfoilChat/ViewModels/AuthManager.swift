@@ -20,6 +20,7 @@ class AuthManager: ObservableObject {
     private var timer: Timer?
     private var clerk: Clerk?
     private var hasTriggeredSignIn = false
+    private var accountSwitchTask: Task<Void, Never>?
     
     // UserDefaults keys
     private let authStateKey = Constants.StorageKeys.Auth.state
@@ -96,6 +97,30 @@ class AuthManager: ObservableObject {
         self.clerk = clerk
         // Check if clerk is already loaded and has a user
         if let user = clerk.user {
+            if let cachedUserId = localUserData?["id"] as? String,
+               cachedUserId != user.id {
+                hasTriggeredSignIn = true
+                accountSwitchTask = Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    await self.clearAuthState()
+                    await RevenueCatManager.shared.logoutUser()
+                    // A sign-out may have completed while the cleanup
+                    // above was suspended; only restore auth state when
+                    // Clerk still reports the captured user.
+                    guard self.clerk?.user?.id == user.id else { return }
+                    self.updateUserData(from: user)
+                    self.isAuthenticated = true
+                    self.saveAuthState()
+                    await RevenueCatManager.shared.loginUser(user.id)
+                    guard self.clerk?.user?.id == user.id else { return }
+                    if !self.hasTriggeredSignIn,
+                       let chatVM = self.chatViewModel {
+                        self.hasTriggeredSignIn = true
+                        chatVM.handleSignIn()
+                    }
+                }
+                return
+            }
             // Update user data BEFORE setting isAuthenticated
             updateUserData(from: user)
             
@@ -176,10 +201,20 @@ class AuthManager: ObservableObject {
             return
         }
 
+        if let accountSwitchTask {
+            await accountSwitchTask.value
+            self.accountSwitchTask = nil
+        }
+
         // Clerk loaded successfully - now we can trust clerk.user state
         let wasAuthenticated = isAuthenticated
 
         if let user = clerk.user {
+            if let cachedUserId = localUserData?["id"] as? String,
+               cachedUserId != user.id {
+                await clearAuthState()
+                await RevenueCatManager.shared.logoutUser()
+            }
             isAuthenticated = true
             updateUserData(from: user)
             await RevenueCatManager.shared.loginUser(user.id)
@@ -202,12 +237,13 @@ class AuthManager: ObservableObject {
     private func clearAuthState() async {
         // Handle chat state BEFORE clearing auth so the view model can still
         // save the current chat (hasChatAccess depends on isAuthenticated).
-        chatViewModel?.handleSignOut()
+        await chatViewModel?.handleSignOut()
 
         // Sign-out performs a full local wipe so that no content, encryption
         // keys, or personalization bleed into the next account on a shared
         // device. This runs before isAuthenticated is cleared below so the
         // view model can still resolve the signing-out user's id for the wipe.
+        await ProfileManager.shared.clearLocalProfileForAccountRemoval()
         EncryptionService.shared.clearKey()
         await DeviceEncryptionService.shared.clearKey()
         if let chatViewModel {
@@ -219,7 +255,6 @@ class AuthManager: ObservableObject {
             await Chat.deleteAllChatsFromStorage(userId: localUserData?["id"] as? String)
         }
         SettingsManager.shared.clearAllSettings()
-        ProfileManager.shared.clearProfile()
 
         localUserData = nil
         isAuthenticated = false

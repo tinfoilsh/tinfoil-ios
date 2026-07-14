@@ -339,12 +339,12 @@ struct SettingsView: View {
     
     /// Shared destructive cleanup used by both "Delete Everything" and "Delete Account".
     private func performFullDataCleanup() async {
+        await ProfileManager.shared.clearLocalProfileForAccountRemoval()
         EncryptionService.shared.clearKey()
         await DeviceEncryptionService.shared.clearKey()
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.hasLaunchedBefore)
         await chatViewModel.clearAllChatsFromDevice()
         settings.clearAllSettings()
-        ProfileManager.shared.clearProfile()
     }
 
     private var accountSection: some View {
@@ -533,12 +533,17 @@ struct SettingsView: View {
         Section {
             Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
                 .tint(Color.accentPrimary)
-            Toggle("Generative UI", isOn: $settings.genUIEnabled)
-                .tint(Color.accentPrimary)
+            Toggle(isOn: $settings.genUIEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Generative UI")
+                    Text("Let the AI render interactive widgets like charts and timelines. When off, no tool capabilities are sent to the model.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .tint(Color.accentPrimary)
         } header: {
             Text("Preferences")
-        } footer: {
-            Text("Let the AI render interactive widgets like charts and timelines. When off, no tool capabilities are sent to the model.")
         }
         .listRowBackground(Color.cardSurface(for: colorScheme))
     }

@@ -45,6 +45,7 @@ struct ContentView: View {
             chatViewModel.authManager = authManager
             authManager.setChatViewModel(chatViewModel)
             requestAppReviewIfEligible()
+            importSharedAttachmentsIfReady()
 
             // Initialize encryption with existing key only (no auto-creation)
             Task {
@@ -124,6 +125,10 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                importSharedAttachmentsIfReady()
+            }
+
             if newPhase == .active && authManager.isAuthenticated {
                 // Sync when app becomes active if authenticated
                 // Only sync if it's been more than 30 seconds since last sync
@@ -151,8 +156,11 @@ struct ContentView: View {
             }
         }
         .onChange(of: authManager.isLoading) { _, isLoading in
-            if !isLoading && authManager.isAuthenticated {
-                chatViewModel.handleSignIn()
+            if !isLoading {
+                importSharedAttachmentsIfReady()
+                if authManager.isAuthenticated {
+                    chatViewModel.handleSignIn()
+                }
             }
         }
         .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
@@ -195,6 +203,11 @@ struct ContentView: View {
 
         defaults.set(true, forKey: Constants.StorageKeys.Settings.hasSeenReviewPrompt)
         requestReview()
+    }
+
+    private func importSharedAttachmentsIfReady() {
+        guard !authManager.isLoading else { return }
+        SharedImportCoordinator.shared.importPendingAttachments(into: chatViewModel)
     }
 }
 

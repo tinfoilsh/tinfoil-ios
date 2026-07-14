@@ -225,7 +225,9 @@ class CloudStorageService: ObservableObject {
     /// the legacy placeholder behavior so the rest of the app can
     /// still display the chat row.
     func downloadChat(_ chatId: String) async throws -> StoredChat? {
-        guard let keys = CEKEncoding.pullKeysIfAvailable() else { return nil }
+        guard let keys = CEKEncoding.pullKeysIfAvailable() else {
+            return encryptedPlaceholder(chatId: chatId)
+        }
         let response = try await SyncEnclaveAPI.pull(
             EnclavePullRequest(
                 scope: .chat,
@@ -236,7 +238,9 @@ class CloudStorageService: ObservableObject {
                 keys: keys
             )
         )
-        guard let item = response.items.first else { return nil }
+        guard let item = response.items.first else {
+            throw CloudStorageError.invalidResponse
+        }
 
         if !item.ok {
             if item.code == WireCodes.notFound { return nil }
@@ -245,7 +249,7 @@ class CloudStorageService: ObservableObject {
 
         guard let plaintextB64 = item.plaintext,
               let plaintext = Data(base64Encoded: plaintextB64) else {
-            return nil
+            return encryptedPlaceholder(chatId: chatId)
         }
 
         do {

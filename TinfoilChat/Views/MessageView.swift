@@ -977,11 +977,20 @@ private struct LongMessageDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showSelectText = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                MarkdownText(content: message.content, isDarkMode: colorScheme == .dark)
+                // Inline Textual selection installs a custom UITextInput per
+                // fragment, whose first-responder pasteboard warm-up has hung
+                // the main thread on very long messages. Above the cap users
+                // still get plain-text selection via the Select Text sheet.
+                MarkdownText(
+                    content: message.content,
+                    isDarkMode: colorScheme == .dark,
+                    textSelectionEnabled: message.content.count <= Constants.Rendering.maxInlineSelectionCharacters
+                )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(20)
             }
@@ -995,6 +1004,16 @@ private struct LongMessageDetailView: View {
                         dismiss()
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Select Text") {
+                        showSelectText = true
+                    }
+                }
+            }
+            .sheet(isPresented: $showSelectText) {
+                UserMessageSelectView(content: message.content)
+                    .presentationDetents([.medium, .large])
+                    .iPadSheetSizing()
             }
         }
         .preferredColorScheme(.dark)
@@ -1248,17 +1267,21 @@ struct MarkdownText: View {
     let content: String
     let isDarkMode: Bool
     let horizontalPadding: CGFloat
+    let textSelectionEnabled: Bool
 
-    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0) {
+    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0, textSelectionEnabled: Bool = true) {
         self.content = content
         self.isDarkMode = isDarkMode
         self.horizontalPadding = horizontalPadding
+        self.textSelectionEnabled = textSelectionEnabled
     }
 
     var body: some View {
         StructuredText(markdown: content)
             .textual.highlighterTheme(.default)
-            .textual.textSelection(.enabled)
+            .if(textSelectionEnabled) { view in
+                view.textual.textSelection(.enabled)
+            }
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, horizontalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1355,6 +1378,15 @@ struct ThoughtsSheetView: View {
     let generationTimeSeconds: Double?
     let isDarkMode: Bool
     @Environment(\.dismiss) private var dismiss
+    /// Chunks rebuilt from `thinkingText` when the message was loaded from
+    /// storage, where streaming chunks are not persisted. Chunked (and
+    /// laid out lazily) so a very large thought never becomes one Text view
+    /// whose CoreText layout blocks the main thread.
+    @State private var reconstructedChunks: [ThinkingChunk]? = nil
+
+    private var displayChunks: [ThinkingChunk] {
+        thinkingChunks.isEmpty ? (reconstructedChunks ?? []) : thinkingChunks
+    }
 
     private var titleText: String {
         if let seconds = generationTimeSeconds {
@@ -1366,16 +1398,15 @@ struct ThoughtsSheetView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if !thinkingChunks.isEmpty {
-                        ForEach(thinkingChunks) { chunk in
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if !displayChunks.isEmpty {
+                        ForEach(displayChunks) { chunk in
                             ThinkingChunkView(chunk: chunk, isDarkMode: isDarkMode)
                                 .equatable()
                         }
-                    } else {
-                        Text(thinkingText)
-                            .font(.system(.body))
-                            .foregroundColor(isDarkMode ? .white.opacity(0.9) : Color.black.opacity(0.8))
+                    } else if !thinkingText.isEmpty {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
                     }
                 }
                 .padding(16)
@@ -1387,6 +1418,13 @@ struct ThoughtsSheetView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .task {
+                guard thinkingChunks.isEmpty, reconstructedChunks == nil, !thinkingText.isEmpty else { return }
+                let text = thinkingText
+                reconstructedChunks = await Task.detached {
+                    ThinkingTextChunker.chunk(text)
+                }.value
             }
         }
     }

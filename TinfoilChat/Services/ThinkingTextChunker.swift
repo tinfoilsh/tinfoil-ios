@@ -39,14 +39,19 @@ class ThinkingTextChunker {
         while let range = workingBuffer.range(of: "\n\n") {
             let paragraph = String(workingBuffer[..<range.lowerBound])
             if !paragraph.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let chunkId = "thinking_\(completedChunks.count)"
-                completedChunks.append(ThinkingChunk(
-                    id: chunkId,
-                    content: paragraph,
-                    isComplete: true
-                ))
+                appendCompletedChunk(paragraph)
             }
             workingBuffer = String(workingBuffer[range.upperBound...])
+        }
+
+        // A single paragraph with no blank lines can grow without bound;
+        // flush completed pieces so the working chunk stays capped.
+        if workingBuffer.count > Constants.Rendering.maxThinkingChunkCharacters {
+            var pieces = Self.hardSplit(workingBuffer)
+            workingBuffer = pieces.removeLast()
+            for piece in pieces {
+                appendCompletedChunk(piece)
+            }
         }
     }
 
@@ -55,12 +60,20 @@ class ThinkingTextChunker {
     /// new one.
     func appendTail(_ token: String) {
         if workingBuffer.isEmpty, !completedChunks.isEmpty {
-            let last = completedChunks[completedChunks.count - 1]
-            completedChunks[completedChunks.count - 1] = ThinkingChunk(
+            let last = completedChunks.removeLast()
+            // Re-split the grown chunk so a long late tail can never
+            // push it past the per-chunk layout cap. The first piece
+            // keeps its id so the existing view identity is stable.
+            var pieces = Self.hardSplit(last.content + token)
+            let first = pieces.removeFirst()
+            completedChunks.append(ThinkingChunk(
                 id: last.id,
-                content: last.content + token,
+                content: first,
                 isComplete: true
-            )
+            ))
+            for piece in pieces {
+                appendCompletedChunk(piece)
+            }
         } else {
             appendToken(token)
         }
@@ -68,12 +81,7 @@ class ThinkingTextChunker {
 
     func finalize() {
         if !workingBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let chunkId = "thinking_\(completedChunks.count)"
-            completedChunks.append(ThinkingChunk(
-                id: chunkId,
-                content: workingBuffer,
-                isComplete: true
-            ))
+            appendCompletedChunk(workingBuffer)
         }
         workingBuffer = ""
     }
@@ -81,5 +89,48 @@ class ThinkingTextChunker {
     func reset() {
         completedChunks.removeAll()
         workingBuffer = ""
+    }
+
+    /// One-shot chunking for already-complete thinking text, e.g. thoughts
+    /// loaded from storage where the streaming chunks were not persisted.
+    static func chunk(_ text: String) -> [ThinkingChunk] {
+        let chunker = ThinkingTextChunker()
+        chunker.appendToken(text)
+        chunker.finalize()
+        return chunker.getAllChunks()
+    }
+
+    private func appendCompletedChunk(_ content: String) {
+        for piece in Self.hardSplit(content) {
+            completedChunks.append(ThinkingChunk(
+                id: "thinking_\(completedChunks.count)",
+                content: piece,
+                isComplete: true
+            ))
+        }
+    }
+
+    /// Splits text into pieces no longer than the chunk cap, preferring the
+    /// last newline before the cap so lines stay intact.
+    private static func hardSplit(_ text: String) -> [String] {
+        let cap = Constants.Rendering.maxThinkingChunkCharacters
+        guard text.count > cap else { return [text] }
+
+        var pieces: [String] = []
+        var remainder = Substring(text)
+        // `limitedBy:` keeps each split O(cap) instead of rescanning the
+        // whole remaining suffix with `count` on every iteration.
+        while let capIndex = remainder.index(
+            remainder.startIndex, offsetBy: cap, limitedBy: remainder.endIndex
+        ), capIndex != remainder.endIndex {
+            let window = remainder[..<capIndex]
+            let splitIndex = window.lastIndex(of: "\n").map { remainder.index(after: $0) } ?? capIndex
+            pieces.append(String(remainder[..<splitIndex]))
+            remainder = remainder[splitIndex...]
+        }
+        if !remainder.isEmpty {
+            pieces.append(String(remainder))
+        }
+        return pieces
     }
 }

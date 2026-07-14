@@ -13,6 +13,12 @@
 import Foundation
 
 enum ProfileMerge {
+    struct ThreeWayResult {
+        let merged: ProfileData
+        let conflicts: [String]
+        let adoptedRemote: Bool
+    }
+
     /// User-facing fields that participate in the merge. Metadata
     /// (version, updatedAt, clocks) is handled separately.
     static let mergeFields: [String] = [
@@ -82,6 +88,105 @@ enum ProfileMerge {
             }
         }
         return changed
+    }
+
+    static func mergeProfiles(
+        baseline: ProfileData,
+        local: ProfileData,
+        remote: ProfileData
+    ) -> ThreeWayResult {
+        guard
+            let baselineDict = try? dictionary(from: baseline),
+            let localDict = try? dictionary(from: local),
+            let remoteDict = try? dictionary(from: remote)
+        else {
+            return ThreeWayResult(merged: local, conflicts: mergeFields, adoptedRemote: false)
+        }
+
+        let localTrusted = clocksTrusted(local)
+        let remoteTrusted = clocksTrusted(remote)
+        var mergedDict = localDict
+        var mergedClocks: [String: EditClock] = [:]
+        var conflicts: [String] = []
+        var adoptedRemote = false
+
+        func assign(_ value: Any?, field: String) {
+            if let value {
+                mergedDict[field] = value
+            } else {
+                mergedDict.removeValue(forKey: field)
+            }
+        }
+
+        for field in mergeFields {
+            let baselineValue = baselineDict[field]
+            let localValue = localDict[field]
+            let localClock = localTrusted ? local.fieldClocks?[field] : nil
+
+            // Remote omits this field: keep the local value and its
+            // clock, mirroring the two-way merge. Omission means the
+            // peer does not model the field (resets are expressed as
+            // empty values, never as a missing key), so treating it as
+            // a deletion would wipe settings owned by this client.
+            guard remoteDict[field] != nil else {
+                if let localClock { mergedClocks[field] = localClock }
+                continue
+            }
+
+            let remoteValue = remoteDict[field]
+            let remoteClock = remoteTrusted ? remote.fieldClocks?[field] : nil
+
+            if valuesEqual(localValue, baselineValue) {
+                assign(remoteValue, field: field)
+                if let remoteClock { mergedClocks[field] = remoteClock }
+                adoptedRemote = adoptedRemote || !valuesEqual(localValue, remoteValue)
+            } else if valuesEqual(localValue, remoteValue) {
+                // Both sides converged on the same value. Keep the
+                // higher trusted clock so the CRDT ordering survives
+                // for future merges instead of silently rewinding to
+                // the local stamp.
+                if let localClock, let remoteClock {
+                    let remoteHigher = SyncConflictResolver.remoteWins(
+                        localClock: localClock,
+                        remoteClock: remoteClock,
+                        localUpdatedAt: nil,
+                        remoteUpdatedAt: nil
+                    )
+                    mergedClocks[field] = remoteHigher ? remoteClock : localClock
+                } else if let clock = localClock ?? remoteClock {
+                    mergedClocks[field] = clock
+                }
+            } else if valuesEqual(remoteValue, baselineValue) {
+                if let localClock { mergedClocks[field] = localClock }
+            } else if let localClock, let remoteClock {
+                if SyncConflictResolver.remoteWins(
+                    localClock: localClock,
+                    remoteClock: remoteClock,
+                    localUpdatedAt: nil,
+                    remoteUpdatedAt: nil
+                ) {
+                    assign(remoteValue, field: field)
+                    mergedClocks[field] = remoteClock
+                    adoptedRemote = true
+                } else {
+                    mergedClocks[field] = localClock
+                }
+            } else {
+                conflicts.append(field)
+                if let localClock { mergedClocks[field] = localClock }
+            }
+        }
+
+        var merged = (try? profile(from: mergedDict)) ?? local
+        merged.version = remote.version
+        merged.clockVersion = remote.version
+        merged.fieldClocks = mergedClocks.isEmpty ? nil : mergedClocks
+        merged.updatedAt = laterTimestamp(local.updatedAt, remote.updatedAt)
+        return ThreeWayResult(
+            merged: merged,
+            conflicts: conflicts,
+            adoptedRemote: adoptedRemote
+        )
     }
 
     /// Merge a remote profile into the local one field by field.

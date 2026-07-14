@@ -215,6 +215,98 @@ actor EncryptedFileStorage {
         try await performSaveChat(chat, userId: userId)
     }
 
+    func applyRemoteChatIfFresh(
+        _ chat: Chat,
+        userId: String,
+        expectedLocalUpdatedAt: Date?,
+        allowLocallyModified: Bool = false
+    ) async throws -> Bool {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+
+        let entries = (try? await loadIndex(userId: userId)) ?? []
+        let existing = entries.first { $0.id == chat.id }
+        guard existing?.updatedAt == expectedLocalUpdatedAt else { return false }
+        if existing?.locallyModified == true && !allowLocallyModified {
+            return false
+        }
+        try await performSaveChat(chat, userId: userId)
+        return true
+    }
+
+    func finalizeUploadIfFresh(
+        chatId: String,
+        userId: String,
+        expectedUpdatedAt: Date,
+        syncVersion: Int,
+        attachmentRewrites: [
+            (clientId: String, serverId: String, encryptionKey: String)
+        ]
+    ) async throws -> Bool {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+
+        let entries = (try? await loadIndex(userId: userId)) ?? []
+        guard let existing = entries.first(where: { $0.id == chatId }) else {
+            return false
+        }
+        let editedDuringUpload = existing.updatedAt != expectedUpdatedAt
+        if !attachmentRewrites.isEmpty {
+            let encPath = try chatFilePath(
+                chatId: chatId,
+                userId: userId,
+                isCorrupted: false
+            )
+            let rawPath = try chatFilePath(
+                chatId: chatId,
+                userId: userId,
+                isCorrupted: true
+            )
+            let hasEncryptedFile = fileManager.fileExists(atPath: encPath.path)
+            let filePath = hasEncryptedFile ? encPath : rawPath
+            guard fileManager.fileExists(atPath: filePath.path),
+                  var chat = try await loadChatFromFile(
+                      filePath,
+                      isRaw: !hasEncryptedFile
+                  ) else {
+                return false
+            }
+            await overlaySyncSidecar(&chat, userId: userId)
+
+            // The rewrites come from a server response, so tolerate
+            // duplicate client ids instead of trapping on them.
+            let rewritesByClientId = Dictionary(
+                attachmentRewrites.map {
+                    ($0.clientId, (serverId: $0.serverId, encryptionKey: $0.encryptionKey))
+                },
+                uniquingKeysWith: { first, _ in first }
+            )
+            var didRewriteAttachment = false
+            for messageIndex in chat.messages.indices {
+                for attachmentIndex in chat.messages[messageIndex].attachments.indices {
+                    let clientId = chat.messages[messageIndex].attachments[attachmentIndex].id
+                    guard let rewrite = rewritesByClientId[clientId] else { continue }
+                    chat.messages[messageIndex].attachments[attachmentIndex].id =
+                        rewrite.serverId
+                    chat.messages[messageIndex].attachments[attachmentIndex].encryptionKey =
+                        rewrite.encryptionKey
+                    didRewriteAttachment = true
+                }
+            }
+            if didRewriteAttachment {
+                try await performSaveChat(chat, userId: userId)
+            }
+        }
+        try await performUpdateSyncMetadata(
+            chatId: chatId,
+            userId: userId,
+            syncVersion: syncVersion,
+            syncedAt: editedDuringUpload ? (existing.syncedAt ?? Date()) : Date(),
+            locallyModified: editedDuringUpload
+        )
+        return !editedDuringUpload
+    }
+
     private func performSaveChat(_ chat: Chat, userId: String) async throws {
         let isCorrupted = chat.decryptionFailed || chat.dataCorrupted
 
