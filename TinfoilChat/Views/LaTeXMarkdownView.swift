@@ -580,7 +580,7 @@ struct LaTeXMarkdownView: View, Equatable {
                   text.count > Constants.Rendering.maxMarkdownSegmentCharacters else {
                 return [segment]
             }
-            return splitMarkdownSegment(text, baseId: segment.id)
+            return splitFencePreservingSegment(text, baseId: segment.id)
         }
 
         return segments
@@ -592,15 +592,25 @@ struct LaTeXMarkdownView: View, Equatable {
     /// measurement pass. Fenced code blocks are kept whole so splitting
     /// never breaks a fence open.
     private nonisolated static func splitLargeContent(_ content: String) -> [ContentSegment] {
+        splitFencePreservingSegment(content, baseId: "md")
+    }
+
+    /// Splits oversized markdown while keeping every fenced code block in
+    /// its own whole segment, so a split can never leave an opening and
+    /// closing fence in different `StructuredText` segments (which would
+    /// render the surrounding text as malformed Markdown).
+    private nonisolated static func splitFencePreservingSegment(
+        _ content: String, baseId: String
+    ) -> [ContentSegment] {
         var segments: [ContentSegment] = []
 
         func appendMarkdown(_ text: String, at location: Int) {
             guard !text.isEmpty else { return }
-            let baseId = "md_\(location)_\(text.hashValue)"
+            let segmentId = "\(baseId)_\(location)_\(text.hashValue)"
             if text.count > Constants.Rendering.maxMarkdownSegmentCharacters {
-                segments.append(contentsOf: splitMarkdownSegment(text, baseId: baseId))
+                segments.append(contentsOf: splitMarkdownSegment(text, baseId: segmentId))
             } else {
-                segments.append(ContentSegment(id: baseId, kind: .markdown(text)))
+                segments.append(ContentSegment(id: segmentId, kind: .markdown(text)))
             }
         }
 
@@ -615,7 +625,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 appendMarkdown(String(content[lastIndex..<swiftRange.lowerBound]), at: match.range.location)
             }
             segments.append(ContentSegment(
-                id: "md_code_\(match.range.location)",
+                id: "\(baseId)_code_\(match.range.location)",
                 kind: .markdown(String(content[swiftRange]))
             ))
             lastIndex = swiftRange.upperBound
