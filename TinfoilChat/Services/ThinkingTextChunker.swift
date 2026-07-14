@@ -60,12 +60,20 @@ class ThinkingTextChunker {
     /// new one.
     func appendTail(_ token: String) {
         if workingBuffer.isEmpty, !completedChunks.isEmpty {
-            let last = completedChunks[completedChunks.count - 1]
-            completedChunks[completedChunks.count - 1] = ThinkingChunk(
+            let last = completedChunks.removeLast()
+            // Re-split the grown chunk so a long late tail can never
+            // push it past the per-chunk layout cap. The first piece
+            // keeps its id so the existing view identity is stable.
+            var pieces = Self.hardSplit(last.content + token)
+            let first = pieces.removeFirst()
+            completedChunks.append(ThinkingChunk(
                 id: last.id,
-                content: last.content + token,
+                content: first,
                 isComplete: true
-            )
+            ))
+            for piece in pieces {
+                appendCompletedChunk(piece)
+            }
         } else {
             appendToken(token)
         }
@@ -110,8 +118,11 @@ class ThinkingTextChunker {
 
         var pieces: [String] = []
         var remainder = Substring(text)
-        while remainder.count > cap {
-            let capIndex = remainder.index(remainder.startIndex, offsetBy: cap)
+        // `limitedBy:` keeps each split O(cap) instead of rescanning the
+        // whole remaining suffix with `count` on every iteration.
+        while let capIndex = remainder.index(
+            remainder.startIndex, offsetBy: cap, limitedBy: remainder.endIndex
+        ), capIndex != remainder.endIndex {
             let window = remainder[..<capIndex]
             let splitIndex = window.lastIndex(of: "\n").map { remainder.index(after: $0) } ?? capIndex
             pieces.append(String(remainder[..<splitIndex]))
