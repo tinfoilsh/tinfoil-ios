@@ -430,6 +430,7 @@ struct ChatSearchServiceTests {
                     ],
                 ])
             },
+            pullKeys: { [EnclavePullKey(key: "pull-key")] },
             loadLocalChat: { chatId, userId in
                 #expect(userId == "user-1")
                 return chatId == "a" ? Self.makeChat(id: "a", title: "Local pond notes") : nil

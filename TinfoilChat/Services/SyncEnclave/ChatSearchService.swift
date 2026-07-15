@@ -267,7 +267,9 @@ final class ChatSearchService {
                         byId[item.id] = chat
                     }
                 }
-            } catch {}
+            } catch {
+                // Resolving remote hits is best-effort; locally available results remain usable.
+            }
         }
         return results.compactMap { byId[$0.id] }.filter { !$0.decryptionFailed }
     }
