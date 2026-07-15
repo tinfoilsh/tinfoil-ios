@@ -204,7 +204,6 @@ final class ChatSearchService {
     private static func pollSettleResult(
         _ response: EnclaveSearchReindexStatusResponse
     ) -> ChatSearchReindexSettle {
-        guard response.failed == 0 else { return .failed }
         if response.status == "idle" { return .completed }
         return terminalSettleResult(response)
     }

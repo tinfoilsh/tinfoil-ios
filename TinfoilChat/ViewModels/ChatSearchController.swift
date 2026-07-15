@@ -46,7 +46,8 @@ final class ChatSearchController: ObservableObject {
     /// Debounce and run one search per term change. Cancelling the
     /// previous task ensures completions from a superseded term never
     /// set state or schedule a refresh.
-    func updateTerm(_ term: String, userId: String?) {
+    @discardableResult
+    func updateTerm(_ term: String, userId: String?) -> Task<Void, Never>? {
         searchTask?.cancel()
         searchTask = nil
         let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -54,7 +55,7 @@ final class ChatSearchController: ObservableObject {
             results = []
             isSearching = false
             isIndexing = false
-            return
+            return nil
         }
         isSearching = true
         searchTask = Task { [weak self] in
@@ -64,9 +65,10 @@ final class ChatSearchController: ObservableObject {
             guard !Task.isCancelled else { return }
             await self?.run(term: trimmed, userId: userId)
         }
+        return searchTask
     }
 
-    func run(term: String, userId: String?) async {
+    private func run(term: String, userId: String?) async {
         do {
             let outcome = try await service.searchSyncedChats(query: term)
             guard !Task.isCancelled else { return }

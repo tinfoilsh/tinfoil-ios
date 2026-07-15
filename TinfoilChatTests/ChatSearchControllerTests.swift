@@ -24,7 +24,7 @@ struct ChatSearchControllerTests {
         )
         let controller = ChatSearchController(service: service)
 
-        await controller.run(term: "ducks", userId: "user-1")
+        await controller.updateTerm("ducks", userId: "user-1")?.value
 
         #expect(recorder.queryRequests.count == 2)
         #expect(controller.isIndexing == false)
@@ -48,7 +48,7 @@ struct ChatSearchControllerTests {
         )
         let controller = ChatSearchController(service: service)
 
-        await controller.run(term: "ducks", userId: "user-1")
+        await controller.updateTerm("ducks", userId: "user-1")?.value
 
         #expect(controller.isIndexing == false)
         #expect(controller.isSearching == false)
@@ -73,7 +73,7 @@ struct ChatSearchControllerTests {
         )
         let controller = ChatSearchController(service: service)
 
-        await controller.run(term: "ducks", userId: "user-1")
+        await controller.updateTerm("ducks", userId: "user-1")?.value
 
         #expect(controller.isIndexing == false)
         #expect(controller.isSearching == false)
