@@ -11,10 +11,16 @@ import Combine
 
 @MainActor
 class AuthManager: ObservableObject {
+    private static let userIdKey = "id"
+
     @Published var isAuthenticated = false
     @Published var isLoading = true
     @Published var localUserData: [String: Any]? = nil
     @Published var hasActiveSubscription = false
+
+    var localUserId: String? {
+        localUserData?[Self.userIdKey] as? String
+    }
     
     private var cancellables = Set<AnyCancellable>()
     private var timer: Timer?
@@ -97,7 +103,7 @@ class AuthManager: ObservableObject {
         self.clerk = clerk
         // Check if clerk is already loaded and has a user
         if let user = clerk.user {
-            if let cachedUserId = localUserData?["id"] as? String,
+            if let cachedUserId = localUserId,
                cachedUserId != user.id {
                 hasTriggeredSignIn = true
                 accountSwitchTask = Task { @MainActor [weak self] in
@@ -140,7 +146,7 @@ class AuthManager: ObservableObject {
         
         // Store relevant user data
         localUserData = [
-            "id": user.id,
+            Self.userIdKey: user.id,
             "email": user.primaryEmailAddress?.emailAddress ?? "",
             "name": user.firstName ?? "",
             "fullName": "\(user.firstName ?? "") \(user.lastName ?? "")",
@@ -210,7 +216,7 @@ class AuthManager: ObservableObject {
         let wasAuthenticated = isAuthenticated
 
         if let user = clerk.user {
-            if let cachedUserId = localUserData?["id"] as? String,
+            if let cachedUserId = localUserId,
                cachedUserId != user.id {
                 await clearAuthState()
                 await RevenueCatManager.shared.logoutUser()
@@ -252,7 +258,7 @@ class AuthManager: ObservableObject {
             // No chat view model is attached (e.g. sign-out resolved before
             // the UI wired one up); wipe directly so chat files never
             // outlive the account on a shared device.
-            await Chat.deleteAllChatsFromStorage(userId: localUserData?["id"] as? String)
+            await Chat.deleteAllChatsFromStorage(userId: localUserId)
         }
         SettingsManager.shared.clearAllSettings()
 

@@ -50,7 +50,7 @@ struct GatedPaywallView: View {
     }
 
     private func prepare() async {
-        guard let clerkUserId = authManager.localUserData?["id"] as? String else {
+        guard let clerkUserId = authManager.localUserId else {
             gateState = .failed
             return
         }

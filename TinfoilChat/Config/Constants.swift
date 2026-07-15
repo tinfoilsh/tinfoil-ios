@@ -149,12 +149,31 @@ enum Constants {
         static let chatListLimit = 100
         static let projectListLimit = 100
         static let projectChatListLimit = 100
+        static let plaintextChatFormatVersion = 2
         /// Hard per-page cap the enclave's list-status endpoint
         /// enforces; requests above it are clamped server-side.
         static let listStatusPageLimit = 500
         /// How many full chat blobs to request per pull call. Keeps
         /// individual response payloads bounded when syncing many chats.
         static let pullBatchSize = 20
+
+        /// Encrypted chat search over the sync enclave. Mirrors the
+        /// webapp constants so both clients drive the enclave's
+        /// reindex lifecycle the same way.
+        enum Search {
+            static let debounceSeconds: TimeInterval = 0.3
+            static let resultLimit = 20
+            static let reindexPollIntervalSeconds: TimeInterval = 2.0
+            static let reindexServerBudgetSeconds: TimeInterval = 20 * 60.0
+            static let reindexResponseGraceSeconds: TimeInterval = 30.0
+            static let reindexPollBudgetSeconds: TimeInterval =
+                reindexServerBudgetSeconds + reindexResponseGraceSeconds
+            /// A failed rebuild puts further kicks on cooldown: every
+            /// attempt re-pulls and re-embeds the whole corpus, so
+            /// retrying on each query would loop a persistent failure
+            /// at full rebuild cost.
+            static let reindexFailureCooldownSeconds: TimeInterval = 60.0
+        }
     }
 
 
