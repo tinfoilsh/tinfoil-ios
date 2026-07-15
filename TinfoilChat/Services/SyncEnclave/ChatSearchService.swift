@@ -37,10 +37,9 @@ struct ChatSearchOutcome: Equatable {
     /// True when the enclave has no complete index for this key yet and
     /// a rebuild has been kicked; results may be partial until it settles.
     let indexing: Bool
-    /// False when search cannot run at all: no primary key loaded,
-    /// fallback keys are still active, or the enclave has no search
-    /// backend (older deploy / unconfigured). The UI should fall back
-    /// to local title filtering.
+    /// False when search cannot run at all: no primary key loaded, or
+    /// the enclave has no search backend (older deploy / unconfigured).
+    /// The UI should fall back to local title filtering.
     let available: Bool
 
     static let unavailable = ChatSearchOutcome(
@@ -63,8 +62,12 @@ final class ChatSearchService {
         var loadLocalChat: (_ chatId: String, _ userId: String) async -> Chat?
         var decodeRemoteChat: (EnclavePullItem) async -> Chat?
         var primaryKeyB64: () -> String?
-        var hasActiveFallbackKeys: () -> Bool
         var pullKeys: () -> [EnclavePullKey]?
+        /// Primary plus retained legacy keys. Reindex is a sweep over
+        /// every stored blob, so it needs the alternatives too or chats
+        /// still sealed under an old CEK stay out of the index until
+        /// migration finishes.
+        var reindexKeys: () -> [EnclavePullKey]
         var sleep: (TimeInterval) async throws -> Void
         var now: () -> Date
     }
@@ -97,8 +100,7 @@ final class ChatSearchService {
         query: String,
         limit: Int = Constants.SyncEnclave.Search.resultLimit
     ) async throws -> ChatSearchOutcome {
-        guard let key = deps.primaryKeyB64(),
-              !deps.hasActiveFallbackKeys() else {
+        guard let key = deps.primaryKeyB64(), !key.isEmpty else {
             return .unavailable
         }
         let response: EnclaveSearchQueryResponse
@@ -130,8 +132,8 @@ final class ChatSearchService {
     /// re-kick after a failure, and every attempt re-pulls and
     /// re-embeds chats, so retrying on each query would loop a
     /// persistent failure at full rebuild cost. Never throws: failures
-    /// are logged and settle as `.failed` so fire-and-forget call
-    /// sites cannot leak errors.
+    /// settle as `.failed` so fire-and-forget call sites cannot leak
+    /// errors.
     @discardableResult
     func ensureSearchIndex() -> Task<ChatSearchReindexSettle, Never> {
         if let inFlight = reindexInFlight { return inFlight }
@@ -145,7 +147,6 @@ final class ChatSearchService {
             do {
                 result = try await self.runReindex()
             } catch {
-                print("[ChatSearch] reindex failed: \(error)")
                 result = .failed
             }
             self.recordReindexSettle(result)
@@ -209,14 +210,11 @@ final class ChatSearchService {
     }
 
     private func runReindex() async throws -> ChatSearchReindexSettle {
-        guard let primaryKey = deps.primaryKeyB64(),
-              !deps.hasActiveFallbackKeys() else {
-            return .skipped
-        }
+        let keys = deps.reindexKeys()
+        guard !keys.isEmpty else { return .skipped }
         let kicked = try await deps.searchReindex(
-            EnclaveSearchReindexRequest(keys: [EnclavePullKey(key: primaryKey)])
+            EnclaveSearchReindexRequest(keys: keys)
         )
-        print("[ChatSearch] reindex kicked job=\(kicked.jobId ?? "nil") status=\(kicked.status)")
         if Self.isTerminalStatus(kicked.status) { return Self.kickoffSettleResult(kicked) }
         let deadline = deps.now()
             .addingTimeInterval(Constants.SyncEnclave.Search.reindexPollBudgetSeconds)
@@ -224,7 +222,6 @@ final class ChatSearchService {
             try await deps.sleep(Constants.SyncEnclave.Search.reindexPollIntervalSeconds)
             let status = try await deps.searchReindexStatus()
             if Self.isTerminalStatus(status.status) {
-                print("[ChatSearch] reindex settled job=\(status.jobId ?? "nil") status=\(status.status) indexed=\(status.indexed) failed=\(status.failed) partial=\(status.partial)")
                 return Self.pollSettleResult(status)
             }
         }
@@ -270,9 +267,7 @@ final class ChatSearchService {
                         byId[item.id] = chat
                     }
                 }
-            } catch {
-                print("[ChatSearch] search result pull failed: \(error)")
-            }
+            } catch {}
         }
         return results.compactMap { byId[$0.id] }.filter { !$0.decryptionFailed }
     }
@@ -294,7 +289,7 @@ func decodeSearchPulledChat(_ item: EnclavePullItem) -> StoredChat? {
     if item.projectIdSet == true {
         stored.projectId = item.projectId
     }
-    stored.formatVersion = 2
+    stored.formatVersion = Constants.SyncEnclave.plaintextChatFormatVersion
     return stored
 }
 
@@ -314,10 +309,8 @@ extension ChatSearchService.Dependencies {
             return await stored.toChat()
         },
         primaryKeyB64: { try? CEKEncoding.requirePrimaryKeyB64() },
-        hasActiveFallbackKeys: {
-            !EncryptionService.shared.getActiveKeys().alternatives.isEmpty
-        },
         pullKeys: { CEKEncoding.pullKeysIfAvailable() },
+        reindexKeys: { CEKEncoding.migrationKeys() },
         sleep: { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
         now: { Date() }
     )

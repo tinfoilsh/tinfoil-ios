@@ -537,8 +537,9 @@ extension EnclaveSearchQueryResponse {
 }
 
 struct EnclaveSearchReindexRequest: Encodable {
-    /// The current primary CEK. Search is unavailable while legacy
-    /// fallback keys remain active.
+    /// The current primary CEK followed by retained legacy CEKs. The
+    /// enclave uses the alternatives to unseal older chats while
+    /// rebuilding the index under the primary key.
     let keys: [EnclavePullKey]
 }
 

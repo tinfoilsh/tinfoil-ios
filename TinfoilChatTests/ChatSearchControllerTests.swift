@@ -52,7 +52,31 @@ struct ChatSearchControllerTests {
 
         #expect(controller.isIndexing == false)
         #expect(controller.isSearching == false)
+        #expect(controller.available == false)
         #expect(recorder.queryRequests.count == 1)
+    }
+
+    @Test
+    func fallsBackToLocalSearchAfterTimedOutRebuild() async {
+        let recorder = ChatSearchServiceTests.Recorder()
+        let service = ChatSearchServiceTests.makeService(
+            recorder: recorder,
+            searchQuery: { _ in
+                EnclaveSearchQueryResponse(results: [], totalIndexed: 0, needsReindex: true)
+            },
+            searchReindex: { _ in ChatSearchServiceTests.runningStatus() },
+            searchReindexStatus: {
+                recorder.advance(Constants.SyncEnclave.Search.reindexPollBudgetSeconds)
+                return ChatSearchServiceTests.runningStatus()
+            }
+        )
+        let controller = ChatSearchController(service: service)
+
+        await controller.updateTerm("ducks", userId: "user-1")?.value
+
+        #expect(controller.isIndexing == false)
+        #expect(controller.isSearching == false)
+        #expect(controller.available == false)
     }
 
     @Test
@@ -77,6 +101,7 @@ struct ChatSearchControllerTests {
 
         #expect(controller.isIndexing == false)
         #expect(controller.isSearching == false)
+        #expect(controller.available == false)
         #expect(recorder.queryRequests.count == 2)
     }
 
@@ -87,5 +112,23 @@ struct ChatSearchControllerTests {
         project.projectId = "project-1"
 
         #expect([root, project].filter(isRootSidebarChat).map(\.id) == ["root"])
+    }
+
+    @Test
+    func sidebarSearchIsOnlyEnabledForCloudChats() {
+        #expect(
+            isSidebarChatSearchEnabled(
+                isAuthenticated: true,
+                isCloudSyncEnabled: true,
+                activeTab: .cloud
+            )
+        )
+        #expect(
+            !isSidebarChatSearchEnabled(
+                isAuthenticated: true,
+                isCloudSyncEnabled: true,
+                activeTab: .local
+            )
+        )
     }
 }

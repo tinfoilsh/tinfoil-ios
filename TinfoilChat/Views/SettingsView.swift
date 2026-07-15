@@ -330,10 +330,10 @@ struct SettingsView: View {
             AsyncImage(url: url) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
-                PixelAvatarView(name: (userData["id"] as? String) ?? "user", size: 40)
+                PixelAvatarView(name: authManager.localUserId ?? "user", size: 40)
             }
         } else {
-            PixelAvatarView(name: clerk.user?.id ?? (authManager.localUserData?["id"] as? String) ?? "user", size: 40)
+            PixelAvatarView(name: clerk.user?.id ?? authManager.localUserId ?? "user", size: 40)
         }
     }
     

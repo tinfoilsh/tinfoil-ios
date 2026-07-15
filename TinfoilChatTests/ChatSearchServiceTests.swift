@@ -55,8 +55,8 @@ struct ChatSearchServiceTests {
         loadLocalChat: @escaping (String, String) async -> Chat? = { _, _ in nil },
         decodeRemoteChat: @escaping (EnclavePullItem) async -> Chat? = { _ in nil },
         primaryKeyB64: @escaping () -> String? = { "primary-b64" },
-        hasActiveFallbackKeys: @escaping () -> Bool = { false },
         pullKeys: @escaping () -> [EnclavePullKey]? = { [EnclavePullKey(key: "primary-b64")] },
+        reindexKeys: @escaping () -> [EnclavePullKey] = { [EnclavePullKey(key: "primary-b64")] },
         sleep: @escaping (TimeInterval) async throws -> Void = { _ in }
     ) -> ChatSearchService {
         ChatSearchService(dependencies: ChatSearchService.Dependencies(
@@ -79,8 +79,8 @@ struct ChatSearchServiceTests {
             loadLocalChat: loadLocalChat,
             decodeRemoteChat: decodeRemoteChat,
             primaryKeyB64: primaryKeyB64,
-            hasActiveFallbackKeys: hasActiveFallbackKeys,
             pullKeys: pullKeys,
+            reindexKeys: reindexKeys,
             sleep: sleep,
             now: { recorder.now }
         ))
@@ -120,16 +120,27 @@ struct ChatSearchServiceTests {
     }
 
     @Test
-    func reportsUnavailableWhileFallbackKeysRemainActive() async throws {
+    func allowsQueriesWhileLegacyKeysRemainAvailableForReindex() async throws {
         let recorder = Recorder()
         let service = Self.makeService(
             recorder: recorder,
-            hasActiveFallbackKeys: { true }
+            searchQuery: { _ in
+                EnclaveSearchQueryResponse(results: [], totalIndexed: 0, needsReindex: true)
+            },
+            reindexKeys: {
+                [
+                    EnclavePullKey(key: "primary-b64"),
+                    EnclavePullKey(key: "legacy-b64"),
+                ]
+            }
         )
         let outcome = try await service.searchSyncedChats(query: "ducks")
-        #expect(outcome == .unavailable)
-        #expect(recorder.queryRequests.isEmpty)
-        #expect(recorder.reindexRequests.isEmpty)
+        #expect(outcome.available)
+        #expect(outcome.indexing)
+        let settled = await service.ensureSearchIndex().value
+        #expect(settled == .completed)
+        #expect(recorder.queryRequests.map(\.key) == ["primary-b64"])
+        #expect(recorder.reindexRequests[0].keys.map(\.key) == ["primary-b64", "legacy-b64"])
     }
 
     @Test
@@ -219,19 +230,7 @@ struct ChatSearchServiceTests {
     @Test
     func skipsTheKickWhenNoKeysAreLoaded() async {
         let recorder = Recorder()
-        let service = Self.makeService(recorder: recorder, primaryKeyB64: { nil })
-        let settled = await service.ensureSearchIndex().value
-        #expect(settled == .skipped)
-        #expect(recorder.reindexRequests.isEmpty)
-    }
-
-    @Test
-    func skipsTheKickWhileFallbackKeysRemainActive() async {
-        let recorder = Recorder()
-        let service = Self.makeService(
-            recorder: recorder,
-            hasActiveFallbackKeys: { true }
-        )
+        let service = Self.makeService(recorder: recorder, reindexKeys: { [] })
         let settled = await service.ensureSearchIndex().value
         #expect(settled == .skipped)
         #expect(recorder.reindexRequests.isEmpty)
@@ -455,6 +454,7 @@ struct ChatSearchServiceTests {
         #expect(recorder.pullRequests.count == 1)
         #expect(recorder.pullRequests[0].ids == ["b", "c"])
         #expect(recorder.pullRequests[0].scope == .chat)
+        #expect(recorder.pullRequests[0].keys.map(\.key) == ["pull-key"])
     }
 
     @Test
@@ -503,7 +503,7 @@ struct ChatSearchServiceTests {
         let stored = try #require(decodeSearchPulledChat(item))
         #expect(stored.syncVersion == 12)
         #expect(stored.projectId == "project-new")
-        #expect(stored.formatVersion == 2)
+        #expect(stored.formatVersion == Constants.SyncEnclave.plaintextChatFormatVersion)
     }
 
     @Test

@@ -89,14 +89,15 @@ final class ChatSearchController: ObservableObject {
                     await run(term: term, userId: userId)
                 } else {
                     isIndexing = false
+                    available = false
                 }
             }
         } catch {
             guard !Task.isCancelled else { return }
-            print("[ChatSearch] search failed: \(error)")
             results = []
             isSearching = false
             isIndexing = false
+            available = false
         }
     }
 }

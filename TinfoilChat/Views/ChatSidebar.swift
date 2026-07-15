@@ -13,6 +13,14 @@ func isRootSidebarChat(_ chat: Chat) -> Bool {
     !chat.isTemporary && chat.projectId == nil && !chat.decryptionFailed
 }
 
+func isSidebarChatSearchEnabled(
+    isAuthenticated: Bool,
+    isCloudSyncEnabled: Bool,
+    activeTab: ChatStorageTab
+) -> Bool {
+    isAuthenticated && isCloudSyncEnabled && activeTab == .cloud
+}
+
 struct ChatSidebar: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(Clerk.self) private var clerk
@@ -61,8 +69,11 @@ struct ChatSidebar: View {
     // the cloud tab: local-only chats never reach the enclave, so the
     // index cannot know about them.
     private var isChatSearchEnabled: Bool {
-        authManager.isAuthenticated && settings.isCloudSyncEnabled
-            && !(settings.isLocalOnlyModeEnabled && activeTab == .local)
+        isSidebarChatSearchEnabled(
+            isAuthenticated: authManager.isAuthenticated,
+            isCloudSyncEnabled: settings.isCloudSyncEnabled,
+            activeTab: activeTab
+        )
     }
 
     private var isChatSearchActive: Bool {
@@ -94,7 +105,7 @@ struct ChatSidebar: View {
     }
 
     private var searchUserId: String? {
-        authManager.localUserData?["id"] as? String
+        authManager.localUserId
     }
 
     // Timer to update relative time strings

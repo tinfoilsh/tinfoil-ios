@@ -338,8 +338,7 @@ class ChatViewModel: ObservableObject {
     private var currentUserId: String? {
         guard let authManager = authManager,
               authManager.isAuthenticated,
-              let userData = authManager.localUserData,
-              let userId = userData["id"] as? String else {
+              let userId = authManager.localUserId else {
             return nil
         }
         return userId
