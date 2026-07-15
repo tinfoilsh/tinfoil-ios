@@ -123,6 +123,10 @@ struct EnclavePullItem: Decodable {
     let keyId: String?
     let etag: String?
     let needsRewrap: Bool?
+    /// Present only when the enclave has authoritative project
+    /// membership for this chat, including an authoritative root nil.
+    let projectIdSet: Bool?
+    let projectId: String?
     /// Error code when `ok=false` (e.g. "NEEDS_REWRAP", "NOT_FOUND").
     let code: String?
     let reason: String?
@@ -131,6 +135,8 @@ struct EnclavePullItem: Decodable {
         case id, ok, plaintext, etag, reason, code
         case keyId = "key_id"
         case needsRewrap = "needs_rewrap"
+        case projectIdSet = "project_id_set"
+        case projectId = "project_id"
     }
 }
 
@@ -531,7 +537,8 @@ extension EnclaveSearchQueryResponse {
 }
 
 struct EnclaveSearchReindexRequest: Encodable {
-    /// Primary key first, then any legacy keys still sealing old rows.
+    /// The current primary CEK. Search is unavailable while legacy
+    /// fallback keys remain active.
     let keys: [EnclavePullKey]
 }
 
@@ -545,8 +552,9 @@ struct EnclaveSearchReindexStatusResponse: Decodable {
     let indexed: Int
     let failed: Int
     let totalIndexed: Int
-    /// True when the run stopped at its wall-clock budget before
-    /// draining every chat; a fresh kickoff resumes the build.
+    /// True when the run ended before every chat was indexed. A
+    /// completed response with zero failures is a clean checkpoint
+    /// that a fresh kickoff can resume.
     let partial: Bool
     let error: String?
 

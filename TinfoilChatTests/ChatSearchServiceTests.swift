@@ -55,8 +55,9 @@ struct ChatSearchServiceTests {
         loadLocalChat: @escaping (String, String) async -> Chat? = { _, _ in nil },
         decodeRemoteChat: @escaping (EnclavePullItem) async -> Chat? = { _ in nil },
         primaryKeyB64: @escaping () -> String? = { "primary-b64" },
+        hasActiveFallbackKeys: @escaping () -> Bool = { false },
         pullKeys: @escaping () -> [EnclavePullKey]? = { [EnclavePullKey(key: "primary-b64")] },
-        reindexKeys: @escaping () -> [EnclavePullKey] = { [EnclavePullKey(key: "primary-b64")] }
+        sleep: @escaping (TimeInterval) async throws -> Void = { _ in }
     ) -> ChatSearchService {
         ChatSearchService(dependencies: ChatSearchService.Dependencies(
             searchQuery: { request in
@@ -78,9 +79,9 @@ struct ChatSearchServiceTests {
             loadLocalChat: loadLocalChat,
             decodeRemoteChat: decodeRemoteChat,
             primaryKeyB64: primaryKeyB64,
+            hasActiveFallbackKeys: hasActiveFallbackKeys,
             pullKeys: pullKeys,
-            reindexKeys: reindexKeys,
-            sleep: { _ in },
+            sleep: sleep,
             now: { recorder.now }
         ))
     }
@@ -116,6 +117,19 @@ struct ChatSearchServiceTests {
         let outcome = try await service.searchSyncedChats(query: "ducks")
         #expect(outcome == .unavailable)
         #expect(recorder.queryRequests.isEmpty)
+    }
+
+    @Test
+    func reportsUnavailableWhileFallbackKeysRemainActive() async throws {
+        let recorder = Recorder()
+        let service = Self.makeService(
+            recorder: recorder,
+            hasActiveFallbackKeys: { true }
+        )
+        let outcome = try await service.searchSyncedChats(query: "ducks")
+        #expect(outcome == .unavailable)
+        #expect(recorder.queryRequests.isEmpty)
+        #expect(recorder.reindexRequests.isEmpty)
     }
 
     @Test
@@ -205,7 +219,19 @@ struct ChatSearchServiceTests {
     @Test
     func skipsTheKickWhenNoKeysAreLoaded() async {
         let recorder = Recorder()
-        let service = Self.makeService(recorder: recorder, reindexKeys: { [] })
+        let service = Self.makeService(recorder: recorder, primaryKeyB64: { nil })
+        let settled = await service.ensureSearchIndex().value
+        #expect(settled == .skipped)
+        #expect(recorder.reindexRequests.isEmpty)
+    }
+
+    @Test
+    func skipsTheKickWhileFallbackKeysRemainActive() async {
+        let recorder = Recorder()
+        let service = Self.makeService(
+            recorder: recorder,
+            hasActiveFallbackKeys: { true }
+        )
         let settled = await service.ensureSearchIndex().value
         #expect(settled == .skipped)
         #expect(recorder.reindexRequests.isEmpty)
@@ -247,6 +273,65 @@ struct ChatSearchServiceTests {
                 totalIndexed: 0, partial: false, error: nil
             )
         })
+        let settled = await service.ensureSearchIndex().value
+        #expect(settled == .failed)
+
+        let rekick = await service.ensureSearchIndex().value
+        #expect(rekick == .skipped)
+        #expect(recorder.reindexRequests.count == 1)
+    }
+
+    @Test
+    func treatsAnUnknownTerminalStatusAsFailure() async {
+        let recorder = Recorder()
+        let service = Self.makeService(recorder: recorder, searchReindex: { _ in
+            EnclaveSearchReindexStatusResponse(
+                jobId: "job-1", status: "paused", indexed: 0, failed: 0,
+                totalIndexed: 0, partial: false, error: nil
+            )
+        })
+        let settled = await service.ensureSearchIndex().value
+        #expect(settled == .failed)
+
+        let rekick = await service.ensureSearchIndex().value
+        #expect(rekick == .skipped)
+        #expect(recorder.reindexRequests.count == 1)
+    }
+
+    @Test
+    func treatsCleanPartialCompletionAsResumableWithoutCooldown() async {
+        let recorder = Recorder()
+        let service = Self.makeService(
+            recorder: recorder,
+            searchReindex: { _ in Self.runningStatus() },
+            searchReindexStatus: {
+                EnclaveSearchReindexStatusResponse(
+                    jobId: "job-1", status: "completed", indexed: 4, failed: 0,
+                    totalIndexed: 4, partial: true, error: nil
+                )
+            }
+        )
+        let settled = await service.ensureSearchIndex().value
+        #expect(settled == .partial)
+
+        let resumed = await service.ensureSearchIndex().value
+        #expect(resumed == .partial)
+        #expect(recorder.reindexRequests.count == 2)
+    }
+
+    @Test
+    func treatsPositiveFailureCountAsFailureEvenWhenStatusIsCompleted() async {
+        let recorder = Recorder()
+        let service = Self.makeService(
+            recorder: recorder,
+            searchReindex: { _ in Self.runningStatus() },
+            searchReindexStatus: {
+                EnclaveSearchReindexStatusResponse(
+                    jobId: "job-1", status: "completed", indexed: 3, failed: 1,
+                    totalIndexed: 3, partial: true, error: nil
+                )
+            }
+        )
         let settled = await service.ensureSearchIndex().value
         #expect(settled == .failed)
 
@@ -303,6 +388,32 @@ struct ChatSearchServiceTests {
         )
         let settled = await service.ensureSearchIndex().value
         #expect(settled == .timeout)
+    }
+
+    @Test
+    func pollBudgetOutlivesTheServerJobBudget() async {
+        let recorder = Recorder()
+        let service = Self.makeService(
+            recorder: recorder,
+            searchReindex: { _ in Self.runningStatus() },
+            searchReindexStatus: {
+                if recorder.statusPolls == 1 {
+                    recorder.advance(
+                        Constants.SyncEnclave.Search.reindexServerBudgetSeconds
+                            + Constants.SyncEnclave.Search.reindexPollIntervalSeconds
+                    )
+                    return Self.runningStatus()
+                }
+                return Self.completedStatus()
+            }
+        )
+        let settled = await service.ensureSearchIndex().value
+        #expect(
+            Constants.SyncEnclave.Search.reindexPollBudgetSeconds
+                > Constants.SyncEnclave.Search.reindexServerBudgetSeconds
+        )
+        #expect(settled == .completed)
+        #expect(recorder.statusPolls == 2)
     }
 
     // MARK: - resolveSearchResultChats
@@ -375,6 +486,88 @@ struct ChatSearchServiceTests {
             userId: "user-1"
         )
         #expect(chats.isEmpty)
+    }
+
+    // MARK: - Pulled chat decoding
+
+    @Test
+    func pulledChatUsesAuthoritativeETagAndProjectAssignment() throws {
+        let item = Self.makePullItem(
+            etag: "12",
+            projectIdSet: true,
+            projectId: "project-new",
+            plaintextProjectId: "project-old",
+            plaintextSyncVersion: 3
+        )
+
+        let stored = try #require(decodeSearchPulledChat(item))
+        #expect(stored.syncVersion == 12)
+        #expect(stored.projectId == "project-new")
+        #expect(stored.formatVersion == 2)
+    }
+
+    @Test
+    func pulledChatClearsAuthoritativeRootProject() throws {
+        let item = Self.makePullItem(
+            etag: "12",
+            projectIdSet: true,
+            projectId: nil,
+            plaintextProjectId: "project-old"
+        )
+
+        let stored = try #require(decodeSearchPulledChat(item))
+        #expect(stored.projectId == nil)
+    }
+
+    @Test
+    func pulledChatPreservesProjectForOlderEnclaveResponse() throws {
+        let item = Self.makePullItem(
+            etag: "12",
+            projectIdSet: nil,
+            projectId: nil,
+            plaintextProjectId: "project-old"
+        )
+
+        let stored = try #require(decodeSearchPulledChat(item))
+        #expect(stored.projectId == "project-old")
+    }
+
+    @Test
+    func pulledChatRequiresAPositiveNumericETag() {
+        let invalidETags: [String?] = [nil, "", "not-a-number", "0", "-1"]
+        for etag in invalidETags {
+            let item = Self.makePullItem(etag: etag)
+            #expect(decodeSearchPulledChat(item) == nil)
+        }
+    }
+
+    private static func makePullItem(
+        etag: String?,
+        projectIdSet: Bool? = nil,
+        projectId: String? = nil,
+        plaintextProjectId: String? = nil,
+        plaintextSyncVersion: Int = 1
+    ) -> EnclavePullItem {
+        var chat = makeChat(id: "remote", title: "Remote")
+        chat.projectId = plaintextProjectId
+        let plaintext = try! JSONEncoder().encode(
+            StoredChat(from: chat, syncVersion: plaintextSyncVersion)
+        ).base64EncodedString()
+        var json: [String: Any] = [
+            "id": chat.id,
+            "ok": true,
+            "plaintext": plaintext,
+        ]
+        if let etag {
+            json["etag"] = etag
+        }
+        if let projectIdSet {
+            json["project_id_set"] = projectIdSet
+        }
+        if let projectId {
+            json["project_id"] = projectId
+        }
+        return EnclavePullResponse(json: ["items": [json]]).items[0]
     }
 }
 

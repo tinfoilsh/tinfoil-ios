@@ -19,12 +19,13 @@
 
 import Foundation
 
-/// How a reindex request settled. `skipped` means no kick was sent
-/// (no keys loaded, or a recent failure put kicks on cooldown);
-/// `timeout` means the poll budget ran out while the job was still
-/// running server-side.
+/// How a reindex request settled. `partial` is a clean, resumable
+/// checkpoint; `skipped` means no kick was sent (no eligible key, or
+/// a recent failure put kicks on cooldown); `timeout` means the poll
+/// budget ran out while the job was still running server-side.
 enum ChatSearchReindexSettle: Equatable {
     case completed
+    case partial
     case failed
     case timeout
     case skipped
@@ -36,9 +37,10 @@ struct ChatSearchOutcome: Equatable {
     /// True when the enclave has no complete index for this key yet and
     /// a rebuild has been kicked; results may be partial until it settles.
     let indexing: Bool
-    /// False when search cannot run at all: no primary key loaded, or
-    /// the enclave has no search backend (older deploy / unconfigured).
-    /// The UI should fall back to local title filtering.
+    /// False when search cannot run at all: no primary key loaded,
+    /// fallback keys are still active, or the enclave has no search
+    /// backend (older deploy / unconfigured). The UI should fall back
+    /// to local title filtering.
     let available: Bool
 
     static let unavailable = ChatSearchOutcome(
@@ -61,12 +63,8 @@ final class ChatSearchService {
         var loadLocalChat: (_ chatId: String, _ userId: String) async -> Chat?
         var decodeRemoteChat: (EnclavePullItem) async -> Chat?
         var primaryKeyB64: () -> String?
+        var hasActiveFallbackKeys: () -> Bool
         var pullKeys: () -> [EnclavePullKey]?
-        /// Primary plus retained legacy keys. Reindex is a sweep over
-        /// every stored blob, so it needs the alternatives too or chats
-        /// still sealed under an old CEK stay out of the index until
-        /// migration finishes.
-        var reindexKeys: () -> [EnclavePullKey]
         var sleep: (TimeInterval) async throws -> Void
         var now: () -> Date
     }
@@ -99,7 +97,10 @@ final class ChatSearchService {
         query: String,
         limit: Int = Constants.SyncEnclave.Search.resultLimit
     ) async throws -> ChatSearchOutcome {
-        guard let key = deps.primaryKeyB64() else { return .unavailable }
+        guard let key = deps.primaryKeyB64(),
+              !deps.hasActiveFallbackKeys() else {
+            return .unavailable
+        }
         let response: EnclaveSearchQueryResponse
         do {
             response = try await deps.searchQuery(
@@ -158,7 +159,7 @@ final class ChatSearchService {
         switch result {
         case .failed:
             lastReindexFailureAt = deps.now()
-        case .completed:
+        case .completed, .partial:
             lastReindexFailureAt = nil
         case .timeout, .skipped:
             break
@@ -174,8 +175,24 @@ final class ChatSearchService {
     /// job's own result. An anomalous "idle" here means no job was
     /// created and must not read as success, or it would clear the
     /// failure cooldown and let callers re-query in a loop.
-    private static func kickoffSettleResult(_ status: String) -> ChatSearchReindexSettle {
-        status == "completed" ? .completed : .failed
+    private static func terminalSettleResult(
+        _ response: EnclaveSearchReindexStatusResponse
+    ) -> ChatSearchReindexSettle {
+        guard response.failed == 0 else { return .failed }
+        switch response.status {
+        case "completed":
+            return response.partial ? .partial : .completed
+        case "failed":
+            return .failed
+        default:
+            return .failed
+        }
+    }
+
+    private static func kickoffSettleResult(
+        _ response: EnclaveSearchReindexStatusResponse
+    ) -> ChatSearchReindexSettle {
+        terminalSettleResult(response)
     }
 
     /// In a poll, "idle" means no job record exists. The enclave only
@@ -184,19 +201,24 @@ final class ChatSearchService {
     /// expired. Treat that as completed: a re-query self-corrects if
     /// the index is still incomplete, whereas mapping it to failure
     /// would start the cooldown for a job that likely succeeded.
-    private static func pollSettleResult(_ status: String) -> ChatSearchReindexSettle {
-        switch status {
-        case "completed", "idle": return .completed
-        default: return .failed
-        }
+    private static func pollSettleResult(
+        _ response: EnclaveSearchReindexStatusResponse
+    ) -> ChatSearchReindexSettle {
+        guard response.failed == 0 else { return .failed }
+        if response.status == "idle" { return .completed }
+        return terminalSettleResult(response)
     }
 
     private func runReindex() async throws -> ChatSearchReindexSettle {
-        let keys = deps.reindexKeys()
-        guard !keys.isEmpty else { return .skipped }
-        let kicked = try await deps.searchReindex(EnclaveSearchReindexRequest(keys: keys))
+        guard let primaryKey = deps.primaryKeyB64(),
+              !deps.hasActiveFallbackKeys() else {
+            return .skipped
+        }
+        let kicked = try await deps.searchReindex(
+            EnclaveSearchReindexRequest(keys: [EnclavePullKey(key: primaryKey)])
+        )
         print("[ChatSearch] reindex kicked job=\(kicked.jobId ?? "nil") status=\(kicked.status)")
-        if Self.isTerminalStatus(kicked.status) { return Self.kickoffSettleResult(kicked.status) }
+        if Self.isTerminalStatus(kicked.status) { return Self.kickoffSettleResult(kicked) }
         let deadline = deps.now()
             .addingTimeInterval(Constants.SyncEnclave.Search.reindexPollBudgetSeconds)
         while deps.now() < deadline {
@@ -204,7 +226,7 @@ final class ChatSearchService {
             let status = try await deps.searchReindexStatus()
             if Self.isTerminalStatus(status.status) {
                 print("[ChatSearch] reindex settled job=\(status.jobId ?? "nil") status=\(status.status) indexed=\(status.indexed) failed=\(status.failed) partial=\(status.partial)")
-                return Self.pollSettleResult(status.status)
+                return Self.pollSettleResult(status)
             }
         }
         return .timeout
@@ -257,6 +279,26 @@ final class ChatSearchService {
     }
 }
 
+/// Decode a successful search-result pull while applying the row
+/// metadata that is authoritative outside the encrypted plaintext.
+func decodeSearchPulledChat(_ item: EnclavePullItem) -> StoredChat? {
+    guard item.ok,
+          let etag = item.etag,
+          let syncVersion = Int(etag),
+          syncVersion > 0,
+          let plaintextB64 = item.plaintext,
+          let plaintext = Data(base64Encoded: plaintextB64),
+          var stored = try? JSONDecoder().decode(StoredChat.self, from: plaintext) else {
+        return nil
+    }
+    stored.syncVersion = syncVersion
+    if item.projectIdSet == true {
+        stored.projectId = item.projectId
+    }
+    stored.formatVersion = 2
+    return stored
+}
+
 // MARK: - Live dependencies
 
 extension ChatSearchService.Dependencies {
@@ -269,17 +311,14 @@ extension ChatSearchService.Dependencies {
             (try? await EncryptedFileStorage.cloud.loadChat(chatId: chatId, userId: userId)) ?? nil
         },
         decodeRemoteChat: { item in
-            guard let plaintextB64 = item.plaintext,
-                  let plaintext = Data(base64Encoded: plaintextB64),
-                  var stored = try? JSONDecoder().decode(StoredChat.self, from: plaintext) else {
-                return nil
-            }
-            stored.formatVersion = 2
+            guard let stored = decodeSearchPulledChat(item) else { return nil }
             return await stored.toChat()
         },
         primaryKeyB64: { try? CEKEncoding.requirePrimaryKeyB64() },
+        hasActiveFallbackKeys: {
+            !EncryptionService.shared.getActiveKeys().alternatives.isEmpty
+        },
         pullKeys: { CEKEncoding.pullKeysIfAvailable() },
-        reindexKeys: { CEKEncoding.migrationKeys() },
         sleep: { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
         now: { Date() }
     )

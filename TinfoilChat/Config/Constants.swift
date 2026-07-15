@@ -163,7 +163,10 @@ enum Constants {
             static let debounceSeconds: TimeInterval = 0.3
             static let resultLimit = 20
             static let reindexPollIntervalSeconds: TimeInterval = 2.0
-            static let reindexPollBudgetSeconds: TimeInterval = 10 * 60.0
+            static let reindexServerBudgetSeconds: TimeInterval = 20 * 60.0
+            static let reindexResponseGraceSeconds: TimeInterval = 30.0
+            static let reindexPollBudgetSeconds: TimeInterval =
+                reindexServerBudgetSeconds + reindexResponseGraceSeconds
             /// A failed rebuild puts further kicks on cooldown: every
             /// attempt re-pulls and re-embeds the whole corpus, so
             /// retrying on each query would loop a persistent failure

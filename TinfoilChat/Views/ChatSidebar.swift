@@ -9,6 +9,10 @@ import SwiftUI
 import ClerkKit
 import SafariServices
 
+func isRootSidebarChat(_ chat: Chat) -> Bool {
+    !chat.isTemporary && chat.projectId == nil && !chat.decryptionFailed
+}
+
 struct ChatSidebar: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(Clerk.self) private var clerk
@@ -50,7 +54,7 @@ struct ChatSidebar: View {
         // sidebar. Chats that failed to decrypt are hidden entirely; they
         // stay in storage so re-decryption can recover them once the
         // right key is active, at which point they reappear here.
-        return source.filter { !$0.isTemporary && $0.projectId == nil && !$0.decryptionFailed }
+        return source.filter(isRootSidebarChat)
     }
 
     // Encrypted server-side search over synced chats. Only offered on
@@ -68,8 +72,8 @@ struct ChatSidebar: View {
 
     private var searchResultChats: [Chat] {
         guard isChatSearchActive else { return [] }
-        // Enclave unavailable (older deploy, no key): degrade to
-        // filtering the locally loaded titles so the box still does
+        // Enclave unavailable (older deploy, no eligible key): degrade
+        // to filtering the locally loaded titles so the box still does
         // something useful.
         guard chatSearch.available else {
             let needle = chatSearchTerm
@@ -82,9 +86,7 @@ struct ChatSidebar: View {
         // The index covers every synced chat, so results can include
         // project chats; apply the same root-list exclusions so search
         // never surfaces rows this list would not show.
-        return chatSearch.results.filter {
-            !$0.isTemporary && $0.projectId == nil && !$0.decryptionFailed
-        }
+        return chatSearch.results.filter(isRootSidebarChat)
     }
 
     private var displayedChats: [Chat] {

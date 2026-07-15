@@ -19,9 +19,9 @@ final class ChatSearchController: ObservableObject {
     @Published private(set) var isSearching = false
     /// True while the enclave rebuilds the index; results may be partial.
     @Published private(set) var isIndexing = false
-    /// False when server-side search cannot run (no key loaded, enclave
-    /// without a search backend). Callers should fall back to filtering
-    /// locally loaded chats by title.
+    /// False when server-side search cannot run (no eligible key,
+    /// enclave without a search backend). Callers should fall back to
+    /// filtering locally loaded chats by title.
     @Published private(set) var available = true
 
     private let service: ChatSearchService
@@ -66,7 +66,7 @@ final class ChatSearchController: ObservableObject {
         }
     }
 
-    private func run(term: String, userId: String?) async {
+    func run(term: String, userId: String?) async {
         do {
             let outcome = try await service.searchSyncedChats(query: term)
             guard !Task.isCancelled else { return }
@@ -77,13 +77,13 @@ final class ChatSearchController: ObservableObject {
             results = chats
             isSearching = false
             if outcome.indexing {
-                // Re-query only after a successful rebuild. Refreshing
-                // on a failed or skipped settle would report
-                // needs_reindex again and kick another full rebuild,
-                // looping a persistent failure at full embedding cost.
+                // Re-query after a full rebuild or a clean partial
+                // checkpoint. The latter reports needs_reindex again
+                // and resumes from the enclave's checkpoint. Failed,
+                // timed-out, and skipped rebuilds stop here.
                 let settled = await service.ensureSearchIndex().value
                 guard !Task.isCancelled else { return }
-                if settled == .completed {
+                if settled == .completed || settled == .partial {
                     await run(term: term, userId: userId)
                 } else {
                     isIndexing = false
@@ -94,6 +94,7 @@ final class ChatSearchController: ObservableObject {
             print("[ChatSearch] search failed: \(error)")
             results = []
             isSearching = false
+            isIndexing = false
         }
     }
 }
