@@ -2443,29 +2443,9 @@ class ChatViewModel: ObservableObject {
         return nil
     }
 
-    /// URLError codes that represent a lost or unavailable network
-    /// connection. Intentionally narrower than retry-oriented predicates:
-    /// cancellation, malformed requests, TLS/cert failures, and
-    /// request-body stream exhaustion share NSURLErrorDomain but are not
-    /// connection losses, so they keep the generic error classification.
-    private static let connectivityErrorCodes: Set<Int> = [
-        NSURLErrorTimedOut,
-        NSURLErrorCannotFindHost,
-        NSURLErrorCannotConnectToHost,
-        NSURLErrorNetworkConnectionLost,
-        NSURLErrorNotConnectedToInternet,
-        NSURLErrorDNSLookupFailed,
-        NSURLErrorResourceUnavailable,
-        NSURLErrorInternationalRoamingOff,
-        NSURLErrorCallIsActive,
-        NSURLErrorDataNotAllowed,
-    ]
-
     /// Checks if an error is a connectivity failure.
     static func isConnectionError(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        return nsError.domain == NSURLErrorDomain
-            && connectivityErrorCodes.contains(nsError.code)
+        URLErrorClassifier.isConnectivityFailure(error)
     }
 
     /// Checks if an error indicates the user has hit their rate limit
