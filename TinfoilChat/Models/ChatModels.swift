@@ -810,7 +810,15 @@ struct Message: Identifiable, Codable, Equatable {
         isRequestError = try container.decodeIfPresent(Bool.self, forKey: .isRequestError) ?? false
         isRateLimitError = try container.decodeIfPresent(Bool.self, forKey: .isRateLimitError) ?? false
         isHourlyLimitError = try container.decodeIfPresent(Bool.self, forKey: .isHourlyLimitError) ?? false
-        isConnectionError = try container.decodeIfPresent(Bool.self, forKey: .isConnectionError) ?? false
+        // Messages persisted before the typed flag existed (or written by
+        // clients that don't emit it) lack the key entirely; fall back to
+        // the legacy text heuristic so their error cards keep rendering as
+        // connection failures.
+        if let decodedConnectionError = try container.decodeIfPresent(Bool.self, forKey: .isConnectionError) {
+            isConnectionError = decodedConnectionError
+        } else {
+            isConnectionError = Self.isLegacyConnectionErrorText(streamError)
+        }
         generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)
         // contentChunks and thinkingChunks are transient UI rendering state — never decoded from storage
         contentChunks = []
@@ -1160,6 +1168,17 @@ struct Message: Identifiable, Codable, Equatable {
     }
 
     // MARK: - Legacy Format Reconstruction
+
+    /// Classifies a persisted error message as a connection failure using
+    /// the text heuristic that predates the typed `isConnectionError` flag.
+    /// Only used when decoding messages that lack the flag.
+    private static func isLegacyConnectionErrorText(_ streamError: String?) -> Bool {
+        guard let msg = streamError?.lowercased() else { return false }
+        return msg.contains("internet connection")
+            || msg.contains("network")
+            || msg.contains("connection was lost")
+            || msg.contains("unable to connect")
+    }
 
     /// Reconstructs attachments from React's legacy format (documents + imageData + documentContent + multimodalText).
     /// React stored these as parallel arrays: documents[i].name paired with imageData[i] for images.
