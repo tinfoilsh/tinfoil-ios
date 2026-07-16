@@ -132,14 +132,6 @@ enum EnclaveErrorRecovery {
                 message: message
             )
         }
-        if isAttestation(error) {
-            return EnclaveErrorClassification(
-                kind: .terminal,
-                code: .attestationFailed,
-                status: nil,
-                message: message
-            )
-        }
         return EnclaveErrorClassification(
             kind: .terminal,
             code: nil,
@@ -231,14 +223,6 @@ enum EnclaveErrorRecovery {
             // same request can never heal it.
             return .abort(reason: .preconditionRequired)
         }
-    }
-
-    private static func isAttestation(_ error: Error) -> Bool {
-        let msg = (error as NSError).localizedDescription.lowercased()
-        return msg.contains("attestation")
-            || msg.contains("enclave verification")
-            || msg.contains("verification document")
-            || msg.contains("verifier")
     }
 
     /// True for URLSession-level transport failures we know retry

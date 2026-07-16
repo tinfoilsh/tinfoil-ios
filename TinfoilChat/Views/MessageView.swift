@@ -593,6 +593,7 @@ struct MessageView: View {
                         isRequestError: message.isRequestError,
                         isRateLimitError: message.isRateLimitError,
                         isHourlyLimit: message.isHourlyLimitError,
+                        isConnectionError: message.isConnectionError,
                         onRegenerate: isLastMessage ? { viewModel.regenerateLastResponse() } : nil,
                         onUpgrade: (message.isRateLimitError && !message.isHourlyLimitError) ? { viewModel.showRateLimitPaywall = true } : nil
                     )
@@ -1709,16 +1710,12 @@ struct ErrorMessageView: View {
     var isRequestError: Bool = false
     var isRateLimitError: Bool = false
     var isHourlyLimit: Bool = false
+    var isConnectionError: Bool = false
     var onRegenerate: (() -> Void)? = nil
     var onUpgrade: (() -> Void)? = nil
 
     private var accentColor: Color {
         isRateLimitError ? .orange : (isRequestError ? .red : .orange)
-    }
-
-    private var isConnectionError: Bool {
-        let msg = errorMessage.lowercased()
-        return msg.contains("internet connection") || msg.contains("network") || msg.contains("connection was lost") || msg.contains("unable to connect")
     }
 
     private var headerIcon: String {

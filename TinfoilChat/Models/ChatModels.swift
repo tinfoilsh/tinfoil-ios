@@ -672,6 +672,10 @@ struct Message: Identifiable, Codable, Equatable {
     /// than the free-tier daily limit, so the UI shows a transient
     /// "try again shortly" message instead of an upgrade prompt.
     var isHourlyLimitError: Bool = false
+    /// True when the stream failed on connectivity (classified from the
+    /// URLError at catch time), so the error card shows the wifi icon and
+    /// "Connection Lost" header without inspecting the message text.
+    var isConnectionError: Bool = false
     var generationTimeSeconds: Double? = nil
     var contentChunks: [ContentChunk] = []
     var thinkingChunks: [ThinkingChunk] = []
@@ -767,7 +771,7 @@ struct Message: Identifiable, Codable, Equatable {
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, isRateLimitError, isHourlyLimitError, generationTimeSeconds, webSearchState
+        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, isRateLimitError, isHourlyLimitError, isConnectionError, generationTimeSeconds, webSearchState
         case webSearch // Alternative key used by React app
         case urlFetches
         case attachments
@@ -806,6 +810,7 @@ struct Message: Identifiable, Codable, Equatable {
         isRequestError = try container.decodeIfPresent(Bool.self, forKey: .isRequestError) ?? false
         isRateLimitError = try container.decodeIfPresent(Bool.self, forKey: .isRateLimitError) ?? false
         isHourlyLimitError = try container.decodeIfPresent(Bool.self, forKey: .isHourlyLimitError) ?? false
+        isConnectionError = try container.decodeIfPresent(Bool.self, forKey: .isConnectionError) ?? false
         generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)
         // contentChunks and thinkingChunks are transient UI rendering state — never decoded from storage
         contentChunks = []
@@ -974,6 +979,7 @@ struct Message: Identifiable, Codable, Equatable {
         if isRequestError { try container.encode(isRequestError, forKey: .isRequestError) }
         if isRateLimitError { try container.encode(isRateLimitError, forKey: .isRateLimitError) }
         if isHourlyLimitError { try container.encode(isHourlyLimitError, forKey: .isHourlyLimitError) }
+        if isConnectionError { try container.encode(isConnectionError, forKey: .isConnectionError) }
         try container.encodeIfPresent(generationTimeSeconds, forKey: .generationTimeSeconds)
         // contentChunks is transient UI rendering state — never encode it
         // Encode as "webSearch" for React app compatibility

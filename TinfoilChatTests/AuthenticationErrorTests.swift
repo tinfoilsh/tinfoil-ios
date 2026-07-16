@@ -104,6 +104,68 @@ struct AuthenticationErrorTests {
         #expect(ChatViewModel.isAuthenticationError(error) == false)
     }
 
+    // MARK: - Typed rate-limit and connection classification
+
+    @Test("Detects HTTP 429 as rate-limit error")
+    func detectsStatusError429AsRateLimit() {
+        let response = HTTPURLResponse(
+            url: URL(string: "https://example.com")!,
+            statusCode: 429,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        let error = OpenAIError.statusError(response: response, statusCode: 429)
+        #expect(ChatViewModel.isRateLimitError(error) == true)
+    }
+
+    @Test("Detects structured rate-limit API type")
+    func detectsStructuredRateLimitType() {
+        let error = Self.makeAPIErrorResponse(
+            message: "Request rejected",
+            type: Constants.API.ErrorType.rateLimit,
+            code: nil
+        )
+        #expect(ChatViewModel.isRateLimitError(error) == true)
+    }
+
+    @Test("Detects structured rate-limit API codes")
+    func detectsStructuredRateLimitCodes() {
+        let insufficientQuota = Self.makeAPIErrorResponse(
+            message: "Quota exhausted",
+            type: "invalid_request_error",
+            code: Constants.API.ErrorCode.insufficientQuota
+        )
+        let rateLimitExceeded = Self.makeAPIErrorResponse(
+            message: "Too many requests",
+            type: "invalid_request_error",
+            code: Constants.API.ErrorCode.rateLimitExceeded
+        )
+
+        #expect(ChatViewModel.isRateLimitError(insufficientQuota) == true)
+        #expect(ChatViewModel.isRateLimitError(rateLimitExceeded) == true)
+    }
+
+    @Test("Does not infer rate limit from unstructured prose")
+    func doesNotInferRateLimitFromMessage() {
+        let error = NSError(
+            domain: "test",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "rate limit exceeded"]
+        )
+        #expect(ChatViewModel.isRateLimitError(error) == false)
+    }
+
+    @Test("Classifies URL transport errors without inspecting prose")
+    func classifiesConnectionErrorsByDomain() {
+        let error = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorNetworkConnectionLost,
+            userInfo: [NSLocalizedDescriptionKey: "arbitrary localized text"]
+        )
+        #expect(ChatViewModel.isConnectionError(error) == true)
+        #expect(ChatViewModel.isConnectionError(NSError(domain: "test", code: 1)) == false)
+    }
+
     // MARK: - Live API: streaming path
 
     @Test("Streaming with bad API key throws error detected by isAuthenticationError")
