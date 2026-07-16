@@ -987,7 +987,12 @@ struct Message: Identifiable, Codable, Equatable {
         if isRequestError { try container.encode(isRequestError, forKey: .isRequestError) }
         if isRateLimitError { try container.encode(isRateLimitError, forKey: .isRateLimitError) }
         if isHourlyLimitError { try container.encode(isHourlyLimitError, forKey: .isHourlyLimitError) }
-        if isConnectionError { try container.encode(isConnectionError, forKey: .isConnectionError) }
+        // Always persisted alongside a stream error (even when false) so
+        // the decode-time legacy text heuristic only applies to messages
+        // written before the typed flag existed.
+        if streamError != nil || isConnectionError {
+            try container.encode(isConnectionError, forKey: .isConnectionError)
+        }
         try container.encodeIfPresent(generationTimeSeconds, forKey: .generationTimeSeconds)
         // contentChunks is transient UI rendering state — never encode it
         // Encode as "webSearch" for React app compatibility
