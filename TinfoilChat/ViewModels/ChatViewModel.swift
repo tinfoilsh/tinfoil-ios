@@ -2443,11 +2443,12 @@ class ChatViewModel: ObservableObject {
         return nil
     }
 
-    /// Checks if an error is a connectivity failure. URLSession reports
-    /// every transport-level failure under NSURLErrorDomain, so the domain
-    /// check covers URLError and its NSError bridge in one place.
+    /// Checks if an error is a connectivity failure. Only transient
+    /// transport codes count — cancellation, malformed requests, and
+    /// TLS/cert failures share NSURLErrorDomain but are not connection
+    /// losses, so they keep the generic error classification.
     static func isConnectionError(_ error: Error) -> Bool {
-        (error as NSError).domain == NSURLErrorDomain
+        EnclaveErrorRecovery.isTransientNetwork(error)
     }
 
     /// Checks if an error indicates the user has hit their rate limit
