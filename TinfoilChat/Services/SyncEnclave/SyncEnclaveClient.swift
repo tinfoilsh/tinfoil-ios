@@ -201,12 +201,19 @@ actor SyncEnclaveClient {
             return try await existing.value
         }
         try Self.assertSecureURL(enclaveURL)
+        // The task itself produces the wrapped error so concurrent callers
+        // awaiting `existing.value` above receive the same typed error as
+        // the creator, keeping every waiter on the recovery path.
         let task = Task<SecureClient, Error> { [enclaveURL, configRepo] in
             let newClient = SecureClient(
                 githubRepo: configRepo,
                 enclaveURL: enclaveURL
             )
-            _ = try await newClient.verify()
+            do {
+                _ = try await newClient.verify()
+            } catch {
+                throw Self.wrapVerificationError(error)
+            }
             return newClient
         }
         verificationTask = task
@@ -218,7 +225,7 @@ actor SyncEnclaveClient {
             return verified
         } catch {
             self.verificationTask = nil
-            throw Self.wrapVerificationError(error)
+            throw error
         }
     }
 
