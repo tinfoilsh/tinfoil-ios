@@ -171,6 +171,26 @@ actor SyncEnclaveClient {
         )
     }
 
+    /// Attestation failures can only originate from the `verify()` call
+    /// below, so they are stamped with the ATTESTATION_FAILED wire code
+    /// here at the source — the recovery classifier matches the typed
+    /// code, never the error text. Transient transport failures keep the
+    /// NETWORK code so verification is retried, and cancellation is
+    /// rethrown untouched.
+    static func wrapVerificationError(_ error: Error) -> Error {
+        if error is CancellationError { return error }
+        if EnclaveErrorRecovery.isTransientNetwork(error) {
+            return SyncEnclaveError(
+                message: "Sync enclave verification failed: \(error.localizedDescription)",
+                code: WireCodes.network
+            )
+        }
+        return SyncEnclaveError(
+            message: error.localizedDescription,
+            code: WireCodes.attestationFailed
+        )
+    }
+
     // MARK: - Private
 
     private func getClient() async throws -> SecureClient {
@@ -181,12 +201,19 @@ actor SyncEnclaveClient {
             return try await existing.value
         }
         try Self.assertSecureURL(enclaveURL)
+        // The task itself produces the wrapped error so concurrent callers
+        // awaiting `existing.value` above receive the same typed error as
+        // the creator, keeping every waiter on the recovery path.
         let task = Task<SecureClient, Error> { [enclaveURL, configRepo] in
             let newClient = SecureClient(
                 githubRepo: configRepo,
                 enclaveURL: enclaveURL
             )
-            _ = try await newClient.verify()
+            do {
+                _ = try await newClient.verify()
+            } catch {
+                throw Self.wrapVerificationError(error)
+            }
             return newClient
         }
         verificationTask = task

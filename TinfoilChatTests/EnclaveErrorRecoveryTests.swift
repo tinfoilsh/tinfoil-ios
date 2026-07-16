@@ -103,17 +103,32 @@ struct EnclaveErrorRecoveryTests {
 
     // MARK: - Non-SyncEnclaveError fallback
 
-    @Test func attestationMessageDetectsBlockAllSync() {
+    @Test func wrappedVerificationFailureMapsToBlockAllSync() {
+        // Attestation failures are tagged at the verify() call site, so
+        // classification never depends on what the error text says.
         struct E: LocalizedError {
-            let errorDescription: String? = "Attestation verifier failed"
+            let errorDescription: String? = "code measurement mismatch"
         }
-        let decision = EnclaveErrorRecovery.decide(E())
+        let wrapped = SyncEnclaveClient.wrapVerificationError(E())
+        let decision = EnclaveErrorRecovery.decide(wrapped)
         #expect(decision.action == .blockAllSync(reason: .attestationFailed))
+        #expect(decision.classification.code == .attestationFailed)
     }
 
-    @Test func plainErrorMapsToAbortUnknown() {
+    @Test func transientNetworkFailureDuringVerificationRetries() {
+        let wrapped = SyncEnclaveClient.wrapVerificationError(URLError(.timedOut))
+        let decision = EnclaveErrorRecovery.decide(wrapped)
+        #expect(decision.action == .retry(reason: .network))
+    }
+
+    @Test func cancellationDuringVerificationIsNotWrapped() {
+        let wrapped = SyncEnclaveClient.wrapVerificationError(CancellationError())
+        #expect(wrapped is CancellationError)
+    }
+
+    @Test func rawAttestationProseDoesNotControlClassification() {
         struct E: LocalizedError {
-            let errorDescription: String? = "unrelated failure"
+            let errorDescription: String? = "Attestation verifier failed"
         }
         let decision = EnclaveErrorRecovery.decide(E())
         #expect(decision.action == .abort(reason: .unknown))

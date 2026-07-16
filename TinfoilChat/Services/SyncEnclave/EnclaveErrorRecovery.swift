@@ -132,14 +132,6 @@ enum EnclaveErrorRecovery {
                 message: message
             )
         }
-        if isAttestation(error) {
-            return EnclaveErrorClassification(
-                kind: .terminal,
-                code: .attestationFailed,
-                status: nil,
-                message: message
-            )
-        }
         return EnclaveErrorClassification(
             kind: .terminal,
             code: nil,
@@ -233,43 +225,22 @@ enum EnclaveErrorRecovery {
         }
     }
 
-    private static func isAttestation(_ error: Error) -> Bool {
-        let msg = (error as NSError).localizedDescription.lowercased()
-        return msg.contains("attestation")
-            || msg.contains("enclave verification")
-            || msg.contains("verification document")
-            || msg.contains("verifier")
-    }
-
     /// True for URLSession-level transport failures we know retry
-    /// can plausibly heal. URLError bridges to NSError under
-    /// NSURLErrorDomain so both casts are checked. TLS/cert
+    /// can plausibly heal. TLS/cert
     /// failures are intentionally excluded — they are almost
     /// always persistent (misconfigured server, expired cert,
     /// pinning failure) and retrying just burns the budget; they
     /// fall through to the terminal default so the recovery
     /// dispatcher surfaces them.
     static func isTransientNetwork(_ error: Error) -> Bool {
-        let transientURLCodes: Set<Int> = [
-            NSURLErrorTimedOut,
-            NSURLErrorCannotFindHost,
-            NSURLErrorCannotConnectToHost,
-            NSURLErrorNetworkConnectionLost,
-            NSURLErrorNotConnectedToInternet,
-            NSURLErrorDNSLookupFailed,
-            NSURLErrorResourceUnavailable,
-            NSURLErrorInternationalRoamingOff,
-            NSURLErrorCallIsActive,
-            NSURLErrorDataNotAllowed,
-            NSURLErrorRequestBodyStreamExhausted,
-        ]
-        if let urlError = error as? URLError {
-            return transientURLCodes.contains(urlError.errorCode)
+        if URLErrorClassifier.isConnectivityFailure(error) {
+            return true
         }
+        // Request-body stream exhaustion is retry-worthy here (the retry
+        // rebuilds the body) but is not a connection loss, so it extends
+        // the shared connectivity set rather than living in it.
         let nsError = error as NSError
-        if nsError.domain == NSURLErrorDomain {
-            return transientURLCodes.contains(nsError.code)
-        }
-        return false
+        return nsError.domain == NSURLErrorDomain
+            && nsError.code == NSURLErrorRequestBodyStreamExhausted
     }
 }

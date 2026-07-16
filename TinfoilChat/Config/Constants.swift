@@ -140,6 +140,14 @@ enum Constants {
             /// Wire code returned with a 429 when a subscriber exceeds the
             /// per-account hourly inference-token cap.
             static let hourlyLimitReached = "HOURLY_LIMIT_REACHED"
+            /// OpenAI-style structured codes carried in the error body when
+            /// a request is rejected for quota or rate-limit reasons.
+            static let insufficientQuota = "insufficient_quota"
+            static let rateLimitExceeded = "rate_limit_exceeded"
+        }
+
+        enum ErrorType {
+            static let rateLimit = "rate_limit_error"
         }
     }
 

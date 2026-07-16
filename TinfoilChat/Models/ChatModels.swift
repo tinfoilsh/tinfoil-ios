@@ -672,6 +672,10 @@ struct Message: Identifiable, Codable, Equatable {
     /// than the free-tier daily limit, so the UI shows a transient
     /// "try again shortly" message instead of an upgrade prompt.
     var isHourlyLimitError: Bool = false
+    /// True when the stream failed on connectivity (classified from the
+    /// URLError at catch time), so the error card shows the wifi icon and
+    /// "Connection Lost" header without inspecting the message text.
+    var isConnectionError: Bool = false
     var generationTimeSeconds: Double? = nil
     var contentChunks: [ContentChunk] = []
     var thinkingChunks: [ThinkingChunk] = []
@@ -767,7 +771,7 @@ struct Message: Identifiable, Codable, Equatable {
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, isRateLimitError, isHourlyLimitError, generationTimeSeconds, webSearchState
+        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, isRateLimitError, isHourlyLimitError, isConnectionError, generationTimeSeconds, webSearchState
         case webSearch // Alternative key used by React app
         case urlFetches
         case attachments
@@ -806,6 +810,15 @@ struct Message: Identifiable, Codable, Equatable {
         isRequestError = try container.decodeIfPresent(Bool.self, forKey: .isRequestError) ?? false
         isRateLimitError = try container.decodeIfPresent(Bool.self, forKey: .isRateLimitError) ?? false
         isHourlyLimitError = try container.decodeIfPresent(Bool.self, forKey: .isHourlyLimitError) ?? false
+        // Messages persisted before the typed flag existed (or written by
+        // clients that don't emit it) lack the key entirely; fall back to
+        // the legacy text heuristic so their error cards keep rendering as
+        // connection failures.
+        if let decodedConnectionError = try container.decodeIfPresent(Bool.self, forKey: .isConnectionError) {
+            isConnectionError = decodedConnectionError
+        } else {
+            isConnectionError = Self.isLegacyConnectionErrorText(streamError)
+        }
         generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)
         // contentChunks and thinkingChunks are transient UI rendering state — never decoded from storage
         contentChunks = []
@@ -974,6 +987,12 @@ struct Message: Identifiable, Codable, Equatable {
         if isRequestError { try container.encode(isRequestError, forKey: .isRequestError) }
         if isRateLimitError { try container.encode(isRateLimitError, forKey: .isRateLimitError) }
         if isHourlyLimitError { try container.encode(isHourlyLimitError, forKey: .isHourlyLimitError) }
+        // Always persisted alongside a stream error (even when false) so
+        // the decode-time legacy text heuristic only applies to messages
+        // written before the typed flag existed.
+        if streamError != nil || isConnectionError {
+            try container.encode(isConnectionError, forKey: .isConnectionError)
+        }
         try container.encodeIfPresent(generationTimeSeconds, forKey: .generationTimeSeconds)
         // contentChunks is transient UI rendering state — never encode it
         // Encode as "webSearch" for React app compatibility
@@ -1154,6 +1173,17 @@ struct Message: Identifiable, Codable, Equatable {
     }
 
     // MARK: - Legacy Format Reconstruction
+
+    /// Classifies a persisted error message as a connection failure using
+    /// the text heuristic that predates the typed `isConnectionError` flag.
+    /// Only used when decoding messages that lack the flag.
+    private static func isLegacyConnectionErrorText(_ streamError: String?) -> Bool {
+        guard let msg = streamError?.lowercased() else { return false }
+        return msg.contains("internet connection")
+            || msg.contains("network")
+            || msg.contains("connection was lost")
+            || msg.contains("unable to connect")
+    }
 
     /// Reconstructs attachments from React's legacy format (documents + imageData + documentContent + multimodalText).
     /// React stored these as parallel arrays: documents[i].name paired with imageData[i] for images.

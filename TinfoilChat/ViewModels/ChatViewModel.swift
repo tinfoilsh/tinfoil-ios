@@ -2279,8 +2279,9 @@ class ChatViewModel: ObservableObject {
                             }
                             chat.messages[lastIndex].isRequestError = self.isRequestError(error)
                             chat.messages[lastIndex].streamError = userFriendlyError
-                            chat.messages[lastIndex].isRateLimitError = self.isRateLimitError(error) || hitHourlyCap
+                            chat.messages[lastIndex].isRateLimitError = Self.isRateLimitError(error) || hitHourlyCap
                             chat.messages[lastIndex].isHourlyLimitError = hitHourlyCap
+                            chat.messages[lastIndex].isConnectionError = Self.isConnectionError(error)
 
                             self.updateChat(chat)
                         }
@@ -2442,13 +2443,24 @@ class ChatViewModel: ObservableObject {
         return nil
     }
 
+    /// Checks if an error is a connectivity failure.
+    static func isConnectionError(_ error: Error) -> Bool {
+        URLErrorClassifier.isConnectivityFailure(error)
+    }
+
     /// Checks if an error indicates the user has hit their rate limit
-    private func isRateLimitError(_ error: Error) -> Bool {
+    static func isRateLimitError(_ error: Error) -> Bool {
         if case OpenAIError.statusError(_, let statusCode) = error, statusCode == 429 {
             return true
         }
-        let msg = error.localizedDescription.lowercased()
-        return msg.contains("rate limit") || msg.contains("request limit") || msg.contains("insufficient_quota")
+        // Non-streaming path: the SDK decodes the response body into
+        // APIErrorResponse, which carries the structured code field.
+        if let apiError = error as? APIErrorResponse {
+            return apiError.error.type == Constants.API.ErrorType.rateLimit
+                || apiError.error.code == Constants.API.ErrorCode.insufficientQuota
+                || apiError.error.code == Constants.API.ErrorCode.rateLimitExceeded
+        }
+        return false
     }
 
     /// Checks if an error is a client request error (4xx, excluding 401 which is handled by retry)
