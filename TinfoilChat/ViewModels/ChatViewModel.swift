@@ -66,6 +66,12 @@ class ChatViewModel: ObservableObject {
             if isWebSearchEnabled != enabled {
                 isWebSearchEnabled = enabled
             }
+            // Resume draining messages queued while this chat was
+            // backgrounded. Guarded on the id changing so the frequent
+            // same-chat reassignments during streaming stay cheap.
+            if let chatId = currentChat?.id, chatId != oldValue?.id {
+                scheduleMessageQueueDrain(chatId: chatId)
+            }
         }
     }
     @Published var activeStorageTab: ChatStorageTab = .cloud
@@ -232,6 +238,19 @@ class ChatViewModel: ObservableObject {
     @Published var pendingImageThumbnails: [String: String] = [:]
     var isProcessingAttachment: Bool {
         pendingAttachments.contains { $0.processingState == .processing }
+    }
+
+    // Per-chat queues of messages submitted while the assistant was busy.
+    // Each chat owns its own queue so a streaming conversation never blocks
+    // a different conversation; a backgrounded chat keeps its queued
+    // messages and resumes draining when reopened. In-memory only, mirroring
+    // the webapp's per-session queue.
+    @Published private(set) var messageQueues: [String: [QueuedMessage]] = [:]
+
+    /// Queued messages for the chat on screen.
+    var queuedMessages: [QueuedMessage] {
+        guard let chatId = currentChat?.id else { return [] }
+        return messageQueues[chatId] ?? []
     }
 
     // Project properties
@@ -824,6 +843,7 @@ class ChatViewModel: ObservableObject {
         // Exit temporary mode when the user explicitly creates a fresh chat.
         if isTemporaryMode {
             if let temp = currentChat, temp.isTemporary {
+                discardMessageQueue(chatId: temp.id)
                 cancelGeneration(chatId: temp.id, announce: false)
                 if temp.isLocalOnly {
                     localChats.removeAll { $0.id == temp.id }
@@ -1198,6 +1218,7 @@ class ChatViewModel: ObservableObject {
         if isTemporaryMode {
             // Exit temporary mode: drop the ephemeral chat and restore previous.
             if let current = currentChat, current.isTemporary {
+                discardMessageQueue(chatId: current.id)
                 cancelGeneration(chatId: current.id, announce: false)
                 if current.isLocalOnly {
                     localChats.removeAll { $0.id == current.id }
@@ -1254,6 +1275,7 @@ class ChatViewModel: ObservableObject {
         // over normally below.
         if isTemporaryMode && !chat.isTemporary {
             if let temp = currentChat, temp.isTemporary {
+                discardMessageQueue(chatId: temp.id)
                 cancelGeneration(chatId: temp.id, announce: false)
                 if temp.isLocalOnly {
                     localChats.removeAll { $0.id == temp.id }
@@ -1367,6 +1389,7 @@ class ChatViewModel: ObservableObject {
         }
 
         let userId = currentUserId
+        discardMessageQueue(chatId: id)
         let canceledStreamTask = cancelGeneration(
             chatId: id,
             announce: false
@@ -1535,13 +1558,19 @@ class ChatViewModel: ObservableObject {
         sendMessage(text: resultText)
     }
 
-    /// Sends a user message and generates a response
+    /// Sends a user message and generates a response. When the current chat
+    /// is already streaming, the message is queued instead and dispatched
+    /// once the assistant goes idle, mirroring the webapp's message queue.
     func sendMessage(text: String) {
-        guard !isLoading else { return }
         let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasAttachments = !pendingAttachments.isEmpty
         guard hasText || hasAttachments else { return }
         guard attachmentsAreReadyToSend(pendingAttachments) else { return }
+
+        if isLoading {
+            enqueueMessage(text: text)
+            return
+        }
 
         // Block send when free-tier requests are exhausted
         #if DEBUG
@@ -1559,23 +1588,34 @@ class ChatViewModel: ObservableObject {
             return
         }
 
+        let messageAttachments = pendingAttachments
+        clearPendingAttachments(acknowledgeSharedImports: false)
+
+        dispatchMessage(text: text, attachments: messageAttachments, dismissKeyboard: true)
+    }
+
+    /// Adds a user message to the conversation and starts the response
+    /// stream. Shared by the direct send path and the queue drain.
+    private func dispatchMessage(
+        text: String,
+        attachments: [Attachment],
+        dismissKeyboard: Bool
+    ) {
         // Optimistically decrement the remaining request count
         SessionTokenManager.shared.snapshotAndDecrementRemaining()
 
-        // Dismiss keyboard
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-
-        let messageAttachments = pendingAttachments
-        clearPendingAttachments(acknowledgeSharedImports: false)
+        if dismissKeyboard {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
 
         // Create and add user message — attachments carry all data
         let userMessage = Message(
             role: .user,
             content: text,
-            attachments: messageAttachments
+            attachments: attachments
         )
         addMessage(userMessage)
-        for requestID in messageAttachments.compactMap(\.sharedImportRequestID) {
+        for requestID in attachments.compactMap(\.sharedImportRequestID) {
             SharedImportCoordinator.shared.acknowledge(requestID: requestID)
         }
 
@@ -1586,7 +1626,77 @@ class ChatViewModel: ObservableObject {
             updateChat(chat)
         }
 
-        generateResponse()
+        generateResponse(dismissKeyboard: dismissKeyboard)
+    }
+
+    // MARK: - Message Queue
+
+    /// Holds a message for the current chat while its assistant response is
+    /// still streaming. Pending attachments ride along with the queued
+    /// message and are cleared from the input.
+    private func enqueueMessage(text: String) {
+        guard let chatId = currentChat?.id else { return }
+        let messageAttachments = pendingAttachments
+        clearPendingAttachments(acknowledgeSharedImports: false)
+        let item = QueuedMessage(text: text, attachments: messageAttachments)
+        messageQueues[chatId, default: []].append(item)
+    }
+
+    /// Drops a chat's entire queue, acknowledging any shared imports riding
+    /// on queued attachments so they don't stay staged in the share inbox.
+    /// Must run wherever a chat is removed (deletion, temporary-chat
+    /// teardown) so queued messages never become unreachable.
+    private func discardMessageQueue(chatId: String) {
+        guard let queue = messageQueues.removeValue(forKey: chatId) else { return }
+        for item in queue {
+            for requestID in item.attachments.compactMap(\.sharedImportRequestID) {
+                SharedImportCoordinator.shared.acknowledge(requestID: requestID)
+            }
+        }
+    }
+
+    /// Removes a queued message before it is dispatched.
+    func removeQueuedMessage(id: String) {
+        guard let chatId = currentChat?.id,
+              var queue = messageQueues[chatId],
+              let index = queue.firstIndex(where: { $0.id == id }) else { return }
+        let removed = queue.remove(at: index)
+        messageQueues[chatId] = queue.isEmpty ? nil : queue
+        for requestID in removed.attachments.compactMap(\.sharedImportRequestID) {
+            SharedImportCoordinator.shared.acknowledge(requestID: requestID)
+        }
+    }
+
+    /// Dispatches the next queued message for a chat, one at a time. Only
+    /// the chat on screen drains; a backgrounded chat keeps its queue and
+    /// resumes when reopened. Dispatch keeps the keyboard up so a draft the
+    /// user is typing is never interrupted.
+    private func drainMessageQueue(chatId: String) {
+        guard currentChat?.id == chatId,
+              !streamState.isStreaming(chatId: chatId),
+              var queue = messageQueues[chatId],
+              !queue.isEmpty else { return }
+
+        // Same free-tier gate as a direct send: the message stays queued so
+        // it can dispatch after an upgrade or on the next drain.
+        if let rl = rateLimit, rl.remaining <= 0, rl.kind != .hourly {
+            showRateLimitPaywall = true
+            return
+        }
+
+        let next = queue.removeFirst()
+        messageQueues[chatId] = queue.isEmpty ? nil : queue
+        dispatchMessage(text: next.text, attachments: next.attachments, dismissKeyboard: false)
+    }
+
+    /// Defers the drain one runloop turn so stream teardown (state resets,
+    /// final chat updates) fully settles before the next dispatch mutates
+    /// the conversation.
+    private func scheduleMessageQueueDrain(chatId: String) {
+        guard messageQueues[chatId]?.isEmpty == false else { return }
+        Task { @MainActor [weak self] in
+            self?.drainMessageQueue(chatId: chatId)
+        }
     }
 
     // MARK: - Attachment Management
@@ -1703,14 +1813,17 @@ class ChatViewModel: ObservableObject {
     }
 
     /// Generates an assistant response for the current conversation (expects user message to already be in chat)
-    private func generateResponse() {
+    private func generateResponse(dismissKeyboard: Bool = true) {
         guard let initialChat = currentChat,
               !streamState.isStreaming(chatId: initialChat.id) else {
             return
         }
 
-        // Dismiss keyboard
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        // Dismiss keyboard, except on queue-driven dispatches where the user
+        // may be typing the next message.
+        if dismissKeyboard {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
 
         AccessibilityAnnouncer.announce(Constants.Accessibility.generatingResponse)
 
@@ -2627,6 +2740,7 @@ class ChatViewModel: ObservableObject {
         streamTasks.removeValue(forKey: chatId)
         thinkingSummaryServices.removeValue(forKey: chatId)?.reset()
         streamState.finish(chatId: chatId)
+        scheduleMessageQueueDrain(chatId: chatId)
     }
 
     /// Regenerates the last assistant response by removing it and resending the last user message

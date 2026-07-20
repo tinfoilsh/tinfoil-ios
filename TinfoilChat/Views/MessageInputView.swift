@@ -70,6 +70,23 @@ struct MessageInputView: View {
     // State for pulsing animation
     @State private var isPulsing = false
 
+    /// A draft that can actually be sent or queued right now: attachments
+    /// all processed, plus either non-whitespace text or at least one
+    /// attachment. Matches `sendMessage`'s own guards so the button never
+    /// offers a send that would be rejected.
+    private var hasSubmittableContent: Bool {
+        guard attachmentsAreReadyToSend(viewModel.pendingAttachments) else { return false }
+        return !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !viewModel.pendingAttachments.isEmpty
+    }
+
+    /// While a response is streaming, the send button only becomes a stop
+    /// button when there is nothing submittable; a sendable draft keeps it
+    /// a send button so the message can be queued. Mirrors the webapp.
+    private var showStopAction: Bool {
+        viewModel.isLoading && !hasSubmittableContent
+    }
+
     // Attachment picker state
 
 
@@ -345,7 +362,6 @@ struct MessageInputView: View {
                          textHeight: $textHeight,
                          placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
                          shouldFocusInput: viewModel.shouldFocusInput,
-                         isLoading: viewModel.isLoading,
                          allowsImagePaste: viewModel.currentModel.isMultimodal,
                          onFocusHandled: { viewModel.shouldFocusInput = false },
                          onSendMessage: { text in viewModel.sendMessage(text: text) },
@@ -443,7 +459,7 @@ struct MessageInputView: View {
                     }
 
                     Button(action: sendOrCancelMessage) {
-                        Image(systemName: viewModel.isLoading ? "stop.fill" : "arrow.up")
+                        Image(systemName: showStopAction ? "stop.fill" : "arrow.up")
                             .font(.system(size: 16, weight: .semibold))
                             .frame(width: 24, height: 24)
                             .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
@@ -454,10 +470,10 @@ struct MessageInputView: View {
                     .clipShape(.circle)
                     .tint(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
                     .disabled(
-                        !viewModel.isLoading
+                        !showStopAction
                         && !attachmentsAreReadyToSend(viewModel.pendingAttachments)
                     )
-                    .accessibilityLabel(viewModel.isLoading ? "Stop generating" : "Send message")
+                    .accessibilityLabel(showStopAction ? "Stop generating" : "Send message")
                     .padding(.trailing, 8)
                 }
                 .padding(.vertical, 8)
@@ -552,16 +568,16 @@ struct MessageInputView: View {
                                 .fill(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
                                 .frame(width: 32, height: 32)
 
-                            Image(systemName: viewModel.isLoading ? "stop.fill" : "arrow.up")
+                            Image(systemName: showStopAction ? "stop.fill" : "arrow.up")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
                         }
                     }
                     .disabled(
-                        !viewModel.isLoading
+                        !showStopAction
                         && !attachmentsAreReadyToSend(viewModel.pendingAttachments)
                     )
-                    .accessibilityLabel(viewModel.isLoading ? "Stop generating" : "Send message")
+                    .accessibilityLabel(showStopAction ? "Stop generating" : "Send message")
                     .accessibleHitTarget()
                     .padding(.trailing, 8)
                 }
@@ -597,7 +613,7 @@ struct MessageInputView: View {
                 .foregroundColor(.secondary)
                 .frame(width: 24, height: 24)
         }
-        .disabled(viewModel.isLoading || viewModel.isProcessingAttachment)
+        .disabled(viewModel.isProcessingAttachment)
         .accessibilityLabel("Add attachment")
         .accessibleHitTarget()
         .padding(.leading, 8)
@@ -628,9 +644,9 @@ struct MessageInputView: View {
     }
 
     private func sendOrCancelMessage() {
-        if viewModel.isLoading {
+        if showStopAction {
             viewModel.cancelGeneration()
-        } else if !messageText.isEmpty || !viewModel.pendingAttachments.isEmpty {
+        } else if hasSubmittableContent {
             viewModel.sendMessage(text: messageText)
             messageText = ""
             textHeight = Layout.defaultHeight
@@ -878,7 +894,6 @@ struct CustomTextEditor: UIViewRepresentable {
     @Binding var textHeight: CGFloat
     var placeholderText: String
     var shouldFocusInput: Bool
-    var isLoading: Bool
     var allowsImagePaste: Bool = false
     var onFocusHandled: () -> Void
     var onSendMessage: (String) -> Void
@@ -1046,7 +1061,8 @@ struct CustomTextEditor: UIViewRepresentable {
                     let currentText = textView.text ?? ""
                     let trimmedText = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
 
-                    if !trimmedText.isEmpty && !parent.isLoading {
+                    // Sending while a response is streaming queues the message.
+                    if !trimmedText.isEmpty {
                         parent.onSendMessage(trimmedText)
 
                         textView.text = ""

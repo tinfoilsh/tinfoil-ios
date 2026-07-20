@@ -1,0 +1,126 @@
+//
+//  MessageQueueView.swift
+//  TinfoilChat
+//
+//  Copyright © 2025 Tinfoil. All rights reserved.
+//
+//  Shows messages queued while the assistant is responding, above the
+//  input area. Mirrors the webapp's MessageQueue component.
+
+import SwiftUI
+
+struct MessageQueueView: View {
+    let queue: [QueuedMessage]
+    let isDarkMode: Bool
+    let onRemove: (String) -> Void
+
+    var body: some View {
+        if !queue.isEmpty {
+            VStack(spacing: 6) {
+                ForEach(queue) { item in
+                    QueuedMessageRow(item: item, isDarkMode: isDarkMode, onRemove: onRemove)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
+        }
+    }
+}
+
+private struct QueuedMessageRow: View {
+    let item: QueuedMessage
+    let isDarkMode: Bool
+    let onRemove: (String) -> Void
+
+    private var previewText: String {
+        let trimmed = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count > Constants.MessageQueue.previewMaxLength {
+            return String(trimmed.prefix(Constants.MessageQueue.previewMaxLength)) + "…"
+        }
+        return trimmed
+    }
+
+    private var fallbackLabel: String {
+        let attachmentCount = item.attachments.count
+        if attachmentCount > 0 {
+            return "\(attachmentCount) attachment\(attachmentCount == 1 ? "" : "s")"
+        }
+        return "Queued message"
+    }
+
+    private var imageAttachments: [Attachment] {
+        item.attachments.filter {
+            $0.type == .image && ($0.thumbnailBase64 ?? $0.base64) != nil
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "list.bullet")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.secondary)
+                .padding(.top, 3)
+
+            VStack(alignment: .leading, spacing: 6) {
+                if !imageAttachments.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(imageAttachments) { attachment in
+                                QueuedImageThumbnail(attachment: attachment, isDarkMode: isDarkMode)
+                            }
+                        }
+                    }
+                }
+                Text(previewText.isEmpty ? fallbackLabel : previewText)
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                    .lineLimit(Constants.MessageQueue.previewLineLimit)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Button {
+                onRemove(item.id)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .frame(width: 24, height: 24)
+            }
+            .accessibilityLabel("Remove queued message")
+            .accessibleHitTarget()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.chatSurface(isDarkMode: isDarkMode))
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Queued message: \(previewText.isEmpty ? fallbackLabel : previewText)")
+    }
+}
+
+private struct QueuedImageThumbnail: View {
+    let attachment: Attachment
+    let isDarkMode: Bool
+
+    private var previewBase64: String? {
+        attachment.thumbnailBase64 ?? attachment.base64
+    }
+
+    var body: some View {
+        DecodedBase64ImageView(
+            base64: previewBase64,
+            cacheKey: "queued-message-\(attachment.id)-\(previewBase64?.hashValue ?? 0)"
+        ) {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isDarkMode ? Color.white.opacity(0.08) : Color.black.opacity(0.06))
+        }
+        .frame(
+            width: Constants.MessageQueue.imageThumbnailSize,
+            height: Constants.MessageQueue.imageThumbnailSize
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .accessibilityLabel(attachment.fileName)
+    }
+}
