@@ -70,6 +70,10 @@ struct MessageInputView: View {
     // State for pulsing animation
     @State private var isPulsing = false
 
+    // Bumped on send so the editor clears its UITextView even while it keeps
+    // focus (queued sends don't dismiss the keyboard).
+    @State private var clearInputTrigger = UUID()
+
     /// A draft that can actually be sent or queued right now: attachments
     /// all processed, plus either non-whitespace text or at least one
     /// attachment. Matches `sendMessage`'s own guards so the button never
@@ -362,6 +366,7 @@ struct MessageInputView: View {
                          textHeight: $textHeight,
                          placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
                          shouldFocusInput: viewModel.shouldFocusInput,
+                         clearTrigger: clearInputTrigger,
                          allowsImagePaste: viewModel.currentModel.isMultimodal,
                          onFocusHandled: { viewModel.shouldFocusInput = false },
                          onSendMessage: { text in viewModel.sendMessage(text: text) },
@@ -649,6 +654,7 @@ struct MessageInputView: View {
         } else if hasSubmittableContent {
             viewModel.sendMessage(text: messageText)
             messageText = ""
+            clearInputTrigger = UUID()
             textHeight = Layout.defaultHeight
         }
     }
@@ -894,6 +900,7 @@ struct CustomTextEditor: UIViewRepresentable {
     @Binding var textHeight: CGFloat
     var placeholderText: String
     var shouldFocusInput: Bool
+    var clearTrigger: UUID
     var allowsImagePaste: Bool = false
     var onFocusHandled: () -> Void
     var onSendMessage: (String) -> Void
@@ -958,6 +965,23 @@ struct CustomTextEditor: UIViewRepresentable {
             context.coordinator.hasFocusedFromFlag = false
         }
 
+        // An explicit clear (message sent or queued) must win over the
+        // stale-binding resync below: while the editor keeps focus, an empty
+        // binding with a non-empty view is otherwise read as "binding lagging
+        // behind typed text" and the draft is pushed back into it.
+        if context.coordinator.lastClearTrigger != clearTrigger {
+            context.coordinator.lastClearTrigger = clearTrigger
+            if isCurrentlyEditing {
+                uiView.text = ""
+                uiView.textColor = UIColor { traitCollection in
+                    return traitCollection.userInterfaceStyle == .dark ? .white : .black
+                }
+            } else {
+                uiView.text = placeholderText
+                uiView.textColor = .lightGray
+            }
+        }
+
         if text.isEmpty && !isCurrentlyEditing && uiView.textColor != .lightGray {
             uiView.text = placeholderText
             uiView.textColor = .lightGray
@@ -999,10 +1023,12 @@ struct CustomTextEditor: UIViewRepresentable {
         var parent: CustomTextEditor
         var isEditing = false
         var hasFocusedFromFlag = false
+        var lastClearTrigger: UUID
         private var lastMeasurement: (text: String, width: CGFloat, pointSize: CGFloat, height: CGFloat)?
 
         init(_ parent: CustomTextEditor) {
             self.parent = parent
+            self.lastClearTrigger = parent.clearTrigger
         }
 
         /// Returns the editor height for the current draft, avoiding repeated
