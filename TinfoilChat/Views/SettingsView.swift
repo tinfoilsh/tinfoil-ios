@@ -79,16 +79,6 @@ class SettingsManager: ObservableObject {
     // singleton is still being initialized (applyProfile runs inside init).
     var isApplyingSharedProfile = false
 
-    // Web search toggle
-    @Published var webSearchEnabled: Bool {
-        didSet {
-            UserDefaults.standard.set(webSearchEnabled, forKey: Constants.StorageKeys.Settings.webSearchEnabled)
-            if !isApplyingSharedProfile {
-                ProfileManager.shared.sharedSettingsDidChange()
-            }
-        }
-    }
-
     @Published var webSearchAvailable: Bool {
         didSet {
             UserDefaults.standard.set(webSearchAvailable, forKey: Constants.StorageKeys.Settings.webSearchAvailable)
@@ -150,8 +140,6 @@ class SettingsManager: ObservableObject {
         self.isUsingCustomPrompt = UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled) as? Bool ?? false
         self.customSystemPrompt = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt) ?? ""
 
-        // Initialize web search setting
-        self.webSearchEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.webSearchEnabled) as? Bool ?? true
         self.webSearchAvailable = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.webSearchAvailable) as? Bool ?? true
 
         // Initialize Generative UI setting (defaults to on)
@@ -211,7 +199,6 @@ class SettingsManager: ObservableObject {
         additionalContext = ""
         isUsingCustomPrompt = false
         customSystemPrompt = ""
-        webSearchEnabled = true
         webSearchAvailable = true
         genUIEnabled = true
         isCloudSyncEnabled = false

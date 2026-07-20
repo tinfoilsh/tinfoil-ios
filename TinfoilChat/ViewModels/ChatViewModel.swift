@@ -31,7 +31,15 @@ class ChatViewModel: ObservableObject {
     // Published properties for UI updates
     @Published var chats: [Chat] = []
     @Published var localChats: [Chat] = []
-    @Published var currentChat: Chat?
+    @Published var currentChat: Chat? {
+        didSet {
+            let enabled = currentChat?.webSearchEnabled
+                ?? SettingsManager.shared.webSearchAvailable
+            if isWebSearchEnabled != enabled {
+                isWebSearchEnabled = enabled
+            }
+        }
+    }
     @Published var activeStorageTab: ChatStorageTab = .cloud
     @Published var isLoading: Bool = false
     @Published var thinkingSummary: String = ""
@@ -365,8 +373,6 @@ class ChatViewModel: ObservableObject {
             fatalError("ChatViewModel cannot be initialized without available models. Ensure AppConfig loads models before creating ChatViewModel.")
         }
         self.currentModel = model
-        self.isWebSearchEnabled = SettingsManager.shared.webSearchEnabled
-
         // Load persisted reasoning preferences. Both default to the most
         // permissive setting (thinking on, medium effort) when no value has
         // been saved yet, matching the webapp.
@@ -407,6 +413,7 @@ class ChatViewModel: ObservableObject {
         let newChat = Chat.create(modelType: currentModel)
         currentChat = newChat
         chats = [newChat]
+        isWebSearchEnabled = newChat.webSearchEnabled
         
         // Load any previously persisted pagination state (per-user)
         // Delay enabling persistence until after load to avoid overwriting saved values
@@ -484,9 +491,6 @@ class ChatViewModel: ObservableObject {
         }
         if let thinkingEnabled = profile.thinkingEnabled {
             self.thinkingEnabled = thinkingEnabled
-        }
-        if let webSearchEnabled = profile.webSearchEnabled {
-            isWebSearchEnabled = webSearchEnabled
         }
     }
     
@@ -807,14 +811,16 @@ class ChatViewModel: ObservableObject {
 
         // Check if we already have a blank chat in the target list
         if shouldBeLocal {
-            if let existing = localChats.first(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
-                selectChat(existing)
+            if let index = localChats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
+                localChats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
+                selectChat(localChats[index])
                 shouldFocusInput = focusInput
                 return
             }
         } else {
-            if let existing = chats.first(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
-                selectChat(existing)
+            if let index = chats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
+                chats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
+                selectChat(chats[index])
                 shouldFocusInput = focusInput
                 return
             }
@@ -1187,7 +1193,8 @@ class ChatViewModel: ObservableObject {
                 title: "Temporary Chat",
                 modelType: model,
                 userId: currentUserId,
-                isLocalOnly: true
+                isLocalOnly: true,
+                webSearchEnabled: SettingsManager.shared.webSearchAvailable
             )
             temp.isTemporary = true
 
@@ -1263,6 +1270,23 @@ class ChatViewModel: ObservableObject {
                 self.applyLoadedImages(loadedImages, toChatId: chatId)
             }
         }
+    }
+
+    func setWebSearchEnabled(_ enabled: Bool) {
+        guard var chat = currentChat else {
+            isWebSearchEnabled = enabled
+            return
+        }
+
+        isWebSearchEnabled = enabled
+        guard chat.webSearchEnabled != enabled else { return }
+
+        chat.webSearchEnabled = enabled
+        chat.locallyModified = true
+        chat.updatedAt = Date()
+        currentChat = chat
+        replaceChat(chat)
+        saveChat(chat)
     }
     
     /// Merge fetched image base64 data into the current messages of a chat by attachment ID.
@@ -1862,7 +1886,7 @@ class ChatViewModel: ObservableObject {
                 // lives in the processor so the stream can be consumed off
                 // the main actor.
                 let processor = StreamingResponseProcessor(
-                    isWebSearchEnabled: self.isWebSearchEnabled,
+                    isWebSearchEnabled: webSearchEnabled,
                     hapticEnabled: hapticEnabled,
                     responseContent: initialResponseContent,
                     currentThoughts: initialThoughts,
@@ -2748,11 +2772,15 @@ class ChatViewModel: ObservableObject {
 
         // Add exactly one blank chat at position 0 if user has chat access
         if hasChatAccess {
+            let webSearchEnabled = wasCurrentChatBlank
+                ? currentChat?.webSearchEnabled
+                : nil
             let blankChat = Chat.create(
                 modelType: currentModel,
                 language: nil,
                 userId: currentUserId,
-                isLocalOnly: isLocal
+                isLocalOnly: isLocal,
+                webSearchEnabled: webSearchEnabled
             )
             result.insert(blankChat, at: 0)
 

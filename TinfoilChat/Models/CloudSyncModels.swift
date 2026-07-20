@@ -87,6 +87,8 @@ struct StoredChat: Codable {
     // Active prompt-library preset for this chat (shared with React via presetId)
     var promptPresetId: String?
 
+    var webSearchEnabled: Bool?
+
     // For tracking streaming state
     var hasActiveStream: Bool?
 
@@ -139,6 +141,7 @@ struct StoredChat: Codable {
         self.modelType = nil
         self.language = nil
         self.userId = nil
+        self.webSearchEnabled = nil
         self.syncVersion = syncVersion
         self.syncedAt = nil
         self.locallyModified = locallyModified
@@ -161,6 +164,7 @@ struct StoredChat: Codable {
         self.formatVersion = chat.formatVersion
         self.projectId = chat.projectId
         self.promptPresetId = chat.promptPresetId
+        self.webSearchEnabled = chat.webSearchEnabled
         self.hasActiveStream = chat.hasActiveStream
         self.clock = chat.clock
         self.writer = chat.writer
@@ -198,7 +202,8 @@ struct StoredChat: Codable {
             dataCorrupted: dataCorrupted ?? false,
             formatVersion: formatVersion,
             projectId: projectId,
-            promptPresetId: promptPresetId
+            promptPresetId: promptPresetId,
+            webSearchEnabled: webSearchEnabled ?? true
         )
 
         if let hasActiveStream = hasActiveStream {
@@ -219,6 +224,7 @@ struct StoredChat: Codable {
         case syncVersion, syncedAt, locallyModified
         case decryptionFailed, dataCorrupted, formatVersion, projectId
         case promptPresetId = "presetId"
+        case webSearchEnabled
         case clock, writer, clockVersion
     }
 
@@ -252,6 +258,7 @@ struct StoredChat: Codable {
         try container.encodeIfPresent(formatVersion, forKey: .formatVersion)
         try container.encodeIfPresent(projectId, forKey: .projectId)
         try container.encodeIfPresent(promptPresetId, forKey: .promptPresetId)
+        try container.encodeIfPresent(webSearchEnabled, forKey: .webSearchEnabled)
         try container.encodeIfPresent(clock, forKey: .clock)
         try container.encodeIfPresent(writer, forKey: .writer)
         try container.encodeIfPresent(clockVersion, forKey: .clockVersion)
@@ -315,6 +322,7 @@ struct StoredChat: Codable {
         formatVersion = try container.decodeIfPresent(Int.self, forKey: .formatVersion)
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
         promptPresetId = try container.decodeIfPresent(String.self, forKey: .promptPresetId)
+        webSearchEnabled = try container.decodeIfPresent(Bool.self, forKey: .webSearchEnabled)
         clock = try container.decodeIfPresent(Int.self, forKey: .clock)
         writer = try container.decodeIfPresent(String.self, forKey: .writer)
         clockVersion = try container.decodeIfPresent(Int.self, forKey: .clockVersion)
@@ -448,7 +456,6 @@ struct ProfileData: Codable {
     // Shared chat defaults
     var reasoningEffort: String?
     var thinkingEnabled: Bool?
-    var webSearchEnabled: Bool?
     var webSearchAvailable: Bool?
     var codeExecutionEnabled: Bool?
     var piiCheckEnabled: Bool?

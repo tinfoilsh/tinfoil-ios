@@ -26,7 +26,7 @@ enum ProfileMerge {
         "traits", "additionalContext", "isUsingPersonalization",
         "isUsingCustomPrompt", "customSystemPrompt", "customPromptPresets",
         "favoritePromptPresetIds", "reasoningEffort",
-        "thinkingEnabled", "webSearchEnabled", "webSearchAvailable",
+        "thinkingEnabled", "webSearchAvailable",
         "codeExecutionEnabled",
         "piiCheckEnabled", "genUIEnabled", "chatFont",
         "projectUploadPreference",

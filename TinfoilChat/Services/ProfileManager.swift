@@ -226,7 +226,6 @@ class ProfileManager: ObservableObject {
             favoritePromptPresetIds: favoritePromptPresetIds,
             reasoningEffort: reasoningEffort,
             thinkingEnabled: thinkingEnabled,
-            webSearchEnabled: SettingsManager.shared.webSearchEnabled,
             webSearchAvailable: SettingsManager.shared.webSearchAvailable,
             codeExecutionEnabled: codeExecutionEnabled,
             piiCheckEnabled: piiCheckEnabled,
@@ -290,9 +289,6 @@ class ProfileManager: ObservableObject {
         }
         if let thinkingEnabled = profile.thinkingEnabled {
             UserDefaults.standard.set(thinkingEnabled, forKey: Constants.StorageKeys.Settings.thinkingEnabled)
-        }
-        if let webSearchEnabled = profile.webSearchEnabled {
-            SettingsManager.shared.webSearchEnabled = webSearchEnabled
         }
         if let webSearchAvailable = profile.webSearchAvailable {
             SettingsManager.shared.webSearchAvailable = webSearchAvailable
@@ -819,7 +815,6 @@ class ProfileManager: ObservableObject {
                p1.favoritePromptPresetIds != p2.favoritePromptPresetIds ||
                p1.reasoningEffort != p2.reasoningEffort ||
                p1.thinkingEnabled != p2.thinkingEnabled ||
-               p1.webSearchEnabled != p2.webSearchEnabled ||
                p1.webSearchAvailable != p2.webSearchAvailable ||
                p1.codeExecutionEnabled != p2.codeExecutionEnabled ||
                p1.piiCheckEnabled != p2.piiCheckEnabled ||
@@ -830,7 +825,7 @@ class ProfileManager: ObservableObject {
 
     func sharedSettingsDidChange() {
         // Ignore changes that originate from applying a synced/loaded profile.
-        // Settings applied mid-`applyProfile` (e.g. webSearchEnabled) would
+        // Settings applied mid-`applyProfile` (e.g. webSearchAvailable) would
         // otherwise persist a partially-applied snapshot, since fields applied
         // later in the sequence still hold their pre-apply values. The applying
         // flow persists the full profile itself once application completes.

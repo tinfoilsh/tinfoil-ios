@@ -735,13 +735,13 @@ struct AddToSheetView: View {
                     .padding(.horizontal, 20)
 
                 if settings.webSearchAvailable {
-                    Toggle(isOn: $viewModel.isWebSearchEnabled) {
+                    Toggle(isOn: Binding(
+                        get: { viewModel.isWebSearchEnabled },
+                        set: { viewModel.setWebSearchEnabled($0) }
+                    )) {
                         Label("Web Search", systemImage: "globe")
                     }
                     .tint(.green)
-                    .onChange(of: viewModel.isWebSearchEnabled) { _, newValue in
-                        settings.webSearchEnabled = newValue
-                    }
                     .padding(.horizontal, 20)
                 }
 
