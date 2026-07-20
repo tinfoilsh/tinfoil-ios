@@ -28,8 +28,12 @@ final class AppIntentCoordinator: ObservableObject {
         pendingActions.append(action)
     }
 
-    func consumeNextAction() -> Action? {
-        guard !pendingActions.isEmpty else { return nil }
-        return pendingActions.removeFirst()
+    func peekNextAction() -> Action? {
+        pendingActions.first
+    }
+
+    func popNextAction() {
+        guard !pendingActions.isEmpty else { return }
+        pendingActions.removeFirst()
     }
 }

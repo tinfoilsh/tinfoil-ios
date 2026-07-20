@@ -170,6 +170,10 @@ struct ContentView: View {
             guard !actions.isEmpty else { return }
             performPendingIntentActionsIfReady()
         }
+        .onChange(of: chatViewModel.isLoading) { _, isLoading in
+            guard !isLoading, !intentCoordinator.pendingActions.isEmpty else { return }
+            performPendingIntentActionsIfReady()
+        }
         .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
             // Update available models when subscription status changes
             chatViewModel.updateModelBasedOnAuthStatus(
@@ -219,8 +223,24 @@ struct ContentView: View {
 
     private func performPendingIntentActionsIfReady() {
         guard !authManager.isLoading else { return }
-        while let action = intentCoordinator.consumeNextAction() {
+        while let action = intentCoordinator.peekNextAction() {
+            // Stop draining at the first action that cannot run yet so queued
+            // actions stay in order; the isLoading observer resumes the drain.
+            guard canPerform(intentAction: action) else { return }
+            intentCoordinator.popNextAction()
             perform(intentAction: action)
+        }
+    }
+
+    private func canPerform(intentAction: AppIntentCoordinator.Action) -> Bool {
+        switch intentAction {
+        case .askQuestion:
+            // Signed-out users cannot get a fresh chat from createNewChat, so
+            // their single chat must finish streaming before the next prompt,
+            // otherwise sendMessage's isLoading guard would drop it.
+            return chatViewModel.hasChatAccess || !chatViewModel.isLoading
+        case .newChat, .startDictation:
+            return true
         }
     }
 
