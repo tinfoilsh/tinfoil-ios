@@ -32,6 +32,39 @@ struct ChatSearchControllerTests {
     }
 
     @Test
+    func keepsPartialIndexResultsWhenTheRebuildFails() async {
+        let recorder = ChatSearchServiceTests.Recorder()
+        let service = ChatSearchServiceTests.makeService(
+            recorder: recorder,
+            searchQuery: { _ in
+                EnclaveSearchQueryResponse(
+                    results: [EnclaveSearchQueryResult(id: "a", score: 1)],
+                    totalIndexed: 1,
+                    needsReindex: true
+                )
+            },
+            searchReindex: { _ in
+                EnclaveSearchReindexStatusResponse(
+                    jobId: "job-1", status: "failed", indexed: 0, failed: 1,
+                    totalIndexed: 1, partial: true, error: "chat could not be indexed"
+                )
+            },
+            loadLocalChat: { chatId, _ in
+                ChatSearchServiceTests.makeChat(id: chatId, title: "Pond notes")
+            }
+        )
+        let controller = ChatSearchController(service: service)
+
+        await controller.updateTerm("ducks", userId: "user-1")?.value
+
+        #expect(controller.results.map(\.id) == ["a"])
+        #expect(controller.available == true)
+        #expect(controller.isIndexing == false)
+        #expect(controller.isSearching == false)
+        #expect(recorder.queryRequests.count == 1)
+    }
+
+    @Test
     func clearsIndexingAfterFailedRebuild() async {
         let recorder = ChatSearchServiceTests.Recorder()
         let service = ChatSearchServiceTests.makeService(

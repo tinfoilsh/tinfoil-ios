@@ -88,8 +88,13 @@ final class ChatSearchController: ObservableObject {
                 if settled == .completed || settled == .partial {
                     await run(term: term, userId: userId)
                 } else {
+                    // The rebuild failed, timed out, or was skipped, but
+                    // the query above still answered from the partial
+                    // index. Keep any hits it produced; only degrade to
+                    // the caller's local title fallback when that partial
+                    // index had nothing to offer.
                     isIndexing = false
-                    available = false
+                    available = !results.isEmpty
                 }
             }
         } catch {
