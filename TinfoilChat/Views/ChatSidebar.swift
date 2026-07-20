@@ -9,15 +9,15 @@ import SwiftUI
 import ClerkKit
 import SafariServices
 
-func isRootSidebarChat(_ chat: Chat) -> Bool {
-    !chat.isTemporary && chat.projectId == nil && !chat.decryptionFailed
-}
-
 /// Search results, unlike the root list, do surface project chats (the
 /// index covers every synced chat and the webapp shows them too); only
 /// temporary and undecryptable chats are excluded.
 func isSearchResultSidebarChat(_ chat: Chat) -> Bool {
     !chat.isTemporary && !chat.decryptionFailed
+}
+
+func isRootSidebarChat(_ chat: Chat) -> Bool {
+    isSearchResultSidebarChat(chat) && chat.projectId == nil
 }
 
 func isSidebarChatSearchEnabled(

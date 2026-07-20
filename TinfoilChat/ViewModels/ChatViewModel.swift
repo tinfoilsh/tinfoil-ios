@@ -930,11 +930,21 @@ class ChatViewModel: ObservableObject {
     }
 
     func enterProject(projectId: String) async {
-        guard hasChatAccess else { return }
+        guard await loadProject(projectId: projectId) else { return }
+        createNewChat(isLocalOnly: false, projectId: projectId, focusInput: false)
+    }
+
+    /// Loads a project and makes it the active context without touching
+    /// the current chat selection. Returns true when the project became
+    /// active.
+    @discardableResult
+    func loadProject(projectId: String) async -> Bool {
+        guard hasChatAccess else { return false }
 
         isLoadingProject = true
         projectError = nil
         isViewingProjectChat = false
+        var loaded = false
         do {
             let project = try await projectStorage.getProject(projectId)
             guard let project else {
@@ -949,12 +959,12 @@ class ChatViewModel: ObservableObject {
             if syncResult.downloaded > 0 || syncResult.uploaded > 0 || activeProjectChats.isEmpty {
                 await loadProjectChatsIntoMemory(projectId: projectId)
             }
-
-            createNewChat(isLocalOnly: false, projectId: projectId, focusInput: false)
+            loaded = true
         } catch {
             projectError = error.localizedDescription
         }
         isLoadingProject = false
+        return loaded
     }
 
     func exitProject() {
@@ -997,16 +1007,27 @@ class ChatViewModel: ObservableObject {
             pendingSearchResultChatId = chat.id
             Task {
                 if activeProject?.id != projectId {
-                    await enterProject(projectId: projectId)
+                    // loadProject (not enterProject) so no blank chat is
+                    // selected along the way, which would clear the pending
+                    // token below before it could be checked.
+                    await loadProject(projectId: projectId)
                 }
-                // Open the hit only when it is still the pending one (no
-                // newer selection landed while the project loaded) and its
-                // project actually became active (the load can fail, e.g.
-                // for a deleted project, leaving the previous context in
-                // place); otherwise the chat would open under the wrong
-                // project or none at all.
-                guard pendingSearchResultChatId == chat.id,
-                      activeProject?.id == projectId else { return }
+                // A newer selection during the load supersedes this one:
+                // leave it in charge, and drop the just-loaded project
+                // context if that selection lives outside it so the
+                // project page doesn't cover the chosen chat.
+                guard pendingSearchResultChatId == chat.id else {
+                    if activeProject?.id == projectId, currentChat?.projectId != projectId {
+                        activeProject = nil
+                        projectDocuments = []
+                        isViewingProjectChat = false
+                    }
+                    return
+                }
+                // The load can also fail (e.g. a deleted project), leaving
+                // some other context in place; never open the chat under
+                // the wrong project or none at all.
+                guard activeProject?.id == projectId else { return }
                 openProjectChat(chat)
             }
         } else {
