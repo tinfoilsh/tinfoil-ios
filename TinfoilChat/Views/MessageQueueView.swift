@@ -48,19 +48,21 @@ private struct QueuedMessageRow: View {
         return "Queued message"
     }
 
+    /// Single source of truth for whether an attachment renders as a
+    /// thumbnail; everything else is listed by name instead.
+    private func hasImagePreview(_ attachment: Attachment) -> Bool {
+        attachment.type == .image && (attachment.thumbnailBase64 ?? attachment.base64) != nil
+    }
+
     private var imageAttachments: [Attachment] {
-        item.attachments.filter {
-            $0.type == .image && ($0.thumbnailBase64 ?? $0.base64) != nil
-        }
+        item.attachments.filter(hasImagePreview)
     }
 
     /// Attachments that can't be shown as a thumbnail (documents, or images
     /// without preview data). Listed by name so the queued payload stays
     /// verifiable even when the row also has preview text.
     private var namedAttachments: [Attachment] {
-        item.attachments.filter { attachment in
-            !(attachment.type == .image && (attachment.thumbnailBase64 ?? attachment.base64) != nil)
-        }
+        item.attachments.filter { !hasImagePreview($0) }
     }
 
     private var thumbnailStrip: some View {
