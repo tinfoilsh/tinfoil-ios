@@ -1615,9 +1615,7 @@ class ChatViewModel: ObservableObject {
             attachments: attachments
         )
         addMessage(userMessage)
-        for requestID in attachments.compactMap(\.sharedImportRequestID) {
-            SharedImportCoordinator.shared.acknowledge(requestID: requestID)
-        }
+        acknowledgeSharedImports(in: attachments)
 
         // If this is the first message, mark as modified (title will be generated after assistant reply)
         if var chat = currentChat, chat.messages.count == 1 {
@@ -1649,9 +1647,7 @@ class ChatViewModel: ObservableObject {
     private func discardMessageQueue(chatId: String) {
         guard let queue = messageQueues.removeValue(forKey: chatId) else { return }
         for item in queue {
-            for requestID in item.attachments.compactMap(\.sharedImportRequestID) {
-                SharedImportCoordinator.shared.acknowledge(requestID: requestID)
-            }
+            acknowledgeSharedImports(in: item.attachments)
         }
     }
 
@@ -1662,9 +1658,7 @@ class ChatViewModel: ObservableObject {
               let index = queue.firstIndex(where: { $0.id == id }) else { return }
         let removed = queue.remove(at: index)
         messageQueues[chatId] = queue.isEmpty ? nil : queue
-        for requestID in removed.attachments.compactMap(\.sharedImportRequestID) {
-            SharedImportCoordinator.shared.acknowledge(requestID: requestID)
-        }
+        acknowledgeSharedImports(in: removed.attachments)
     }
 
     /// Dispatches the next queued message for a chat, one at a time. Only
@@ -1700,6 +1694,15 @@ class ChatViewModel: ObservableObject {
     }
 
     // MARK: - Attachment Management
+
+    /// Marks the share-inbox requests behind these attachments as handled.
+    /// Single funnel for every path that consumes or discards attachments,
+    /// so acknowledgment behavior can't drift between them.
+    private func acknowledgeSharedImports(in attachments: [Attachment]) {
+        for requestID in attachments.compactMap(\.sharedImportRequestID) {
+            SharedImportCoordinator.shared.acknowledge(requestID: requestID)
+        }
+    }
 
     func addDocumentAttachment(
         url: URL,
@@ -1787,28 +1790,22 @@ class ChatViewModel: ObservableObject {
     }
 
     func removePendingAttachment(id: String) {
-        let sharedImportRequestID = pendingAttachments
-            .first(where: { $0.id == id })?
-            .sharedImportRequestID
+        let removed = pendingAttachments.filter { $0.id == id }
         pendingAttachments.removeAll { $0.id == id }
         pendingImageThumbnails.removeValue(forKey: id)
-        if let sharedImportRequestID {
-            SharedImportCoordinator.shared.acknowledge(requestID: sharedImportRequestID)
-        }
+        acknowledgeSharedImports(in: removed)
         if pendingAttachments.isEmpty {
             attachmentError = nil
         }
     }
 
     func clearPendingAttachments(acknowledgeSharedImports: Bool = true) {
-        let sharedImportRequestIDs = pendingAttachments.compactMap(\.sharedImportRequestID)
+        let removed = pendingAttachments
         pendingAttachments.removeAll()
         pendingImageThumbnails.removeAll()
         attachmentError = nil
         if acknowledgeSharedImports {
-            for requestID in sharedImportRequestIDs {
-                SharedImportCoordinator.shared.acknowledge(requestID: requestID)
-            }
+            self.acknowledgeSharedImports(in: removed)
         }
     }
 
