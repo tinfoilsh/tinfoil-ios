@@ -734,14 +734,16 @@ struct AddToSheetView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
 
-                Toggle(isOn: $viewModel.isWebSearchEnabled) {
-                    Label("Web Search", systemImage: "globe")
+                if settings.webSearchAvailable {
+                    Toggle(isOn: $viewModel.isWebSearchEnabled) {
+                        Label("Web Search", systemImage: "globe")
+                    }
+                    .tint(.green)
+                    .onChange(of: viewModel.isWebSearchEnabled) { _, newValue in
+                        settings.webSearchEnabled = newValue
+                    }
+                    .padding(.horizontal, 20)
                 }
-                .tint(.green)
-                .onChange(of: viewModel.isWebSearchEnabled) { _, newValue in
-                    settings.webSearchEnabled = newValue
-                }
-                .padding(.horizontal, 20)
 
                 if let contextUsage {
                     HStack {

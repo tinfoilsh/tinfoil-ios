@@ -1723,10 +1723,12 @@ class ChatViewModel: ObservableObject {
                 let turnHasImages = self.messages.contains { message in
                     message.attachments.contains { $0.type == .image }
                 }
+                let webSearchEnabled = self.isWebSearchEnabled
+                    && SettingsManager.shared.webSearchAvailable
                 let modelSelection = AppConfig.shared.resolveModelSelection(
                     currentModel,
                     preferMultimodal: turnHasImages,
-                    preferToolCalling: self.isWebSearchEnabled || SettingsManager.shared.genUIEnabled
+                    preferToolCalling: webSearchEnabled || SettingsManager.shared.genUIEnabled
                 )
                 let representativeModel = modelSelection.representative
 
@@ -1825,7 +1827,7 @@ class ChatViewModel: ObservableObject {
                     rules: processedRules,
                     conversationMessages: self.messages,
                     contextWindow: representativeModel.contextWindow,
-                    webSearchEnabled: self.isWebSearchEnabled,
+                    webSearchEnabled: webSearchEnabled,
                     isMultimodal: representativeModel.isMultimodal,
                     reasoningConfig: representativeModel.reasoningConfig,
                     reasoningEffort: self.reasoningEffort,

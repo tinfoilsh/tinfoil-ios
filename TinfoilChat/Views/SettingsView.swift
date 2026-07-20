@@ -89,6 +89,15 @@ class SettingsManager: ObservableObject {
         }
     }
 
+    @Published var webSearchAvailable: Bool {
+        didSet {
+            UserDefaults.standard.set(webSearchAvailable, forKey: Constants.StorageKeys.Settings.webSearchAvailable)
+            if !isApplyingSharedProfile {
+                ProfileManager.shared.sharedSettingsDidChange()
+            }
+        }
+    }
+
     // Generative UI toggle. When off, no render_* tool capabilities are sent.
     @Published var genUIEnabled: Bool {
         didSet {
@@ -143,6 +152,7 @@ class SettingsManager: ObservableObject {
 
         // Initialize web search setting
         self.webSearchEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.webSearchEnabled) as? Bool ?? true
+        self.webSearchAvailable = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.webSearchAvailable) as? Bool ?? true
 
         // Initialize Generative UI setting (defaults to on)
         self.genUIEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.genUIEnabled) as? Bool ?? true
@@ -186,6 +196,7 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.webSearchEnabled)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.webSearchAvailable)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.genUIEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.cloudSyncEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.localOnlyModeEnabled)
@@ -201,6 +212,7 @@ class SettingsManager: ObservableObject {
         isUsingCustomPrompt = false
         customSystemPrompt = ""
         webSearchEnabled = true
+        webSearchAvailable = true
         genUIEnabled = true
         isCloudSyncEnabled = false
         isLocalOnlyModeEnabled = false
@@ -533,6 +545,15 @@ struct SettingsView: View {
         Section {
             Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
                 .tint(Color.accentPrimary)
+            Toggle(isOn: $settings.webSearchAvailable) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Web Search")
+                    Text("Show web search controls and allow chats to search the web.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .tint(Color.accentPrimary)
             Toggle(isOn: $settings.genUIEnabled) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Generative UI")

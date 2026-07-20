@@ -449,6 +449,7 @@ struct ProfileData: Codable {
     var reasoningEffort: String?
     var thinkingEnabled: Bool?
     var webSearchEnabled: Bool?
+    var webSearchAvailable: Bool?
     var codeExecutionEnabled: Bool?
     var piiCheckEnabled: Bool?
     var genUIEnabled: Bool?

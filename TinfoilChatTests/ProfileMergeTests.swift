@@ -148,10 +148,20 @@ struct ProfileMergeTests {
 
     @Test("changedProfileFields diffs values")
     func changedFields() {
-        let baseline = ProfileData(nickname: "a", traits: ["x"], thinkingEnabled: true)
-        let local = ProfileData(nickname: "b", traits: ["x", "y"], thinkingEnabled: true)
+        let baseline = ProfileData(
+            nickname: "a",
+            traits: ["x"],
+            thinkingEnabled: true,
+            webSearchAvailable: true
+        )
+        let local = ProfileData(
+            nickname: "b",
+            traits: ["x", "y"],
+            thinkingEnabled: true,
+            webSearchAvailable: false
+        )
         let fields = ProfileMerge.changedProfileFields(local: local, baseline: baseline)
-        #expect(Set(fields) == Set(["nickname", "traits"]))
+        #expect(Set(fields) == Set(["nickname", "traits", "webSearchAvailable"]))
     }
 
     @Test("adopts populated remote fields when local stayed empty")

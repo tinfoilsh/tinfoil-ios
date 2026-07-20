@@ -227,6 +227,7 @@ class ProfileManager: ObservableObject {
             reasoningEffort: reasoningEffort,
             thinkingEnabled: thinkingEnabled,
             webSearchEnabled: SettingsManager.shared.webSearchEnabled,
+            webSearchAvailable: SettingsManager.shared.webSearchAvailable,
             codeExecutionEnabled: codeExecutionEnabled,
             piiCheckEnabled: piiCheckEnabled,
             genUIEnabled: SettingsManager.shared.genUIEnabled,
@@ -292,6 +293,9 @@ class ProfileManager: ObservableObject {
         }
         if let webSearchEnabled = profile.webSearchEnabled {
             SettingsManager.shared.webSearchEnabled = webSearchEnabled
+        }
+        if let webSearchAvailable = profile.webSearchAvailable {
+            SettingsManager.shared.webSearchAvailable = webSearchAvailable
         }
         if let codeExecutionEnabled = profile.codeExecutionEnabled {
             self.codeExecutionEnabled = codeExecutionEnabled
@@ -816,6 +820,7 @@ class ProfileManager: ObservableObject {
                p1.reasoningEffort != p2.reasoningEffort ||
                p1.thinkingEnabled != p2.thinkingEnabled ||
                p1.webSearchEnabled != p2.webSearchEnabled ||
+               p1.webSearchAvailable != p2.webSearchAvailable ||
                p1.codeExecutionEnabled != p2.codeExecutionEnabled ||
                p1.piiCheckEnabled != p2.piiCheckEnabled ||
                p1.genUIEnabled != p2.genUIEnabled ||
