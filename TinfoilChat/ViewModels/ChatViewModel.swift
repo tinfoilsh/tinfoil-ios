@@ -212,7 +212,17 @@ class ChatViewModel: ObservableObject {
     var verificationError: String? { verification.error }
     
     // Rate limit properties
-    @Published var rateLimit: RateLimitInfo?
+    @Published var rateLimit: RateLimitInfo? {
+        didSet {
+            // A drain stopped by the daily cap has no retrigger of its own,
+            // so returning capacity (quota refresh, or an upgrade clearing
+            // the limit to nil) must resume the on-screen chat's queue.
+            let hasCapacity = rateLimit.map { $0.remaining > 0 || $0.kind == .hourly } ?? true
+            if hasCapacity, let chatId = currentChat?.id {
+                scheduleMessageQueueDrain(chatId: chatId)
+            }
+        }
+    }
     @Published var showRateLimitPaywall: Bool = false
 
     // Model properties
