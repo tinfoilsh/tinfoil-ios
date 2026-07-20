@@ -983,6 +983,29 @@ class ChatViewModel: ObservableObject {
         isViewingProjectChat = true
     }
 
+    /// Opens a sidebar search hit, which may live outside the current
+    /// context: project chats are opened inside their project so the
+    /// conversation keeps its documents and instructions, and root
+    /// chats leave any active project first.
+    func openSearchResult(_ chat: Chat) {
+        if let projectId = chat.projectId {
+            Task {
+                if activeProject?.id != projectId {
+                    await enterProject(projectId: projectId)
+                }
+                openProjectChat(chat)
+            }
+        } else {
+            if activeProject != nil {
+                activeProject = nil
+                projectDocuments = []
+                projectError = nil
+                isViewingProjectChat = false
+            }
+            selectChat(chat)
+        }
+    }
+
     func updateActiveProject(name: String? = nil, description: String? = nil, systemInstructions: String? = nil, memory: [MemoryFact]? = nil) async {
         guard let project = activeProject else { return }
 

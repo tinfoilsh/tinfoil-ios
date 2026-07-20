@@ -13,6 +13,13 @@ func isRootSidebarChat(_ chat: Chat) -> Bool {
     !chat.isTemporary && chat.projectId == nil && !chat.decryptionFailed
 }
 
+/// Search results, unlike the root list, do surface project chats (the
+/// index covers every synced chat and the webapp shows them too); only
+/// temporary and undecryptable chats are excluded.
+func isSearchResultSidebarChat(_ chat: Chat) -> Bool {
+    !chat.isTemporary && !chat.decryptionFailed
+}
+
 func isSidebarChatSearchEnabled(
     isAuthenticated: Bool,
     isCloudSyncEnabled: Bool,
@@ -94,10 +101,7 @@ struct ChatSidebar: View {
                 !$0.isBlankChat && $0.title.lowercased().contains(needle)
             }
         }
-        // The index covers every synced chat, so results can include
-        // project chats; apply the same root-list exclusions so search
-        // never surfaces rows this list would not show.
-        return chatSearch.results.filter(isRootSidebarChat)
+        return chatSearch.results.filter(isSearchResultSidebarChat)
     }
 
     private var displayedChats: [Chat] {
@@ -379,7 +383,11 @@ struct ChatSidebar: View {
                     syncFailed: !chat.isBlankChat && syncHealth.failedChats[chat.id] != nil,
                     isGenerating: viewModel.isChatStreaming(chat.id),
                     onSelect: {
-                        viewModel.selectChat(chat)
+                        if isChatSearchActive {
+                            viewModel.openSearchResult(chat)
+                        } else {
+                            viewModel.selectChat(chat)
+                        }
                     },
                     onEdit: {
                         if editingChatId == chat.id {
@@ -770,6 +778,12 @@ struct ChatListItem: View {
                         }
                     } else {
                         HStack(spacing: 4) {
+                            if chat.projectId != nil {
+                                Image(systemName: "folder")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .accessibilityHidden(true)
+                            }
                             Text(chat.title)
                                 .foregroundColor(.primary)
                                 .lineLimit(1)
@@ -865,6 +879,9 @@ struct ChatListItem: View {
             return "Encrypted chat. Failed to decrypt, wrong key."
         }
         var components = [chat.title.isEmpty ? "Untitled chat" : chat.title]
+        if chat.projectId != nil {
+            components.append("Project chat")
+        }
         if chat.isBlankChat {
             components.append("New chat")
         } else if !createdTimeString.isEmpty {
