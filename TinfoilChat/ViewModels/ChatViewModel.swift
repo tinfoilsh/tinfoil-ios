@@ -2193,9 +2193,6 @@ class ChatViewModel: ObservableObject {
                     self.flushPendingStreamUpdate(chatId: sid)
 
                     // Finalize all message content
-                    summaryService.reset()
-                    self.streamState.setThinkingSummary(nil, chatId: sid)
-                    self.streamState.setWebSearchSummary(nil, chatId: sid)
                     if !chat.messages.isEmpty, let lastIndex = chat.messages.indices.last {
                         chat.messages[lastIndex].content = finalSnapshot.responseContent
                         chat.messages[lastIndex].thoughts = finalSnapshot.thoughts
@@ -2302,8 +2299,6 @@ class ChatViewModel: ObservableObject {
                         AccessibilityAnnouncer.announce(Constants.Accessibility.responseFailed)
                         HapticFeedback.trigger(.error)
                     }
-                    self.streamState.setThinkingSummary(nil, chatId: streamChatId)
-                    self.streamState.setWebSearchSummary(nil, chatId: streamChatId)
 
                     // Mark the chat as no longer having an active stream
                     // Look up by streamChatId, not self.currentChat, in case user navigated away

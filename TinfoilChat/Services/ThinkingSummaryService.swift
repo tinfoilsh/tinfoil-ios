@@ -10,8 +10,6 @@ import Foundation
 /// Service for generating thinking summaries during streaming
 @MainActor
 class ThinkingSummaryService {
-    static let shared = ThinkingSummaryService()
-
     private var isGenerating = false
     private var currentSummary: String = ""
     private var generationTask: Task<Void, Never>?
