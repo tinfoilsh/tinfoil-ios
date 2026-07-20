@@ -155,6 +155,9 @@ class SettingsManager: ObservableObject {
         } else {
             self.webSearchAvailable = true
         }
+        UserDefaults.standard.removeObject(
+            forKey: Constants.StorageKeys.Settings.webSearchEnabled
+        )
 
         // Initialize Generative UI setting (defaults to on)
         self.genUIEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.genUIEnabled) as? Bool ?? true
