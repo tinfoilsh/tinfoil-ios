@@ -1940,14 +1940,8 @@ class ChatViewModel: ObservableObject {
                     systemPrompt = systemPrompt.replacingOccurrences(of: "{USER_PREFERENCES}", with: "")
                 }
                 
-                // Stable replacement for the legacy {CURRENT_DATETIME} placeholder.
-                // The live timestamp is delivered via an ephemeral reminder message
-                // at the end of the request instead, so the system prompt stays
-                // byte-stable and server-side prefix caching keeps working.
-                let currentDateTimePointer = "provided in a reminder message at the end of the conversation"
                 let timezone = TimeZone.current.abbreviation() ?? TimeZone.current.identifier
                 
-                systemPrompt = systemPrompt.replacingOccurrences(of: "{CURRENT_DATETIME}", with: currentDateTimePointer)
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{TIMEZONE}", with: timezone)
                 systemPrompt = ProjectContextBuilder.applyProjectContext(
                     to: systemPrompt,
@@ -1967,7 +1961,6 @@ class ChatViewModel: ObservableObject {
                         processedRules = processedRules.replacingOccurrences(of: "{USER_PREFERENCES}", with: "")
                     }
 
-                    processedRules = processedRules.replacingOccurrences(of: "{CURRENT_DATETIME}", with: currentDateTimePointer)
                     processedRules = processedRules.replacingOccurrences(of: "{TIMEZONE}", with: timezone)
                 }
 
