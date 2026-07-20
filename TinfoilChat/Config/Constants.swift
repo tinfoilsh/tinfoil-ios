@@ -439,6 +439,15 @@ enum Constants {
         static let warningThreshold = 3
     }
 
+    enum MessageQueue {
+        static let maxQueuedMessages = 1
+        /// Longest text preview shown for a queued message; mirrors the
+        /// webapp's QUEUED_PREVIEW_MAX_LENGTH.
+        static let previewMaxLength = 240
+        static let previewLineLimit = 2
+        static let imageThumbnailSize: CGFloat = 48
+    }
+
     enum Attachments {
         static let maxImageDimension: CGFloat = 768
         static let imageCompressionQuality: CGFloat = 0.85

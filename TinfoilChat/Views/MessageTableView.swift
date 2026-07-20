@@ -89,6 +89,24 @@ struct MessageTableView: UIViewRepresentable {
         let isIdConversion = chatIdChanged && !currentMessageIds.isEmpty &&
             currentMessageIds == context.coordinator.lastMessageIds
 
+        // Track which row is streaming synchronously, before any reload below
+        // measures cells. A queued message dispatched right as a stream ends
+        // can move `isLoading` false -> true and append rows within a single
+        // update, so the finished message's wrapper still claims to be the
+        // streaming last row when the reload measures it (wrapper updates are
+        // deferred a runloop tick). The cell's streaming buffer keys off this
+        // coordinator value instead, so the finished row measures at its
+        // collapsed height immediately and can't overlap the rows added after
+        // it. The stale wrapper's buffer state and cached height go with it.
+        let previousStreamingMessageId = context.coordinator.streamingMessageId
+        context.coordinator.streamingMessageId = isLoading ? messages.last?.id : nil
+        if let staleId = previousStreamingMessageId,
+           staleId != messages.last?.id,
+           let staleWrapper = context.coordinator.messageWrappers[staleId] {
+            staleWrapper.resetBuffer()
+            context.coordinator.messageHeightCache.removeValue(forKey: staleId)
+        }
+
         if chatIdChanged {
             context.coordinator.lastChatId = currentChatId
             context.coordinator.preservedOffsetAfterStreaming = nil
@@ -268,8 +286,17 @@ struct MessageTableView: UIViewRepresentable {
                         return
                     }
                     UIView.performWithoutAnimation {
-                        tableView.beginUpdates()
-                        tableView.endUpdates()
+                        // A queued message can be dispatched between the stream
+                        // ending and this deferred collapse, growing the
+                        // datasource before the table has reloaded for it.
+                        // begin/endUpdates would assert on the mismatched row
+                        // counts; the imminent reload from that count change
+                        // re-measures heights anyway, so the collapse pass is
+                        // only run while the counts still agree.
+                        if tableView.numberOfRows(inSection: 0) == context.coordinator.parent.messages.count {
+                            tableView.beginUpdates()
+                            tableView.endUpdates()
+                        }
                         context.coordinator.isCollapsingStreamingBuffer = false
                         context.coordinator.updateContentInset()
                         tableView.layoutIfNeeded()
@@ -361,6 +388,9 @@ struct MessageTableView: UIViewRepresentable {
         var isUserMessageScrollMode = false
         var preservedOffsetAfterStreaming: CGFloat?
         var isCollapsingStreamingBuffer = false
+        /// The message currently rendered with a streaming buffer, updated
+        /// synchronously with the datasource (wrapper flags lag one tick).
+        var streamingMessageId: String?
         var heightCache: [IndexPath: CGFloat] = [:]
         var messageHeightCache: [String: CGFloat] = [:]
         var contentEstimateCache: [String: CGFloat] = [:]
@@ -587,9 +617,17 @@ struct MessageTableView: UIViewRepresentable {
 
         private func isStreamingRow(at indexPath: IndexPath) -> Bool {
             guard indexPath.row < parent.messages.count else { return false }
-            guard indexPath.row == parent.messages.count - 1 else { return false }
             let message = parent.messages[indexPath.row]
-            return parent.isLoading || messageWrappers[message.id]?.isLoading == true
+            // Wrapper flags lag the datasource by a runloop tick, so a message
+            // that just stopped being the streaming last row (queued dispatch
+            // appended rows behind it) can still render its buffer this tick.
+            // Trust the wrapper's claim wherever the row sits so that inflated
+            // frame never enters the height caches.
+            if let wrapper = messageWrappers[message.id], wrapper.isLoading, wrapper.isLastMessage {
+                return true
+            }
+            guard indexPath.row == parent.messages.count - 1 else { return false }
+            return parent.isLoading
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -896,6 +934,15 @@ struct ObservableMessageCell: View {
         )
     }
 
+    /// Wrapper flags update a runloop tick behind the datasource, so they can
+    /// still mark a finished message as the streaming last row while a reload
+    /// is measuring cells (queued dispatch landing at stream end). Requiring
+    /// the coordinator's synchronous id keeps the buffer off such rows.
+    private var showsStreamingBuffer: Bool {
+        wrapper.isLoading && wrapper.isLastMessage
+            && coordinator?.streamingMessageId == wrapper.message.id
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if wrapper.showArchiveSeparator {
@@ -917,7 +964,7 @@ struct ObservableMessageCell: View {
             }
 
             ZStack(alignment: .topLeading) {
-                if wrapper.isLoading && wrapper.isLastMessage {
+                if showsStreamingBuffer {
                     Color.clear
                         .frame(height: bufferHeight)
                 }
@@ -938,7 +985,7 @@ struct ObservableMessageCell: View {
                     view.frame(maxWidth: 900)
                         .frame(maxWidth: .infinity)
                 }
-                .if(wrapper.isLoading && wrapper.isLastMessage) { view in
+                .if(showsStreamingBuffer) { view in
                     view.background(
                         GeometryReader { geometry in
                             Color.clear

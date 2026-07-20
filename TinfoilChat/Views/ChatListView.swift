@@ -100,6 +100,11 @@ struct ChatListView: View {
                     )
                     .transition(.opacity)
                 }
+                MessageQueueView(
+                    queue: viewModel.queuedMessages,
+                    isDarkMode: isDarkMode,
+                    onRemove: { viewModel.removeQueuedMessage(id: $0) }
+                )
                 MessageInputView(
                     messageText: $messageText,
                     viewModel: viewModel,

@@ -70,6 +70,35 @@ struct MessageInputView: View {
     // State for pulsing animation
     @State private var isPulsing = false
 
+    // Clears the editor's UITextView imperatively at send time, so the draft
+    // disappears even while the editor keeps focus (queued sends don't
+    // dismiss the keyboard) without depending on render timing.
+    @State private var editorHandle = CustomTextEditorHandle()
+
+    /// A draft that can actually be sent or queued right now: attachments
+    /// all processed, plus either non-whitespace text or at least one
+    /// attachment. Matches `sendMessage`'s own guards so the button never
+    /// offers a send that would be rejected.
+    private var hasSubmittableContent: Bool {
+        guard attachmentsAreReadyToSend(viewModel.pendingAttachments) else { return false }
+        return !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !viewModel.pendingAttachments.isEmpty
+    }
+
+    /// While a response is streaming, the button stays a send button only
+    /// while a sendable draft can actually be queued; with nothing
+    /// submittable, or the queue already full, it reverts to a stop button
+    /// so the stream can always be cancelled. Mirrors the webapp.
+    private var showStopAction: Bool {
+        viewModel.isLoading && (!hasSubmittableContent || viewModel.isMessageQueueFull)
+    }
+
+    /// The send button greys out while a draft can't be dispatched because
+    /// an attachment is still processing.
+    private var isSendActionDisabled: Bool {
+        !showStopAction && !attachmentsAreReadyToSend(viewModel.pendingAttachments)
+    }
+
     // Attachment picker state
 
 
@@ -345,7 +374,7 @@ struct MessageInputView: View {
                          textHeight: $textHeight,
                          placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
                          shouldFocusInput: viewModel.shouldFocusInput,
-                         isLoading: viewModel.isLoading,
+                         handle: editorHandle,
                          allowsImagePaste: viewModel.currentModel.isMultimodal,
                          onFocusHandled: { viewModel.shouldFocusInput = false },
                          onSendMessage: { text in viewModel.sendMessage(text: text) },
@@ -443,7 +472,7 @@ struct MessageInputView: View {
                     }
 
                     Button(action: sendOrCancelMessage) {
-                        Image(systemName: viewModel.isLoading ? "stop.fill" : "arrow.up")
+                        Image(systemName: showStopAction ? "stop.fill" : "arrow.up")
                             .font(.system(size: 16, weight: .semibold))
                             .frame(width: 24, height: 24)
                             .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
@@ -453,11 +482,8 @@ struct MessageInputView: View {
                     .glassEffect(.regular.interactive(), in: .circle)
                     .clipShape(.circle)
                     .tint(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
-                    .disabled(
-                        !viewModel.isLoading
-                        && !attachmentsAreReadyToSend(viewModel.pendingAttachments)
-                    )
-                    .accessibilityLabel(viewModel.isLoading ? "Stop generating" : "Send message")
+                    .disabled(isSendActionDisabled)
+                    .accessibilityLabel(showStopAction ? "Stop generating" : "Send message")
                     .padding(.trailing, 8)
                 }
                 .padding(.vertical, 8)
@@ -552,16 +578,13 @@ struct MessageInputView: View {
                                 .fill(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
                                 .frame(width: 32, height: 32)
 
-                            Image(systemName: viewModel.isLoading ? "stop.fill" : "arrow.up")
+                            Image(systemName: showStopAction ? "stop.fill" : "arrow.up")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
                         }
                     }
-                    .disabled(
-                        !viewModel.isLoading
-                        && !attachmentsAreReadyToSend(viewModel.pendingAttachments)
-                    )
-                    .accessibilityLabel(viewModel.isLoading ? "Stop generating" : "Send message")
+                    .disabled(isSendActionDisabled)
+                    .accessibilityLabel(showStopAction ? "Stop generating" : "Send message")
                     .accessibleHitTarget()
                     .padding(.trailing, 8)
                 }
@@ -597,7 +620,7 @@ struct MessageInputView: View {
                 .foregroundColor(.secondary)
                 .frame(width: 24, height: 24)
         }
-        .disabled(viewModel.isLoading || viewModel.isProcessingAttachment)
+        .disabled(viewModel.isProcessingAttachment)
         .accessibilityLabel("Add attachment")
         .accessibleHitTarget()
         .padding(.leading, 8)
@@ -628,12 +651,16 @@ struct MessageInputView: View {
     }
 
     private func sendOrCancelMessage() {
-        if viewModel.isLoading {
+        if showStopAction {
             viewModel.cancelGeneration()
-        } else if !messageText.isEmpty || !viewModel.pendingAttachments.isEmpty {
-            viewModel.sendMessage(text: messageText)
-            messageText = ""
-            textHeight = Layout.defaultHeight
+        } else if hasSubmittableContent {
+            // Only clear the input when the message was actually sent or
+            // queued; a rejected draft (full queue, rate limit) stays put.
+            if viewModel.sendMessage(text: messageText) {
+                messageText = ""
+                editorHandle.clearDraft()
+                textHeight = Layout.defaultHeight
+            }
         }
     }
 
@@ -872,16 +899,30 @@ struct ModelSelectorSheetView: View {
     }
 }
 
+/// Lets the owning view reach into the editor imperatively. Clearing the
+/// draft through the coordinator keeps the UITextView, the binding, and the
+/// keyboard focus consistent in one synchronous step, instead of relying on
+/// a render pass to propagate an emptied binding back into UIKit.
+final class CustomTextEditorHandle {
+    fileprivate weak var coordinator: CustomTextEditor.Coordinator?
+
+    func clearDraft() {
+        coordinator?.clearDraft()
+    }
+}
+
 /// Custom UIViewRepresentable for a properly managed text editor
 struct CustomTextEditor: UIViewRepresentable {
     @Binding var text: String
     @Binding var textHeight: CGFloat
     var placeholderText: String
     var shouldFocusInput: Bool
-    var isLoading: Bool
+    var handle: CustomTextEditorHandle? = nil
     var allowsImagePaste: Bool = false
     var onFocusHandled: () -> Void
-    var onSendMessage: (String) -> Void
+    /// Returns whether the message was accepted, so the editor only clears
+    /// itself when the draft was actually sent or queued.
+    var onSendMessage: (String) -> Bool
     var onPasteImage: ((Data, String) -> Void)? = nil
     var onPasteFile: ((URL, String) -> Void)? = nil
     var onPasteFileError: ((String) -> Void)? = nil
@@ -906,6 +947,9 @@ struct CustomTextEditor: UIViewRepresentable {
         textView.adjustsFontForContentSizeCategory = true
         textView.accessibilityLabel = "Message"
 
+        context.coordinator.textView = textView
+        handle?.coordinator = context.coordinator
+
         // Initialize with placeholder or actual text
         if text.isEmpty {
             textView.text = placeholderText
@@ -923,6 +967,7 @@ struct CustomTextEditor: UIViewRepresentable {
     
     func updateUIView(_ uiView: UITextView, context: Context) {
         context.coordinator.parent = self
+        handle?.coordinator = context.coordinator
         if let pastingView = uiView as? PastingTextView {
             pastingView.allowsImagePaste = allowsImagePaste
             pastingView.onPasteImage = onPasteImage
@@ -941,6 +986,20 @@ struct CustomTextEditor: UIViewRepresentable {
             }
         } else if !shouldFocusInput {
             context.coordinator.hasFocusedFromFlag = false
+        }
+
+        // A clear can race a render whose state snapshot predates it: the
+        // view model publishes on every streaming token, so such a pass can
+        // still read the old draft from the binding after `clearDraft` ran
+        // and would write it straight back into the emptied editor. Treat
+        // exactly that value as empty until a fresher one arrives.
+        var text = self.text
+        if let clearedDraft = context.coordinator.clearedDraft {
+            if text == clearedDraft {
+                text = ""
+            } else {
+                context.coordinator.clearedDraft = nil
+            }
         }
 
         if text.isEmpty && !isCurrentlyEditing && uiView.textColor != .lightGray {
@@ -984,10 +1043,41 @@ struct CustomTextEditor: UIViewRepresentable {
         var parent: CustomTextEditor
         var isEditing = false
         var hasFocusedFromFlag = false
+        weak var textView: UITextView?
+        /// The draft text at the moment `clearDraft` ran. While streaming, the
+        /// view model publishes on every token, so a render transaction whose
+        /// state snapshot predates the send can reach `updateUIView` after the
+        /// clear, still carrying the old draft in the binding. That value must
+        /// be recognized and ignored or it gets written back into the emptied
+        /// editor and then resynced into the binding, undoing the clear.
+        var clearedDraft: String?
         private var lastMeasurement: (text: String, width: CGFloat, pointSize: CGFloat, height: CGFloat)?
 
         init(_ parent: CustomTextEditor) {
             self.parent = parent
+        }
+
+        /// Empties the draft in one synchronous step: the UITextView, the
+        /// text binding, and the reported height all reset together, keeping
+        /// focus (and the keyboard) exactly as they were. Without this, an
+        /// emptied binding reaching `updateUIView` while the editor is still
+        /// focused is indistinguishable from a stale binding and the draft
+        /// text gets resynced right back into it.
+        func clearDraft() {
+            guard let textView else { return }
+            clearedDraft = textView.text
+            if isEditing {
+                textView.text = ""
+                textView.textColor = UIColor { traitCollection in
+                    return traitCollection.userInterfaceStyle == .dark ? .white : .black
+                }
+            } else {
+                textView.text = parent.placeholderText
+                textView.textColor = .lightGray
+            }
+            parent.text = ""
+            parent.textHeight = MessageInputView.Layout.defaultHeight
+            refreshAccessibility(textView)
         }
 
         /// Returns the editor height for the current draft, avoiding repeated
@@ -1046,17 +1136,12 @@ struct CustomTextEditor: UIViewRepresentable {
                     let currentText = textView.text ?? ""
                     let trimmedText = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
 
-                    if !trimmedText.isEmpty && !parent.isLoading {
-                        parent.onSendMessage(trimmedText)
-
-                        textView.text = ""
-                        parent.text = ""
-                        parent.textHeight = MessageInputView.Layout.defaultHeight
-
-                        textView.text = parent.placeholderText
-                        textView.textColor = .lightGray
-
-                        textView.resignFirstResponder()
+                    // Sending while a response is streaming queues the message
+                    // and keeps focus so the next draft can be typed; a direct
+                    // send dismisses the keyboard itself, after which the
+                    // clear falls back to showing the placeholder.
+                    if !trimmedText.isEmpty && parent.onSendMessage(trimmedText) {
+                        clearDraft()
                     }
 
                     return false

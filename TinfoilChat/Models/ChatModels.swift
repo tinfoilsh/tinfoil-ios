@@ -664,6 +664,24 @@ struct GenUIToolCall: Codable, Equatable, Identifiable {
 // `TimelineToolCallBlock.resolution` so chats round-trip across
 // platforms.
 
+/// A user message submitted while the assistant was busy, held until the
+/// current response finishes. Mirrors the webapp's `QueuedMessage`.
+struct QueuedMessage: Identifiable, Equatable {
+    let id: String
+    let text: String
+    let attachments: [Attachment]
+
+    init(
+        id: String = UUID().uuidString.lowercased(),
+        text: String,
+        attachments: [Attachment] = []
+    ) {
+        self.id = id
+        self.text = text
+        self.attachments = attachments
+    }
+}
+
 /// Represents a single message in a chat
 struct Message: Identifiable, Codable, Equatable {
     let id: String
