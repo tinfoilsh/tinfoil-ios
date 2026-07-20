@@ -16,6 +16,7 @@ struct ContentView: View {
     @EnvironmentObject private var authManager: AuthManager
     @StateObject private var chatViewModel = TinfoilChat.ChatViewModel()
     @ObservedObject private var passkeyManager = PasskeyManager.shared
+    @ObservedObject private var intentCoordinator = AppIntentCoordinator.shared
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.scenePhase) var scenePhase
     @Environment(\.requestReview) private var requestReview
@@ -46,6 +47,7 @@ struct ContentView: View {
             authManager.setChatViewModel(chatViewModel)
             requestAppReviewIfEligible()
             importSharedAttachmentsIfReady()
+            performPendingIntentActionIfReady()
 
             // Initialize encryption with existing key only (no auto-creation)
             Task {
@@ -161,7 +163,12 @@ struct ContentView: View {
                 if authManager.isAuthenticated {
                     chatViewModel.handleSignIn()
                 }
+                performPendingIntentActionIfReady()
             }
+        }
+        .onChange(of: intentCoordinator.pendingAction) { _, action in
+            guard action != nil else { return }
+            performPendingIntentActionIfReady()
         }
         .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
             // Update available models when subscription status changes
@@ -208,6 +215,23 @@ struct ContentView: View {
     private func importSharedAttachmentsIfReady() {
         guard !authManager.isLoading else { return }
         SharedImportCoordinator.shared.importPendingAttachments(into: chatViewModel)
+    }
+
+    private func performPendingIntentActionIfReady() {
+        guard !authManager.isLoading else { return }
+        guard let action = intentCoordinator.consumePendingAction() else { return }
+        switch action {
+        case .askQuestion(let prompt):
+            chatViewModel.createNewChat(focusInput: false)
+            chatViewModel.sendMessage(text: prompt)
+        case .newChat:
+            chatViewModel.createNewChat()
+        case .startDictation:
+            chatViewModel.createNewChat(focusInput: false)
+            Task {
+                await chatViewModel.startAudioRecording()
+            }
+        }
     }
 }
 
