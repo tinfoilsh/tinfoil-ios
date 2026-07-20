@@ -65,6 +65,35 @@ struct ChatSearchControllerTests {
     }
 
     @Test
+    func clearsStaleIndexingBannerWhenANewTermStartsSearching() async {
+        let recorder = ChatSearchServiceTests.Recorder()
+        let service = ChatSearchServiceTests.makeService(
+            recorder: recorder,
+            searchQuery: { _ in
+                EnclaveSearchQueryResponse(results: [], totalIndexed: 0, needsReindex: true)
+            },
+            searchReindex: { _ in
+                // Keep the rebuild in flight so isIndexing stays raised
+                // from the first term's outcome.
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                return ChatSearchServiceTests.runningStatus()
+            }
+        )
+        let controller = ChatSearchController(service: service)
+
+        controller.updateTerm("duck", userId: "user-1")
+        for _ in 0..<100 where !controller.isIndexing {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        #expect(controller.isIndexing == true)
+
+        controller.updateTerm("ducks", userId: "user-1")
+
+        #expect(controller.isIndexing == false)
+        #expect(controller.isSearching == true)
+    }
+
+    @Test
     func clearsIndexingAfterFailedRebuild() async {
         let recorder = ChatSearchServiceTests.Recorder()
         let service = ChatSearchServiceTests.makeService(

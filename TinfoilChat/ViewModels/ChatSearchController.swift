@@ -58,6 +58,10 @@ final class ChatSearchController: ObservableObject {
             return nil
         }
         isSearching = true
+        // The indexing banner describes the previous term's outcome;
+        // clear it so a fresh query shows the plain searching state
+        // until the enclave answers for this term.
+        isIndexing = false
         searchTask = Task { [weak self] in
             try? await Task.sleep(
                 nanoseconds: UInt64(Constants.SyncEnclave.Search.debounceSeconds * 1_000_000_000)
