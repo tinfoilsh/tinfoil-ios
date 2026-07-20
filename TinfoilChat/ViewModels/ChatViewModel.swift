@@ -983,19 +983,34 @@ class ChatViewModel: ObservableObject {
         isViewingProjectChat = true
     }
 
+    /// Search hit whose project is still loading. Any newer chat
+    /// selection replaces or clears it, so a slow project load can
+    /// never navigate away from what the user picked afterwards.
+    private var pendingSearchResultChatId: String?
+
     /// Opens a sidebar search hit, which may live outside the current
     /// context: project chats are opened inside their project so the
     /// conversation keeps its documents and instructions, and root
     /// chats leave any active project first.
     func openSearchResult(_ chat: Chat) {
         if let projectId = chat.projectId {
+            pendingSearchResultChatId = chat.id
             Task {
                 if activeProject?.id != projectId {
                     await enterProject(projectId: projectId)
                 }
+                // Open the hit only when it is still the pending one (no
+                // newer selection landed while the project loaded) and its
+                // project actually became active (the load can fail, e.g.
+                // for a deleted project, leaving the previous context in
+                // place); otherwise the chat would open under the wrong
+                // project or none at all.
+                guard pendingSearchResultChatId == chat.id,
+                      activeProject?.id == projectId else { return }
                 openProjectChat(chat)
             }
         } else {
+            pendingSearchResultChatId = nil
             if activeProject != nil {
                 activeProject = nil
                 projectDocuments = []
@@ -1278,6 +1293,9 @@ class ChatViewModel: ObservableObject {
 
     /// Selects a chat as the current chat
     func selectChat(_ chat: Chat) {
+        // Any explicit selection supersedes a search hit whose project
+        // is still loading.
+        pendingSearchResultChatId = nil
         // If the user picked a different chat while in temporary mode, drop
         // the ephemeral chat and exit temporary mode. The selected chat takes
         // over normally below.

@@ -92,13 +92,17 @@ struct ChatSidebar: View {
         guard isChatSearchActive else { return [] }
         // Enclave unavailable (older deploy, no eligible key): degrade
         // to filtering the locally loaded titles so the box still does
-        // something useful.
+        // something useful. Draw from the loaded cloud chats with the
+        // search-result predicate so project chats stay findable here
+        // too, matching the server-backed results.
         guard chatSearch.available else {
             let needle = chatSearchTerm
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
-            return filteredChats.filter {
-                !$0.isBlankChat && $0.title.lowercased().contains(needle)
+            return viewModel.chats.filter {
+                isSearchResultSidebarChat($0)
+                    && !$0.isBlankChat
+                    && $0.title.lowercased().contains(needle)
             }
         }
         return chatSearch.results.filter(isSearchResultSidebarChat)
