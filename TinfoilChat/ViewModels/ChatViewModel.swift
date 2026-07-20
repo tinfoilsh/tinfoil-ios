@@ -302,6 +302,12 @@ class ChatViewModel: ObservableObject {
         return streamState.isStreaming(chatId: chatId)
     }
 
+    /// Whether the given chat has a response currently being generated,
+    /// regardless of which chat is on screen.
+    func isChatStreaming(_ chatId: String) -> Bool {
+        streamState.isStreaming(chatId: chatId)
+    }
+
     var thinkingSummary: String {
         guard let chatId = currentChat?.id else { return "" }
         return streamState.thinkingSummaries[chatId] ?? ""

@@ -377,6 +377,7 @@ struct ChatSidebar: View {
                     updatedTimeString: chat.isBlankChat ? "" : updatedTimeString(for: chat),
                     isSyncing: !chat.isBlankChat && cloudSync.pendingUploadChatIds.contains(chat.id),
                     syncFailed: !chat.isBlankChat && syncHealth.failedChats[chat.id] != nil,
+                    isGenerating: viewModel.isChatStreaming(chat.id),
                     onSelect: {
                         viewModel.selectChat(chat)
                     },
@@ -735,6 +736,7 @@ struct ChatListItem: View {
     let updatedTimeString: String
     var isSyncing: Bool = false
     var syncFailed: Bool = false
+    var isGenerating: Bool = false
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -808,7 +810,11 @@ struct ChatListItem: View {
                                 + Text(updatedTimeString.isEmpty ? "" : " · \(updatedTimeString)")
                                 .foregroundColor(Color(UIColor.tertiaryLabel)))
                                 .font(.caption)
-                            if syncFailed {
+                            if isGenerating {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                                    .frame(width: 12, height: 12)
+                            } else if syncFailed {
                                 Image(systemName: "exclamationmark.triangle")
                                     .font(.caption2)
                                     .foregroundColor(.orange)
@@ -867,7 +873,9 @@ struct ChatListItem: View {
                 components.append(updatedTimeString)
             }
         }
-        if syncFailed {
+        if isGenerating {
+            components.append("Generating response")
+        } else if syncFailed {
             components.append("Couldn't sync with cloud")
         } else if isSyncing {
             components.append("Syncing with cloud")
