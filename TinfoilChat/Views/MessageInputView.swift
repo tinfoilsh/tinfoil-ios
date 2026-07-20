@@ -1136,17 +1136,12 @@ struct CustomTextEditor: UIViewRepresentable {
                     let currentText = textView.text ?? ""
                     let trimmedText = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
 
-                    // Sending while a response is streaming queues the message.
+                    // Sending while a response is streaming queues the message
+                    // and keeps focus so the next draft can be typed; a direct
+                    // send dismisses the keyboard itself, after which the
+                    // clear falls back to showing the placeholder.
                     if !trimmedText.isEmpty && parent.onSendMessage(trimmedText) {
-                        clearedDraft = currentText
-                        textView.text = ""
-                        parent.text = ""
-                        parent.textHeight = MessageInputView.Layout.defaultHeight
-
-                        textView.text = parent.placeholderText
-                        textView.textColor = .lightGray
-
-                        textView.resignFirstResponder()
+                        clearDraft()
                     }
 
                     return false
