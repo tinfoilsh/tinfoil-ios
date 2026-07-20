@@ -440,6 +440,7 @@ enum Constants {
     }
 
     enum MessageQueue {
+        static let maxQueuedMessages = 1
         /// Longest text preview shown for a queued message; mirrors the
         /// webapp's QUEUED_PREVIEW_MAX_LENGTH.
         static let previewMaxLength = 240

@@ -253,6 +253,11 @@ class ChatViewModel: ObservableObject {
         return messageQueues[chatId] ?? []
     }
 
+    /// True when the on-screen chat can't accept another queued message.
+    var isMessageQueueFull: Bool {
+        queuedMessages.count >= Constants.MessageQueue.maxQueuedMessages
+    }
+
     // Project properties
     @Published var projects: [Project] = []
     @Published var activeProject: Project?
@@ -1561,15 +1566,19 @@ class ChatViewModel: ObservableObject {
     /// Sends a user message and generates a response. When the current chat
     /// is already streaming, the message is queued instead and dispatched
     /// once the assistant goes idle, mirroring the webapp's message queue.
-    func sendMessage(text: String) {
+    /// Returns whether the message was accepted (sent or queued), so callers
+    /// can keep the draft in the input when it wasn't.
+    @discardableResult
+    func sendMessage(text: String) -> Bool {
         let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasAttachments = !pendingAttachments.isEmpty
-        guard hasText || hasAttachments else { return }
-        guard attachmentsAreReadyToSend(pendingAttachments) else { return }
+        guard hasText || hasAttachments else { return false }
+        guard attachmentsAreReadyToSend(pendingAttachments) else { return false }
 
         if isLoading {
+            guard !isMessageQueueFull else { return false }
             enqueueMessage(text: text)
-            return
+            return true
         }
 
         // Block send when free-tier requests are exhausted
@@ -1585,13 +1594,14 @@ class ChatViewModel: ObservableObject {
         // shows the paywall.
         if let rl = rateLimit, rl.remaining <= 0, rl.kind != .hourly {
             showRateLimitPaywall = true
-            return
+            return false
         }
 
         let messageAttachments = pendingAttachments
         clearPendingAttachments(acknowledgeSharedImports: false)
 
         dispatchMessage(text: text, attachments: messageAttachments, dismissKeyboard: true)
+        return true
     }
 
     /// Adds a user message to the conversation and starts the response
@@ -1634,6 +1644,7 @@ class ChatViewModel: ObservableObject {
     /// message and are cleared from the input.
     private func enqueueMessage(text: String) {
         guard let chatId = currentChat?.id else { return }
+        guard (messageQueues[chatId]?.count ?? 0) < Constants.MessageQueue.maxQueuedMessages else { return }
         let messageAttachments = pendingAttachments
         clearPendingAttachments(acknowledgeSharedImports: false)
         let item = QueuedMessage(text: text, attachments: messageAttachments)

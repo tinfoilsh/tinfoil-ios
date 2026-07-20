@@ -91,6 +91,15 @@ struct MessageInputView: View {
         viewModel.isLoading && !hasSubmittableContent
     }
 
+    /// The send button greys out while a draft can't be dispatched: an
+    /// attachment is still processing, or the queue already holds the
+    /// maximum number of follow-ups for the streaming response.
+    private var isSendActionDisabled: Bool {
+        !showStopAction
+        && (!attachmentsAreReadyToSend(viewModel.pendingAttachments)
+            || (viewModel.isLoading && viewModel.isMessageQueueFull))
+    }
+
     // Attachment picker state
 
 
@@ -474,10 +483,7 @@ struct MessageInputView: View {
                     .glassEffect(.regular.interactive(), in: .circle)
                     .clipShape(.circle)
                     .tint(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
-                    .disabled(
-                        !showStopAction
-                        && !attachmentsAreReadyToSend(viewModel.pendingAttachments)
-                    )
+                    .disabled(isSendActionDisabled)
                     .accessibilityLabel(showStopAction ? "Stop generating" : "Send message")
                     .padding(.trailing, 8)
                 }
@@ -578,10 +584,7 @@ struct MessageInputView: View {
                                 .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
                         }
                     }
-                    .disabled(
-                        !showStopAction
-                        && !attachmentsAreReadyToSend(viewModel.pendingAttachments)
-                    )
+                    .disabled(isSendActionDisabled)
                     .accessibilityLabel(showStopAction ? "Stop generating" : "Send message")
                     .accessibleHitTarget()
                     .padding(.trailing, 8)
@@ -652,10 +655,13 @@ struct MessageInputView: View {
         if showStopAction {
             viewModel.cancelGeneration()
         } else if hasSubmittableContent {
-            viewModel.sendMessage(text: messageText)
-            messageText = ""
-            clearInputTrigger = UUID()
-            textHeight = Layout.defaultHeight
+            // Only clear the input when the message was actually sent or
+            // queued; a rejected draft (full queue, rate limit) stays put.
+            if viewModel.sendMessage(text: messageText) {
+                messageText = ""
+                clearInputTrigger = UUID()
+                textHeight = Layout.defaultHeight
+            }
         }
     }
 
@@ -903,7 +909,9 @@ struct CustomTextEditor: UIViewRepresentable {
     var clearTrigger: UUID
     var allowsImagePaste: Bool = false
     var onFocusHandled: () -> Void
-    var onSendMessage: (String) -> Void
+    /// Returns whether the message was accepted, so the editor only clears
+    /// itself when the draft was actually sent or queued.
+    var onSendMessage: (String) -> Bool
     var onPasteImage: ((Data, String) -> Void)? = nil
     var onPasteFile: ((URL, String) -> Void)? = nil
     var onPasteFileError: ((String) -> Void)? = nil
@@ -1088,9 +1096,7 @@ struct CustomTextEditor: UIViewRepresentable {
                     let trimmedText = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
 
                     // Sending while a response is streaming queues the message.
-                    if !trimmedText.isEmpty {
-                        parent.onSendMessage(trimmedText)
-
+                    if !trimmedText.isEmpty && parent.onSendMessage(trimmedText) {
                         textView.text = ""
                         parent.text = ""
                         parent.textHeight = MessageInputView.Layout.defaultHeight
