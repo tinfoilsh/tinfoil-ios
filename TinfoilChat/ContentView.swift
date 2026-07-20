@@ -47,7 +47,7 @@ struct ContentView: View {
             authManager.setChatViewModel(chatViewModel)
             requestAppReviewIfEligible()
             importSharedAttachmentsIfReady()
-            performPendingIntentActionIfReady()
+            performPendingIntentActionsIfReady()
 
             // Initialize encryption with existing key only (no auto-creation)
             Task {
@@ -163,12 +163,12 @@ struct ContentView: View {
                 if authManager.isAuthenticated {
                     chatViewModel.handleSignIn()
                 }
-                performPendingIntentActionIfReady()
+                performPendingIntentActionsIfReady()
             }
         }
-        .onChange(of: intentCoordinator.pendingAction) { _, action in
-            guard action != nil else { return }
-            performPendingIntentActionIfReady()
+        .onChange(of: intentCoordinator.pendingActions) { _, actions in
+            guard !actions.isEmpty else { return }
+            performPendingIntentActionsIfReady()
         }
         .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
             // Update available models when subscription status changes
@@ -217,19 +217,34 @@ struct ContentView: View {
         SharedImportCoordinator.shared.importPendingAttachments(into: chatViewModel)
     }
 
-    private func performPendingIntentActionIfReady() {
+    private func performPendingIntentActionsIfReady() {
         guard !authManager.isLoading else { return }
-        guard let action = intentCoordinator.consumePendingAction() else { return }
-        switch action {
+        while let action = intentCoordinator.consumeNextAction() {
+            perform(intentAction: action)
+        }
+    }
+
+    private func perform(intentAction: AppIntentCoordinator.Action) {
+        switch intentAction {
         case .askQuestion(let prompt):
+            // Signed-out users cannot create chats, so the prompt is sent to
+            // their single session chat, same as typing it in the UI.
             chatViewModel.createNewChat(focusInput: false)
+            guard chatViewModel.currentChat != nil else { return }
             chatViewModel.sendMessage(text: prompt)
         case .newChat:
             chatViewModel.createNewChat()
         case .startDictation:
-            chatViewModel.createNewChat(focusInput: false)
-            Task {
-                await chatViewModel.startAudioRecording()
+            if chatViewModel.canUseAudioInput {
+                chatViewModel.createNewChat(focusInput: false)
+                Task {
+                    await chatViewModel.startAudioRecording()
+                }
+            } else {
+                // Audio input is a premium feature; fall back to a focused
+                // text input so the intent still gives visible feedback.
+                chatViewModel.createNewChat()
+                chatViewModel.shouldFocusInput = true
             }
         }
     }

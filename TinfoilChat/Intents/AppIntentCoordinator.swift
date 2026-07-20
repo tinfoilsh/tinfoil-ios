@@ -20,16 +20,16 @@ final class AppIntentCoordinator: ObservableObject {
         case startDictation
     }
 
-    @Published private(set) var pendingAction: Action?
+    @Published private(set) var pendingActions: [Action] = []
 
     private init() {}
 
     func enqueue(_ action: Action) {
-        pendingAction = action
+        pendingActions.append(action)
     }
 
-    func consumePendingAction() -> Action? {
-        defer { pendingAction = nil }
-        return pendingAction
+    func consumeNextAction() -> Action? {
+        guard !pendingActions.isEmpty else { return nil }
+        return pendingActions.removeFirst()
     }
 }
