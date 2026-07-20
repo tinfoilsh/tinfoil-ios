@@ -458,6 +458,23 @@ struct SettingsView: View {
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
             Section {
+                NavigationLink {
+                    AuthenticatorMFASettingsView()
+                } label: {
+                    HStack {
+                        Text("Authenticator App")
+                        Spacer()
+                        Text(clerk.user?.totpEnabled == true ? "On" : "Off")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Security")
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
+
+            Section {
                 Button(action: {
                     showDeleteConfirmation = true
                 }) {
