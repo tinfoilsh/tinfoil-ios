@@ -9,8 +9,15 @@ import SwiftUI
 import ClerkKit
 import SafariServices
 
+/// Search results, unlike the root list, do surface project chats (the
+/// index covers every synced chat and the webapp shows them too); only
+/// temporary and undecryptable chats are excluded.
+func isSearchResultSidebarChat(_ chat: Chat) -> Bool {
+    !chat.isTemporary && !chat.decryptionFailed
+}
+
 func isRootSidebarChat(_ chat: Chat) -> Bool {
-    !chat.isTemporary && chat.projectId == nil && !chat.decryptionFailed
+    isSearchResultSidebarChat(chat) && chat.projectId == nil
 }
 
 func isSidebarChatSearchEnabled(
@@ -85,19 +92,20 @@ struct ChatSidebar: View {
         guard isChatSearchActive else { return [] }
         // Enclave unavailable (older deploy, no eligible key): degrade
         // to filtering the locally loaded titles so the box still does
-        // something useful.
+        // something useful. Draw from the loaded cloud chats with the
+        // search-result predicate so project chats stay findable here
+        // too, matching the server-backed results.
         guard chatSearch.available else {
             let needle = chatSearchTerm
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
-            return filteredChats.filter {
-                !$0.isBlankChat && $0.title.lowercased().contains(needle)
+            return viewModel.chats.filter {
+                isSearchResultSidebarChat($0)
+                    && !$0.isBlankChat
+                    && $0.title.lowercased().contains(needle)
             }
         }
-        // The index covers every synced chat, so results can include
-        // project chats; apply the same root-list exclusions so search
-        // never surfaces rows this list would not show.
-        return chatSearch.results.filter(isRootSidebarChat)
+        return chatSearch.results.filter(isSearchResultSidebarChat)
     }
 
     private var displayedChats: [Chat] {
@@ -377,8 +385,13 @@ struct ChatSidebar: View {
                     updatedTimeString: chat.isBlankChat ? "" : updatedTimeString(for: chat),
                     isSyncing: !chat.isBlankChat && cloudSync.pendingUploadChatIds.contains(chat.id),
                     syncFailed: !chat.isBlankChat && syncHealth.failedChats[chat.id] != nil,
+                    isGenerating: viewModel.isChatStreaming(chat.id),
                     onSelect: {
-                        viewModel.selectChat(chat)
+                        if isChatSearchActive {
+                            viewModel.openSearchResult(chat)
+                        } else {
+                            viewModel.selectChat(chat)
+                        }
                     },
                     onEdit: {
                         if editingChatId == chat.id {
@@ -735,6 +748,7 @@ struct ChatListItem: View {
     let updatedTimeString: String
     var isSyncing: Bool = false
     var syncFailed: Bool = false
+    var isGenerating: Bool = false
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -768,6 +782,12 @@ struct ChatListItem: View {
                         }
                     } else {
                         HStack(spacing: 4) {
+                            if chat.projectId != nil {
+                                Image(systemName: "folder")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .accessibilityHidden(true)
+                            }
                             Text(chat.title)
                                 .foregroundColor(.primary)
                                 .lineLimit(1)
@@ -808,7 +828,11 @@ struct ChatListItem: View {
                                 + Text(updatedTimeString.isEmpty ? "" : " · \(updatedTimeString)")
                                 .foregroundColor(Color(UIColor.tertiaryLabel)))
                                 .font(.caption)
-                            if syncFailed {
+                            if isGenerating {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                                    .frame(width: 12, height: 12)
+                            } else if syncFailed {
                                 Image(systemName: "exclamationmark.triangle")
                                     .font(.caption2)
                                     .foregroundColor(.orange)
@@ -859,6 +883,9 @@ struct ChatListItem: View {
             return "Encrypted chat. Failed to decrypt, wrong key."
         }
         var components = [chat.title.isEmpty ? "Untitled chat" : chat.title]
+        if chat.projectId != nil {
+            components.append("Project chat")
+        }
         if chat.isBlankChat {
             components.append("New chat")
         } else if !createdTimeString.isEmpty {
@@ -867,7 +894,9 @@ struct ChatListItem: View {
                 components.append(updatedTimeString)
             }
         }
-        if syncFailed {
+        if isGenerating {
+            components.append("Generating response")
+        } else if syncFailed {
             components.append("Couldn't sync with cloud")
         } else if isSyncing {
             components.append("Syncing with cloud")

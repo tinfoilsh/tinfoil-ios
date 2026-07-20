@@ -302,6 +302,12 @@ class ChatViewModel: ObservableObject {
         return streamState.isStreaming(chatId: chatId)
     }
 
+    /// Whether the given chat has a response currently being generated,
+    /// regardless of which chat is on screen.
+    func isChatStreaming(_ chatId: String) -> Bool {
+        streamState.isStreaming(chatId: chatId)
+    }
+
     var thinkingSummary: String {
         guard let chatId = currentChat?.id else { return "" }
         return streamState.thinkingSummaries[chatId] ?? ""
@@ -924,11 +930,29 @@ class ChatViewModel: ObservableObject {
     }
 
     func enterProject(projectId: String) async {
-        guard hasChatAccess else { return }
+        guard await loadProject(projectId: projectId) else { return }
+        createNewChat(isLocalOnly: false, projectId: projectId, focusInput: false)
+    }
+
+    /// Monotonic token for project loads. A newer load supersedes any
+    /// in-flight one, which then resumes stale and must neither mutate
+    /// the shared project context nor report success.
+    private var projectLoadGeneration = 0
+
+    /// Loads a project and makes it the active context without touching
+    /// the current chat selection. Returns true when the project became
+    /// active and this load is still the most recent one.
+    @discardableResult
+    func loadProject(projectId: String) async -> Bool {
+        guard hasChatAccess else { return false }
+
+        projectLoadGeneration += 1
+        let generation = projectLoadGeneration
 
         isLoadingProject = true
         projectError = nil
         isViewingProjectChat = false
+        var loaded = false
         do {
             let project = try await projectStorage.getProject(projectId)
             guard let project else {
@@ -936,6 +960,7 @@ class ChatViewModel: ObservableObject {
             }
 
             let documents = try await projectStorage.listDocuments(projectId: projectId, includeContent: true)
+            guard generation == projectLoadGeneration else { return false }
             activeProject = project
             projectDocuments = documents
 
@@ -943,12 +968,14 @@ class ChatViewModel: ObservableObject {
             if syncResult.downloaded > 0 || syncResult.uploaded > 0 || activeProjectChats.isEmpty {
                 await loadProjectChatsIntoMemory(projectId: projectId)
             }
-
-            createNewChat(isLocalOnly: false, projectId: projectId, focusInput: false)
+            guard generation == projectLoadGeneration else { return false }
+            loaded = true
         } catch {
+            guard generation == projectLoadGeneration else { return false }
             projectError = error.localizedDescription
         }
         isLoadingProject = false
+        return loaded
     }
 
     func exitProject() {
@@ -975,6 +1002,56 @@ class ChatViewModel: ObservableObject {
         guard let projectId = activeProject?.id else { return }
         createNewChat(isLocalOnly: false, projectId: projectId)
         isViewingProjectChat = true
+    }
+
+    /// Search hit whose project is still loading. Any newer chat
+    /// selection replaces or clears it, so a slow project load can
+    /// never navigate away from what the user picked afterwards.
+    private var pendingSearchResultChatId: String?
+
+    /// Opens a sidebar search hit, which may live outside the current
+    /// context: project chats are opened inside their project so the
+    /// conversation keeps its documents and instructions, and root
+    /// chats leave any active project first.
+    func openSearchResult(_ chat: Chat) {
+        if let projectId = chat.projectId {
+            pendingSearchResultChatId = chat.id
+            Task {
+                if activeProject?.id != projectId {
+                    // loadProject (not enterProject) so no blank chat is
+                    // selected along the way, which would clear the pending
+                    // token below before it could be checked.
+                    await loadProject(projectId: projectId)
+                }
+                // A newer selection during the load supersedes this one:
+                // leave it in charge, and drop the just-loaded project
+                // context if that selection lives outside it so the
+                // project page doesn't cover the chosen chat.
+                guard pendingSearchResultChatId == chat.id else {
+                    if activeProject?.id == projectId, currentChat?.projectId != projectId {
+                        activeProject = nil
+                        projectDocuments = []
+                        projectError = nil
+                        isViewingProjectChat = false
+                    }
+                    return
+                }
+                // The load can also fail (e.g. a deleted project), leaving
+                // some other context in place; never open the chat under
+                // the wrong project or none at all.
+                guard activeProject?.id == projectId else { return }
+                openProjectChat(chat)
+            }
+        } else {
+            pendingSearchResultChatId = nil
+            if activeProject != nil {
+                activeProject = nil
+                projectDocuments = []
+                projectError = nil
+                isViewingProjectChat = false
+            }
+            selectChat(chat)
+        }
     }
 
     func updateActiveProject(name: String? = nil, description: String? = nil, systemInstructions: String? = nil, memory: [MemoryFact]? = nil) async {
@@ -1249,6 +1326,9 @@ class ChatViewModel: ObservableObject {
 
     /// Selects a chat as the current chat
     func selectChat(_ chat: Chat) {
+        // Any explicit selection supersedes a search hit whose project
+        // is still loading.
+        pendingSearchResultChatId = nil
         // If the user picked a different chat while in temporary mode, drop
         // the ephemeral chat and exit temporary mode. The selected chat takes
         // over normally below.

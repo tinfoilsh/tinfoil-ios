@@ -58,6 +58,10 @@ final class ChatSearchController: ObservableObject {
             return nil
         }
         isSearching = true
+        // The indexing banner describes the previous term's outcome;
+        // clear it so a fresh query shows the plain searching state
+        // until the enclave answers for this term.
+        isIndexing = false
         searchTask = Task { [weak self] in
             try? await Task.sleep(
                 nanoseconds: UInt64(Constants.SyncEnclave.Search.debounceSeconds * 1_000_000_000)
@@ -88,8 +92,13 @@ final class ChatSearchController: ObservableObject {
                 if settled == .completed || settled == .partial {
                     await run(term: term, userId: userId)
                 } else {
+                    // The rebuild failed, timed out, or was skipped, but
+                    // the query above still answered from the partial
+                    // index. Keep any hits it produced; only degrade to
+                    // the caller's local title fallback when that partial
+                    // index had nothing to offer.
                     isIndexing = false
-                    available = false
+                    available = !results.isEmpty
                 }
             }
         } catch {

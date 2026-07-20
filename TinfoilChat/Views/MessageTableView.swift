@@ -95,8 +95,27 @@ struct MessageTableView: UIViewRepresentable {
             context.coordinator.isCollapsingStreamingBuffer = false
 
             if !isIdConversion {
+                // Sync the loading flag on real chat switches so the
+                // buffer-collapse path below never runs for a switch away
+                // from a chat that is still streaming; it only describes a
+                // stream ending in place. ID conversions keep the prior value:
+                // the same conversation stays on screen with its wrappers
+                // retained, so a stream that ends across the conversion must
+                // still collapse its buffer through the normal path.
+                context.coordinator.lastIsLoading = isLoading
                 context.coordinator.messageWrappers.removeAll()
                 context.coordinator.shownMessageIds.removeAll()
+
+                // Drop any streaming inset left behind by the previous chat,
+                // and reset a blank chat to the top since no scroll trigger
+                // will fire to position it.
+                UIView.performWithoutAnimation {
+                    tableView.contentInset.bottom = 0
+                    tableView.verticalScrollIndicatorInsets.bottom = 0
+                    if messages.isEmpty {
+                        tableView.contentOffset.y = -tableView.adjustedContentInset.top
+                    }
+                }
             }
             context.coordinator.lastMessageIds = currentMessageIds
         } else if currentMessageIds != context.coordinator.lastMessageIds {
@@ -923,6 +942,15 @@ struct ObservableMessageCell: View {
                     view.background(
                         GeometryReader { geometry in
                             Color.clear
+                                // Report the initial height too: when the user
+                                // switches back to a chat that is mid-stream its
+                                // wrapper is recreated, and without this the
+                                // content height stays 0 until the next token,
+                                // so the unused buffer cannot be inset away and
+                                // scroll-to-bottom lands in blank space.
+                                .onAppear {
+                                    wrapper.actualContentHeight = geometry.size.height
+                                }
                                 .onChange(of: geometry.size.height) { _, newHeight in
                                     wrapper.actualContentHeight = newHeight
                                 }
