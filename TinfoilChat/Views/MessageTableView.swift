@@ -93,12 +93,16 @@ struct MessageTableView: UIViewRepresentable {
             context.coordinator.lastChatId = currentChatId
             context.coordinator.preservedOffsetAfterStreaming = nil
             context.coordinator.isCollapsingStreamingBuffer = false
-            // Sync the loading flag on chat switches so the buffer-collapse
-            // path below never runs for a switch away from a chat that is
-            // still streaming; it only describes a stream ending in place.
-            context.coordinator.lastIsLoading = isLoading
 
             if !isIdConversion {
+                // Sync the loading flag on real chat switches so the
+                // buffer-collapse path below never runs for a switch away
+                // from a chat that is still streaming; it only describes a
+                // stream ending in place. ID conversions keep the prior value:
+                // the same conversation stays on screen with its wrappers
+                // retained, so a stream that ends across the conversion must
+                // still collapse its buffer through the normal path.
+                context.coordinator.lastIsLoading = isLoading
                 context.coordinator.messageWrappers.removeAll()
                 context.coordinator.shownMessageIds.removeAll()
 
