@@ -2265,7 +2265,7 @@ class ChatViewModel: ObservableObject {
 
                 #if DEBUG
                 print("[Chat] generateResponse error: \(type(of: error)) — \(error)")
-                print("[Chat] isAuthError=\(ChatViewModel.isAuthenticationError(error)), isRequestError=\(self.isRequestError(error)), isRateLimitError=\(self.isRateLimitError(error))")
+                print("[Chat] isAuthError=\(ChatViewModel.isAuthenticationError(error)), isRequestError=\(self.isRequestError(error)), isRateLimitError=\(Self.isRateLimitError(error))")
                 #endif
 
                 // Check if this is a 401 auth error and we haven't retried yet
