@@ -85,20 +85,18 @@ struct MessageInputView: View {
             || !viewModel.pendingAttachments.isEmpty
     }
 
-    /// While a response is streaming, the send button only becomes a stop
-    /// button when there is nothing submittable; a sendable draft keeps it
-    /// a send button so the message can be queued. Mirrors the webapp.
+    /// While a response is streaming, the button stays a send button only
+    /// while a sendable draft can actually be queued; with nothing
+    /// submittable, or the queue already full, it reverts to a stop button
+    /// so the stream can always be cancelled. Mirrors the webapp.
     private var showStopAction: Bool {
-        viewModel.isLoading && !hasSubmittableContent
+        viewModel.isLoading && (!hasSubmittableContent || viewModel.isMessageQueueFull)
     }
 
-    /// The send button greys out while a draft can't be dispatched: an
-    /// attachment is still processing, or the queue already holds the
-    /// maximum number of follow-ups for the streaming response.
+    /// The send button greys out while a draft can't be dispatched because
+    /// an attachment is still processing.
     private var isSendActionDisabled: Bool {
-        !showStopAction
-        && (!attachmentsAreReadyToSend(viewModel.pendingAttachments)
-            || (viewModel.isLoading && viewModel.isMessageQueueFull))
+        !showStopAction && !attachmentsAreReadyToSend(viewModel.pendingAttachments)
     }
 
     // Attachment picker state
