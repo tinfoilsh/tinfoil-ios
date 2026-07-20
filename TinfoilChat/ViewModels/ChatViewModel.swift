@@ -26,16 +26,50 @@ enum ReasoningEffort: String, CaseIterable, Sendable {
     case high
 }
 
+struct ChatStreamState {
+    private(set) var activeChatIds: Set<String> = []
+    private(set) var thinkingSummaries: [String: String] = [:]
+    private(set) var webSearchSummaries: [String: String] = [:]
+
+    mutating func start(chatId: String) {
+        activeChatIds.insert(chatId)
+    }
+
+    mutating func setThinkingSummary(_ summary: String?, chatId: String) {
+        thinkingSummaries[chatId] = summary
+    }
+
+    mutating func setWebSearchSummary(_ summary: String?, chatId: String) {
+        webSearchSummaries[chatId] = summary
+    }
+
+    mutating func finish(chatId: String) {
+        activeChatIds.remove(chatId)
+        thinkingSummaries[chatId] = nil
+        webSearchSummaries[chatId] = nil
+    }
+
+    func isStreaming(chatId: String) -> Bool {
+        activeChatIds.contains(chatId)
+    }
+}
+
 @MainActor
 class ChatViewModel: ObservableObject {
     // Published properties for UI updates
     @Published var chats: [Chat] = []
     @Published var localChats: [Chat] = []
-    @Published var currentChat: Chat?
+    @Published var currentChat: Chat? {
+        didSet {
+            let enabled = currentChat?.webSearchEnabled
+                ?? SettingsManager.shared.webSearchAvailable
+            if isWebSearchEnabled != enabled {
+                isWebSearchEnabled = enabled
+            }
+        }
+    }
     @Published var activeStorageTab: ChatStorageTab = .cloud
-    @Published var isLoading: Bool = false
-    @Published var thinkingSummary: String = ""
-    @Published var webSearchSummary: String = ""
+    @Published private var streamState = ChatStreamState()
     @Published var showVerifierSheet: Bool = false
     @Published var showAddSheet: Bool = false
     @Published var showModelSelectorSheet: Bool = false
@@ -211,14 +245,15 @@ class ChatViewModel: ObservableObject {
 
     // Private properties
     private var client: TinfoilAI?
-    private var currentTask: Task<Void, Error>?
+    private var streamTasks: [String: Task<Void, Never>] = [:]
+    private var thinkingSummaryServices: [String: ThinkingSummaryService] = [:]
     private var autoSyncTimer: Timer?
     private var didBecomeActiveObserver: NSObjectProtocol?
     private var willResignActiveObserver: NSObjectProtocol?
     private var sharedSettingsObserver: NSObjectProtocol?
     private var networkStatusCancellable: AnyCancellable?
-    private var streamUpdateTimer: Timer?
-    private var pendingStreamUpdate: Chat?
+    private var streamUpdateTimers: [String: Timer] = [:]
+    private var pendingStreamUpdates: [String: Chat] = [:]
     private var pendingSaveTask: Task<Void, Never>?
     private var lastKnownAuthState: Bool?
     
@@ -260,6 +295,21 @@ class ChatViewModel: ObservableObject {
     
     var messages: [Message] {
         currentChat?.messages ?? []
+    }
+
+    var isLoading: Bool {
+        guard let chatId = currentChat?.id else { return false }
+        return streamState.isStreaming(chatId: chatId)
+    }
+
+    var thinkingSummary: String {
+        guard let chatId = currentChat?.id else { return "" }
+        return streamState.thinkingSummaries[chatId] ?? ""
+    }
+
+    var webSearchSummary: String {
+        guard let chatId = currentChat?.id else { return "" }
+        return streamState.webSearchSummaries[chatId] ?? ""
     }
 
     var isProjectMode: Bool {
@@ -365,8 +415,6 @@ class ChatViewModel: ObservableObject {
             fatalError("ChatViewModel cannot be initialized without available models. Ensure AppConfig loads models before creating ChatViewModel.")
         }
         self.currentModel = model
-        self.isWebSearchEnabled = SettingsManager.shared.webSearchEnabled
-
         // Load persisted reasoning preferences. Both default to the most
         // permissive setting (thinking on, medium effort) when no value has
         // been saved yet, matching the webapp.
@@ -407,6 +455,7 @@ class ChatViewModel: ObservableObject {
         let newChat = Chat.create(modelType: currentModel)
         currentChat = newChat
         chats = [newChat]
+        isWebSearchEnabled = newChat.webSearchEnabled
         
         // Load any previously persisted pagination state (per-user)
         // Delay enabling persistence until after load to avoid overwriting saved values
@@ -444,9 +493,11 @@ class ChatViewModel: ObservableObject {
         autoSyncTimer?.invalidate()
         autoSyncTimer = nil
 
-        // Stop stream update timer
-        streamUpdateTimer?.invalidate()
-        streamUpdateTimer = nil
+        // Stop stream update timers
+        streamUpdateTimers.values.forEach { $0.invalidate() }
+        streamUpdateTimers.removeAll()
+        streamTasks.values.forEach { $0.cancel() }
+        streamTasks.removeAll()
 
         // Cancel network status observer
         networkStatusCancellable?.cancel()
@@ -485,9 +536,6 @@ class ChatViewModel: ObservableObject {
         if let thinkingEnabled = profile.thinkingEnabled {
             self.thinkingEnabled = thinkingEnabled
         }
-        if let webSearchEnabled = profile.webSearchEnabled {
-            isWebSearchEnabled = webSearchEnabled
-        }
     }
     
     /// Setup auto-sync timer to sync every 30 seconds
@@ -521,7 +569,7 @@ class ChatViewModel: ObservableObject {
                 }
                 
                 // Skip auto-sync if actively sending a message or streaming
-                if self.isLoading {
+                if !self.streamState.activeChatIds.isEmpty {
                     return
                 }
                 
@@ -730,7 +778,7 @@ class ChatViewModel: ObservableObject {
             return
         }
 
-        guard !isLoading else {
+        guard streamState.activeChatIds.isEmpty else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 self?.retryClientSetup()
             }
@@ -773,14 +821,10 @@ class ChatViewModel: ObservableObject {
         // Allow creating new chats for all authenticated users
         guard hasChatAccess else { return }
         
-        // Cancel any ongoing generation first
-        if isLoading {
-            cancelGeneration()
-        }
-
         // Exit temporary mode when the user explicitly creates a fresh chat.
         if isTemporaryMode {
             if let temp = currentChat, temp.isTemporary {
+                cancelGeneration(chatId: temp.id, announce: false)
                 if temp.isLocalOnly {
                     localChats.removeAll { $0.id == temp.id }
                 } else {
@@ -805,16 +849,19 @@ class ChatViewModel: ObservableObject {
             shouldBeLocal = activeStorageTab == .local
         }
 
-        // Check if we already have a blank chat in the target list
+        // A reused blank represents a fresh chat, so reset its preference to
+        // the current global default before selecting it.
         if shouldBeLocal {
-            if let existing = localChats.first(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
-                selectChat(existing)
+            if let index = localChats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
+                localChats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
+                selectChat(localChats[index])
                 shouldFocusInput = focusInput
                 return
             }
         } else {
-            if let existing = chats.first(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
-                selectChat(existing)
+            if let index = chats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
+                chats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
+                selectChat(chats[index])
                 shouldFocusInput = focusInput
                 return
             }
@@ -1148,13 +1195,10 @@ class ChatViewModel: ObservableObject {
     func toggleTemporaryMode() {
         guard hasChatAccess else { return }
 
-        if isLoading {
-            cancelGeneration()
-        }
-
         if isTemporaryMode {
             // Exit temporary mode: drop the ephemeral chat and restore previous.
             if let current = currentChat, current.isTemporary {
+                cancelGeneration(chatId: current.id, announce: false)
                 if current.isLocalOnly {
                     localChats.removeAll { $0.id == current.id }
                 } else {
@@ -1187,7 +1231,8 @@ class ChatViewModel: ObservableObject {
                 title: "Temporary Chat",
                 modelType: model,
                 userId: currentUserId,
-                isLocalOnly: true
+                isLocalOnly: true,
+                webSearchEnabled: SettingsManager.shared.webSearchAvailable
             )
             temp.isTemporary = true
 
@@ -1204,16 +1249,12 @@ class ChatViewModel: ObservableObject {
 
     /// Selects a chat as the current chat
     func selectChat(_ chat: Chat) {
-        // Cancel any ongoing generation first
-        if isLoading {
-            cancelGeneration()
-        }
-
         // If the user picked a different chat while in temporary mode, drop
         // the ephemeral chat and exit temporary mode. The selected chat takes
         // over normally below.
         if isTemporaryMode && !chat.isTemporary {
             if let temp = currentChat, temp.isTemporary {
+                cancelGeneration(chatId: temp.id, announce: false)
                 if temp.isLocalOnly {
                     localChats.removeAll { $0.id == temp.id }
                 } else {
@@ -1264,6 +1305,27 @@ class ChatViewModel: ObservableObject {
             }
         }
     }
+
+    func setWebSearchEnabled(_ enabled: Bool) {
+        guard var chat = currentChat else {
+            if isWebSearchEnabled != enabled {
+                isWebSearchEnabled = enabled
+            }
+            return
+        }
+
+        guard chat.webSearchEnabled != enabled else { return }
+        if isWebSearchEnabled != enabled {
+            isWebSearchEnabled = enabled
+        }
+
+        chat.webSearchEnabled = enabled
+        chat.locallyModified = true
+        chat.updatedAt = Date()
+        currentChat = chat
+        replaceChat(chat)
+        saveChat(chat)
+    }
     
     /// Merge fetched image base64 data into the current messages of a chat by attachment ID.
     /// This avoids replacing the entire messages array, preventing a stale snapshot from
@@ -1305,9 +1367,16 @@ class ChatViewModel: ObservableObject {
         }
 
         let userId = currentUserId
+        let canceledStreamTask = cancelGeneration(
+            chatId: id,
+            announce: false
+        )
 
         // Delete from file storage and cloud
         Task {
+            await canceledStreamTask?.value
+            await drainPendingSaves()
+
             if !isLocal && SettingsManager.shared.isCloudSyncEnabled {
                 do {
                     try await cloudSync.deleteFromCloud(id)
@@ -1496,9 +1565,6 @@ class ChatViewModel: ObservableObject {
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
 
-        // Update UI state
-        isLoading = true
-
         let messageAttachments = pendingAttachments
         clearPendingAttachments(acknowledgeSharedImports: false)
 
@@ -1638,36 +1704,41 @@ class ChatViewModel: ObservableObject {
 
     /// Generates an assistant response for the current conversation (expects user message to already be in chat)
     private func generateResponse() {
+        guard let initialChat = currentChat,
+              !streamState.isStreaming(chatId: initialChat.id) else {
+            return
+        }
+
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
 
-        // Update UI state
-        isLoading = true
         AccessibilityAnnouncer.announce(Constants.Accessibility.generatingResponse)
 
         // Create initial empty assistant message as a placeholder
         let assistantMessage = Message(role: .assistant, content: "", isCollapsed: true)
         addMessage(assistantMessage)
 
-        // Set the chat as having an active stream
-        if var chat = currentChat {
-            chat.hasActiveStream = true
-            updateChat(chat)
-            // Track streaming for cloud sync
-            streamingTracker.startStreaming(chat.id)
-        }
-        
-        // Store the current chat for stream validation
-        // We'll track by messages rather than ID to handle ID changes
-        let _ = currentChat
-        let _ = currentChat?.messages.count ?? 0
-        let streamChatId = currentChat?.id
-        
-        // Cancel any existing task
-        currentTask?.cancel()
+        guard var updatedStreamChat = currentChat else { return }
+        let streamChatId = updatedStreamChat.id
+        updatedStreamChat.hasActiveStream = true
+        updateChat(updatedStreamChat)
+        let streamChat = updatedStreamChat
+        streamState.start(chatId: streamChatId)
+        streamingTracker.startStreaming(streamChatId)
+
+        let conversationMessages = streamChat.messages
+        let streamModel = currentModel
+        let streamProject = activeProject
+        let streamProjectDocuments = projectDocuments
+        let streamReasoningEffort = reasoningEffort
+        let streamThinkingEnabled = thinkingEnabled
+        let streamWebSearchEnabled = isWebSearchEnabled
+            && SettingsManager.shared.webSearchAvailable
+        let summaryService = ThinkingSummaryService()
+        thinkingSummaryServices[streamChatId] = summaryService
         
         // Create and start a new task for the streaming request
-        currentTask = Task {
+        let streamTask = Task<Void, Never> {
             // Begin background task to allow stream to complete if app goes to background
             var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
             backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: Constants.Sync.backgroundTaskName) {
@@ -1720,13 +1791,14 @@ class ChatViewModel: ObservableObject {
                 // model plus an ordered candidate list. Preferences narrow the
                 // Auto candidates: multimodal when the turn carries images, and
                 // tool-calling when web search or GenUI tools may be used.
-                let turnHasImages = self.messages.contains { message in
+                let turnHasImages = conversationMessages.contains { message in
                     message.attachments.contains { $0.type == .image }
                 }
+                let webSearchEnabled = streamWebSearchEnabled
                 let modelSelection = AppConfig.shared.resolveModelSelection(
-                    currentModel,
+                    streamModel,
                     preferMultimodal: turnHasImages,
-                    preferToolCalling: self.isWebSearchEnabled || SettingsManager.shared.genUIEnabled
+                    preferToolCalling: webSearchEnabled || SettingsManager.shared.genUIEnabled
                 )
                 let representativeModel = modelSelection.representative
 
@@ -1740,7 +1812,7 @@ class ChatViewModel: ObservableObject {
                 var suppressDefaultRules = false
                 
                 // Precedence: per-chat prompt preset > custom prompt toggle > default
-                if let preset = profileManager.promptPreset(for: currentChat?.promptPresetId) {
+                if let preset = profileManager.promptPreset(for: streamChat.promptPresetId) {
                     systemPrompt = preset.systemPrompt
                 } else if let customPrompt = profileManager.getCustomSystemPrompt() {
                     systemPrompt = customPrompt
@@ -1763,7 +1835,7 @@ class ChatViewModel: ObservableObject {
                 } else if settingsManager.selectedLanguage != "System" {
                     // Use the language from settings
                     languageToUse = settingsManager.selectedLanguage
-                } else if let chat = currentChat, let chatLanguage = chat.language {
+                } else if let chatLanguage = streamChat.language {
                     // Fall back to chat's language if set
                     languageToUse = chatLanguage
                 } else {
@@ -1798,8 +1870,8 @@ class ChatViewModel: ObservableObject {
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{TIMEZONE}", with: timezone)
                 systemPrompt = ProjectContextBuilder.applyProjectContext(
                     to: systemPrompt,
-                    project: self.activeProject,
-                    documents: self.projectDocuments
+                    project: streamProject,
+                    documents: streamProjectDocuments
                 )
                 
                 // Process rules with same replacements
@@ -1823,13 +1895,13 @@ class ChatViewModel: ObservableObject {
                     modelId: modelId,
                     systemPrompt: systemPrompt,
                     rules: processedRules,
-                    conversationMessages: self.messages,
+                    conversationMessages: conversationMessages,
                     contextWindow: representativeModel.contextWindow,
-                    webSearchEnabled: self.isWebSearchEnabled,
+                    webSearchEnabled: webSearchEnabled,
                     isMultimodal: representativeModel.isMultimodal,
                     reasoningConfig: representativeModel.reasoningConfig,
-                    reasoningEffort: self.reasoningEffort,
-                    thinkingEnabled: self.thinkingEnabled,
+                    reasoningEffort: streamReasoningEffort,
+                    thinkingEnabled: streamThinkingEnabled,
                     genUIEnabled: SettingsManager.shared.genUIEnabled,
                     autoCandidates: modelSelection.autoCandidates
                 )
@@ -1846,13 +1918,12 @@ class ChatViewModel: ObservableObject {
                 var initialThoughts: String? = nil
                 var initialGenerationTime: TimeInterval? = nil
                 var initialIsThinking = false
-                if let chat = self.currentChat,
-                   !chat.messages.isEmpty,
-                   let lastIndex = chat.messages.indices.last {
-                    initialResponseContent = chat.messages[lastIndex].content
-                    initialThoughts = chat.messages[lastIndex].thoughts
-                    initialGenerationTime = chat.messages[lastIndex].generationTimeSeconds
-                    initialIsThinking = chat.messages[lastIndex].isThinking
+                if !streamChat.messages.isEmpty,
+                   let lastIndex = streamChat.messages.indices.last {
+                    initialResponseContent = streamChat.messages[lastIndex].content
+                    initialThoughts = streamChat.messages[lastIndex].thoughts
+                    initialGenerationTime = streamChat.messages[lastIndex].generationTimeSeconds
+                    initialIsThinking = streamChat.messages[lastIndex].isThinking
                 }
 
                 // All per-chunk parsing state (event markers, chunkers, the
@@ -1860,7 +1931,7 @@ class ChatViewModel: ObservableObject {
                 // lives in the processor so the stream can be consumed off
                 // the main actor.
                 let processor = StreamingResponseProcessor(
-                    isWebSearchEnabled: self.isWebSearchEnabled,
+                    isWebSearchEnabled: webSearchEnabled,
                     hapticEnabled: hapticEnabled,
                     responseContent: initialResponseContent,
                     currentThoughts: initialThoughts,
@@ -1887,17 +1958,11 @@ class ChatViewModel: ObservableObject {
                     // Look up the streaming chat by ID, not self.currentChat,
                     // so an event landing after the user switched chats never
                     // writes search state into the newly selected chat.
-                    guard let sid = streamChatId,
-                          let location = self.findChatLocation(sid) else { return }
+                    let sid = streamChatId
+                    guard let location = self.findChatLocation(sid) else { return }
                     var chat = self.chat(at: location)
                     guard !chat.messages.isEmpty,
                           let lastIndex = chat.messages.indices.last else { return }
-                    // webSearchSummary drives the status line of whichever
-                    // chat is on screen, so only surface new search progress
-                    // while the user is still viewing the streaming chat
-                    // (clearing it is always safe).
-                    let isViewingStreamChat = self.currentChat?.id == sid
-
                     if event.action?.type == "open_page", let url = event.action?.url {
                         let fetchId = event.itemId ?? url
                         switch event.status {
@@ -1945,9 +2010,10 @@ class ChatViewModel: ObservableObject {
                             status: .searching,
                             sources: existingSources
                         )
-                        if isViewingStreamChat {
-                            self.webSearchSummary = event.action?.query.map { "Searching the web: \($0)" } ?? "Searching the web"
-                        }
+                        self.streamState.setWebSearchSummary(
+                            event.action?.query.map { "Searching the web: \($0)" } ?? "Searching the web",
+                            chatId: sid
+                        )
                     case .completed:
                         let eventSources = event.sources?.compactMap { source -> WebSearchSource? in
                             guard let url = source.url, !url.isEmpty else { return nil }
@@ -1982,7 +2048,7 @@ class ChatViewModel: ObservableObject {
                             chat.messages[lastIndex].webSearchState?.sources = merged
                         }
                         chat.messages[lastIndex].webSearchState?.status = .completed
-                        self.webSearchSummary = ""
+                        self.streamState.setWebSearchSummary(nil, chatId: sid)
                     case .failed:
                         let eventSources = event.sources?.compactMap { source -> WebSearchSource? in
                             guard let url = source.url, !url.isEmpty else { return nil }
@@ -2000,7 +2066,7 @@ class ChatViewModel: ObservableObject {
                             )
                         }
                         chat.messages[lastIndex].webSearchState?.status = .failed
-                        self.webSearchSummary = ""
+                        self.streamState.setWebSearchSummary(nil, chatId: sid)
                     case .blocked:
                         let existing = processor.findSearchInstance(matching: event.itemId)
                         let id = existing?.id ?? event.itemId ?? processor.allocateSearchId()
@@ -2018,7 +2084,7 @@ class ChatViewModel: ObservableObject {
                             status: .blocked,
                             reason: event.error?.code
                         )
-                        self.webSearchSummary = ""
+                        self.streamState.setWebSearchSummary(nil, chatId: sid)
                     }
                     chat.messages[lastIndex].segments = processor.currentSegments
                     chat.messages[lastIndex].webSearches = processor.currentWebSearches
@@ -2064,13 +2130,13 @@ class ChatViewModel: ObservableObject {
                             case .beginThinkingSession:
                                 pendingSummaryThoughts = nil
                                 await MainActor.run {
-                                    ThinkingSummaryService.shared.reset()
+                                    summaryService.reset()
                                 }
                             case .endThinkingSession:
                                 pendingSummaryThoughts = nil
                                 await MainActor.run {
-                                    ThinkingSummaryService.shared.reset()
-                                    self?.thinkingSummary = ""
+                                    summaryService.reset()
+                                    self?.streamState.setThinkingSummary(nil, chatId: streamChatId)
                                 }
                             case .generate(let thoughts):
                                 pendingSummaryThoughts = thoughts
@@ -2088,8 +2154,9 @@ class ChatViewModel: ObservableObject {
                                 guard let self else { return }
                                 self.applyStreamSnapshot(snapshot, streamChatId: streamChatId)
                                 if let thoughtsForSummary {
-                                    ThinkingSummaryService.shared.generateSummary(thoughts: thoughtsForSummary) { [weak self] summary in
-                                        self?.thinkingSummary = summary
+                                    summaryService.generateSummary(thoughts: thoughtsForSummary) { [weak self] summary in
+                                        guard self?.streamState.isStreaming(chatId: streamChatId) == true else { return }
+                                        self?.streamState.setThinkingSummary(summary, chatId: streamChatId)
                                     }
                                 }
                             }
@@ -2106,6 +2173,7 @@ class ChatViewModel: ObservableObject {
                 } onCancel: {
                     consumeTask.cancel()
                 }
+                try Task.checkCancellation()
 
                 let finalSnapshot = processor.snapshot()
 
@@ -2113,27 +2181,18 @@ class ChatViewModel: ObservableObject {
                 // Look up the streaming chat by ID, not self.currentChat, because
                 // the user may have navigated away or toggled sync mid-stream.
                 var finalizedChat: Chat? = await MainActor.run {
-                    guard let sid = streamChatId,
-                          let location = self.findChatLocation(sid) else {
-                        self.isLoading = false
+                    let sid = streamChatId
+                    guard let location = self.findChatLocation(sid) else {
+                        self.finishStreamState(chatId: sid)
+                        self.streamingTracker.endStreaming(sid)
                         return nil
                     }
                     var chat = self.chat(at: location)
                     chat.hasActiveStream = false
 
-                    self.streamUpdateTimer?.invalidate()
-                    self.streamUpdateTimer = nil
-                    if let pending = self.pendingStreamUpdate {
-                        self.pendingStreamUpdate = nil
-                        if self.hasChatAccess {
-                            self.saveChat(pending)
-                        }
-                    }
+                    self.flushPendingStreamUpdate(chatId: sid)
 
                     // Finalize all message content
-                    ThinkingSummaryService.shared.reset()
-                    self.thinkingSummary = ""
-                    self.webSearchSummary = ""
                     if !chat.messages.isEmpty, let lastIndex = chat.messages.indices.last {
                         chat.messages[lastIndex].content = finalSnapshot.responseContent
                         chat.messages[lastIndex].thoughts = finalSnapshot.thoughts
@@ -2164,17 +2223,18 @@ class ChatViewModel: ObservableObject {
                         }
                     }
 
-                    // Apply finalized content to currentChat BEFORE setting isLoading
-                    // to false. The isLoadingChanged path in MessageTableView.updateUIView
-                    // reads messages.last (from currentChat) to populate the wrapper. If
-                    // isLoading is cleared first, the wrapper captures stale throttled
+                    // Apply finalized content to currentChat before ending the stream.
+                    // The isLoadingChanged path in MessageTableView.updateUIView reads
+                    // messages.last (from currentChat) to populate the wrapper. If the
+                    // stream ends first, the wrapper captures stale throttled
                     // content. Title generation (async) then delays the real updateChat,
                     // and no subsequent updateUIView branch refreshes the wrapper — causing
                     // the first assistant response to appear truncated.
                     self.updateChat(chat)
-                    self.isLoading = false
-                    AccessibilityAnnouncer.announce(Constants.Accessibility.responseComplete)
-                    HapticFeedback.trigger(.success)
+                    if self.currentChat?.id == sid {
+                        AccessibilityAnnouncer.announce(Constants.Accessibility.responseComplete)
+                        HapticFeedback.trigger(.success)
+                    }
 
                     return chat
                 }
@@ -2193,17 +2253,24 @@ class ChatViewModel: ObservableObject {
                     }
                 }
 
+                guard !Task.isCancelled else { return }
+
                 // Save with the resolved title and trigger cloud backup
                 await MainActor.run {
                     if let chat = finalizedChat {
                         self.updateChat(chat)
                         self.endStreamingAndBackup(chatId: chat.id)
                     }
+                    self.finishStreamState(chatId: streamChatId)
                 }
             } catch {
+                if error is CancellationError || Task.isCancelled {
+                    return
+                }
+
                 #if DEBUG
                 print("[Chat] generateResponse error: \(type(of: error)) — \(error)")
-                print("[Chat] isAuthError=\(ChatViewModel.isAuthenticationError(error)), isRequestError=\(self.isRequestError(error)), isRateLimitError=\(self.isRateLimitError(error))")
+                print("[Chat] isAuthError=\(ChatViewModel.isAuthenticationError(error)), isRequestError=\(self.isRequestError(error)), isRateLimitError=\(Self.isRateLimitError(error))")
                 #endif
 
                 // Check if this is a 401 auth error and we haven't retried yet
@@ -2228,36 +2295,29 @@ class ChatViewModel: ObservableObject {
 
                 // Handle error
                 await MainActor.run {
-                    self.isLoading = false
-                    AccessibilityAnnouncer.announce(Constants.Accessibility.responseFailed)
-                    HapticFeedback.trigger(.error)
-                    self.thinkingSummary = ""
-                    self.webSearchSummary = ""
+                    if self.currentChat?.id == streamChatId {
+                        AccessibilityAnnouncer.announce(Constants.Accessibility.responseFailed)
+                        HapticFeedback.trigger(.error)
+                    }
 
                     // Mark the chat as no longer having an active stream
                     // Look up by streamChatId, not self.currentChat, in case user navigated away
-                    if let sid = streamChatId,
-                       let location = self.findChatLocation(sid) {
+                    let sid = streamChatId
+                    if let location = self.findChatLocation(sid) {
                         var chat = self.chat(at: location)
                         chat.hasActiveStream = false
 
                         // Force any pending stream updates to save immediately
-                        self.streamUpdateTimer?.invalidate()
-                        self.streamUpdateTimer = nil
-                        if let pending = self.pendingStreamUpdate {
-                            self.pendingStreamUpdate = nil
-                            if self.hasChatAccess {
-                                self.saveChat(pending)
-                            }
-                        }
+                        self.flushPendingStreamUpdate(chatId: sid)
 
                         self.updateChat(chat)  // Final update without throttling
 
                         self.endStreamingAndBackup(chatId: chat.id)
+                    } else {
+                        self.streamingTracker.endStreaming(sid)
                     }
 
-                    if let sid = streamChatId,
-                       let location = self.findChatLocation(sid) {
+                    if let location = self.findChatLocation(sid) {
                         var chat = self.chat(at: location)
                         if !chat.messages.isEmpty {
                             let lastIndex = chat.messages.count - 1
@@ -2286,20 +2346,23 @@ class ChatViewModel: ObservableObject {
                             self.updateChat(chat)
                         }
                     }
+                    self.finishStreamState(chatId: sid)
                 }
             }
 
             // Refresh rate limit from the server after each request completes (success or error)
             SessionTokenManager.shared.refreshRateLimit()
         }
+        streamTasks[streamChatId] = streamTask
     }
     
     /// Applies one throttled streaming snapshot to the streaming chat's last
     /// message. Snapshots are immutable values produced by the stream task's
     /// processor, so this never reads live parsing state.
-    private func applyStreamSnapshot(_ snapshot: StreamingResponseProcessor.Snapshot, streamChatId: String?) {
-        guard self.currentChat?.id == streamChatId else { return }
-        guard var chat = self.currentChat,
+    private func applyStreamSnapshot(_ snapshot: StreamingResponseProcessor.Snapshot, streamChatId: String) {
+        guard let location = findChatLocation(streamChatId) else { return }
+        var chat = chat(at: location)
+        guard
               chat.hasActiveStream,
               !chat.messages.isEmpty,
               let lastIndex = chat.messages.indices.last else {
@@ -2504,22 +2567,66 @@ class ChatViewModel: ObservableObject {
 
     /// Cancels the current message generation
     func cancelGeneration() {
-        currentTask?.cancel()
-        currentTask = nil
-        isLoading = false
-        AccessibilityAnnouncer.announce(Constants.Accessibility.generationStopped)
-        thinkingSummary = ""
-        webSearchSummary = ""
+        guard let chatId = currentChat?.id else { return }
+        _ = cancelGeneration(chatId: chatId, announce: true)
+        self.showVerifierSheet = false
+    }
 
-        // Reset the hasActiveStream property
-        if var chat = currentChat {
+    @discardableResult
+    private func cancelGeneration(
+        chatId: String,
+        announce: Bool
+    ) -> Task<Void, Never>? {
+        guard streamState.isStreaming(chatId: chatId) else { return nil }
+
+        let streamTask = streamTasks[chatId]
+        streamTask?.cancel()
+        flushPendingStreamUpdate(chatId: chatId)
+        if let location = findChatLocation(chatId) {
+            var chat = chat(at: location)
             chat.hasActiveStream = false
             updateChat(chat)
-            // End streaming tracking for cloud sync
             streamingTracker.endStreaming(chat.id)
+        } else {
+            streamingTracker.endStreaming(chatId)
         }
 
-        self.showVerifierSheet = false
+        finishStreamState(chatId: chatId)
+        if announce {
+            AccessibilityAnnouncer.announce(Constants.Accessibility.generationStopped)
+        }
+        return streamTask
+    }
+
+    private func cancelAllGenerations() -> [Task<Void, Never>] {
+        Array(streamState.activeChatIds).compactMap { chatId in
+            cancelGeneration(
+                chatId: chatId,
+                announce: false
+            )
+        }
+    }
+
+    private func drainStreamTasks(_ tasks: [Task<Void, Never>]) async {
+        for task in tasks {
+            await task.value
+        }
+    }
+
+    private func flushPendingStreamUpdate(chatId: String) {
+        streamUpdateTimers.removeValue(forKey: chatId)?.invalidate()
+        if let pending = pendingStreamUpdates.removeValue(forKey: chatId),
+           hasChatAccess {
+            saveChat(pending)
+        }
+    }
+
+    private func finishStreamState(chatId: String) {
+        streamUpdateTimers.removeValue(forKey: chatId)?.invalidate()
+        pendingStreamUpdates.removeValue(forKey: chatId)
+        streamTasks.removeValue(forKey: chatId)
+        thinkingSummaryServices.removeValue(forKey: chatId)?.reset()
+        streamState.finish(chatId: chatId)
     }
 
     /// Regenerates the last assistant response by removing it and resending the last user message
@@ -2581,8 +2688,6 @@ class ChatViewModel: ObservableObject {
 
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-
-        isLoading = true
 
         let userMessage = Message(role: .user, content: trimmedContent)
         addMessage(userMessage)
@@ -2746,11 +2851,15 @@ class ChatViewModel: ObservableObject {
 
         // Add exactly one blank chat at position 0 if user has chat access
         if hasChatAccess {
+            let webSearchEnabled = wasCurrentChatBlank
+                ? currentChat?.webSearchEnabled
+                : nil
             let blankChat = Chat.create(
                 modelType: currentModel,
                 language: nil,
                 userId: currentUserId,
-                isLocalOnly: isLocal
+                isLocalOnly: isLocal,
+                webSearchEnabled: webSearchEnabled
             )
             result.insert(blankChat, at: 0)
 
@@ -2812,7 +2921,7 @@ class ChatViewModel: ObservableObject {
         
         // If the chat has an active stream or is being actively modified, ensure it's marked as locally modified
         // This prevents sync from overwriting it while messages are being sent
-        if chat.hasActiveStream || isLoading {
+        if chat.hasActiveStream {
             updatedChat.locallyModified = true
             updatedChat.updatedAt = Date()
         }
@@ -2827,18 +2936,13 @@ class ChatViewModel: ObservableObject {
         // During streaming, batch saves to reduce disk I/O
         if throttleForStreaming {
             // Store pending update
-            pendingStreamUpdate = updatedChat
+            pendingStreamUpdates[updatedChat.id] = updatedChat
 
             // Cancel existing timer and create new one
-            streamUpdateTimer?.invalidate()
-            streamUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+            streamUpdateTimers[updatedChat.id]?.invalidate()
+            streamUpdateTimers[updatedChat.id] = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
                 Task { @MainActor in
-                    if let pending = self?.pendingStreamUpdate {
-                        self?.pendingStreamUpdate = nil
-                        if self?.hasChatAccess == true {
-                            self?.saveChat(pending)
-                        }
-                    }
+                    self?.flushPendingStreamUpdate(chatId: updatedChat.id)
                 }
             }
         } else {
@@ -2872,6 +2976,10 @@ class ChatViewModel: ObservableObject {
             }
         }
     }
+
+    private func drainPendingSaves() async {
+        await pendingSaveTask?.value
+    }
     
     
     // MARK: - Model Management
@@ -2880,11 +2988,6 @@ class ChatViewModel: ObservableObject {
     func changeModel(to modelType: ModelType, shouldUpdateChat: Bool = true) {
         // Only proceed if the model is actually changing
         guard modelType != currentModel else { return }
-        
-        // Cancel any ongoing tasks
-        currentTask?.cancel()
-        currentTask = nil
-        isLoading = false
         
         // Update model settings
         self.currentModel = modelType
@@ -2946,6 +3049,8 @@ class ChatViewModel: ObservableObject {
         // Allow a new sign-in flow after sign-out
         isSignInInProgress = false
         hasPerformedInitialSync = false
+        let canceledStreamTasks = cancelAllGenerations()
+        await drainStreamTasks(canceledStreamTasks)
 
         // Stop auto-sync timer when signing out
         autoSyncTimer?.invalidate()
@@ -2999,6 +3104,8 @@ class ChatViewModel: ObservableObject {
     
     /// Clear all local chats and reset to fresh state
     func clearAllChatsFromDevice() async {
+        let canceledStreamTasks = cancelAllGenerations()
+
         // Clear all chats from memory
         chats.removeAll()
         localChats.removeAll()
@@ -3006,6 +3113,8 @@ class ChatViewModel: ObservableObject {
         
         // Clear from file storage (both local and cloud stores)
         let userId = currentUserId
+        await drainStreamTasks(canceledStreamTasks)
+        await drainPendingSaves()
         await Chat.deleteAllChatsFromStorage(userId: userId)
         
         // Reset sync state
@@ -3034,7 +3143,7 @@ class ChatViewModel: ObservableObject {
         // awaiting the latest task flushes every earlier one. Otherwise a
         // detached save kicked off by handleSignOut could land after the
         // wipe and resurrect the signed-out user's chat files.
-        await pendingSaveTask?.value
+        await drainPendingSaves()
         await Chat.deleteAllChatsFromStorage(userId: currentUserId)
     }
 

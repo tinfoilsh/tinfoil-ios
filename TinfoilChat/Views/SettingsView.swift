@@ -79,10 +79,9 @@ class SettingsManager: ObservableObject {
     // singleton is still being initialized (applyProfile runs inside init).
     var isApplyingSharedProfile = false
 
-    // Web search toggle
-    @Published var webSearchEnabled: Bool {
+    @Published var webSearchAvailable: Bool {
         didSet {
-            UserDefaults.standard.set(webSearchEnabled, forKey: Constants.StorageKeys.Settings.webSearchEnabled)
+            UserDefaults.standard.set(webSearchAvailable, forKey: Constants.StorageKeys.Settings.webSearchAvailable)
             if !isApplyingSharedProfile {
                 ProfileManager.shared.sharedSettingsDidChange()
             }
@@ -141,8 +140,24 @@ class SettingsManager: ObservableObject {
         self.isUsingCustomPrompt = UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled) as? Bool ?? false
         self.customSystemPrompt = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt) ?? ""
 
-        // Initialize web search setting
-        self.webSearchEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.webSearchEnabled) as? Bool ?? true
+        if let storedValue = UserDefaults.standard.object(
+            forKey: Constants.StorageKeys.Settings.webSearchAvailable
+        ) as? Bool {
+            self.webSearchAvailable = storedValue
+        } else if let legacyValue = UserDefaults.standard.object(
+            forKey: Constants.StorageKeys.Settings.webSearchEnabled
+        ) as? Bool {
+            self.webSearchAvailable = legacyValue
+            UserDefaults.standard.set(
+                legacyValue,
+                forKey: Constants.StorageKeys.Settings.webSearchAvailable
+            )
+        } else {
+            self.webSearchAvailable = true
+        }
+        UserDefaults.standard.removeObject(
+            forKey: Constants.StorageKeys.Settings.webSearchEnabled
+        )
 
         // Initialize Generative UI setting (defaults to on)
         self.genUIEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.genUIEnabled) as? Bool ?? true
@@ -186,6 +201,7 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.webSearchEnabled)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.webSearchAvailable)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.genUIEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.cloudSyncEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.localOnlyModeEnabled)
@@ -200,7 +216,7 @@ class SettingsManager: ObservableObject {
         additionalContext = ""
         isUsingCustomPrompt = false
         customSystemPrompt = ""
-        webSearchEnabled = true
+        webSearchAvailable = true
         genUIEnabled = true
         isCloudSyncEnabled = false
         isLocalOnlyModeEnabled = false
@@ -533,6 +549,15 @@ struct SettingsView: View {
         Section {
             Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
                 .tint(Color.accentPrimary)
+            Toggle(isOn: $settings.webSearchAvailable) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Web Search")
+                    Text("Show web search controls and allow chats to search the web.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .tint(Color.accentPrimary)
             Toggle(isOn: $settings.genUIEnabled) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Generative UI")

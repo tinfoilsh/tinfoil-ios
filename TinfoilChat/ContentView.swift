@@ -16,6 +16,7 @@ struct ContentView: View {
     @EnvironmentObject private var authManager: AuthManager
     @StateObject private var chatViewModel = TinfoilChat.ChatViewModel()
     @ObservedObject private var passkeyManager = PasskeyManager.shared
+    @ObservedObject private var intentCoordinator = AppIntentCoordinator.shared
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.scenePhase) var scenePhase
     @Environment(\.requestReview) private var requestReview
@@ -46,6 +47,7 @@ struct ContentView: View {
             authManager.setChatViewModel(chatViewModel)
             requestAppReviewIfEligible()
             importSharedAttachmentsIfReady()
+            performPendingIntentActionsIfReady()
 
             // Initialize encryption with existing key only (no auto-creation)
             Task {
@@ -161,7 +163,16 @@ struct ContentView: View {
                 if authManager.isAuthenticated {
                     chatViewModel.handleSignIn()
                 }
+                performPendingIntentActionsIfReady()
             }
+        }
+        .onChange(of: intentCoordinator.pendingActions) { _, actions in
+            guard !actions.isEmpty else { return }
+            performPendingIntentActionsIfReady()
+        }
+        .onChange(of: chatViewModel.isLoading) { _, isLoading in
+            guard !isLoading, !intentCoordinator.pendingActions.isEmpty else { return }
+            performPendingIntentActionsIfReady()
         }
         .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
             // Update available models when subscription status changes
@@ -208,6 +219,54 @@ struct ContentView: View {
     private func importSharedAttachmentsIfReady() {
         guard !authManager.isLoading else { return }
         SharedImportCoordinator.shared.importPendingAttachments(into: chatViewModel)
+    }
+
+    private func performPendingIntentActionsIfReady() {
+        guard !authManager.isLoading else { return }
+        while let action = intentCoordinator.peekNextAction() {
+            // Stop draining at the first action that cannot run yet so queued
+            // actions stay in order; the isLoading observer resumes the drain.
+            guard canPerform(intentAction: action) else { return }
+            intentCoordinator.popNextAction()
+            perform(intentAction: action)
+        }
+    }
+
+    private func canPerform(intentAction: AppIntentCoordinator.Action) -> Bool {
+        switch intentAction {
+        case .askQuestion:
+            // Signed-out users cannot get a fresh chat from createNewChat, so
+            // their single chat must finish streaming before the next prompt,
+            // otherwise sendMessage's isLoading guard would drop it.
+            return chatViewModel.hasChatAccess || !chatViewModel.isLoading
+        case .newChat, .startDictation:
+            return true
+        }
+    }
+
+    private func perform(intentAction: AppIntentCoordinator.Action) {
+        switch intentAction {
+        case .askQuestion(let prompt):
+            // Signed-out users cannot create chats, so the prompt is sent to
+            // their single session chat, same as typing it in the UI.
+            chatViewModel.createNewChat(focusInput: false)
+            guard chatViewModel.currentChat != nil else { return }
+            chatViewModel.sendMessage(text: prompt)
+        case .newChat:
+            chatViewModel.createNewChat()
+        case .startDictation:
+            if chatViewModel.canUseAudioInput {
+                chatViewModel.createNewChat(focusInput: false)
+                Task {
+                    await chatViewModel.startAudioRecording()
+                }
+            } else {
+                // Audio input is a premium feature; fall back to a focused
+                // text input so the intent still gives visible feedback.
+                chatViewModel.createNewChat()
+                chatViewModel.shouldFocusInput = true
+            }
+        }
     }
 }
 
