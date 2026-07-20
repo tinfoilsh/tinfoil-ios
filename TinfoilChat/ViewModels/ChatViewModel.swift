@@ -1367,10 +1367,16 @@ class ChatViewModel: ObservableObject {
         }
 
         let userId = currentUserId
-        cancelGeneration(chatId: id, announce: false)
+        let canceledStreamTask = cancelGeneration(
+            chatId: id,
+            announce: false
+        )
 
         // Delete from file storage and cloud
         Task {
+            await canceledStreamTask?.value
+            await drainPendingSaves()
+
             if !isLocal && SettingsManager.shared.isCloudSyncEnabled {
                 do {
                     try await cloudSync.deleteFromCloud(id)
@@ -2250,6 +2256,8 @@ class ChatViewModel: ObservableObject {
                     }
                 }
 
+                guard !Task.isCancelled else { return }
+
                 // Save with the resolved title and trigger cloud backup
                 await MainActor.run {
                     if let chat = finalizedChat {
@@ -2565,14 +2573,19 @@ class ChatViewModel: ObservableObject {
     /// Cancels the current message generation
     func cancelGeneration() {
         guard let chatId = currentChat?.id else { return }
-        cancelGeneration(chatId: chatId, announce: true)
+        _ = cancelGeneration(chatId: chatId, announce: true)
         self.showVerifierSheet = false
     }
 
-    private func cancelGeneration(chatId: String, announce: Bool) {
-        guard streamState.isStreaming(chatId: chatId) else { return }
+    @discardableResult
+    private func cancelGeneration(
+        chatId: String,
+        announce: Bool
+    ) -> Task<Void, Never>? {
+        guard streamState.isStreaming(chatId: chatId) else { return nil }
 
-        streamTasks[chatId]?.cancel()
+        let streamTask = streamTasks[chatId]
+        streamTask?.cancel()
         flushPendingStreamUpdate(chatId: chatId)
         if let location = findChatLocation(chatId) {
             var chat = chat(at: location)
@@ -2587,11 +2600,21 @@ class ChatViewModel: ObservableObject {
         if announce {
             AccessibilityAnnouncer.announce(Constants.Accessibility.generationStopped)
         }
+        return streamTask
     }
 
-    private func cancelAllGenerations() {
-        for chatId in Array(streamState.activeChatIds) {
-            cancelGeneration(chatId: chatId, announce: false)
+    private func cancelAllGenerations() -> [Task<Void, Never>] {
+        Array(streamState.activeChatIds).compactMap { chatId in
+            cancelGeneration(
+                chatId: chatId,
+                announce: false
+            )
+        }
+    }
+
+    private func drainStreamTasks(_ tasks: [Task<Void, Never>]) async {
+        for task in tasks {
+            await task.value
         }
     }
 
@@ -2958,6 +2981,10 @@ class ChatViewModel: ObservableObject {
             }
         }
     }
+
+    private func drainPendingSaves() async {
+        await pendingSaveTask?.value
+    }
     
     
     // MARK: - Model Management
@@ -3027,7 +3054,8 @@ class ChatViewModel: ObservableObject {
         // Allow a new sign-in flow after sign-out
         isSignInInProgress = false
         hasPerformedInitialSync = false
-        cancelAllGenerations()
+        let canceledStreamTasks = cancelAllGenerations()
+        await drainStreamTasks(canceledStreamTasks)
 
         // Stop auto-sync timer when signing out
         autoSyncTimer?.invalidate()
@@ -3081,7 +3109,7 @@ class ChatViewModel: ObservableObject {
     
     /// Clear all local chats and reset to fresh state
     func clearAllChatsFromDevice() async {
-        cancelAllGenerations()
+        let canceledStreamTasks = cancelAllGenerations()
 
         // Clear all chats from memory
         chats.removeAll()
@@ -3090,6 +3118,8 @@ class ChatViewModel: ObservableObject {
         
         // Clear from file storage (both local and cloud stores)
         let userId = currentUserId
+        await drainStreamTasks(canceledStreamTasks)
+        await drainPendingSaves()
         await Chat.deleteAllChatsFromStorage(userId: userId)
         
         // Reset sync state
@@ -3118,7 +3148,7 @@ class ChatViewModel: ObservableObject {
         // awaiting the latest task flushes every earlier one. Otherwise a
         // detached save kicked off by handleSignOut could land after the
         // wipe and resurrect the signed-out user's chat files.
-        await pendingSaveTask?.value
+        await drainPendingSaves()
         await Chat.deleteAllChatsFromStorage(userId: currentUserId)
     }
 
