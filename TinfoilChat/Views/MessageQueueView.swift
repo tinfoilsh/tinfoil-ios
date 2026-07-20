@@ -54,6 +54,14 @@ private struct QueuedMessageRow: View {
         }
     }
 
+    private var thumbnailStrip: some View {
+        HStack(spacing: 6) {
+            ForEach(imageAttachments) { attachment in
+                QueuedImageThumbnail(attachment: attachment, isDarkMode: isDarkMode)
+            }
+        }
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "list.bullet")
@@ -63,11 +71,11 @@ private struct QueuedMessageRow: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 if !imageAttachments.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(imageAttachments) { attachment in
-                                QueuedImageThumbnail(attachment: attachment, isDarkMode: isDarkMode)
-                            }
+                    // Hug the thumbnails when they fit; scroll on overflow.
+                    ViewThatFits(in: .horizontal) {
+                        thumbnailStrip
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            thumbnailStrip
                         }
                     }
                 }
@@ -75,7 +83,6 @@ private struct QueuedMessageRow: View {
                     .font(.system(size: 14))
                     .foregroundColor(.secondary)
                     .lineLimit(Constants.MessageQueue.previewLineLimit)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Button {
@@ -84,10 +91,13 @@ private struct QueuedMessageRow: View {
                 Image(systemName: "trash")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
-                    .frame(width: 24, height: 24)
+                    // Lays out at one text line's height so the compact row
+                    // isn't inflated; the hit area alone grows to the 44pt
+                    // minimum via the inset content shape.
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle().inset(by: -12))
             }
             .accessibilityLabel("Remove queued message")
-            .accessibleHitTarget()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -95,6 +105,9 @@ private struct QueuedMessageRow: View {
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color.chatSurface(isDarkMode: isDarkMode))
         )
+        // Sizes like a user bubble: hugs the text and caps at the same
+        // adaptive width, trailing-aligned above the input.
+        .modifier(MessageBubbleModifier(isUserMessage: true))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Queued message: \(previewText.isEmpty ? fallbackLabel : previewText)")
     }
