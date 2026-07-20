@@ -54,6 +54,15 @@ private struct QueuedMessageRow: View {
         }
     }
 
+    /// Attachments that can't be shown as a thumbnail (documents, or images
+    /// without preview data). Listed by name so the queued payload stays
+    /// verifiable even when the row also has preview text.
+    private var namedAttachments: [Attachment] {
+        item.attachments.filter { attachment in
+            !(attachment.type == .image && (attachment.thumbnailBase64 ?? attachment.base64) != nil)
+        }
+    }
+
     private var thumbnailStrip: some View {
         HStack(spacing: 6) {
             ForEach(imageAttachments) { attachment in
@@ -79,10 +88,23 @@ private struct QueuedMessageRow: View {
                         }
                     }
                 }
-                Text(previewText.isEmpty ? fallbackLabel : previewText)
-                    .font(.system(size: 14))
+                ForEach(namedAttachments) { attachment in
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 11))
+                        Text(attachment.fileName)
+                            .font(.system(size: 12))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
                     .foregroundColor(.secondary)
-                    .lineLimit(Constants.MessageQueue.previewLineLimit)
+                }
+                if !previewText.isEmpty || item.attachments.isEmpty {
+                    Text(previewText.isEmpty ? fallbackLabel : previewText)
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .lineLimit(Constants.MessageQueue.previewLineLimit)
+                }
             }
 
             Button {
