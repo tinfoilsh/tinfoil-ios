@@ -934,12 +934,20 @@ class ChatViewModel: ObservableObject {
         createNewChat(isLocalOnly: false, projectId: projectId, focusInput: false)
     }
 
+    /// Monotonic token for project loads. A newer load supersedes any
+    /// in-flight one, which then resumes stale and must neither mutate
+    /// the shared project context nor report success.
+    private var projectLoadGeneration = 0
+
     /// Loads a project and makes it the active context without touching
     /// the current chat selection. Returns true when the project became
-    /// active.
+    /// active and this load is still the most recent one.
     @discardableResult
     func loadProject(projectId: String) async -> Bool {
         guard hasChatAccess else { return false }
+
+        projectLoadGeneration += 1
+        let generation = projectLoadGeneration
 
         isLoadingProject = true
         projectError = nil
@@ -952,6 +960,7 @@ class ChatViewModel: ObservableObject {
             }
 
             let documents = try await projectStorage.listDocuments(projectId: projectId, includeContent: true)
+            guard generation == projectLoadGeneration else { return false }
             activeProject = project
             projectDocuments = documents
 
@@ -959,8 +968,10 @@ class ChatViewModel: ObservableObject {
             if syncResult.downloaded > 0 || syncResult.uploaded > 0 || activeProjectChats.isEmpty {
                 await loadProjectChatsIntoMemory(projectId: projectId)
             }
+            guard generation == projectLoadGeneration else { return false }
             loaded = true
         } catch {
+            guard generation == projectLoadGeneration else { return false }
             projectError = error.localizedDescription
         }
         isLoadingProject = false
@@ -1020,6 +1031,7 @@ class ChatViewModel: ObservableObject {
                     if activeProject?.id == projectId, currentChat?.projectId != projectId {
                         activeProject = nil
                         projectDocuments = []
+                        projectError = nil
                         isViewingProjectChat = false
                     }
                     return
