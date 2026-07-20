@@ -18,7 +18,7 @@ class ThinkingSummaryService {
     private var lastGenerationTime: Date?
     private var summarizedContentLength: Int = 0
 
-    private init() {}
+    init() {}
 
     /// Generate a summary of the thinking content
     /// - Parameters:
