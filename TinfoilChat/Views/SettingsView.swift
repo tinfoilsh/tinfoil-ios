@@ -1258,7 +1258,7 @@ struct CustomSystemPromptView: View {
                         .font(.caption)
                     
                     if isUsingCustomPrompt {
-                        Text("Tip: Use placeholders like {USER_PREFERENCES}, {LANGUAGE}, {CURRENT_DATETIME}, and {TIMEZONE} to tell the model about your preferences, timezone, and the current time and date.")
+                        Text("Tip: Use placeholders like {USER_PREFERENCES}, {LANGUAGE}, and {TIMEZONE} to tell the model about your preferences and timezone. The current time and date are always provided to the model automatically.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .padding(.top, 4)

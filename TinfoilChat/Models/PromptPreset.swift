@@ -87,7 +87,7 @@ praise; acknowledge progress only when it reflects real understanding.
 
 {USER_PREFERENCES}
 
-Respond in {LANGUAGE}. Current time: {CURRENT_DATETIME} ({TIMEZONE}).
+Respond in {LANGUAGE}. The user's timezone is {TIMEZONE}.
 """),
             isBuiltIn: true
         ),
@@ -120,7 +120,7 @@ doesn't reproduce on a careful second look. Don't pad the review.
 
 {USER_PREFERENCES}
 
-Respond in {LANGUAGE}. Current time: {CURRENT_DATETIME} ({TIMEZONE}).
+Respond in {LANGUAGE}. The user's timezone is {TIMEZONE}.
 """),
             isBuiltIn: true
         ),
@@ -151,7 +151,7 @@ fragments; if they write in long periodic sentences, do the same.
 
 {USER_PREFERENCES}
 
-Respond in {LANGUAGE}. Current time: {CURRENT_DATETIME} ({TIMEZONE}).
+Respond in {LANGUAGE}. The user's timezone is {TIMEZONE}.
 """),
             isBuiltIn: true
         ),
@@ -184,7 +184,7 @@ recommendation unless the user explicitly asks.
 
 {USER_PREFERENCES}
 
-Respond in {LANGUAGE}. Current time: {CURRENT_DATETIME} ({TIMEZONE}).
+Respond in {LANGUAGE}. The user's timezone is {TIMEZONE}.
 """),
             isBuiltIn: true
         ),
@@ -218,7 +218,7 @@ expanding into every alternative.
 
 {USER_PREFERENCES}
 
-Respond in {LANGUAGE}. Current time: {CURRENT_DATETIME} ({TIMEZONE}).
+Respond in {LANGUAGE}. The user's timezone is {TIMEZONE}.
 """),
             isBuiltIn: true
         ),
@@ -273,7 +273,7 @@ Once the scene is set, dive straight in.
 
 {USER_PREFERENCES}
 
-Respond in {LANGUAGE}. Current time: {CURRENT_DATETIME} ({TIMEZONE}).
+Respond in {LANGUAGE}. The user's timezone is {TIMEZONE}.
 """),
             isBuiltIn: true
         ),
@@ -300,7 +300,7 @@ depth, they'll ask.
 
 {USER_PREFERENCES}
 
-Respond in {LANGUAGE}. Current time: {CURRENT_DATETIME} ({TIMEZONE}).
+Respond in {LANGUAGE}. The user's timezone is {TIMEZONE}.
 """),
             isBuiltIn: true
         ),
