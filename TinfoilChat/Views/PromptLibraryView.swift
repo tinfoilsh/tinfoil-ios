@@ -466,7 +466,7 @@ struct PromptEditorView: View {
                 } header: {
                     Text("System Prompt")
                 } footer: {
-                    Text("Placeholders supported: {USER_PREFERENCES}, {LANGUAGE}, {CURRENT_DATETIME}, {TIMEZONE}.")
+                    Text("Placeholders supported: {USER_PREFERENCES}, {LANGUAGE}, {TIMEZONE}. The current time is always provided to the model automatically.")
                         .font(.caption)
                 }
                 .listRowBackground(Color.cardSurface(for: colorScheme))

@@ -48,6 +48,11 @@ struct ChatQueryBuilder {
     ///     `model` becomes `AutoModel.requestModel` and the ordered candidates
     ///     (with per-candidate reasoning params) are attached under
     ///     `AutoModel.optionsField` for the router to resolve.
+    ///   - includeTimeReminder: Append an ephemeral current-time reminder as
+    ///     the final message. The reminder is built at request time and never
+    ///     persisted, keeping the system prompt and history byte-stable so
+    ///     prefix caching works. Defaults to `false` so internal utilities
+    ///     (title gen, memory) stay unaffected.
     /// - Returns: A configured ChatQuery
     @MainActor
     static func buildQuery(
@@ -63,7 +68,8 @@ struct ChatQueryBuilder {
         reasoningEffort: ReasoningEffort = .medium,
         thinkingEnabled: Bool = true,
         genUIEnabled: Bool = true,
-        autoCandidates: [ModelType]? = nil
+        autoCandidates: [ModelType]? = nil,
+        includeTimeReminder: Bool = false
     ) -> ChatQuery {
 
         var messages: [ChatQuery.ChatCompletionMessageParam] = []
@@ -191,6 +197,10 @@ struct ChatQueryBuilder {
                     }
                 }
             }
+        }
+
+        if includeTimeReminder {
+            messages.append(.user(.init(content: .string(TimeReminder.formatCurrentTimeReminder()))))
         }
 
         let tools: [ChatQuery.ChatCompletionToolParam]? = genUIEnabled
