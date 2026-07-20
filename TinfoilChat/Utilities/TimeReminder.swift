@@ -15,10 +15,18 @@ import Foundation
 /// same minute produce byte-identical requests.
 enum TimeReminder {
 
-    static func formatCurrentTimeReminder(now: Date = Date()) -> String {
+    private static let dateFormat = "EEEE, MMMM d, yyyy, hh:mm a zzz"
+
+    // en_US_POSIX guarantees invariant fixed-format output (QA1480): plain
+    // en_US would let the user's 24-hour time override rewrite "hh:mm a".
+    private static let formatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US")
-        formatter.dateFormat = "EEEE, MMMM d, yyyy, hh:mm a zzz"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = dateFormat
+        return formatter
+    }()
+
+    static func formatCurrentTimeReminder(now: Date = Date()) -> String {
         let dateTime = formatter.string(from: now)
         let timezone = TimeZone.current.identifier
         return "<system-reminder>Current time: \(dateTime) (\(timezone))</system-reminder>"
