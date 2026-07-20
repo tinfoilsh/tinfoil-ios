@@ -140,7 +140,21 @@ class SettingsManager: ObservableObject {
         self.isUsingCustomPrompt = UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled) as? Bool ?? false
         self.customSystemPrompt = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt) ?? ""
 
-        self.webSearchAvailable = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.webSearchAvailable) as? Bool ?? true
+        if let storedValue = UserDefaults.standard.object(
+            forKey: Constants.StorageKeys.Settings.webSearchAvailable
+        ) as? Bool {
+            self.webSearchAvailable = storedValue
+        } else if let legacyValue = UserDefaults.standard.object(
+            forKey: Constants.StorageKeys.Settings.webSearchEnabled
+        ) as? Bool {
+            self.webSearchAvailable = legacyValue
+            UserDefaults.standard.set(
+                legacyValue,
+                forKey: Constants.StorageKeys.Settings.webSearchAvailable
+            )
+        } else {
+            self.webSearchAvailable = true
+        }
 
         // Initialize Generative UI setting (defaults to on)
         self.genUIEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.genUIEnabled) as? Bool ?? true
