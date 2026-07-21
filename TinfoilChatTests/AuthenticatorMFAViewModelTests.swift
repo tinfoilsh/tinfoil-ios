@@ -167,6 +167,41 @@ struct AuthenticatorMFAViewModelTests {
     }
 
     @Test
+    func cancellationDiscardsAnInFlightVerification() async {
+        let verificationStarted = AsyncStream<Void>.makeStream()
+        let resumeVerification = AsyncStream<Void>.makeStream()
+        let model = AuthenticatorMFAViewModel(
+            service: StubService(
+                verifyTOTP: { _ in
+                    verificationStarted.continuation.yield()
+                    for await _ in resumeVerification.stream {
+                        break
+                    }
+                    return ["stale-code"]
+                }
+            )
+        )
+        model.sync(userId: "user-1", isEnabled: false)
+        model.verificationCode = "123456"
+
+        let verificationTask = Task {
+            await model.verifySetup()
+        }
+        for await _ in verificationStarted.stream {
+            break
+        }
+
+        verificationTask.cancel()
+        resumeVerification.continuation.yield()
+        let didVerify = await verificationTask.value
+
+        #expect(didVerify == false)
+        #expect(model.backupCodes.isEmpty)
+        #expect(model.isEnabled == false)
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test
     func backupCodeTextMatchesTheWebExportFormat() {
         #expect(
             BackupCodesFile.contents(for: ["alpha", "bravo"])

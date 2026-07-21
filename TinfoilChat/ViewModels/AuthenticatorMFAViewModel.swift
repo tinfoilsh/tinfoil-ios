@@ -101,8 +101,8 @@ final class AuthenticatorMFAViewModel: ObservableObject {
     private var userId: String?
     private var userRevision = 0
 
-    init(service: any AuthenticatorMFAService = ClerkAuthenticatorMFAService()) {
-        self.service = service
+    init(service: (any AuthenticatorMFAService)? = nil) {
+        self.service = service ?? ClerkAuthenticatorMFAService()
     }
 
     var canVerify: Bool {
@@ -197,11 +197,11 @@ final class AuthenticatorMFAViewModel: ObservableObject {
 
         do {
             let value = try await operation()
-            guard operationRevision == userRevision else { return false }
+            guard operationRevision == userRevision, !Task.isCancelled else { return false }
             apply(value)
             return true
         } catch {
-            guard operationRevision == userRevision else { return false }
+            guard operationRevision == userRevision, !Task.isCancelled else { return false }
             if let reverificationFallback,
                let level = Self.reverificationLevel(for: error, fallback: reverificationFallback) {
                 reverificationLevel = level
