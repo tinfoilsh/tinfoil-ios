@@ -19,6 +19,63 @@ struct IdentifiedGroup<T>: Identifiable {
     let items: [T]
 }
 
+func shouldShowPendingResponseRecovery(
+    message: Message,
+    pendingRecoveries: [PendingRecoveryEnvelope],
+    activeTurnId: String?
+) -> Bool {
+    guard message.role == .user,
+          let turnId = message.turnId,
+          turnId != activeTurnId
+    else {
+        return false
+    }
+    return pendingRecoveries.contains { $0.turnId == turnId }
+}
+
+private struct PendingResponseRecoveryView: View {
+    let isDarkMode: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Constants.ChatRecovery.indicatorSpacing) {
+            Image(systemName: "arrow.clockwise")
+                .font(.body.weight(.medium))
+                .foregroundColor(isDarkMode ? .white.opacity(0.65) : .black.opacity(0.65))
+
+            VStack(alignment: .leading, spacing: Constants.ChatRecovery.indicatorTextSpacing) {
+                HStack(spacing: Constants.ChatRecovery.indicatorTextSpacing) {
+                    Text(Constants.ChatRecovery.indicatorTitle)
+                        .font(.subheadline.weight(.medium))
+                    InlineLoadingDotsView(isDarkMode: isDarkMode)
+                        .accessibilityHidden(true)
+                }
+                Text(Constants.ChatRecovery.indicatorDetail)
+                    .font(.caption)
+                    .foregroundColor(isDarkMode ? .white.opacity(0.55) : .black.opacity(0.55))
+            }
+        }
+        .foregroundColor(isDarkMode ? .white : .black)
+        .padding(.horizontal, Constants.ChatRecovery.indicatorHorizontalPadding)
+        .padding(.vertical, Constants.ChatRecovery.indicatorVerticalPadding)
+        .frame(maxWidth: Constants.ChatRecovery.indicatorMaxWidth, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Constants.ChatRecovery.indicatorCornerRadius)
+                .fill(isDarkMode ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Constants.ChatRecovery.indicatorCornerRadius)
+                .stroke(
+                    isDarkMode ? Color.white.opacity(0.12) : Color.black.opacity(0.10),
+                    lineWidth: Constants.ChatRecovery.indicatorBorderWidth
+                )
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(Constants.ChatRecovery.indicatorTitle). \(Constants.ChatRecovery.indicatorDetail)"
+        )
+    }
+}
+
 struct MessageView: View {
     let message: Message
     let isDarkMode: Bool
@@ -49,6 +106,15 @@ struct MessageView: View {
     private var inlineAssistantTextSelectionEnabled: Bool {
         guard !(isLoading && isLastMessage) else { return false }
         return message.content.count <= Constants.Rendering.maxInlineSelectionCharacters
+    }
+
+    private var showsPendingResponseRecovery: Bool {
+        let activeTurnId = viewModel.isLoading ? viewModel.messages.last?.turnId : nil
+        return shouldShowPendingResponseRecovery(
+            message: message,
+            pendingRecoveries: viewModel.currentChat?.pendingRecoveries ?? [],
+            activeTurnId: activeTurnId
+        )
     }
 
     /// Runs of adjacent segments collapsed for inline rendering. Adjacent
@@ -726,6 +792,12 @@ struct MessageView: View {
                         isEditMode = true
                         viewModel.editRequestedForMessageIndex = nil
                     }
+                }
+
+                if showsPendingResponseRecovery {
+                    PendingResponseRecoveryView(isDarkMode: isDarkMode)
+                        .padding(.top, Constants.ChatRecovery.indicatorTopPadding)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
             }

@@ -174,6 +174,16 @@ enum Constants {
         static let webSearchEvent = "web_search"
         static let statusPathPrefix = "/recovery"
         static let userCacheKeyPrefix = "chat-recovery-user-cache-secret"
+        static let indicatorTitle = "Recovering response"
+        static let indicatorDetail = "Decrypting and restoring this message. This can take up to a minute."
+        static let indicatorSpacing: CGFloat = 10
+        static let indicatorTextSpacing: CGFloat = 3
+        static let indicatorHorizontalPadding: CGFloat = 12
+        static let indicatorVerticalPadding: CGFloat = 10
+        static let indicatorCornerRadius: CGFloat = 12
+        static let indicatorTopPadding: CGFloat = 6
+        static let indicatorMaxWidth: CGFloat = 300
+        static let indicatorBorderWidth: CGFloat = 1
     }
 
     enum SyncEnclave {
