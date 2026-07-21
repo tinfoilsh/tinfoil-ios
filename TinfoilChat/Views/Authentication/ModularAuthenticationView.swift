@@ -18,7 +18,6 @@ struct ModularAuthenticationView: View {
   @State private var errorMessage: String? = nil
   @State private var isLoading = false
   @State private var isSignUp = false
-  @State private var authCheckTask: Task<Void, Never>? = nil
   @State private var isInVerificationMode = false
   @State private var isKeyboardVisible = false
   
@@ -238,45 +237,55 @@ struct ModularAuthenticationView: View {
   
   private func signInWithOAuth(provider: OAuthProvider) async {
     errorMessage = nil
+    isLoading = true
     
-    // Dismiss the modal immediately before starting OAuth flow
-    dismiss()
+    do {
+      let result = try await clerk.auth.signInWithOAuth(provider: provider)
+      await handleAuthResult(result)
+    } catch {
+      errorMessage = handleAuthError(error)
+    }
     
-    authCheckTask = await OAuthManager.signInWithOAuth(
-      provider: provider,
-      clerk: clerk,
-      authManager: authManager,
-      errorCallback: { message in
-        errorMessage = message
-      },
-      loadingStateCallback: { loading in
-        isLoading = loading
-      }
-    )
+    isLoading = false
   }
   
   private func signInWithApple() async {
     errorMessage = nil
     isLoading = true
     
-    // Dismiss the modal immediately before starting Apple sign-in flow
-    dismiss()
-    
     do {
-      try await clerk.auth.signInWithApple()
-
-      // Check for successful auth
-      try await clerk.refreshClient()
-      if clerk.user != nil {
-        await authManager.initializeAuthState()
-        // Post notification to close sidebar and go to main chat view
-        NotificationCenter.default.post(name: NSNotification.Name("AuthenticationCompleted"), object: nil)
-      }
+      let result = try await clerk.auth.signInWithApple()
+      await handleAuthResult(result)
     } catch {
       errorMessage = handleAuthError(error)
     }
     
     isLoading = false
+  }
+  
+  /// Completes an OAuth or Apple sign-in, keeping the modal open when the
+  /// account still needs a second factor so SignInView can prompt for it.
+  private func handleAuthResult(_ result: TransferFlowResult) async {
+    if case .signIn(let signIn) = result, signIn.status == .needsSecondFactor {
+      isSignUp = false
+      return
+    }
+    
+    do {
+      try await clerk.refreshClient()
+    } catch {
+      errorMessage = handleAuthError(error)
+      return
+    }
+    
+    if clerk.user != nil {
+      await authManager.initializeAuthState()
+      // Post notification to close sidebar and go to main chat view
+      NotificationCenter.default.post(name: NSNotification.Name("AuthenticationCompleted"), object: nil)
+      dismiss()
+    } else {
+      errorMessage = "Sign-in could not be completed. Please try again."
+    }
   }
   
   // MARK: - Lifecycle Methods
@@ -357,10 +366,6 @@ struct ModularAuthenticationView: View {
       name: UIResponder.keyboardWillHideNotification,
       object: nil
     )
-    
-    // Cancel background task if it's running
-    authCheckTask?.cancel()
-    authCheckTask = nil
     
     // Ensure auth state is refreshed when this view disappears
     if clerk.user != nil && !authManager.isAuthenticated {

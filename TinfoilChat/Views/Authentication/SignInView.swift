@@ -63,6 +63,12 @@ struct SignInView: View {
     .sheet(isPresented: $showForgotPassword) {
       ForgotPasswordView(isPresented: $showForgotPassword)
     }
+    .onAppear {
+      presentSecondFactorIfNeeded()
+    }
+    .onChange(of: clerk.auth.currentSignIn?.status) { _, _ in
+      presentSecondFactorIfNeeded()
+    }
     .preference(key: VerificationModePreferenceKey.self, value: needsMfa)
   }
   
@@ -272,6 +278,42 @@ struct SignInView: View {
   
   // MARK: - Actions
   
+  /// Presents the second-factor step for any in-progress sign-in that
+  /// requires it, whether it started with a password or an SSO provider.
+  private func presentSecondFactorIfNeeded() {
+    guard !needsMfa,
+          let signIn = clerk.auth.currentSignIn,
+          signIn.status == .needsSecondFactor else {
+      return
+    }
+    
+    let resolvedTypes = resolveAvailableMfaTypes(from: signIn.supportedSecondFactors)
+    let preferredType = resolvedTypes.first ?? .totp
+    availableMfaTypes = resolvedTypes
+    mfaType = preferredType
+    mfaCode = ""
+    needsMfa = true
+    isLoading = false
+    
+    if preferredType == .phoneCode || preferredType == .emailCode {
+      Task {
+        do {
+          if var currentSignIn = clerk.auth.currentSignIn {
+            if preferredType == .phoneCode {
+              currentSignIn = try await currentSignIn.sendMfaPhoneCode()
+            } else {
+              currentSignIn = try await currentSignIn.sendMfaEmailCode()
+            }
+          }
+        } catch {
+          await MainActor.run {
+            errorMessage = "Failed to send code: \(error.localizedDescription)"
+          }
+        }
+      }
+    }
+  }
+  
   private func signIn(email: String, password: String) async {
     await MainActor.run {
       isLoading = true
@@ -283,24 +325,8 @@ struct SignInView: View {
       
       switch signIn.status {
       case .needsSecondFactor:
-        let resolvedTypes = resolveAvailableMfaTypes(from: signIn.supportedSecondFactors)
-        let preferredType = resolvedTypes.first ?? .totp
-        
-        if preferredType == .phoneCode {
-          if var currentSignIn = clerk.auth.currentSignIn {
-            currentSignIn = try await currentSignIn.sendMfaPhoneCode()
-          }
-        } else if preferredType == .emailCode {
-          if var currentSignIn = clerk.auth.currentSignIn {
-            currentSignIn = try await currentSignIn.sendMfaEmailCode()
-          }
-        }
-        
         await MainActor.run {
-          availableMfaTypes = resolvedTypes
-          mfaType = preferredType
-          needsMfa = true
-          isLoading = false
+          presentSecondFactorIfNeeded()
         }
         
       case .complete:
