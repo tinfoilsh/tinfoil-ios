@@ -326,11 +326,7 @@ private struct AuthenticatorMFASetupView: View {
     }
 
     private func copySetupKey() {
-        copySensitiveTextToClipboard(details.secret)
-        setupKeyCopied = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Share.copyFeedbackDurationSeconds) {
-            setupKeyCopied = false
-        }
+        copySensitiveTextToClipboard(details.secret, copied: $setupKeyCopied)
     }
 }
 
@@ -446,11 +442,7 @@ private struct BackupCodesView: View {
     }
 
     private func copyCodes() {
-        copySensitiveTextToClipboard(codes.joined(separator: "\n"))
-        codesCopied = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Share.copyFeedbackDurationSeconds) {
-            codesCopied = false
-        }
+        copySensitiveTextToClipboard(codes.joined(separator: "\n"), copied: $codesCopied)
     }
 
     private func shareCodes() {
@@ -473,13 +465,18 @@ private struct BackupCodesView: View {
     }
 }
 
-private func copySensitiveTextToClipboard(_ text: String) {
+@MainActor
+private func copySensitiveTextToClipboard(_ text: String, copied: Binding<Bool>) {
     UIPasteboard.general.setItems(
         [[UIPasteboard.typeAutomatic: text]],
         options: [
             .expirationDate: Date().addingTimeInterval(Constants.CloudSync.clipboardExpirationSeconds)
         ]
     )
+    copied.wrappedValue = true
+    DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Share.copyFeedbackDurationSeconds) {
+        copied.wrappedValue = false
+    }
 }
 
 private struct SharedBackupCodesFile: Identifiable {
