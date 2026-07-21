@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 @preconcurrency import OpenAI
 import Security
@@ -21,6 +22,46 @@ enum ChatRecoveryNotificationKey {
     static let storage = "storage"
 }
 
+enum ChatRecoveryPhase {
+    /// The proxy is still buffering the response because the model has not
+    /// finished generating it. Recovery cannot start yet.
+    case generating
+    /// The buffered response is complete and is being fetched, decrypted,
+    /// and reconstructed.
+    case restoring
+}
+
+/// Publishes the per-turn recovery phase observed by the coordinator's
+/// status polls so the UI can distinguish "waiting for generation to
+/// finish" from the brief restore step.
+@MainActor
+final class ChatRecoveryPhaseTracker: ObservableObject {
+    static let shared = ChatRecoveryPhaseTracker()
+
+    @Published private(set) var phases: [String: ChatRecoveryPhase] = [:]
+
+    private init() {}
+
+    func phase(forTurnId turnId: String?) -> ChatRecoveryPhase {
+        guard let turnId else { return .generating }
+        return phases[turnId] ?? .generating
+    }
+
+    func setPhase(_ phase: ChatRecoveryPhase, turnId: String) {
+        guard phases[turnId] != phase else { return }
+        phases[turnId] = phase
+    }
+
+    func clear(turnId: String) {
+        phases.removeValue(forKey: turnId)
+    }
+
+    func clearAll() {
+        guard !phases.isEmpty else { return }
+        phases.removeAll()
+    }
+}
+
 actor ChatRecoveryCoordinator {
     static let shared = ChatRecoveryCoordinator()
 
@@ -34,6 +75,9 @@ actor ChatRecoveryCoordinator {
         activeAccountId = accountId
         cancelledTurns.removeAll()
         isScanning = false
+        Task { @MainActor in
+            ChatRecoveryPhaseTracker.shared.clearAll()
+        }
     }
 
     func begin(
@@ -171,6 +215,9 @@ actor ChatRecoveryCoordinator {
             turnId: attempt.turnId,
             storage: attempt.storage
         ))
+        await MainActor.run {
+            ChatRecoveryPhaseTracker.shared.clear(turnId: attempt.turnId)
+        }
         try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
         do {
             try await ChatRecoverySync.shared.mutate(
@@ -333,8 +380,12 @@ actor ChatRecoveryCoordinator {
         }
         do {
             let state = try await ChatRecoveryClient.shared.state(sessionId: payload.sessionId)
+            let turnId = envelope.turnId
             switch state {
             case .processing:
+                await MainActor.run {
+                    ChatRecoveryPhaseTracker.shared.setPhase(.generating, turnId: turnId)
+                }
                 return
             case .failed, .missing:
                 await removeTerminal(
@@ -346,7 +397,9 @@ actor ChatRecoveryCoordinator {
                 )
                 return
             case .complete:
-                break
+                await MainActor.run {
+                    ChatRecoveryPhaseTracker.shared.setPhase(.restoring, turnId: turnId)
+                }
             }
             guard let token = payload.recoveryToken.fields else { return }
             let stream = try await ChatRecoveryClient.shared.fetch(
@@ -384,6 +437,9 @@ actor ChatRecoveryCoordinator {
                 )
             )
             try? await ChatRecoveryClient.shared.delete(sessionId: payload.sessionId)
+            await MainActor.run {
+                ChatRecoveryPhaseTracker.shared.clear(turnId: turnId)
+            }
             postRecoveryUpdate(
                 chatId: chatId,
                 userId: userId,
@@ -391,6 +447,9 @@ actor ChatRecoveryCoordinator {
             )
         } catch ChatRecoverySyncError.envelopeMissing {
             try? await ChatRecoveryClient.shared.delete(sessionId: payload.sessionId)
+            await MainActor.run {
+                ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
+            }
             if storage == .cloud {
                 try? await ChatRecoverySync.shared.refreshFromRemote(
                     chatId: chatId,
@@ -523,6 +582,9 @@ actor ChatRecoveryCoordinator {
     ) async {
         if let sessionId {
             try? await ChatRecoveryClient.shared.delete(sessionId: sessionId)
+        }
+        await MainActor.run {
+            ChatRecoveryPhaseTracker.shared.clear(turnId: turnId)
         }
         do {
             try await ChatRecoverySync.shared.mutate(

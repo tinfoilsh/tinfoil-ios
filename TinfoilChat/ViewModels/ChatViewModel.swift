@@ -54,6 +54,13 @@ struct ChatStreamState {
     }
 }
 
+func shouldBlockMessageSendForRecovery(
+    pendingRecoveries: [PendingRecoveryEnvelope],
+    isStreaming: Bool
+) -> Bool {
+    !isStreaming && !pendingRecoveries.isEmpty
+}
+
 @MainActor
 class ChatViewModel: ObservableObject {
     // Published properties for UI updates
@@ -349,6 +356,13 @@ class ChatViewModel: ObservableObject {
         return streamState.isStreaming(chatId: chatId)
     }
 
+    var hasPendingResponseRecovery: Bool {
+        shouldBlockMessageSendForRecovery(
+            pendingRecoveries: currentChat?.pendingRecoveries ?? [],
+            isStreaming: isLoading
+        )
+    }
+
     /// Whether the given chat has a response currently being generated,
     /// regardless of which chat is on screen.
     func isChatStreaming(_ chatId: String) -> Bool {
@@ -610,6 +624,7 @@ class ChatViewModel: ObservableObject {
                 self.replaceChat(recovered)
                 if self.currentChat?.id == chatId {
                     self.currentChat = recovered
+                    self.scheduleMessageQueueDrain(chatId: chatId)
                 }
             }
         }
@@ -1800,6 +1815,7 @@ class ChatViewModel: ObservableObject {
         let hasAttachments = !pendingAttachments.isEmpty
         guard hasText || hasAttachments else { return false }
         guard attachmentsAreReadyToSend(pendingAttachments) else { return false }
+        guard !hasPendingResponseRecovery else { return false }
 
         if isLoading {
             guard !isMessageQueueFull else { return false }
@@ -1905,6 +1921,7 @@ class ChatViewModel: ObservableObject {
     private func drainMessageQueue(chatId: String) {
         guard currentChat?.id == chatId,
               !streamState.isStreaming(chatId: chatId),
+              !hasPendingResponseRecovery,
               var queue = messageQueues[chatId],
               !queue.isEmpty else { return }
 

@@ -94,9 +94,13 @@ struct MessageInputView: View {
     }
 
     /// The send button greys out while a draft can't be dispatched because
-    /// an attachment is still processing.
+    /// an attachment is still processing or the previous response is being
+    /// recovered.
     private var isSendActionDisabled: Bool {
-        !showStopAction && !attachmentsAreReadyToSend(viewModel.pendingAttachments)
+        !showStopAction && (
+            viewModel.hasPendingResponseRecovery
+                || !attachmentsAreReadyToSend(viewModel.pendingAttachments)
+        )
     }
 
     // Attachment picker state

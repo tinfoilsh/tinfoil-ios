@@ -47,4 +47,47 @@ struct PendingResponseRecoveryPresentationTests {
             activeTurnId: "turn-1"
         ))
     }
+
+    @Test func hidesInterruptedAssistantWhileRecoveryIsPending() {
+        let interrupted = Message(
+            role: .assistant,
+            turnId: "turn-1",
+            content: "",
+            thoughts: "Partial reasoning",
+            isThinking: true
+        )
+
+        #expect(shouldHidePendingResponseAssistant(
+            message: interrupted,
+            pendingRecoveries: [recovery],
+            activeTurnId: nil
+        ))
+        #expect(!shouldHidePendingResponseAssistant(
+            message: interrupted,
+            pendingRecoveries: [recovery],
+            activeTurnId: "turn-1"
+        ))
+    }
+
+    @Test func describesRecoveryPhases() {
+        #expect(pendingResponseRecoveryDetail(phase: .generating)
+            == "This may take a few minutes")
+        #expect(pendingResponseRecoveryDetail(phase: .restoring)
+            == "This may take a few minutes")
+    }
+
+    @Test func blocksSendingOnlyAfterAnInterruptedRecoverableTurn() {
+        #expect(shouldBlockMessageSendForRecovery(
+            pendingRecoveries: [recovery],
+            isStreaming: false
+        ))
+        #expect(!shouldBlockMessageSendForRecovery(
+            pendingRecoveries: [recovery],
+            isStreaming: true
+        ))
+        #expect(!shouldBlockMessageSendForRecovery(
+            pendingRecoveries: [],
+            isStreaming: false
+        ))
+    }
 }

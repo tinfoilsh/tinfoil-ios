@@ -33,45 +33,52 @@ func shouldShowPendingResponseRecovery(
     return pendingRecoveries.contains { $0.turnId == turnId }
 }
 
+func shouldHidePendingResponseAssistant(
+    message: Message,
+    pendingRecoveries: [PendingRecoveryEnvelope],
+    activeTurnId: String?
+) -> Bool {
+    guard message.role == .assistant,
+          let turnId = message.turnId,
+          turnId != activeTurnId
+    else {
+        return false
+    }
+    return pendingRecoveries.contains { $0.turnId == turnId }
+}
+
+func pendingResponseRecoveryDetail(phase: ChatRecoveryPhase) -> String {
+    switch phase {
+    case .generating:
+        return Constants.ChatRecovery.indicatorDetailGenerating
+    case .restoring:
+        return Constants.ChatRecovery.indicatorDetailRestoring
+    }
+}
+
 private struct PendingResponseRecoveryView: View {
     let isDarkMode: Bool
+    let phase: ChatRecoveryPhase
 
     var body: some View {
-        HStack(alignment: .top, spacing: Constants.ChatRecovery.indicatorSpacing) {
-            Image(systemName: "arrow.clockwise")
-                .font(.body.weight(.medium))
-                .foregroundColor(isDarkMode ? .white.opacity(0.65) : .black.opacity(0.65))
+        HStack(alignment: .center, spacing: Constants.ChatRecovery.indicatorSpacing) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(isDarkMode ? .white.opacity(0.65) : .black.opacity(0.65))
 
             VStack(alignment: .leading, spacing: Constants.ChatRecovery.indicatorTextSpacing) {
-                HStack(spacing: Constants.ChatRecovery.indicatorTextSpacing) {
-                    Text(Constants.ChatRecovery.indicatorTitle)
-                        .font(.subheadline.weight(.medium))
-                    InlineLoadingDotsView(isDarkMode: isDarkMode)
-                        .accessibilityHidden(true)
-                }
-                Text(Constants.ChatRecovery.indicatorDetail)
+                Text(Constants.ChatRecovery.indicatorTitle)
+                    .font(.subheadline.weight(.medium))
+                Text(pendingResponseRecoveryDetail(phase: phase))
                     .font(.caption)
                     .foregroundColor(isDarkMode ? .white.opacity(0.55) : .black.opacity(0.55))
             }
         }
         .foregroundColor(isDarkMode ? .white : .black)
-        .padding(.horizontal, Constants.ChatRecovery.indicatorHorizontalPadding)
         .padding(.vertical, Constants.ChatRecovery.indicatorVerticalPadding)
-        .frame(maxWidth: Constants.ChatRecovery.indicatorMaxWidth, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Constants.ChatRecovery.indicatorCornerRadius)
-                .fill(isDarkMode ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Constants.ChatRecovery.indicatorCornerRadius)
-                .stroke(
-                    isDarkMode ? Color.white.opacity(0.12) : Color.black.opacity(0.10),
-                    lineWidth: Constants.ChatRecovery.indicatorBorderWidth
-                )
-        )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "\(Constants.ChatRecovery.indicatorTitle). \(Constants.ChatRecovery.indicatorDetail)"
+            "\(Constants.ChatRecovery.indicatorTitle). \(pendingResponseRecoveryDetail(phase: phase))"
         )
     }
 }
@@ -83,6 +90,7 @@ struct MessageView: View {
     let isLoading: Bool
     let messageIndex: Int
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
+    @ObservedObject private var recoveryPhaseTracker = ChatRecoveryPhaseTracker.shared
     @State private var showCopyFeedback = false
     @State private var cachedParsedContent: (thinkingText: String, remainderText: String, contentHash: Int)? = nil
     @State private var showLongMessageSheet = false
@@ -111,6 +119,15 @@ struct MessageView: View {
     private var showsPendingResponseRecovery: Bool {
         let activeTurnId = viewModel.isLoading ? viewModel.messages.last?.turnId : nil
         return shouldShowPendingResponseRecovery(
+            message: message,
+            pendingRecoveries: viewModel.currentChat?.pendingRecoveries ?? [],
+            activeTurnId: activeTurnId
+        )
+    }
+
+    private var hidesPendingResponseAssistant: Bool {
+        let activeTurnId = viewModel.isLoading ? viewModel.messages.last?.turnId : nil
+        return shouldHidePendingResponseAssistant(
             message: message,
             pendingRecoveries: viewModel.currentChat?.pendingRecoveries ?? [],
             activeTurnId: activeTurnId
@@ -795,7 +812,10 @@ struct MessageView: View {
                 }
 
                 if showsPendingResponseRecovery {
-                    PendingResponseRecoveryView(isDarkMode: isDarkMode)
+                    PendingResponseRecoveryView(
+                        isDarkMode: isDarkMode,
+                        phase: recoveryPhaseTracker.phase(forTurnId: message.turnId)
+                    )
                         .padding(.top, Constants.ChatRecovery.indicatorTopPadding)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -900,6 +920,13 @@ struct MessageView: View {
             }
             return .systemAction
         })
+        .if(hidesPendingResponseAssistant) { view in
+            view
+                .hidden()
+                .frame(height: 0)
+                .clipped()
+                .accessibilityHidden(true)
+        }
     }
 
     private func copyMessagePart(_ text: String) {
