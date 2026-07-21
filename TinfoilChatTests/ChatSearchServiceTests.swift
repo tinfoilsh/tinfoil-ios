@@ -100,6 +100,8 @@ struct ChatSearchServiceTests {
             chat: true,
             paid: false,
             multimodal: false,
+            toolCalling: nil,
+            attributes: nil,
             reasoningConfig: nil
         )
     )
@@ -430,14 +432,14 @@ struct ChatSearchServiceTests {
                     ],
                 ])
             },
-            pullKeys: { [EnclavePullKey(key: "pull-key")] },
             loadLocalChat: { chatId, userId in
                 #expect(userId == "user-1")
                 return chatId == "a" ? Self.makeChat(id: "a", title: "Local pond notes") : nil
             },
             decodeRemoteChat: { item in
                 item.id == "b" ? Self.makeChat(id: "b", title: "Remote tax chat") : nil
-            }
+            },
+            pullKeys: { [EnclavePullKey(key: "pull-key")] }
         )
 
         let chats = await service.resolveSearchResultChats(
