@@ -133,72 +133,101 @@ struct AuthenticatorMFAViewModelTests {
 
     @Test
     func accountChangesDiscardAnInFlightVerification() async {
-        let verificationStarted = AsyncStream<Void>.makeStream()
-        let resumeVerification = AsyncStream<Void>.makeStream()
-        let model = AuthenticatorMFAViewModel(
-            service: StubService(
-                verifyTOTP: { _ in
-                    verificationStarted.continuation.yield()
-                    for await _ in resumeVerification.stream {
-                        break
-                    }
-                    return ["old-account-code"]
-                }
-            )
-        )
-        model.sync(userId: "user-1", isEnabled: false)
-        model.verificationCode = "123456"
+        let scenario = Self.makeInFlightVerification(returning: ["old-account-code"])
 
         let verificationTask = Task {
-            await model.verifySetup()
+            await scenario.model.verifySetup()
         }
-        for await _ in verificationStarted.stream {
+        for await _ in scenario.started {
             break
         }
 
-        model.sync(userId: "user-2", isEnabled: false)
-        resumeVerification.continuation.yield()
+        scenario.model.sync(userId: "user-2", isEnabled: false)
+        scenario.resume.yield()
         let didVerify = await verificationTask.value
 
         #expect(didVerify == false)
-        #expect(model.backupCodes.isEmpty)
-        #expect(model.isEnabled == false)
-        #expect(model.errorMessage == nil)
+        #expect(scenario.model.backupCodes.isEmpty)
+        #expect(scenario.model.isEnabled == false)
+        #expect(scenario.model.errorMessage == nil)
     }
 
     @Test
-    func cancellationDiscardsAnInFlightVerification() async {
-        let verificationStarted = AsyncStream<Void>.makeStream()
-        let resumeVerification = AsyncStream<Void>.makeStream()
-        let model = AuthenticatorMFAViewModel(
-            service: StubService(
-                verifyTOTP: { _ in
-                    verificationStarted.continuation.yield()
-                    for await _ in resumeVerification.stream {
-                        break
-                    }
-                    return ["stale-code"]
-                }
-            )
-        )
-        model.sync(userId: "user-1", isEnabled: false)
-        model.verificationCode = "123456"
+    func cancellationStillDeliversBackupCodesFromASuccessfulVerification() async {
+        let scenario = Self.makeInFlightVerification(returning: ["rescue-code"])
 
         let verificationTask = Task {
-            await model.verifySetup()
+            await scenario.model.verifySetup()
         }
-        for await _ in verificationStarted.stream {
+        for await _ in scenario.started {
             break
         }
 
         verificationTask.cancel()
-        resumeVerification.continuation.yield()
+        scenario.resume.yield()
         let didVerify = await verificationTask.value
 
-        #expect(didVerify == false)
-        #expect(model.backupCodes.isEmpty)
-        #expect(model.isEnabled == false)
+        #expect(didVerify)
+        #expect(scenario.model.backupCodes == ["rescue-code"])
+        #expect(scenario.model.isEnabled)
+    }
+
+    @Test
+    func cancellationDiscardsAnInFlightSetup() async {
+        let setupStarted = AsyncStream<Void>.makeStream()
+        let resumeSetup = AsyncStream<Void>.makeStream()
+        let model = AuthenticatorMFAViewModel(
+            service: StubService(
+                createTOTP: {
+                    setupStarted.continuation.yield()
+                    for await _ in resumeSetup.stream {
+                        break
+                    }
+                    return AuthenticatorMFASetupDetails(secret: "SECRET", uri: "otpauth://totp/example")
+                }
+            )
+        )
+        model.sync(userId: "user-1", isEnabled: false)
+
+        let setupTask = Task {
+            await model.startSetup()
+        }
+        for await _ in setupStarted.stream {
+            break
+        }
+
+        setupTask.cancel()
+        resumeSetup.continuation.yield()
+        let didStart = await setupTask.value
+
+        #expect(didStart == false)
+        #expect(model.setupDetails == nil)
         #expect(model.errorMessage == nil)
+    }
+
+    private static func makeInFlightVerification(
+        returning codes: [String]
+    ) -> (
+        model: AuthenticatorMFAViewModel,
+        started: AsyncStream<Void>,
+        resume: AsyncStream<Void>.Continuation
+    ) {
+        let started = AsyncStream<Void>.makeStream()
+        let resume = AsyncStream<Void>.makeStream()
+        let model = AuthenticatorMFAViewModel(
+            service: StubService(
+                verifyTOTP: { _ in
+                    started.continuation.yield()
+                    for await _ in resume.stream {
+                        break
+                    }
+                    return codes
+                }
+            )
+        )
+        model.sync(userId: "user-1", isEnabled: false)
+        model.verificationCode = "123456"
+        return (model, started.stream, resume.continuation)
     }
 
     @Test

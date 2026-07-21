@@ -144,7 +144,10 @@ final class AuthenticatorMFAViewModel: ObservableObject {
     func verifySetup() async -> Bool {
         guard canVerify else { return false }
         let code = verificationCode
+        // Verification mutates the account remotely and returns one-time backup
+        // codes, so a cancelled flow must still surface a successful result.
         return await perform(
+            deliversResultWhenCancelled: true,
             operation: { try await service.verifyTOTP(code: code) }
         ) { codes in
             backupCodes = codes
@@ -185,6 +188,7 @@ final class AuthenticatorMFAViewModel: ObservableObject {
 
     private func perform<Value>(
         reverificationFallback: SessionVerification.Level? = nil,
+        deliversResultWhenCancelled: Bool = false,
         operation: () async throws -> Value,
         apply: (Value) -> Void
     ) async -> Bool {
@@ -197,7 +201,8 @@ final class AuthenticatorMFAViewModel: ObservableObject {
 
         do {
             let value = try await operation()
-            guard operationRevision == userRevision, !Task.isCancelled else { return false }
+            guard operationRevision == userRevision,
+                  deliversResultWhenCancelled || !Task.isCancelled else { return false }
             apply(value)
             return true
         } catch {
