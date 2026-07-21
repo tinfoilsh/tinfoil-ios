@@ -100,6 +100,12 @@ struct RecoveryDecision: Equatable {
 }
 
 enum EnclaveErrorRecovery {
+    static func isVersionConflict(_ error: SyncEnclaveError) -> Bool {
+        error.code == WireCodes.staleBlob
+            || (error.code == nil && error.status == 412)
+            || (error.status == 409 && error.code == WireCodes.syncConflict)
+    }
+
     /// Decide the recovery action for any thrown value from a sync
     /// enclave call. Idempotent and pure — safe to call inside a
     /// catch block before any side effects.
