@@ -29,47 +29,23 @@ struct AuthenticatorMFASettingsView: View {
     var body: some View {
         Form {
             Section {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "checkmark.shield")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack {
-                            Text("Authenticator app")
-                            Spacer()
-                            Text(model.isEnabled ? "On" : "Off")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(model.isEnabled ? Color.green : Color.secondary)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 4)
-                                .background(
-                                    (model.isEnabled ? Color.green : Color.secondary)
-                                        .opacity(0.14),
-                                    in: Capsule()
-                                )
-                        }
-
-                        Text("Add an extra layer of security with time-based codes.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Button(model.isEnabled ? "Turn Off" : "Set Up") {
-                            if model.isEnabled {
-                                isDisableConfirmationPresented = true
-                            } else {
-                                request(.setup)
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(model.isEnabled ? .red : .primary)
-                        .disabled(model.isWorking || clerk.user == nil)
-                        .padding(.top, 6)
-                    }
+                LabeledContent("Authenticator App") {
+                    Text(model.isEnabled ? "On" : "Off")
                 }
-                .padding(.vertical, 4)
-            } header: {
-                Text("Security")
+
+                if model.isEnabled {
+                    Button("Turn Off Authenticator", role: .destructive) {
+                        isDisableConfirmationPresented = true
+                    }
+                    .disabled(model.isWorking || clerk.user == nil)
+                } else {
+                    Button("Set Up Authenticator") {
+                        request(.setup)
+                    }
+                    .disabled(model.isWorking || clerk.user == nil)
+                }
+            } footer: {
+                Text("Add an extra layer of security with time-based codes.")
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
@@ -238,7 +214,8 @@ private struct AuthenticatorMFASetupView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     Text("Scan this code with your authenticator app.")
-                        .font(.headline)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
 
                     QRCodeImage(value: details.uri)
                         .frame(maxWidth: .infinity)

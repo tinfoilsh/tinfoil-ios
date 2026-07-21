@@ -466,7 +466,6 @@ struct SettingsView: View {
                             Text("Authenticator App")
                             Spacer()
                             Text(clerk.user?.totpEnabled == true ? "On" : "Off")
-                                .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
