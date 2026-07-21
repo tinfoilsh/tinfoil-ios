@@ -564,6 +564,7 @@ private struct MFAReverificationView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .disabled(isWorking)
                 }
 
                 if activeFactor?.strategy != .passkey {
@@ -619,6 +620,12 @@ private struct MFAReverificationView: View {
             .task {
                 await start()
             }
+            .task(id: selectedSecondFactor) {
+                guard selectedSecondFactor != nil else { return }
+                await perform {
+                    await prepareCurrentFactorIfNeeded()
+                }
+            }
         }
         .interactiveDismissDisabled(isWorking)
     }
@@ -627,12 +634,9 @@ private struct MFAReverificationView: View {
         Binding(
             get: { secondFactor ?? availableSecondFactors[0] },
             set: {
+                guard selectedSecondFactor != $0 else { return }
                 selectedSecondFactor = $0
                 input = ""
-                preparedFactor = nil
-                Task {
-                    await prepareCurrentFactorIfNeeded()
-                }
             }
         )
     }
@@ -770,11 +774,13 @@ private struct MFAReverificationView: View {
             default:
                 result = nil
             }
+            guard !Task.isCancelled else { return }
             preparedFactor = factorToPrepare
             if let result {
                 verification = result
             }
         } catch {
+            guard !Task.isCancelled else { return }
             errorMessage = AuthenticatorMFAViewModel.message(for: error)
         }
     }
