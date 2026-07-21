@@ -829,7 +829,7 @@ class ObservableMessageWrapper: ObservableObject {
     @Published var isLoading: Bool
     @Published var isArchived: Bool
     @Published var showArchiveSeparator: Bool
-    @Published var shouldAnimateAppearance: Bool = false
+    var shouldAnimateAppearance: Bool = false
     @Published var messageIndex: Int
     var bufferMultiplier: CGFloat = Constants.StreamingBuffer.initialMultiplier
     var actualContentHeight: CGFloat = 0
