@@ -151,6 +151,31 @@ enum Constants {
         }
     }
 
+    enum ChatRecovery {
+        static let envelopeVersion = 1
+        static let envelopeLifetimeSeconds: TimeInterval = 7 * 24 * 60 * 60
+        static let maxPendingPerChat = 8
+        static let maxConcurrentScans = 3
+        static let maxMutationAttempts = 4
+        static let maxCiphertextBytes = 4_096
+        static let maxIdentifierLength = 256
+        static let sessionIdBytes = 16
+        static let nonceBytes = 12
+        static let authenticationTagBytes = 16
+        static let cekBytes = 32
+        static let keyIdHexLength = 32
+        static let tokenFieldHexLength = 64
+        static let requestTimeoutSeconds: TimeInterval = 30
+        static let hkdfInfo = "tinfoil-chat-recovery-envelope-v1"
+        static let aadLabel = "tinfoil-chat-recovery-envelope-aad-v1"
+        static let sessionHeader = "X-Session-Id"
+        static let enclaveHeader = "X-Tinfoil-Enclave-Url"
+        static let eventsHeader = "X-Tinfoil-Events"
+        static let webSearchEvent = "web_search"
+        static let statusPathPrefix = "/recovery"
+        static let userCacheKeyPrefix = "chat-recovery-user-cache-secret"
+    }
+
     enum SyncEnclave {
         static let url = "https://sync.tinfoil.sh"
         static let configRepo = "tinfoilsh/confidential-sync"
