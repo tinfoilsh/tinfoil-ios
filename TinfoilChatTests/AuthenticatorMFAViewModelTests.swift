@@ -241,11 +241,9 @@ private final class Recorder {
 
 @MainActor
 private struct StubService: AuthenticatorMFAService {
-    var createTOTPHandler: () async throws -> AuthenticatorMFASetupDetails = {
-        AuthenticatorMFASetupDetails(secret: "SECRET", uri: "otpauth://totp/example")
-    }
-    var verifyTOTPHandler: (String) async throws -> [String] = { _ in [] }
-    var disableTOTPHandler: () async throws -> Void = {}
+    let createTOTPHandler: () async throws -> AuthenticatorMFASetupDetails
+    let verifyTOTPHandler: (String) async throws -> [String]
+    let disableTOTPHandler: () async throws -> Void
 
     init(
         createTOTP: @escaping () async throws -> AuthenticatorMFASetupDetails = {
