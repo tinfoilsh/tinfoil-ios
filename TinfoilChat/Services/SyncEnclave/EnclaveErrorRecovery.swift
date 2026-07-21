@@ -101,8 +101,10 @@ struct RecoveryDecision: Equatable {
 
 enum EnclaveErrorRecovery {
     static func isVersionConflict(_ error: SyncEnclaveError) -> Bool {
-        error.code == WireCodes.staleBlob
-            || (error.code == nil && error.status == 412)
+        let isUncodedPrecondition = error.status == 412
+            && (error.code == nil || error.usesHTTPStatusFallbackCode)
+        return error.code == WireCodes.staleBlob
+            || isUncodedPrecondition
             || (error.status == 409 && error.code == WireCodes.syncConflict)
     }
 
