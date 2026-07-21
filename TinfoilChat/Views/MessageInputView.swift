@@ -138,12 +138,14 @@ struct MessageInputView: View {
     }
 
     /// The send action greys out while a draft can't be dispatched because
-    /// an attachment is still processing; voice greys out while a recording
-    /// is being transcribed.
+    /// an attachment is still processing or the previous response is being
+    /// recovered; voice greys out while a recording is being transcribed.
     private var isTrailingActionDisabled: Bool {
         switch trailingAction {
         case .voice: return viewModel.isTranscribing
-        case .send: return !attachmentsAreReadyToSend(viewModel.pendingAttachments)
+        case .send:
+            return viewModel.hasPendingResponseRecovery
+                || !attachmentsAreReadyToSend(viewModel.pendingAttachments)
         case .stop: return false
         }
     }
