@@ -218,7 +218,6 @@ actor ChatRecoveryCoordinator {
         await MainActor.run {
             ChatRecoveryPhaseTracker.shared.clear(turnId: attempt.turnId)
         }
-        try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
         do {
             try await ChatRecoverySync.shared.mutate(
                 chatId: attempt.chatId,
@@ -226,6 +225,7 @@ actor ChatRecoveryCoordinator {
                 storage: attempt.storage,
                 mutation: .cancel(turnId: attempt.turnId, response: response)
             )
+            try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
         } catch ChatRecoverySyncError.envelopeMissing {
             if attempt.storage == .cloud {
                 try? await ChatRecoverySync.shared.refreshFromRemote(
@@ -233,6 +233,7 @@ actor ChatRecoveryCoordinator {
                     userId: attempt.userId
                 )
             }
+            try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
             postRecoveryUpdate(
                 chatId: attempt.chatId,
                 userId: attempt.userId,
@@ -446,7 +447,6 @@ actor ChatRecoveryCoordinator {
                 storage: storage
             )
         } catch ChatRecoverySyncError.envelopeMissing {
-            try? await ChatRecoveryClient.shared.delete(sessionId: payload.sessionId)
             await MainActor.run {
                 ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
             }
@@ -456,6 +456,7 @@ actor ChatRecoveryCoordinator {
                     userId: userId
                 )
             }
+            try? await ChatRecoveryClient.shared.delete(sessionId: payload.sessionId)
             postRecoveryUpdate(
                 chatId: chatId,
                 userId: userId,
@@ -580,9 +581,6 @@ actor ChatRecoveryCoordinator {
         sessionId: String?,
         storage: ChatRecoveryStorage
     ) async {
-        if let sessionId {
-            try? await ChatRecoveryClient.shared.delete(sessionId: sessionId)
-        }
         await MainActor.run {
             ChatRecoveryPhaseTracker.shared.clear(turnId: turnId)
         }
@@ -593,6 +591,9 @@ actor ChatRecoveryCoordinator {
                 storage: storage,
                 mutation: .remove(turnId: turnId)
             )
+            if let sessionId {
+                try? await ChatRecoveryClient.shared.delete(sessionId: sessionId)
+            }
             postRecoveryUpdate(
                 chatId: chatId,
                 userId: userId,
