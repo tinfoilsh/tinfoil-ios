@@ -19,12 +19,13 @@ struct IdentifiedGroup<T>: Identifiable {
     let items: [T]
 }
 
-func shouldShowPendingResponseRecovery(
+private func messageHasPendingRecovery(
     message: Message,
+    role: MessageRole,
     pendingRecoveries: [PendingRecoveryEnvelope],
     activeTurnId: String?
 ) -> Bool {
-    guard message.role == .user,
+    guard message.role == role,
           let turnId = message.turnId,
           turnId != activeTurnId
     else {
@@ -33,18 +34,30 @@ func shouldShowPendingResponseRecovery(
     return pendingRecoveries.contains { $0.turnId == turnId }
 }
 
+func shouldShowPendingResponseRecovery(
+    message: Message,
+    pendingRecoveries: [PendingRecoveryEnvelope],
+    activeTurnId: String?
+) -> Bool {
+    messageHasPendingRecovery(
+        message: message,
+        role: .user,
+        pendingRecoveries: pendingRecoveries,
+        activeTurnId: activeTurnId
+    )
+}
+
 func shouldHidePendingResponseAssistant(
     message: Message,
     pendingRecoveries: [PendingRecoveryEnvelope],
     activeTurnId: String?
 ) -> Bool {
-    guard message.role == .assistant,
-          let turnId = message.turnId,
-          turnId != activeTurnId
-    else {
-        return false
-    }
-    return pendingRecoveries.contains { $0.turnId == turnId }
+    messageHasPendingRecovery(
+        message: message,
+        role: .assistant,
+        pendingRecoveries: pendingRecoveries,
+        activeTurnId: activeTurnId
+    )
 }
 
 func pendingResponseRecoveryDetail(phase: ChatRecoveryPhase) -> String {
@@ -116,21 +129,28 @@ struct MessageView: View {
         return message.content.count <= Constants.Rendering.maxInlineSelectionCharacters
     }
 
+    private var recoveryContext: (pendingRecoveries: [PendingRecoveryEnvelope], activeTurnId: String?) {
+        (
+            pendingRecoveries: viewModel.currentChat?.pendingRecoveries ?? [],
+            activeTurnId: viewModel.isLoading ? viewModel.messages.last?.turnId : nil
+        )
+    }
+
     private var showsPendingResponseRecovery: Bool {
-        let activeTurnId = viewModel.isLoading ? viewModel.messages.last?.turnId : nil
+        let context = recoveryContext
         return shouldShowPendingResponseRecovery(
             message: message,
-            pendingRecoveries: viewModel.currentChat?.pendingRecoveries ?? [],
-            activeTurnId: activeTurnId
+            pendingRecoveries: context.pendingRecoveries,
+            activeTurnId: context.activeTurnId
         )
     }
 
     private var hidesPendingResponseAssistant: Bool {
-        let activeTurnId = viewModel.isLoading ? viewModel.messages.last?.turnId : nil
+        let context = recoveryContext
         return shouldHidePendingResponseAssistant(
             message: message,
-            pendingRecoveries: viewModel.currentChat?.pendingRecoveries ?? [],
-            activeTurnId: activeTurnId
+            pendingRecoveries: context.pendingRecoveries,
+            activeTurnId: context.activeTurnId
         )
     }
 
