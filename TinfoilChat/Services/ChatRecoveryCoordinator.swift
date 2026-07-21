@@ -6,12 +6,19 @@ struct ChatRecoveryAttempt: Sendable {
     let chatId: String
     let turnId: String
     let userId: String
+    let storage: ChatRecoveryStorage
     let sessionId: String
     let generation: Int
 }
 
 extension Notification.Name {
     static let chatRecoveryDidUpdate = Notification.Name("chatRecoveryDidUpdate")
+}
+
+enum ChatRecoveryNotificationKey {
+    static let chatId = "chatId"
+    static let userId = "userId"
+    static let storage = "storage"
 }
 
 actor ChatRecoveryCoordinator {
@@ -32,16 +39,22 @@ actor ChatRecoveryCoordinator {
     func begin(
         chatId: String,
         turnId: String,
-        userId: String
+        userId: String,
+        storage: ChatRecoveryStorage
     ) throws -> ChatRecoveryAttempt {
         if activeAccountId != userId {
             reset(accountId: userId)
         }
-        cancelledTurns.remove(turnKey(chatId: chatId, turnId: turnId))
+        cancelledTurns.remove(turnKey(
+            chatId: chatId,
+            turnId: turnId,
+            storage: storage
+        ))
         return ChatRecoveryAttempt(
             chatId: chatId,
             turnId: turnId,
             userId: userId,
+            storage: storage,
             sessionId: try randomSessionId(),
             generation: accountGeneration
         )
@@ -51,14 +64,24 @@ actor ChatRecoveryCoordinator {
         attempt: ChatRecoveryAttempt,
         token: ChatRecoveryTokenPayload
     ) async throws -> PendingRecoveryEnvelope {
-        let key = turnKey(chatId: attempt.chatId, turnId: attempt.turnId)
+        let key = turnKey(
+            chatId: attempt.chatId,
+            turnId: attempt.turnId,
+            storage: attempt.storage
+        )
         if cancelledTurns.contains(key)
             || attempt.generation != accountGeneration
             || activeAccountId != attempt.userId {
             try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
             throw CancellationError()
         }
-        let cek = try EncryptionService.shared.getKeyBytesOrThrow()
+        let cek: Data
+        switch attempt.storage {
+        case .cloud:
+            cek = try EncryptionService.shared.getKeyBytesOrThrow()
+        case .local:
+            cek = try await DeviceEncryptionService.shared.getKeyBytesOrThrow()
+        }
         let envelope = try ChatRecoveryCrypto.encrypt(
             cek: cek,
             userId: attempt.userId,
@@ -71,10 +94,14 @@ actor ChatRecoveryCoordinator {
             try await ChatRecoverySync.shared.mutate(
                 chatId: attempt.chatId,
                 userId: attempt.userId,
+                storage: attempt.storage,
                 mutation: .add(envelope)
             )
         } catch {
             if case ChatRecoverySyncError.pendingLimitReached = error {
+                try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
+            } else if attempt.storage == .local,
+                      case ChatRecoverySyncError.chatMissing = error {
                 try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
             }
             throw error
@@ -95,7 +122,11 @@ actor ChatRecoveryCoordinator {
         title: String? = nil,
         titleState: Chat.TitleState? = nil
     ) async throws {
-        let key = turnKey(chatId: attempt.chatId, turnId: attempt.turnId)
+        let key = turnKey(
+            chatId: attempt.chatId,
+            turnId: attempt.turnId,
+            storage: attempt.storage
+        )
         guard !cancelledTurns.contains(key),
               attempt.generation == accountGeneration,
               activeAccountId == attempt.userId
@@ -107,6 +138,7 @@ actor ChatRecoveryCoordinator {
             try await ChatRecoverySync.shared.mutate(
                 chatId: attempt.chatId,
                 userId: attempt.userId,
+                storage: attempt.storage,
                 mutation: .complete(
                     envelope: envelope,
                     response: response,
@@ -117,31 +149,48 @@ actor ChatRecoveryCoordinator {
             try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
         } catch ChatRecoverySyncError.envelopeMissing {
             try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
-            try await ChatRecoverySync.shared.refreshFromRemote(
+            if attempt.storage == .cloud {
+                try await ChatRecoverySync.shared.refreshFromRemote(
+                    chatId: attempt.chatId,
+                    userId: attempt.userId
+                )
+            }
+            postRecoveryUpdate(
                 chatId: attempt.chatId,
-                userId: attempt.userId
+                userId: attempt.userId,
+                storage: attempt.storage
             )
-            postRecoveryUpdate(chatId: attempt.chatId)
         } catch {
             throw error
         }
     }
 
     func cancel(attempt: ChatRecoveryAttempt, response: Message? = nil) async {
-        cancelledTurns.insert(turnKey(chatId: attempt.chatId, turnId: attempt.turnId))
+        cancelledTurns.insert(turnKey(
+            chatId: attempt.chatId,
+            turnId: attempt.turnId,
+            storage: attempt.storage
+        ))
         try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
         do {
             try await ChatRecoverySync.shared.mutate(
                 chatId: attempt.chatId,
                 userId: attempt.userId,
+                storage: attempt.storage,
                 mutation: .cancel(turnId: attempt.turnId, response: response)
             )
         } catch ChatRecoverySyncError.envelopeMissing {
-            try? await ChatRecoverySync.shared.refreshFromRemote(
+            if attempt.storage == .cloud {
+                try? await ChatRecoverySync.shared.refreshFromRemote(
+                    chatId: attempt.chatId,
+                    userId: attempt.userId
+                )
+            }
+            postRecoveryUpdate(
                 chatId: attempt.chatId,
-                userId: attempt.userId
+                userId: attempt.userId,
+                storage: attempt.storage
             )
-            postRecoveryUpdate(chatId: attempt.chatId)
         } catch {
             return
         }
@@ -151,7 +200,7 @@ actor ChatRecoveryCoordinator {
         try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
     }
 
-    func scan(userId: String) async {
+    func scan(userId: String, storages: [ChatRecoveryStorage]) async {
         if activeAccountId != userId {
             reset(accountId: userId)
         }
@@ -159,38 +208,44 @@ actor ChatRecoveryCoordinator {
         isScanning = true
         defer { isScanning = false }
         let generation = accountGeneration
-        let entries = (try? await EncryptedFileStorage.cloud.loadIndex(userId: userId)) ?? []
-        let storedChats = (try? await EncryptedFileStorage.cloud.loadChats(
-            chatIds: entries.map(\.id),
-            userId: userId
-        )) ?? []
-        let work = storedChats.flatMap { chat in
-            (chat.pendingRecoveries ?? []).map { (chat.id, $0) }
+        var work: [(String, PendingRecoveryEnvelope, ChatRecoveryStorage)] = []
+        for storage in storages {
+            guard !Task.isCancelled else { return }
+            let storedChats = (try? await storage.fileStorage.loadChatsWithPendingRecoveries(
+                userId: userId
+            )) ?? []
+            work.append(contentsOf: storedChats.flatMap { chat in
+                (chat.pendingRecoveries ?? []).map { (chat.id, $0, storage) }
+            })
         }
         guard !work.isEmpty else { return }
 
         await withTaskGroup(of: Void.self) { group in
             var iterator = work.makeIterator()
             for _ in 0..<min(Constants.ChatRecovery.maxConcurrentScans, work.count) {
+                guard !Task.isCancelled else { return }
                 if let item = iterator.next() {
                     group.addTask {
                         await self.recover(
                             chatId: item.0,
                             envelope: item.1,
                             userId: userId,
-                            generation: generation
+                            generation: generation,
+                            storage: item.2
                         )
                     }
                 }
             }
             while await group.next() != nil {
+                guard !Task.isCancelled else { return }
                 if let item = iterator.next() {
                     group.addTask {
                         await self.recover(
                             chatId: item.0,
                             envelope: item.1,
                             userId: userId,
-                            generation: generation
+                            generation: generation,
+                            storage: item.2
                         )
                     }
                 }
@@ -202,22 +257,30 @@ actor ChatRecoveryCoordinator {
         chatId: String,
         envelope originalEnvelope: PendingRecoveryEnvelope,
         userId: String,
-        generation: Int
+        generation: Int,
+        storage: ChatRecoveryStorage
     ) async {
-        guard generation == accountGeneration, activeAccountId == userId else { return }
+        guard !Task.isCancelled,
+              generation == accountGeneration,
+              activeAccountId == userId,
+              !(await isChatStreaming(chatId))
+        else {
+            return
+        }
         var envelope = originalEnvelope
         let payload: ChatRecoveryEnvelopePayload
         do {
             if try ChatRecoveryCrypto.isExpired(envelope) {
                 throw ChatRecoveryCryptoError.expired
             }
-            let opened = try openEnvelope(
+            let opened = try await openEnvelope(
                 envelope,
                 chatId: chatId,
-                userId: userId
+                userId: userId,
+                storage: storage
             )
             payload = opened.payload
-            if opened.usedHistoricalKey {
+            if storage == .cloud && opened.usedHistoricalKey {
                 let currentCEK = try EncryptionService.shared.getKeyBytesOrThrow()
                 let rewrapped = try ChatRecoveryCrypto.rewrap(
                     envelope: envelope,
@@ -229,17 +292,23 @@ actor ChatRecoveryCoordinator {
                 try await ChatRecoverySync.shared.mutate(
                     chatId: chatId,
                     userId: userId,
+                    storage: storage,
                     mutation: .replace(old: envelope, new: rewrapped)
                 )
                 envelope = rewrapped
-                postRecoveryUpdate(chatId: chatId)
+                postRecoveryUpdate(
+                    chatId: chatId,
+                    userId: userId,
+                    storage: storage
+                )
             }
         } catch ChatRecoveryCryptoError.expired {
             await removeTerminal(
                 chatId: chatId,
                 turnId: envelope.turnId,
                 userId: userId,
-                sessionId: nil
+                sessionId: nil,
+                storage: storage
             )
             return
         } catch ChatRecoveryCryptoError.invalidEnvelope,
@@ -248,14 +317,20 @@ actor ChatRecoveryCoordinator {
                 chatId: chatId,
                 turnId: envelope.turnId,
                 userId: userId,
-                sessionId: nil
+                sessionId: nil,
+                storage: storage
             )
             return
         } catch {
             return
         }
 
-        guard generation == accountGeneration, activeAccountId == userId else { return }
+        guard !Task.isCancelled,
+              generation == accountGeneration,
+              activeAccountId == userId
+        else {
+            return
+        }
         do {
             let state = try await ChatRecoveryClient.shared.state(sessionId: payload.sessionId)
             switch state {
@@ -266,7 +341,8 @@ actor ChatRecoveryCoordinator {
                     chatId: chatId,
                     turnId: envelope.turnId,
                     userId: userId,
-                    sessionId: payload.sessionId
+                    sessionId: payload.sessionId,
+                    storage: storage
                 )
                 return
             case .complete:
@@ -277,11 +353,16 @@ actor ChatRecoveryCoordinator {
                 sessionId: payload.sessionId,
                 token: token
             )
+            guard !Task.isCancelled else { return }
             let response = try await reconstructMessage(
                 stream: stream,
                 turnId: envelope.turnId
             )
-            let key = turnKey(chatId: chatId, turnId: envelope.turnId)
+            let key = turnKey(
+                chatId: chatId,
+                turnId: envelope.turnId,
+                storage: storage
+            )
             guard generation == accountGeneration,
                   activeAccountId == userId,
                   !cancelledTurns.contains(key)
@@ -289,9 +370,12 @@ actor ChatRecoveryCoordinator {
                 try? await ChatRecoveryClient.shared.delete(sessionId: payload.sessionId)
                 return
             }
+            guard !(await isChatStreaming(chatId)) else { return }
+            guard !Task.isCancelled else { return }
             try await ChatRecoverySync.shared.mutate(
                 chatId: chatId,
                 userId: userId,
+                storage: storage,
                 mutation: .complete(
                     envelope: envelope,
                     response: response,
@@ -300,21 +384,32 @@ actor ChatRecoveryCoordinator {
                 )
             )
             try? await ChatRecoveryClient.shared.delete(sessionId: payload.sessionId)
-            postRecoveryUpdate(chatId: chatId)
+            postRecoveryUpdate(
+                chatId: chatId,
+                userId: userId,
+                storage: storage
+            )
         } catch ChatRecoverySyncError.envelopeMissing {
             try? await ChatRecoveryClient.shared.delete(sessionId: payload.sessionId)
-            try? await ChatRecoverySync.shared.refreshFromRemote(
+            if storage == .cloud {
+                try? await ChatRecoverySync.shared.refreshFromRemote(
+                    chatId: chatId,
+                    userId: userId
+                )
+            }
+            postRecoveryUpdate(
                 chatId: chatId,
-                userId: userId
+                userId: userId,
+                storage: storage
             )
-            postRecoveryUpdate(chatId: chatId)
         } catch ChatRecoveryClientError.state(let state)
             where state == .failed || state == .missing {
             await removeTerminal(
                 chatId: chatId,
                 turnId: envelope.turnId,
                 userId: userId,
-                sessionId: payload.sessionId
+                sessionId: payload.sessionId,
+                storage: storage
             )
         } catch {
             return
@@ -324,12 +419,23 @@ actor ChatRecoveryCoordinator {
     private func openEnvelope(
         _ envelope: PendingRecoveryEnvelope,
         chatId: String,
-        userId: String
-    ) throws -> (
+        userId: String,
+        storage: ChatRecoveryStorage
+    ) async throws -> (
         payload: ChatRecoveryEnvelopePayload,
         cek: Data,
         usedHistoricalKey: Bool
     ) {
+        if storage == .local {
+            let deviceKey = try await DeviceEncryptionService.shared.getKeyBytesOrThrow()
+            let payload = try ChatRecoveryCrypto.decrypt(
+                cek: deviceKey,
+                userId: userId,
+                chatId: chatId,
+                envelope: envelope
+            )
+            return (payload, deviceKey, false)
+        }
         let primary = try EncryptionService.shared.getKeyBytesOrThrow()
         let primaryKeyId = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: primary)
         if primaryKeyId == envelope.keyId {
@@ -412,7 +518,8 @@ actor ChatRecoveryCoordinator {
         chatId: String,
         turnId: String,
         userId: String,
-        sessionId: String?
+        sessionId: String?,
+        storage: ChatRecoveryStorage
     ) async {
         if let sessionId {
             try? await ChatRecoveryClient.shared.delete(sessionId: sessionId)
@@ -421,9 +528,14 @@ actor ChatRecoveryCoordinator {
             try await ChatRecoverySync.shared.mutate(
                 chatId: chatId,
                 userId: userId,
+                storage: storage,
                 mutation: .remove(turnId: turnId)
             )
-            postRecoveryUpdate(chatId: chatId)
+            postRecoveryUpdate(
+                chatId: chatId,
+                userId: userId,
+                storage: storage
+            )
         } catch {
             return
         }
@@ -438,15 +550,33 @@ actor ChatRecoveryCoordinator {
         return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
-    private func turnKey(chatId: String, turnId: String) -> String {
-        "\(chatId)\u{0}\(turnId)"
+    private func isChatStreaming(_ chatId: String) async -> Bool {
+        await MainActor.run {
+            StreamingTracker.shared.isStreaming(chatId)
+        }
     }
 
-    private func postRecoveryUpdate(chatId: String) {
+    private func turnKey(
+        chatId: String,
+        turnId: String,
+        storage: ChatRecoveryStorage
+    ) -> String {
+        "\(storage.rawValue)\u{0}\(chatId)\u{0}\(turnId)"
+    }
+
+    private func postRecoveryUpdate(
+        chatId: String,
+        userId: String,
+        storage: ChatRecoveryStorage
+    ) {
         NotificationCenter.default.post(
             name: .chatRecoveryDidUpdate,
             object: nil,
-            userInfo: ["chatId": chatId]
+            userInfo: [
+                ChatRecoveryNotificationKey.chatId: chatId,
+                ChatRecoveryNotificationKey.userId: userId,
+                ChatRecoveryNotificationKey.storage: storage.rawValue,
+            ]
         )
     }
 }

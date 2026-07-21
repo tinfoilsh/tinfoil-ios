@@ -113,6 +113,16 @@ struct EnclaveErrorRecoveryTests {
             SyncEnclaveError(message: "stale blob", status: 412)
         ))
         #expect(EnclaveErrorRecovery.isVersionConflict(
+            SyncEnclaveError(message: "conflict", status: 409)
+        ))
+        #expect(EnclaveErrorRecovery.isVersionConflict(
+            SyncEnclaveError(
+                message: "conflict",
+                status: 409,
+                code: SyncEnclaveError.httpStatusFallbackCode(409)
+            )
+        ))
+        #expect(EnclaveErrorRecovery.isVersionConflict(
             SyncEnclaveError(
                 message: "stale blob",
                 status: 412,
