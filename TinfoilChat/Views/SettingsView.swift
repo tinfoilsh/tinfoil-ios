@@ -457,22 +457,24 @@ struct SettingsView: View {
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
-            Section {
-                NavigationLink {
-                    AuthenticatorMFASettingsView()
-                } label: {
-                    HStack {
-                        Text("Authenticator App")
-                        Spacer()
-                        Text(clerk.user?.totpEnabled == true ? "On" : "Off")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            if clerk.user != nil {
+                Section {
+                    NavigationLink {
+                        AuthenticatorMFASettingsView()
+                    } label: {
+                        HStack {
+                            Text("Authenticator App")
+                            Spacer()
+                            Text(clerk.user?.totpEnabled == true ? "On" : "Off")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                } header: {
+                    Text("Security")
                 }
-            } header: {
-                Text("Security")
+                .listRowBackground(Color.cardSurface(for: colorScheme))
             }
-            .listRowBackground(Color.cardSurface(for: colorScheme))
 
             Section {
                 Button(action: {
