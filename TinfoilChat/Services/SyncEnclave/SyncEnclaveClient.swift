@@ -25,6 +25,14 @@ struct SyncEnclaveError: LocalizedError, Equatable {
     let details: [String: AnyCodable]?
 
     var errorDescription: String? { message }
+    var usesHTTPStatusFallbackCode: Bool {
+        guard let status else { return false }
+        return code == Self.httpStatusFallbackCode(status)
+    }
+
+    static func httpStatusFallbackCode(_ status: Int) -> String {
+        "HTTP_\(status)"
+    }
 
     static func == (lhs: SyncEnclaveError, rhs: SyncEnclaveError) -> Bool {
         lhs.message == rhs.message && lhs.status == rhs.status && lhs.code == rhs.code
@@ -264,7 +272,7 @@ actor SyncEnclaveClient {
 
     private static func parseError(response: SecureResponse) -> SyncEnclaveError {
         var message = "Sync enclave request failed: HTTP \(response.statusCode)"
-        var code: String? = "HTTP_\(response.statusCode)"
+        var code: String? = SyncEnclaveError.httpStatusFallbackCode(response.statusCode)
         var details: [String: AnyCodable]? = nil
         if !response.body.isEmpty,
            let parsed = try? JSONDecoder.enclave.decode([String: AnyCodable].self, from: response.body) {
