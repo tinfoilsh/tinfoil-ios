@@ -27,6 +27,8 @@ struct SignInView: View {
   @State private var mfaType: SignIn.MfaType = .totp
   @State private var availableMfaTypes: [SignIn.MfaType] = []
   @State private var isVerifyingMfa = false
+  @State private var isSendingMfaCode = false
+  @State private var mfaSendTask: Task<Void, Never>? = nil
   
   private var emailIsEmpty: Bool {
     return email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -177,18 +179,18 @@ struct SignInView: View {
         .disabled(isVerifyingMfa)
       
       Button {
-        guard !isVerifyingMfa else { return }
+        guard !isVerifyingMfa, !isSendingMfaCode else { return }
         Task {
           await verifyMfaCode()
         }
       } label: {
         HStack {
-          if isVerifyingMfa {
+          if isVerifyingMfa || isSendingMfaCode {
             ProgressView()
               .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .black : .white))
               .padding(.trailing, 8)
           }
-          Text(isVerifyingMfa ? "Verifying..." : "Verify")
+          Text(isVerifyingMfa ? "Verifying..." : isSendingMfaCode ? "Sending code..." : "Verify")
         }
         .font(.headline)
         .foregroundColor(colorScheme == .dark ? .black : .white)
@@ -196,14 +198,14 @@ struct SignInView: View {
         .frame(height: 50)
         .background(
           colorScheme == .dark ?
-            (isVerifyingMfa ? Color.white.opacity(0.7) : Color.white) :
-            (isVerifyingMfa ? Color.black.opacity(0.7) : Color.black)
+            (isVerifyingMfa || isSendingMfaCode ? Color.white.opacity(0.7) : Color.white) :
+            (isVerifyingMfa || isSendingMfaCode ? Color.black.opacity(0.7) : Color.black)
         )
         .cornerRadius(8)
         .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
       }
       .buttonStyle(PressableButtonStyle())
-      .disabled(isVerifyingMfa)
+      .disabled(isVerifyingMfa || isSendingMfaCode)
       
       if hasAlternativeMfaMethod {
         Button("Try another method") {
@@ -216,6 +218,9 @@ struct SignInView: View {
       }
       
       Button("Cancel") {
+        mfaSendTask?.cancel()
+        mfaSendTask = nil
+        isSendingMfaCode = false
         needsMfa = false
         mfaCode = ""
         errorMessage = nil
@@ -243,23 +248,35 @@ struct SignInView: View {
     mfaCode = ""
     errorMessage = nil
     mfaType = nextType
+    sendMfaCodeIfNeeded(for: nextType)
+  }
+  
+  /// Requests code delivery for phone/email factors, keeping verification
+  /// disabled until the code has been sent.
+  private func sendMfaCodeIfNeeded(for type: SignIn.MfaType) {
+    mfaSendTask?.cancel()
+    guard type == .phoneCode || type == .emailCode else {
+      mfaSendTask = nil
+      isSendingMfaCode = false
+      return
+    }
     
-    if nextType == .phoneCode || nextType == .emailCode {
-      Task {
-        do {
-          if var currentSignIn = clerk.auth.currentSignIn {
-            if nextType == .phoneCode {
-              currentSignIn = try await currentSignIn.sendMfaPhoneCode()
-            } else {
-              currentSignIn = try await currentSignIn.sendMfaEmailCode()
-            }
-          }
-        } catch {
-          await MainActor.run {
-            errorMessage = "Failed to send code: \(error.localizedDescription)"
+    isSendingMfaCode = true
+    mfaSendTask = Task {
+      do {
+        if var currentSignIn = clerk.auth.currentSignIn {
+          if type == .phoneCode {
+            currentSignIn = try await currentSignIn.sendMfaPhoneCode()
+          } else {
+            currentSignIn = try await currentSignIn.sendMfaEmailCode()
           }
         }
+      } catch {
+        guard !Task.isCancelled else { return }
+        errorMessage = "Failed to send code: \(error.localizedDescription)"
       }
+      guard !Task.isCancelled else { return }
+      isSendingMfaCode = false
     }
   }
   
@@ -292,26 +309,10 @@ struct SignInView: View {
     availableMfaTypes = resolvedTypes
     mfaType = preferredType
     mfaCode = ""
+    errorMessage = nil
     needsMfa = true
     isLoading = false
-    
-    if preferredType == .phoneCode || preferredType == .emailCode {
-      Task {
-        do {
-          if var currentSignIn = clerk.auth.currentSignIn {
-            if preferredType == .phoneCode {
-              currentSignIn = try await currentSignIn.sendMfaPhoneCode()
-            } else {
-              currentSignIn = try await currentSignIn.sendMfaEmailCode()
-            }
-          }
-        } catch {
-          await MainActor.run {
-            errorMessage = "Failed to send code: \(error.localizedDescription)"
-          }
-        }
-      }
-    }
+    sendMfaCodeIfNeeded(for: preferredType)
   }
   
   private func signIn(email: String, password: String) async {
