@@ -8,8 +8,27 @@ enum ChatRecoverySyncError: Error {
     case conflict
 }
 
+enum ChatRecoveryStorage: String, Sendable {
+    case cloud
+    case local
+
+    var fileStorage: EncryptedFileStorage {
+        switch self {
+        case .cloud:
+            return .cloud
+        case .local:
+            return .local
+        }
+    }
+}
+
 actor ChatRecoverySync {
     static let shared = ChatRecoverySync()
+    private let expiryFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 
     enum Mutation {
         case add(PendingRecoveryEnvelope)
@@ -27,8 +46,18 @@ actor ChatRecoverySync {
     func mutate(
         chatId: String,
         userId: String,
+        storage: ChatRecoveryStorage,
         mutation: Mutation
     ) async throws {
+        if storage == .local {
+            try await mutateLocal(
+                chatId: chatId,
+                userId: userId,
+                mutation: mutation
+            )
+            return
+        }
+
         var lastError: Error = ChatRecoverySyncError.conflict
         for _ in 0..<Constants.ChatRecovery.maxMutationAttempts {
             do {
@@ -38,12 +67,18 @@ actor ChatRecoverySync {
                 guard let remote = try await CloudStorageService.shared.downloadChat(chatId) else {
                     throw ChatRecoverySyncError.chatMissing
                 }
-                let local = try? await EncryptedFileStorage.cloud.loadChat(
+                let loadedLocal = try? await EncryptedFileStorage.cloud.loadChat(
                     chatId: chatId,
                     userId: userId
                 )
                 guard let remoteChat = await MainActor.run(body: { remote.toChat() }) else {
                     throw ChatRecoverySyncError.chatMissing
+                }
+                guard !remoteChat.decryptionFailed, !remoteChat.dataCorrupted else {
+                    throw ChatRecoverySyncError.chatMissing
+                }
+                let local = loadedLocal.flatMap {
+                    $0.decryptionFailed || $0.dataCorrupted ? nil : $0
                 }
                 var candidate = preferredBase(local: local, remote: remoteChat)
                 try apply(mutation, to: &candidate, authoritativeRemote: remoteChat)
@@ -82,6 +117,39 @@ actor ChatRecoverySync {
             }
         }
         throw lastError
+    }
+
+    private func mutateLocal(
+        chatId: String,
+        userId: String,
+        mutation: Mutation
+    ) async throws {
+        for _ in 0..<Constants.ChatRecovery.maxMutationAttempts {
+            guard await Clerk.shared.user?.id == userId,
+                  let local = try await EncryptedFileStorage.local.loadChat(
+                      chatId: chatId,
+                      userId: userId
+                  )
+            else {
+                throw ChatRecoverySyncError.chatMissing
+            }
+            var candidate = local
+            try apply(mutation, to: &candidate, authoritativeRemote: local)
+            candidate.updatedAt = Date()
+            candidate.locallyModified = true
+            guard await Clerk.shared.user?.id == userId else {
+                throw ChatRecoverySyncError.chatMissing
+            }
+            if try await EncryptedFileStorage.local.applyRemoteChatIfFresh(
+                candidate,
+                userId: userId,
+                expectedLocalUpdatedAt: local.updatedAt,
+                allowLocallyModified: true
+            ) {
+                return
+            }
+        }
+        throw ChatRecoverySyncError.conflict
     }
 
     func refreshFromRemote(chatId: String, userId: String) async throws {
@@ -190,6 +258,9 @@ actor ChatRecoverySync {
                 chat.messages[index] = response
             }
         case .replace(let old, let new):
+            if pending.contains(new) {
+                break
+            }
             guard authoritativeRemote.pendingRecoveries?.contains(old) == true
                     || authoritativeRemote.pendingRecoveries?.contains(new) == true,
                   let index = pending.firstIndex(of: old)
@@ -296,9 +367,7 @@ actor ChatRecoverySync {
     }
 
     private func envelopeIsExpired(_ envelope: PendingRecoveryEnvelope) -> Bool {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: envelope.expiresAt).map { $0 <= Date() } ?? true
+        expiryFormatter.date(from: envelope.expiresAt).map { $0 <= Date() } ?? true
     }
 
 }

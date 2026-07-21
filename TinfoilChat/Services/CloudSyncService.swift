@@ -444,8 +444,7 @@ class CloudSyncService: ObservableObject {
                   ),
                   chat.messages.contains(where: {
                       $0.role == .user && $0.turnId == requiredTurnId
-                  }),
-                  !streamingTracker.isStreaming(chatId)
+                  })
             else {
                 throw SyncEnclaveError(message: "required chat turn is not ready for backup")
             }
@@ -458,7 +457,7 @@ class CloudSyncService: ObservableObject {
                     throw SyncEnclaveError(message: "account changed during cloud backup")
                 }
                 let newVersion = result.syncVersion ?? chat.syncVersion + 1
-                _ = try await EncryptedFileStorage.cloud.finalizeUploadIfFresh(
+                let fullySynced = try await EncryptedFileStorage.cloud.finalizeUploadIfFresh(
                     chatId: chat.id,
                     userId: userId,
                     expectedUpdatedAt: chat.updatedAt,
@@ -471,6 +470,9 @@ class CloudSyncService: ObservableObject {
                         )
                     }
                 )
+                if fullySynced {
+                    SyncHealthStore.shared.reportChatSynced(chat.id)
+                }
                 return
             } catch let error as SyncEnclaveError
                 where EnclaveErrorRecovery.isVersionConflict(error) {

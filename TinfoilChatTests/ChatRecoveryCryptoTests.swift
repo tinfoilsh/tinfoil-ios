@@ -24,7 +24,7 @@ struct ChatRecoveryCryptoTests {
             .serialized(String(data: try JSONEncoder().encode(token), encoding: .utf8)!),
         ] {
             let envelope = try ChatRecoveryCrypto.encrypt(
-                cek: Data(repeating: 1, count: 32),
+                cek: Data(repeating: 1, count: SyncEnclaveKeyBundle.cekByteCount),
                 userId: userId,
                 chatId: chatId,
                 turnId: turnId,
@@ -33,7 +33,7 @@ struct ChatRecoveryCryptoTests {
                 now: now
             )
             let opened = try ChatRecoveryCrypto.decrypt(
-                cek: Data(repeating: 1, count: 32),
+                cek: Data(repeating: 1, count: SyncEnclaveKeyBundle.cekByteCount),
                 userId: userId,
                 chatId: chatId,
                 envelope: envelope,
@@ -49,7 +49,7 @@ struct ChatRecoveryCryptoTests {
         let envelope = try makeEnvelope()
         #expect(throws: ChatRecoveryCryptoError.self) {
             try ChatRecoveryCrypto.decrypt(
-                cek: Data(repeating: 1, count: 32),
+                cek: Data(repeating: 1, count: SyncEnclaveKeyBundle.cekByteCount),
                 userId: "another_user",
                 chatId: chatId,
                 envelope: envelope,
@@ -67,7 +67,7 @@ struct ChatRecoveryCryptoTests {
         )
         #expect(throws: ChatRecoveryCryptoError.self) {
             try ChatRecoveryCrypto.decrypt(
-                cek: Data(repeating: 1, count: 32),
+                cek: Data(repeating: 1, count: SyncEnclaveKeyBundle.cekByteCount),
                 userId: userId,
                 chatId: chatId,
                 envelope: tampered,
@@ -83,8 +83,8 @@ struct ChatRecoveryCryptoTests {
             envelope: envelope,
             userId: userId,
             chatId: chatId,
-            oldCEK: Data(repeating: 1, count: 32),
-            newCEK: Data(repeating: 2, count: 32),
+            oldCEK: Data(repeating: 1, count: SyncEnclaveKeyBundle.cekByteCount),
+            newCEK: Data(repeating: 2, count: SyncEnclaveKeyBundle.cekByteCount),
             now: now
         )
         #expect(rewrapped.createdAt == envelope.createdAt)
@@ -92,7 +92,7 @@ struct ChatRecoveryCryptoTests {
         #expect(rewrapped.keyId != envelope.keyId)
         #expect(throws: ChatRecoveryCryptoError.self) {
             try ChatRecoveryCrypto.decrypt(
-                cek: Data(repeating: 1, count: 32),
+                cek: Data(repeating: 1, count: SyncEnclaveKeyBundle.cekByteCount),
                 userId: userId,
                 chatId: chatId,
                 envelope: rewrapped,
@@ -100,13 +100,60 @@ struct ChatRecoveryCryptoTests {
             )
         }
         let opened = try ChatRecoveryCrypto.decrypt(
-            cek: Data(repeating: 2, count: 32),
+            cek: Data(repeating: 2, count: SyncEnclaveKeyBundle.cekByteCount),
             userId: userId,
             chatId: chatId,
             envelope: rewrapped,
             now: now
         )
         #expect(opened.recoveryToken.fields == token)
+    }
+
+    @Test("binds local recovery envelopes to the device key")
+    func localDeviceKey() throws {
+        let deviceKey = Data(
+            repeating: 3,
+            count: SyncEnclaveKeyBundle.cekByteCount
+        )
+        let cloudKey = Data(
+            repeating: 4,
+            count: SyncEnclaveKeyBundle.cekByteCount
+        )
+        let envelope = try makeEnvelope(cek: deviceKey)
+        #expect(throws: ChatRecoveryCryptoError.invalidKey) {
+            try ChatRecoveryCrypto.decrypt(
+                cek: cloudKey,
+                userId: userId,
+                chatId: chatId,
+                envelope: envelope,
+                now: now
+            )
+        }
+        let opened = try ChatRecoveryCrypto.decrypt(
+            cek: deviceKey,
+            userId: userId,
+            chatId: chatId,
+            envelope: envelope,
+            now: now
+        )
+        #expect(opened.recoveryToken.fields == token)
+    }
+
+    @Test("normalizes malformed recovery keys")
+    func malformedKey() throws {
+        let envelope = try makeEnvelope()
+        #expect(throws: ChatRecoveryCryptoError.invalidKey) {
+            try ChatRecoveryCrypto.decrypt(
+                cek: Data(
+                    repeating: 1,
+                    count: SyncEnclaveKeyBundle.cekByteCount - 1
+                ),
+                userId: userId,
+                chatId: chatId,
+                envelope: envelope,
+                now: now
+            )
+        }
     }
 
     @Test("rejects expired envelopes")
@@ -118,7 +165,7 @@ struct ChatRecoveryCryptoTests {
         #expect(try ChatRecoveryCrypto.isExpired(envelope, now: expiry))
         #expect(throws: ChatRecoveryCryptoError.expired) {
             try ChatRecoveryCrypto.decrypt(
-                cek: Data(repeating: 1, count: 32),
+                cek: Data(repeating: 1, count: SyncEnclaveKeyBundle.cekByteCount),
                 userId: userId,
                 chatId: chatId,
                 envelope: envelope,
@@ -168,9 +215,11 @@ struct ChatRecoveryCryptoTests {
         #expect(decodedEnvelope == envelope)
     }
 
-    private func makeEnvelope() throws -> PendingRecoveryEnvelope {
+    private func makeEnvelope(
+        cek: Data = Data(repeating: 1, count: SyncEnclaveKeyBundle.cekByteCount)
+    ) throws -> PendingRecoveryEnvelope {
         try ChatRecoveryCrypto.encrypt(
-            cek: Data(repeating: 1, count: 32),
+            cek: cek,
             userId: userId,
             chatId: chatId,
             turnId: turnId,

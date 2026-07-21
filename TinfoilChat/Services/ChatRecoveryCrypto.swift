@@ -80,7 +80,7 @@ enum ChatRecoveryCrypto {
         try requireLowercaseHex(sessionId, length: Constants.ChatRecovery.sessionIdBytes * 2)
         try requireToken(recoveryToken)
 
-        let keyId = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+        let keyId = try recoveryKeyId(cek)
         let formatter = timestampFormatter(fractionalSeconds: true)
         let createdAt = formatter.string(from: now)
         let expiresAt = formatter.string(
@@ -131,7 +131,7 @@ enum ChatRecoveryCrypto {
         try requireIdentifier(userId)
         try requireIdentifier(chatId)
         try validate(envelope)
-        guard try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek) == envelope.keyId else {
+        guard try recoveryKeyId(cek) == envelope.keyId else {
             throw ChatRecoveryCryptoError.invalidKey
         }
         guard let expiry = parseTimestamp(envelope.expiresAt), now < expiry else {
@@ -185,7 +185,7 @@ enum ChatRecoveryCrypto {
             envelope: envelope,
             now: now
         )
-        let keyId = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: newCEK)
+        let keyId = try recoveryKeyId(newCEK)
         let metadata = PendingRecoveryEnvelope(
             v: envelope.v,
             turnId: envelope.turnId,
@@ -299,6 +299,14 @@ enum ChatRecoveryCrypto {
               value.count <= Constants.ChatRecovery.maxIdentifierLength
         else {
             throw ChatRecoveryCryptoError.invalidIdentifier
+        }
+    }
+
+    private static func recoveryKeyId(_ cek: Data) throws -> String {
+        do {
+            return try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+        } catch {
+            throw ChatRecoveryCryptoError.invalidKey
         }
     }
 
