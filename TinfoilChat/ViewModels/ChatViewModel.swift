@@ -3073,7 +3073,7 @@ class ChatViewModel: ObservableObject {
 
         let streamTask = streamTasks[chatId]
         let recoveryAttempt = recoveryAttempts.removeValue(forKey: chatId)
-        let stoppedResponse = recoveryAttempt.flatMap { attempt in
+        let stoppedResponse = recoveryAttempt.flatMap { attempt -> Message? in
             guard let location = findChatLocation(chatId) else { return nil }
             return chat(at: location).messages.last {
                 $0.role == .assistant && $0.turnId == attempt.turnId
