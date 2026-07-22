@@ -244,6 +244,7 @@ class AuthManager: ObservableObject {
         // Handle chat state BEFORE clearing auth so the view model can still
         // save the current chat (hasChatAccess depends on isAuthenticated).
         await chatViewModel?.handleSignOut()
+        await ChatRecoveryCoordinator.shared.reset(accountId: nil)
 
         // Sign-out performs a full local wipe so that no content, encryption
         // keys, or personalization bleed into the next account on a shared

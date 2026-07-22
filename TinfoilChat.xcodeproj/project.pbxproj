@@ -757,8 +757,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tinfoilsh/encrypted-http-body-protocol.git";
 			requirement = {
-				kind = exactVersion;
-				version = 0.2.3;
+				branch = "feat/incremental-stream-recovery";
+				kind = branch;
 			};
 		};
 		99EEFB192F9EE9E8005B3D75 /* XCRemoteSwiftPackageReference "tinfoil-swift" */ = {

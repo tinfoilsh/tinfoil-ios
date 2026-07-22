@@ -621,6 +621,10 @@ class ChatViewModel: ObservableObject {
                 else {
                     return
                 }
+                ChatRecoveryDraftStore.shared.prune(
+                    chatId: chatId,
+                    retaining: Set((recovered.pendingRecoveries ?? []).map(\.turnId))
+                )
                 self.replaceChat(recovered)
                 if self.currentChat?.id == chatId {
                     self.currentChat = recovered
@@ -1636,6 +1640,7 @@ class ChatViewModel: ObservableObject {
 
         let userId = currentUserId
         discardMessageQueue(chatId: id)
+        ChatRecoveryDraftStore.shared.discard(chatId: id)
         let canceledStreamTask = cancelGeneration(
             chatId: id,
             announce: false
@@ -3652,6 +3657,7 @@ class ChatViewModel: ObservableObject {
         await suspendRecoveryScans()
 
         // Clear all chats from memory
+        ChatRecoveryDraftStore.shared.clearAll()
         chats.removeAll()
         localChats.removeAll()
         currentChat = nil

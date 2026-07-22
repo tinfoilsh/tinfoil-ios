@@ -23,17 +23,13 @@ enum ChatRecoveryNotificationKey {
 }
 
 enum ChatRecoveryPhase {
-    /// The proxy is still buffering the response because the model has not
-    /// finished generating it. Recovery cannot start yet.
+    /// The proxy is still receiving the response from the model.
     case generating
-    /// The buffered response is complete and is being fetched, decrypted,
-    /// and reconstructed.
+    /// The response is complete and its final state is being restored.
     case restoring
 }
 
-/// Publishes the per-turn recovery phase observed by the coordinator's
-/// status polls so the UI can distinguish "waiting for generation to
-/// finish" from the brief restore step.
+/// Publishes the per-turn recovery phase observed by the coordinator.
 @MainActor
 final class ChatRecoveryPhaseTracker: ObservableObject {
     static let shared = ChatRecoveryPhaseTracker()
@@ -70,13 +66,15 @@ actor ChatRecoveryCoordinator {
     private var activeAccountId: String?
     private var isScanning = false
 
-    func reset(accountId: String?) {
+    func reset(accountId: String?) async {
         accountGeneration += 1
         activeAccountId = accountId
         cancelledTurns.removeAll()
         isScanning = false
-        Task { @MainActor in
+        let generation = accountGeneration
+        await MainActor.run {
             ChatRecoveryPhaseTracker.shared.clearAll()
+            ChatRecoveryDraftStore.shared.reset(generation: generation)
         }
     }
 
@@ -85,15 +83,21 @@ actor ChatRecoveryCoordinator {
         turnId: String,
         userId: String,
         storage: ChatRecoveryStorage
-    ) throws -> ChatRecoveryAttempt {
+    ) async throws -> ChatRecoveryAttempt {
         if activeAccountId != userId {
-            reset(accountId: userId)
+            await reset(accountId: userId)
         }
         cancelledTurns.remove(turnKey(
             chatId: chatId,
             turnId: turnId,
             storage: storage
         ))
+        await MainActor.run {
+            ChatRecoveryDraftStore.shared.allow(
+                chatId: chatId,
+                turnId: turnId
+            )
+        }
         return ChatRecoveryAttempt(
             chatId: chatId,
             turnId: turnId,
@@ -190,6 +194,12 @@ actor ChatRecoveryCoordinator {
                     titleState: titleState
                 )
             )
+            await MainActor.run {
+                ChatRecoveryDraftStore.shared.clear(
+                    chatId: attempt.chatId,
+                    turnId: attempt.turnId
+                )
+            }
             try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
         } catch ChatRecoverySyncError.envelopeMissing {
             try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
@@ -217,6 +227,10 @@ actor ChatRecoveryCoordinator {
         ))
         await MainActor.run {
             ChatRecoveryPhaseTracker.shared.clear(turnId: attempt.turnId)
+            ChatRecoveryDraftStore.shared.discard(
+                chatId: attempt.chatId,
+                turnId: attempt.turnId
+            )
         }
         do {
             try await ChatRecoverySync.shared.mutate(
@@ -251,7 +265,7 @@ actor ChatRecoveryCoordinator {
 
     func scan(userId: String, storages: [ChatRecoveryStorage]) async {
         if activeAccountId != userId {
-            reset(accountId: userId)
+            await reset(accountId: userId)
         }
         guard !isScanning else { return }
         isScanning = true
@@ -388,7 +402,6 @@ actor ChatRecoveryCoordinator {
                 await MainActor.run {
                     ChatRecoveryPhaseTracker.shared.setPhase(.generating, turnId: turnId)
                 }
-                return
             case .failed, .missing:
                 await removeTerminal(
                     chatId: chatId,
@@ -411,7 +424,11 @@ actor ChatRecoveryCoordinator {
             guard !Task.isCancelled else { return }
             let response = try await reconstructMessage(
                 stream: stream,
-                turnId: envelope.turnId
+                chatId: chatId,
+                turnId: envelope.turnId,
+                userId: userId,
+                generation: generation,
+                storage: storage
             )
             let key = turnKey(
                 chatId: chatId,
@@ -427,6 +444,37 @@ actor ChatRecoveryCoordinator {
             }
             guard !(await isChatStreaming(chatId)) else { return }
             guard !Task.isCancelled else { return }
+            let finalState = try await ChatRecoveryClient.shared.state(
+                sessionId: payload.sessionId
+            )
+            switch finalState {
+            case .processing:
+                await MainActor.run {
+                    ChatRecoveryPhaseTracker.shared.setPhase(.generating, turnId: turnId)
+                }
+                return
+            case .failed, .missing:
+                await removeTerminal(
+                    chatId: chatId,
+                    turnId: envelope.turnId,
+                    userId: userId,
+                    sessionId: payload.sessionId,
+                    storage: storage
+                )
+                return
+            case .complete:
+                await MainActor.run {
+                    ChatRecoveryPhaseTracker.shared.setPhase(.restoring, turnId: turnId)
+                }
+            }
+            guard generation == accountGeneration,
+                  activeAccountId == userId,
+                  !cancelledTurns.contains(key),
+                  !(await isChatStreaming(chatId)),
+                  !Task.isCancelled
+            else {
+                return
+            }
             try await ChatRecoverySync.shared.mutate(
                 chatId: chatId,
                 userId: userId,
@@ -528,7 +576,11 @@ actor ChatRecoveryCoordinator {
 
     private func reconstructMessage(
         stream: AsyncThrowingStream<ChatStreamResult, Error>,
-        turnId: String
+        chatId: String,
+        turnId: String,
+        userId: String,
+        generation: Int,
+        storage: ChatRecoveryStorage
     ) async throws -> Message {
         let processor = StreamingResponseProcessor(
             isWebSearchEnabled: true,
@@ -540,10 +592,71 @@ actor ChatRecoveryCoordinator {
             for event in parsed.events {
                 eventState.apply(event, processor: processor)
             }
-            _ = processor.process(parsed)
+            let outcome = processor.process(parsed)
+            if outcome.didMutateState || !parsed.events.isEmpty {
+                try ensureRecoveryIsCurrent(
+                    chatId: chatId,
+                    turnId: turnId,
+                    userId: userId,
+                    generation: generation,
+                    storage: storage
+                )
+                let draft = recoveredMessage(
+                    snapshot: processor.snapshot(),
+                    eventState: eventState,
+                    chatId: chatId,
+                    turnId: turnId,
+                    isStreaming: true
+                )
+                if recoveredMessageIsMeaningful(draft) {
+                    await MainActor.run {
+                        ChatRecoveryDraftStore.shared.replace(
+                            draft,
+                            chatId: chatId,
+                            turnId: turnId,
+                            generation: generation
+                        )
+                    }
+                }
+            }
         }
         processor.finishStream()
-        let snapshot = processor.snapshot()
+        try ensureRecoveryIsCurrent(
+            chatId: chatId,
+            turnId: turnId,
+            userId: userId,
+            generation: generation,
+            storage: storage
+        )
+        let message = recoveredMessage(
+            snapshot: processor.snapshot(),
+            eventState: eventState,
+            chatId: chatId,
+            turnId: turnId,
+            isStreaming: false
+        )
+        if recoveredMessageIsMeaningful(message) {
+            var finalDraft = message
+            finalDraft.isStreaming = true
+            await MainActor.run {
+                ChatRecoveryDraftStore.shared.replace(
+                    finalDraft,
+                    chatId: chatId,
+                    turnId: turnId,
+                    generation: generation
+                )
+            }
+        }
+        return message
+    }
+
+    private func recoveredMessage(
+        snapshot: StreamingResponseProcessor.Snapshot,
+        eventState: RecoveredEventState,
+        chatId: String,
+        turnId: String,
+        isStreaming: Bool
+    ) -> Message {
         var webSearchState = eventState.webSearchState
         if !snapshot.collectedSources.isEmpty {
             var state = webSearchState ?? WebSearchState(status: .searching)
@@ -554,16 +667,18 @@ actor ChatRecoveryCoordinator {
             webSearchState = state
         }
         var message = Message(
+            id: recoveryDraftMessageId(chatId: chatId, turnId: turnId),
             role: .assistant,
             turnId: turnId,
             content: snapshot.responseContent,
             thoughts: snapshot.thoughts,
-            isThinking: false,
+            isThinking: snapshot.isThinking,
             generationTimeSeconds: snapshot.generationTimeSeconds,
             contentChunks: snapshot.contentChunks,
             thinkingChunks: snapshot.thinkingChunks,
             webSearchState: webSearchState
         )
+        message.isStreaming = isStreaming
         message.thinkingDuration = snapshot.generationTimeSeconds
         message.segments = snapshot.segments
         message.webSearches = snapshot.webSearches
@@ -575,6 +690,36 @@ actor ChatRecoveryCoordinator {
         return message
     }
 
+    private func recoveredMessageIsMeaningful(_ message: Message) -> Bool {
+        !message.content.isEmpty
+            || message.thoughts?.isEmpty == false
+            || message.isThinking
+            || message.segments?.isEmpty == false
+            || message.webSearches?.isEmpty == false
+            || message.webSearchState != nil
+            || !message.urlFetches.isEmpty
+            || !message.toolCalls.isEmpty
+            || message.annotations?.isEmpty == false
+            || message.timeline?.isEmpty == false
+    }
+
+    private func ensureRecoveryIsCurrent(
+        chatId: String,
+        turnId: String,
+        userId: String,
+        generation: Int,
+        storage: ChatRecoveryStorage
+    ) throws {
+        let key = turnKey(chatId: chatId, turnId: turnId, storage: storage)
+        guard !Task.isCancelled,
+              generation == accountGeneration,
+              activeAccountId == userId,
+              !cancelledTurns.contains(key)
+        else {
+            throw CancellationError()
+        }
+    }
+
     private func removeTerminal(
         chatId: String,
         turnId: String,
@@ -584,6 +729,10 @@ actor ChatRecoveryCoordinator {
     ) async {
         await MainActor.run {
             ChatRecoveryPhaseTracker.shared.clear(turnId: turnId)
+            ChatRecoveryDraftStore.shared.discard(
+                chatId: chatId,
+                turnId: turnId
+            )
         }
         do {
             try await ChatRecoverySync.shared.mutate(
