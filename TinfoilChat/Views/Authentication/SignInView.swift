@@ -75,7 +75,9 @@ struct SignInView: View {
       mfaSendTask?.cancel()
       mfaSendTask = nil
       isSendingMfaCode = false
+      isVerifyingMfa = false
       needsMfa = false
+      mfaType = .totp
       mfaCode = ""
     }
     .preference(key: VerificationModePreferenceKey.self, value: needsMfa)
