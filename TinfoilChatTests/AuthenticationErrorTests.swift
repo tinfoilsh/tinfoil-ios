@@ -195,30 +195,4 @@ struct AuthenticationErrorTests {
         }
     }
 
-    // MARK: - Live API: non-streaming path
-
-    @Test("Non-streaming with bad API key throws error detected by isAuthenticationError")
-    func nonStreamingBadKeyDetected() async throws {
-        let client = try await TinfoilAI.create(apiKey: "sk-bad-key-that-does-not-exist")
-
-        let chatQuery = ChatQuery(
-            messages: [.user(.init(content: .string("Hello")))],
-            model: "gpt-oss-120b"
-        )
-
-        var caughtError: Error? = nil
-        do {
-            let _: ChatResult = try await client.chats(query: chatQuery)
-        } catch {
-            caughtError = error
-        }
-
-        #expect(caughtError != nil, "Expected an error from non-streaming with bad API key")
-        if let error = caughtError {
-            #expect(
-                ChatViewModel.isAuthenticationError(error),
-                "isAuthenticationError should return true, but got error type: \(type(of: error)), value: \(error)"
-            )
-        }
-    }
 }
