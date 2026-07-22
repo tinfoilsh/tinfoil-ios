@@ -71,6 +71,10 @@ struct SignInView: View {
     .onChange(of: clerk.auth.currentSignIn?.status) { _, _ in
       presentSecondFactorIfNeeded()
     }
+    .onDisappear {
+      mfaSendTask?.cancel()
+      mfaSendTask = nil
+    }
     .preference(key: VerificationModePreferenceKey.self, value: needsMfa)
   }
   
@@ -315,14 +319,28 @@ struct SignInView: View {
     
     // A recreated view can rediscover an attempt that already has an
     // undelivered code pending; avoid spamming the user with another one.
-    if !hasPendingSecondFactorCode(signIn) {
+    if !hasPendingSecondFactorCode(signIn, for: preferredType) {
       sendMfaCodeIfNeeded(for: preferredType)
     }
   }
   
-  private func hasPendingSecondFactorCode(_ signIn: SignIn) -> Bool {
-    guard let verification = signIn.secondFactorVerification else { return false }
-    guard let expireAt = verification.expireAt else { return true }
+  private func hasPendingSecondFactorCode(_ signIn: SignIn, for type: SignIn.MfaType) -> Bool {
+    let expectedStrategy: FactorStrategy
+    switch type {
+    case .phoneCode:
+      expectedStrategy = .phoneCode
+    case .emailCode:
+      expectedStrategy = .emailCode
+    default:
+      return false
+    }
+    
+    guard let verification = signIn.secondFactorVerification,
+          verification.strategy == expectedStrategy,
+          verification.status == .unverified,
+          let expireAt = verification.expireAt else {
+      return false
+    }
     return expireAt > Date()
   }
   
