@@ -240,6 +240,7 @@ actor ChatRecoveryCoordinator {
                 storage: attempt.storage
             )
         } catch {
+            try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
             return
         }
     }
@@ -600,6 +601,9 @@ actor ChatRecoveryCoordinator {
                 storage: storage
             )
         } catch {
+            if let sessionId {
+                try? await ChatRecoveryClient.shared.delete(sessionId: sessionId)
+            }
             return
         }
     }
