@@ -312,7 +312,18 @@ struct SignInView: View {
     errorMessage = nil
     needsMfa = true
     isLoading = false
-    sendMfaCodeIfNeeded(for: preferredType)
+    
+    // A recreated view can rediscover an attempt that already has an
+    // undelivered code pending; avoid spamming the user with another one.
+    if !hasPendingSecondFactorCode(signIn) {
+      sendMfaCodeIfNeeded(for: preferredType)
+    }
+  }
+  
+  private func hasPendingSecondFactorCode(_ signIn: SignIn) -> Bool {
+    guard let verification = signIn.secondFactorVerification else { return false }
+    guard let expireAt = verification.expireAt else { return true }
+    return expireAt > Date()
   }
   
   private func signIn(email: String, password: String) async {
