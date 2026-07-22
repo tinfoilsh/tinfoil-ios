@@ -74,18 +74,19 @@ private struct PendingResponseRecoveryView: View {
     let phase: ChatRecoveryPhase
 
     var body: some View {
-        HStack(alignment: .center, spacing: Constants.ChatRecovery.indicatorSpacing) {
-            ProgressView()
-                .controlSize(.small)
-                .tint(isDarkMode ? .white.opacity(0.65) : .black.opacity(0.65))
+        VStack(alignment: .leading, spacing: Constants.ChatRecovery.indicatorTextSpacing) {
+            HStack(alignment: .center, spacing: Constants.ChatRecovery.indicatorSpacing) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(isDarkMode ? .white.opacity(0.65) : .black.opacity(0.65))
 
-            VStack(alignment: .leading, spacing: Constants.ChatRecovery.indicatorTextSpacing) {
                 Text(Constants.ChatRecovery.indicatorTitle)
                     .font(.subheadline.weight(.medium))
-                Text(pendingResponseRecoveryDetail(phase: phase))
-                    .font(.caption)
-                    .foregroundColor(isDarkMode ? .white.opacity(0.55) : .black.opacity(0.55))
             }
+
+            Text(pendingResponseRecoveryDetail(phase: phase))
+                .font(.caption)
+                .foregroundColor(isDarkMode ? .white.opacity(0.55) : .black.opacity(0.55))
         }
         .foregroundColor(isDarkMode ? .white : .black)
         .padding(.vertical, Constants.ChatRecovery.indicatorVerticalPadding)
