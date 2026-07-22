@@ -243,7 +243,9 @@ struct ModularAuthenticationView: View {
       let result = try await clerk.auth.signInWithOAuth(provider: provider)
       await handleAuthResult(result)
     } catch {
-      errorMessage = handleAuthError(error)
+      if !isUserCancellation(error) {
+        errorMessage = handleAuthError(error)
+      }
     }
     
     isLoading = false
@@ -257,7 +259,9 @@ struct ModularAuthenticationView: View {
       let result = try await clerk.auth.signInWithApple()
       await handleAuthResult(result)
     } catch {
-      errorMessage = handleAuthError(error)
+      if !isUserCancellation(error) {
+        errorMessage = handleAuthError(error)
+      }
     }
     
     isLoading = false

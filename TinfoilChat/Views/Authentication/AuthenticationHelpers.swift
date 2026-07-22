@@ -5,6 +5,7 @@
 //  Created on 04/10/25.
 //  Copyright © 2025 Tinfoil. All rights reserved.
 
+import AuthenticationServices
 import SwiftUI
 import ClerkKit
 
@@ -88,6 +89,24 @@ struct AuthErrorBanner: View {
 }
 
 // MARK: - Helper Functions
+
+/// Whether the error represents the user backing out of an authentication
+/// prompt (browser sheet or Apple sign-in), which should not surface an error.
+func isUserCancellation(_ error: Error) -> Bool {
+  if error is CancellationError {
+    return true
+  }
+  let nsError = error as NSError
+  if nsError.domain == ASWebAuthenticationSessionError.errorDomain,
+     nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
+    return true
+  }
+  if nsError.domain == ASAuthorizationError.errorDomain,
+     nsError.code == ASAuthorizationError.canceled.rawValue {
+    return true
+  }
+  return false
+}
 
 /// Handle authentication errors and provide user-friendly messages
 func handleAuthError(_ error: Error) -> String {
