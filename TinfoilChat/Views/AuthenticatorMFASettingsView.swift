@@ -541,7 +541,7 @@ private struct MFAReverificationView: View {
                     .disabled(isWorking)
                 }
 
-                if activeFactor?.strategy != .passkey {
+                if verification?.status != .complete, activeFactor?.strategy != .passkey {
                     if activeFactor?.strategy == .password {
                         SecureField("Password", text: $input)
                             .textContentType(.password)
@@ -576,7 +576,12 @@ private struct MFAReverificationView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isWorking || (activeFactor?.strategy != .passkey && input.isEmpty))
+                .disabled(
+                    isWorking
+                        || (verification?.status != .complete
+                            && activeFactor?.strategy != .passkey
+                            && input.isEmpty)
+                )
 
                 Spacer()
             }
@@ -616,6 +621,9 @@ private struct MFAReverificationView: View {
     }
 
     private var instructions: String {
+        if verification?.status == .complete {
+            return "You're verified. Tap Continue to finish."
+        }
         guard let factor = activeFactor else {
             return isWorking ? "Preparing verification…" : "Verify your identity to continue."
         }
@@ -673,6 +681,12 @@ private struct MFAReverificationView: View {
     }
 
     private func submit() async {
+        if verification?.status == .complete {
+            await perform {
+                try await finish()
+            }
+            return
+        }
         guard let session = clerk.session, let activeFactor else { return }
         let value = input
 
@@ -706,16 +720,22 @@ private struct MFAReverificationView: View {
 
         switch result.status {
         case .complete:
-            guard let session = clerk.session else {
-                throw AuthenticatorMFAError.missingSession
-            }
-            _ = try await session.getToken(.init(skipCache: true))
-            onVerified()
+            try await finish()
         case .needsFirstFactor, .needsSecondFactor:
             await prepareCurrentFactorIfNeeded()
         case .unknown:
             errorMessage = Constants.Security.errorMessage
         }
+    }
+
+    /// Refreshes the session token so the verified state is picked up, then
+    /// reports success. Retryable via the Continue button if the refresh fails.
+    private func finish() async throws {
+        guard let session = clerk.session else {
+            throw AuthenticatorMFAError.missingSession
+        }
+        _ = try await session.getToken(.init(skipCache: true))
+        onVerified()
     }
 
     private func prepareCurrentFactorIfNeeded() async {
