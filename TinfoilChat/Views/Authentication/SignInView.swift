@@ -74,6 +74,9 @@ struct SignInView: View {
     .onDisappear {
       mfaSendTask?.cancel()
       mfaSendTask = nil
+      isSendingMfaCode = false
+      needsMfa = false
+      mfaCode = ""
     }
     .preference(key: VerificationModePreferenceKey.self, value: needsMfa)
   }
