@@ -69,6 +69,28 @@ struct PendingResponseRecoveryPresentationTests {
         ))
     }
 
+    @Test func draftSuppressesPlaceholderAndRevealsAssistant() {
+        let user = Message(role: .user, turnId: "turn-1", content: "Question")
+        let assistant = Message(
+            role: .assistant,
+            turnId: "turn-1",
+            content: "Recovered partial"
+        )
+
+        #expect(!shouldShowPendingResponseRecovery(
+            message: user,
+            pendingRecoveries: [recovery],
+            activeTurnId: nil,
+            hasRecoveryDraft: true
+        ))
+        #expect(!shouldHidePendingResponseAssistant(
+            message: assistant,
+            pendingRecoveries: [recovery],
+            activeTurnId: nil,
+            hasRecoveryDraft: true
+        ))
+    }
+
     @Test func describesRecoveryPhases() {
         #expect(pendingResponseRecoveryDetail(phase: .generating)
             == "This may take a few minutes")

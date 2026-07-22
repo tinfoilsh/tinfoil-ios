@@ -37,9 +37,10 @@ private func messageHasPendingRecovery(
 func shouldShowPendingResponseRecovery(
     message: Message,
     pendingRecoveries: [PendingRecoveryEnvelope],
-    activeTurnId: String?
+    activeTurnId: String?,
+    hasRecoveryDraft: Bool = false
 ) -> Bool {
-    messageHasPendingRecovery(
+    !hasRecoveryDraft && messageHasPendingRecovery(
         message: message,
         role: .user,
         pendingRecoveries: pendingRecoveries,
@@ -50,9 +51,10 @@ func shouldShowPendingResponseRecovery(
 func shouldHidePendingResponseAssistant(
     message: Message,
     pendingRecoveries: [PendingRecoveryEnvelope],
-    activeTurnId: String?
+    activeTurnId: String?,
+    hasRecoveryDraft: Bool = false
 ) -> Bool {
-    messageHasPendingRecovery(
+    !hasRecoveryDraft && messageHasPendingRecovery(
         message: message,
         role: .assistant,
         pendingRecoveries: pendingRecoveries,
@@ -102,6 +104,7 @@ struct MessageView: View {
     let isDarkMode: Bool
     let isLastMessage: Bool
     let isLoading: Bool
+    let hasRecoveryDraft: Bool
     let messageIndex: Int
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
     @ObservedObject private var recoveryPhaseTracker = ChatRecoveryPhaseTracker.shared
@@ -126,8 +129,12 @@ struct MessageView: View {
     }
 
     private var inlineAssistantTextSelectionEnabled: Bool {
-        guard !(isLoading && isLastMessage) else { return false }
+        guard !isRenderingStream else { return false }
         return message.content.count <= Constants.Rendering.maxInlineSelectionCharacters
+    }
+
+    private var isRenderingStream: Bool {
+        (isLoading && isLastMessage) || (hasRecoveryDraft && message.isStreaming)
     }
 
     private var recoveryContext: (pendingRecoveries: [PendingRecoveryEnvelope], activeTurnId: String?) {
@@ -142,7 +149,8 @@ struct MessageView: View {
         return shouldShowPendingResponseRecovery(
             message: message,
             pendingRecoveries: context.pendingRecoveries,
-            activeTurnId: context.activeTurnId
+            activeTurnId: context.activeTurnId,
+            hasRecoveryDraft: hasRecoveryDraft
         )
     }
 
@@ -151,7 +159,8 @@ struct MessageView: View {
         return shouldHidePendingResponseAssistant(
             message: message,
             pendingRecoveries: context.pendingRecoveries,
-            activeTurnId: context.activeTurnId
+            activeTurnId: context.activeTurnId,
+            hasRecoveryDraft: hasRecoveryDraft
         )
     }
 
@@ -318,7 +327,7 @@ struct MessageView: View {
             ForEach(runs) { identifiedRun in
                 switch identifiedRun.run {
                 case .text(let text, let isTrailing):
-                    let isStreamingText = isTrailing && isLoading && isLastMessage
+                    let isStreamingText = isTrailing && isRenderingStream
                     LaTeXMarkdownView(
                         content: text,
                         isDarkMode: isDarkMode,
@@ -335,20 +344,23 @@ struct MessageView: View {
                     CollapsibleThinkingBox(
                         thinkingText: content,
                         isDarkMode: isDarkMode,
-                        isStreaming: isThinking && isLoading && isLastMessage,
+                        isStreaming: isThinking && isRenderingStream,
                         generationTimeSeconds: duration,
-                        thinkingSummary: isLastMessage && isThinking ? viewModel.thinkingSummary : nil,
+                        thinkingSummary: isLoading && isLastMessage && isThinking
+                            ? viewModel.thinkingSummary
+                            : nil,
                         onTap: { showThoughtsSheet = true }
                     )
                 case .webSearches(let group):
                     let aggregate = aggregatedState(for: group)
                     let isSearchInFlight = aggregate.status == .searching
-                        && isLoading
-                        && isLastMessage
+                        && isRenderingStream
                     WebSearchBox(
                         webSearchState: aggregate,
                         isDarkMode: isDarkMode,
-                        webSearchSummary: isSearchInFlight ? viewModel.webSearchSummary : nil,
+                        webSearchSummary: isLoading && isLastMessage && isSearchInFlight
+                            ? viewModel.webSearchSummary
+                            : nil,
                         groupSize: group.count,
                         onTap: {
                             if group.count > 1 {
@@ -370,7 +382,7 @@ struct MessageView: View {
                 case .toolCall(let toolCall, let isTrailing):
                     GenUIToolCallView(
                         toolCall: toolCall,
-                        isStreaming: isTrailing && isLoading && isLastMessage,
+                        isStreaming: isTrailing && isRenderingStream,
                         isDarkMode: isDarkMode,
                         resolution: message.genUIResolution(for: toolCall.id),
                         onRetry: nil
@@ -447,8 +459,7 @@ struct MessageView: View {
                     message.thoughts == nil &&
                     !message.isThinking &&
                     (message.segments?.isEmpty ?? true) &&
-                    isLoading &&
-                    isLastMessage {
+                    isRenderingStream {
                     VStack(alignment: .leading, spacing: 4) {
                         if !message.urlFetches.isEmpty {
                             URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode, onTap: { showURLFetchSheet = true })
@@ -459,7 +470,9 @@ struct MessageView: View {
                             WebSearchBox(
                                 webSearchState: webSearchState,
                                 isDarkMode: isDarkMode,
-                                webSearchSummary: viewModel.webSearchSummary,
+                                webSearchSummary: isLoading && isLastMessage
+                                    ? viewModel.webSearchSummary
+                                    : nil,
                                 onTap: { showSourcesSheet = true }
                             )
                         }
@@ -490,9 +503,11 @@ struct MessageView: View {
                         CollapsibleThinkingBox(
                             thinkingText: message.thoughts ?? "",
                             isDarkMode: isDarkMode,
-                            isStreaming: message.isThinking && isLoading && isLastMessage,
+                            isStreaming: message.isThinking && isRenderingStream,
                             generationTimeSeconds: message.generationTimeSeconds,
-                            thinkingSummary: isLastMessage && message.isThinking ? viewModel.thinkingSummary : nil,
+                            thinkingSummary: isLoading && isLastMessage && message.isThinking
+                                ? viewModel.thinkingSummary
+                                : nil,
                             onTap: { showThoughtsSheet = true }
                         )
 
@@ -507,7 +522,9 @@ struct MessageView: View {
                                 WebSearchBox(
                                     webSearchState: webSearchState,
                                     isDarkMode: isDarkMode,
-                                    webSearchSummary: isLastMessage ? viewModel.webSearchSummary : nil,
+                                    webSearchSummary: isLoading && isLastMessage
+                                        ? viewModel.webSearchSummary
+                                        : nil,
                                     onTap: { showSourcesSheet = true }
                                 )
                             }
@@ -517,7 +534,7 @@ struct MessageView: View {
                                     ChunkedContentView(
                                         chunks: message.contentChunks,
                                         isDarkMode: isDarkMode,
-                                        isStreaming: isLoading && isLastMessage,
+                                        isStreaming: isRenderingStream,
                                         textSelectionEnabled: inlineAssistantTextSelectionEnabled,
                                         citationUrls: citationUrls
                                     )
@@ -527,7 +544,7 @@ struct MessageView: View {
                                     LaTeXMarkdownView(
                                         content: message.content,
                                         isDarkMode: isDarkMode,
-                                        isStreaming: isLoading && isLastMessage,
+                                        isStreaming: isRenderingStream,
                                         textSelectionEnabled: inlineAssistantTextSelectionEnabled,
                                         citationUrls: citationUrls
                                     )
@@ -548,9 +565,13 @@ struct MessageView: View {
                         CollapsibleThinkingBox(
                             thinkingText: parsed.thinkingText,
                             isDarkMode: isDarkMode,
-                            isStreaming: isLoading && isLastMessage,
+                            isStreaming: isRenderingStream,
                             generationTimeSeconds: message.generationTimeSeconds,
-                            thinkingSummary: isLastMessage && !message.content.contains("</think>") ? viewModel.thinkingSummary : nil,
+                            thinkingSummary: isLoading
+                                && isLastMessage
+                                && !message.content.contains("</think>")
+                                ? viewModel.thinkingSummary
+                                : nil,
                             onTap: { showThoughtsSheet = true }
                         )
                         
@@ -559,7 +580,7 @@ struct MessageView: View {
                             LaTeXMarkdownView(
                                 content: parsed.remainderText,
                                 isDarkMode: isDarkMode,
-                                isStreaming: isLoading && isLastMessage,
+                                isStreaming: isRenderingStream,
                                 textSelectionEnabled: inlineAssistantTextSelectionEnabled,
                                 citationUrls: citationUrls
                             )
@@ -626,7 +647,9 @@ struct MessageView: View {
                                 WebSearchBox(
                                     webSearchState: webSearchState,
                                     isDarkMode: isDarkMode,
-                                    webSearchSummary: isLastMessage ? viewModel.webSearchSummary : nil,
+                                    webSearchSummary: isLoading && isLastMessage
+                                        ? viewModel.webSearchSummary
+                                        : nil,
                                     onTap: { showSourcesSheet = true }
                                 )
                             }
@@ -635,7 +658,7 @@ struct MessageView: View {
                                 ChunkedContentView(
                                     chunks: message.contentChunks,
                                     isDarkMode: isDarkMode,
-                                    isStreaming: isLoading && isLastMessage,
+                                    isStreaming: isRenderingStream,
                                     textSelectionEnabled: inlineAssistantTextSelectionEnabled,
                                     citationUrls: citationUrls
                                 )
@@ -645,7 +668,7 @@ struct MessageView: View {
                                 LaTeXMarkdownView(
                                     content: message.content,
                                     isDarkMode: isDarkMode,
-                                    isStreaming: isLoading && isLastMessage,
+                                    isStreaming: isRenderingStream,
                                     textSelectionEnabled: inlineAssistantTextSelectionEnabled,
                                     citationUrls: citationUrls
                                 )
@@ -681,8 +704,7 @@ struct MessageView: View {
                 // initial content has started arriving so we don't double up
                 // with the initial `LoadingDotsView` placeholder above.
                 if message.role == .assistant &&
-                   isLoading &&
-                   isLastMessage &&
+                   isRenderingStream &&
                    (!message.content.isEmpty || message.thoughts != nil || message.isThinking) {
                     StreamingIndicatorDot(isDarkMode: isDarkMode)
                         .padding(.top, 4)
@@ -707,7 +729,7 @@ struct MessageView: View {
                 // Add action buttons for assistant messages (only when not streaming)
                 if message.role == .assistant &&
                    (!message.content.isEmpty || message.thoughts != nil) &&
-                   !(isLoading && isLastMessage) {
+                   !isRenderingStream {
                     HStack(spacing: 16) {
                         // Sources button - only show if we have web search sources
                         if let webSearchState = message.webSearchState,

@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/encrypted-http-body-protocol.git",
       "state" : {
-        "revision" : "9e321911a9abc13379e4d557b5a478745ba09eef",
-        "version" : "0.2.3"
+        "branch" : "feat/incremental-stream-recovery",
+        "revision" : "175e173835d2824980e36ee175bacb50d329221e"
       }
     },
     {

@@ -10,6 +10,8 @@ import Textual
 import ObjectiveC
 
 struct MessageTableView: UIViewRepresentable {
+    let messages: [Message]
+    let recoveryDraftTurnIds: Set<String>
     let archivedMessagesStartIndex: Int
     let isDarkMode: Bool
     let isLoading: Bool
@@ -21,10 +23,6 @@ struct MessageTableView: UIViewRepresentable {
     let scrollToUserTrigger: UUID
     @Binding var tableOpacity: Double
     let keyboardHeight: CGFloat
-
-    private var messages: [Message] {
-        viewModel.messages
-    }
 
     func makeUIView(context: Context) -> UITableView {
         let tableView = UITableView(frame: .zero, style: .plain)
@@ -85,7 +83,7 @@ struct MessageTableView: UIViewRepresentable {
 
         // Detect ID conversion (temp → permanent) by checking if message IDs match
         // This is more reliable than checking wrappers since wrappers only exist for rendered cells
-        let currentMessageIds = Set(viewModel.messages.map { $0.id })
+        let currentMessageIds = Set(messages.map { $0.id })
         let isIdConversion = chatIdChanged && !currentMessageIds.isEmpty &&
             currentMessageIds == context.coordinator.lastMessageIds
 
@@ -218,6 +216,9 @@ struct MessageTableView: UIViewRepresentable {
                         isDarkMode: coordinator.parent.isDarkMode,
                         isLastMessage: true,
                         isLoading: coordinator.parent.isLoading,
+                        hasRecoveryDraft: currentMessage.turnId.map {
+                            coordinator.parent.recoveryDraftTurnIds.contains($0)
+                        } ?? false,
                         isArchived: isArchived,
                         showArchiveSeparator: showArchiveSeparator,
                         messageIndex: coordinator.parent.messages.count - 1
@@ -229,6 +230,25 @@ struct MessageTableView: UIViewRepresentable {
                         tableView.endUpdates()
                     }
                 }
+            }
+        } else {
+            for (index, message) in messages.enumerated() {
+                guard let wrapper = context.coordinator.messageWrappers[message.id] else {
+                    continue
+                }
+                wrapper.update(
+                    message: message,
+                    isDarkMode: isDarkMode,
+                    isLastMessage: index == messages.count - 1,
+                    isLoading: false,
+                    hasRecoveryDraft: message.turnId.map {
+                        recoveryDraftTurnIds.contains($0)
+                    } ?? false,
+                    isArchived: index < archivedMessagesStartIndex,
+                    showArchiveSeparator: index == archivedMessagesStartIndex
+                        && archivedMessagesStartIndex > 0,
+                    messageIndex: index
+                )
             }
         }
 
@@ -261,6 +281,9 @@ struct MessageTableView: UIViewRepresentable {
                     isDarkMode: isDarkMode,
                     isLastMessage: true,
                     isLoading: false,
+                    hasRecoveryDraft: lastMessage.turnId.map {
+                        recoveryDraftTurnIds.contains($0)
+                    } ?? false,
                     isArchived: isArchived,
                     showArchiveSeparator: showArchiveSeparator,
                     messageIndex: messages.count - 1
@@ -401,16 +424,16 @@ struct MessageTableView: UIViewRepresentable {
             self.parent = parent
         }
 
-        func getOrCreateWrapper(for message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool, messageIndex: Int) -> ObservableMessageWrapper {
+        func getOrCreateWrapper(for message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, hasRecoveryDraft: Bool, isArchived: Bool, showArchiveSeparator: Bool, messageIndex: Int) -> ObservableMessageWrapper {
             if let existing = messageWrappers[message.id] {
-                existing.update(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator, messageIndex: messageIndex)
+                existing.update(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, hasRecoveryDraft: hasRecoveryDraft, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator, messageIndex: messageIndex)
                 // Never re-animate existing messages
                 existing.shouldAnimateAppearance = false
                 return existing
             } else {
                 let isFirstTimeShown = !shownMessageIds.contains(message.id)
                 shownMessageIds.insert(message.id)
-                let wrapper = ObservableMessageWrapper(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator, shouldAnimateAppearance: isFirstTimeShown, messageIndex: messageIndex)
+                let wrapper = ObservableMessageWrapper(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, hasRecoveryDraft: hasRecoveryDraft, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator, shouldAnimateAppearance: isFirstTimeShown, messageIndex: messageIndex)
                 messageWrappers[message.id] = wrapper
                 return wrapper
             }
@@ -488,6 +511,9 @@ struct MessageTableView: UIViewRepresentable {
                     isDarkMode: parent.isDarkMode,
                     isLastMessage: isLastMessage,
                     isLoading: parent.isLoading && isLastMessage,
+                    hasRecoveryDraft: message.turnId.map {
+                        parent.recoveryDraftTurnIds.contains($0)
+                    } ?? false,
                     isArchived: isArchived,
                     showArchiveSeparator: showArchiveSeparator,
                     messageIndex: indexPath.row
@@ -827,6 +853,7 @@ class ObservableMessageWrapper: ObservableObject {
     @Published var isDarkMode: Bool
     @Published var isLastMessage: Bool
     @Published var isLoading: Bool
+    @Published var hasRecoveryDraft: Bool
     @Published var isArchived: Bool
     @Published var showArchiveSeparator: Bool
     var shouldAnimateAppearance: Bool = false
@@ -836,18 +863,19 @@ class ObservableMessageWrapper: ObservableObject {
     var cachedHeight: CGFloat?
     var cachedHeightKey: Int?
 
-    init(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool, shouldAnimateAppearance: Bool = true, messageIndex: Int = 0) {
+    init(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, hasRecoveryDraft: Bool = false, isArchived: Bool, showArchiveSeparator: Bool, shouldAnimateAppearance: Bool = true, messageIndex: Int = 0) {
         self.message = message
         self.isDarkMode = isDarkMode
         self.isLastMessage = isLastMessage
         self.isLoading = isLoading
+        self.hasRecoveryDraft = hasRecoveryDraft
         self.isArchived = isArchived
         self.showArchiveSeparator = showArchiveSeparator
         self.shouldAnimateAppearance = shouldAnimateAppearance
         self.messageIndex = messageIndex
     }
 
-    func update(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool, messageIndex: Int) {
+    func update(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, hasRecoveryDraft: Bool, isArchived: Bool, showArchiveSeparator: Bool, messageIndex: Int) {
         let contentChanged = self.message.content != message.content ||
                             self.message.thoughts != message.thoughts ||
                             self.message.contentChunks != message.contentChunks ||
@@ -860,10 +888,15 @@ class ObservableMessageWrapper: ObservableObject {
                             self.message.urlFetches != message.urlFetches ||
                             self.message.segments != message.segments ||
                             self.message.webSearches != message.webSearches ||
+                            self.message.toolCalls != message.toolCalls ||
+                            self.message.timeline != message.timeline ||
+                            self.message.annotations != message.annotations ||
+                            self.message.webSearchBeforeThinking != message.webSearchBeforeThinking ||
                             self.isDarkMode != isDarkMode
 
         let metadataChanged = self.isLastMessage != isLastMessage ||
                               self.isLoading != isLoading ||
+                              self.hasRecoveryDraft != hasRecoveryDraft ||
                               self.isArchived != isArchived ||
                               self.showArchiveSeparator != showArchiveSeparator ||
                               self.messageIndex != messageIndex
@@ -885,6 +918,7 @@ class ObservableMessageWrapper: ObservableObject {
             self.isDarkMode = isDarkMode
             self.isLastMessage = isLastMessage
             self.isLoading = isLoading
+            self.hasRecoveryDraft = hasRecoveryDraft
             self.isArchived = isArchived
             self.showArchiveSeparator = showArchiveSeparator
             self.messageIndex = messageIndex
@@ -974,6 +1008,7 @@ struct ObservableMessageCell: View {
                     isDarkMode: wrapper.isDarkMode,
                     isLastMessage: wrapper.isLastMessage,
                     isLoading: wrapper.isLoading,
+                    hasRecoveryDraft: wrapper.hasRecoveryDraft,
                     messageIndex: wrapper.messageIndex
                 )
                 .environmentObject(viewModel)

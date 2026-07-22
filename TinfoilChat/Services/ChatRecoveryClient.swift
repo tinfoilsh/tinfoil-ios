@@ -108,40 +108,72 @@ actor ChatRecoveryClient {
         sessionId: String,
         token: ChatRecoveryTokenFields
     ) async throws -> AsyncThrowingStream<ChatStreamResult, Error> {
-        let response = try await request(sessionId: sessionId)
+        guard let exportedSecret = Data(lowercaseHex: token.exportedSecret),
+              exportedSecret.count == EHBPConstants.exportLength,
+              let requestEnc = Data(lowercaseHex: token.requestEnc),
+              requestEnc.count == EHBPConstants.requestEncLength
+        else {
+            throw ChatRecoveryClientError.invalidResponse
+        }
+        let request = try await recoveryRequest(sessionId: sessionId)
+        let (bytes, urlResponse) = try await URLSession.shared.bytes(for: request)
+        guard let response = urlResponse as? HTTPURLResponse else {
+            bytes.task.cancel()
+            throw ChatRecoveryClientError.invalidResponse
+        }
         switch response.statusCode {
         case 404:
+            bytes.task.cancel()
             throw ChatRecoveryClientError.state(.missing)
         case 409:
+            bytes.task.cancel()
             throw ChatRecoveryClientError.state(.processing)
         case 410:
+            bytes.task.cancel()
             throw ChatRecoveryClientError.state(.failed)
+        case let statusCode where !(200..<300).contains(statusCode):
+            bytes.task.cancel()
+            throw ChatRecoveryClientError.httpStatus(statusCode)
         default:
-            let nonceHex = response.headers.first {
-                $0.key.caseInsensitiveCompare(EHBPProtocol.responseNonceHeader) == .orderedSame
-            }?.value
-            guard (200..<300).contains(response.statusCode),
-                  let nonceHex,
+            guard let nonceHex = response.value(
+                      forHTTPHeaderField: EHBPProtocol.responseNonceHeader
+                  ),
+                  nonceHex == nonceHex.lowercased(),
                   let nonce = Data(lowercaseHex: nonceHex),
-                  let exportedSecret = Data(lowercaseHex: token.exportedSecret),
-                  let requestEnc = Data(lowercaseHex: token.requestEnc)
+                  nonce.count == EHBPConstants.responseNonceLength
             else {
+                bytes.task.cancel()
                 throw ChatRecoveryClientError.invalidResponse
             }
-            let plaintext = try EHBP.decryptResponseBody(
-                token: SessionRecoveryToken(
-                    exportedSecret: exportedSecret,
-                    requestEnc: requestEnc
-                ),
-                responseNonce: nonce,
-                encryptedData: response.data
+            let responseDecryptor = try SessionRecoveryToken(
+                exportedSecret: exportedSecret,
+                requestEnc: requestEnc
+            ).makeResponseDecryptor(
+                responseNonce: nonce
             )
-            return Self.decodeSSE(
-                AsyncThrowingStream { continuation in
-                    continuation.yield(plaintext)
-                    continuation.finish()
+            let plaintext = AsyncThrowingStream<Data, Error> { continuation in
+                let task = Task {
+                    do {
+                        var decryptor = responseDecryptor
+                        for try await byte in bytes {
+                            try Task.checkCancellation()
+                            for chunk in try decryptor.push(Data([byte])) {
+                                continuation.yield(chunk)
+                            }
+                        }
+                        try decryptor.finish()
+                        continuation.finish()
+                    } catch {
+                        bytes.task.cancel()
+                        continuation.finish(throwing: error)
+                    }
                 }
-            )
+                continuation.onTermination = { _ in
+                    task.cancel()
+                    bytes.task.cancel()
+                }
+            }
+            return Self.decodeSSE(plaintext)
         }
     }
 
@@ -191,6 +223,29 @@ actor ChatRecoveryClient {
         suffix: String = "",
         method: String = "GET"
     ) async throws -> (data: Data, statusCode: Int, headers: [String: String]) {
+        let request = try await recoveryRequest(
+            sessionId: sessionId,
+            suffix: suffix,
+            method: method
+        )
+        let (data, urlResponse) = try await URLSession.shared.data(for: request)
+        guard let response = urlResponse as? HTTPURLResponse else {
+            throw ChatRecoveryClientError.invalidResponse
+        }
+        var headers: [String: String] = [:]
+        for (key, value) in response.allHeaderFields {
+            if let key = key as? String, let value = value as? String {
+                headers[key] = value
+            }
+        }
+        return (data, response.statusCode, headers)
+    }
+
+    private func recoveryRequest(
+        sessionId: String,
+        suffix: String = "",
+        method: String = "GET"
+    ) async throws -> URLRequest {
         try validateSessionId(sessionId)
         _ = try await endpoint()
         guard let baseURL = URL(string: Constants.API.baseURL),
@@ -205,17 +260,7 @@ actor ChatRecoveryClient {
         request.httpMethod = method
         request.timeoutInterval = Constants.ChatRecovery.requestTimeoutSeconds
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        let (data, urlResponse) = try await URLSession.shared.data(for: request)
-        guard let response = urlResponse as? HTTPURLResponse else {
-            throw ChatRecoveryClientError.invalidResponse
-        }
-        var headers: [String: String] = [:]
-        for (key, value) in response.allHeaderFields {
-            if let key = key as? String, let value = value as? String {
-                headers[key] = value
-            }
-        }
-        return (data, response.statusCode, headers)
+        return request
     }
 
     private func validateSessionId(_ sessionId: String) throws {
