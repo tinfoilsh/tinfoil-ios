@@ -199,6 +199,7 @@ struct MessageTableView: UIViewRepresentable {
             // During streaming, update the last message wrapper directly
             if let lastMessage = messages.last,
                let wrapper = context.coordinator.messageWrappers[lastMessage.id] {
+                let lastMessageId = lastMessage.id
                 if hasRecoveryDraft(lastMessage) {
                     context.coordinator.heightCache.removeValue(
                         forKey: IndexPath(row: messages.count - 1, section: 0)
@@ -229,7 +230,12 @@ struct MessageTableView: UIViewRepresentable {
                     // stale wrapper or recalculating heights against the old row
                     // set would desync the table from its datasource.
                     guard coordinator.lastChatId == currentChatId,
-                          let currentMessage = coordinator.parent.messages.last else { return }
+                          coordinator.streamingMessageId == lastMessageId,
+                          let currentMessage = coordinator.parent.messages.last,
+                          currentMessage.id == lastMessageId
+                    else {
+                        return
+                    }
 
                     wrapper.update(
                         message: currentMessage,
