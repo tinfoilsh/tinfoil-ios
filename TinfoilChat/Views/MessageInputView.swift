@@ -93,10 +93,78 @@ struct MessageInputView: View {
         viewModel.isLoading && (!hasSubmittableContent || viewModel.isMessageQueueFull)
     }
 
-    /// The send button greys out while a draft can't be dispatched because
-    /// an attachment is still processing.
-    private var isSendActionDisabled: Bool {
-        !showStopAction && !attachmentsAreReadyToSend(viewModel.pendingAttachments)
+    private enum TrailingAction {
+        case voice
+        case send
+        case stop
+    }
+
+    /// The trailing button doubles as voice input while the draft is empty
+    /// and becomes the send button once the user enters text or attaches
+    /// files; while a stream with nothing submittable is in flight it turns
+    /// into a stop button. An active recording or transcription pins the
+    /// voice role so the microphone can always be stopped.
+    private var trailingAction: TrailingAction {
+        if showAudioButton && (viewModel.isRecording || viewModel.isTranscribing) {
+            return .voice
+        }
+        if showStopAction { return .stop }
+        if showAudioButton,
+           messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           viewModel.pendingAttachments.isEmpty {
+            return .voice
+        }
+        return .send
+    }
+
+    private var trailingActionIconName: String {
+        switch trailingAction {
+        case .voice: return viewModel.isRecording ? "stop.fill" : "mic.fill"
+        case .send: return "arrow.up"
+        case .stop: return "stop.fill"
+        }
+    }
+
+    private var trailingActionAccessibilityLabel: String {
+        switch trailingAction {
+        case .voice: return viewModel.isRecording ? "Stop recording" : "Voice input"
+        case .send: return "Send message"
+        case .stop: return "Stop generating"
+        }
+    }
+
+    /// The send action greys out while a draft can't be dispatched because
+    /// an attachment is still processing; voice greys out while a recording
+    /// is being transcribed.
+    private var isTrailingActionDisabled: Bool {
+        switch trailingAction {
+        case .voice: return viewModel.isTranscribing
+        case .send: return !attachmentsAreReadyToSend(viewModel.pendingAttachments)
+        case .stop: return false
+        }
+    }
+
+    private var trailingActionForegroundColor: Color {
+        if viewModel.isRecording { return .white }
+        return isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight
+    }
+
+    private var trailingActionBackgroundColor: Color {
+        if viewModel.isRecording { return .red }
+        return isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight
+    }
+
+    /// Icon content shared by both input layouts' trailing action button.
+    @ViewBuilder
+    private var trailingActionIcon: some View {
+        if trailingAction == .voice && viewModel.isTranscribing {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: trailingActionForegroundColor))
+                .scaleEffect(0.8)
+        } else {
+            Image(systemName: trailingActionIconName)
+                .font(.system(size: 16, weight: .semibold))
+        }
     }
 
     // Attachment picker state
@@ -430,60 +498,27 @@ struct MessageInputView: View {
 
                     Spacer()
 
-                    // Microphone button
-                    if showAudioButton {
-                        Button(action: handleAudioButtonTap) {
-                            ZStack {
-                                if viewModel.isRecording {
-                                    // Pulsating background when recording
-                                    Circle()
-                                        .fill(Color.red.opacity(0.2))
-                                        .frame(width: 44, height: 44)
-                                        .scaleEffect(reduceMotion ? 1.0 : (isPulsing ? 1.1 : 0.9))
-                                        .animation(
-                                            reduceMotion ? nil : .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
-                                            value: isPulsing
-                                        )
-                                }
-
-                                Group {
-                                    if viewModel.isTranscribing {
-                                        ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle(tint: .secondary))
-                                            .scaleEffect(0.8)
-                                    } else {
-                                        Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
-                                            .font(.system(size: 20))
-                                    }
-                                }
-                                .frame(width: 32, height: 32)
-                                .foregroundColor(viewModel.isRecording ? .red : .secondary)
-                            }
-                            .frame(width: 32, height: 32)
-                        }
-                        .onChange(of: viewModel.isRecording) { _, isRecording in
-                            isPulsing = isRecording
-                        }
-                        .disabled(viewModel.isLoading || viewModel.isTranscribing)
-                        .accessibleHitTarget()
-                        .accessibilityLabel(viewModel.isRecording ? "Stop recording" : "Voice input")
-                        .accessibilityValue(viewModel.isTranscribing ? "Transcribing" : "")
-                        .padding(.trailing, 4)
-                    }
-
-                    Button(action: sendOrCancelMessage) {
-                        Image(systemName: showStopAction ? "stop.fill" : "arrow.up")
-                            .font(.system(size: 16, weight: .semibold))
+                    Button(action: handleTrailingActionTap) {
+                        trailingActionIcon
                             .frame(width: 24, height: 24)
-                            .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
+                            .foregroundColor(trailingActionForegroundColor)
                     }
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.circle)
                     .glassEffect(.regular.interactive(), in: .circle)
                     .clipShape(.circle)
-                    .tint(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
-                    .disabled(isSendActionDisabled)
-                    .accessibilityLabel(showStopAction ? "Stop generating" : "Send message")
+                    .tint(trailingActionBackgroundColor)
+                    .scaleEffect(reduceMotion || !isPulsing ? 1.0 : 1.1)
+                    .animation(
+                        reduceMotion ? nil : (isPulsing ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .easeInOut(duration: 0.2)),
+                        value: isPulsing
+                    )
+                    .onChange(of: viewModel.isRecording) { _, isRecording in
+                        isPulsing = isRecording
+                    }
+                    .disabled(isTrailingActionDisabled)
+                    .accessibilityLabel(trailingActionAccessibilityLabel)
+                    .accessibilityValue(viewModel.isTranscribing ? "Transcribing" : "")
                     .padding(.trailing, 8)
                 }
                 .padding(.vertical, 8)
@@ -531,60 +566,27 @@ struct MessageInputView: View {
 
                     Spacer()
 
-                    // Microphone button
-                    if showAudioButton {
-                        Button(action: handleAudioButtonTap) {
-                            ZStack {
-                                if viewModel.isRecording {
-                                    // Pulsating background when recording
-                                    Circle()
-                                        .fill(Color.red.opacity(0.2))
-                                        .frame(width: 44, height: 44)
-                                        .scaleEffect(reduceMotion ? 1.0 : (isPulsing ? 1.1 : 0.9))
-                                        .animation(
-                                            reduceMotion ? nil : .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
-                                            value: isPulsing
-                                        )
-                                }
-
-                                Group {
-                                    if viewModel.isTranscribing {
-                                        ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle(tint: .secondary))
-                                            .scaleEffect(0.8)
-                                    } else {
-                                        Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
-                                            .font(.system(size: 20))
-                                    }
-                                }
-                                .frame(width: 32, height: 32)
-                                .foregroundColor(viewModel.isRecording ? .red : .secondary)
-                            }
-                            .frame(width: 32, height: 32)
-                        }
-                        .onChange(of: viewModel.isRecording) { _, isRecording in
-                            isPulsing = isRecording
-                        }
-                        .disabled(viewModel.isLoading || viewModel.isTranscribing)
-                        .accessibleHitTarget()
-                        .accessibilityLabel(viewModel.isRecording ? "Stop recording" : "Voice input")
-                        .accessibilityValue(viewModel.isTranscribing ? "Transcribing" : "")
-                        .padding(.trailing, 4)
-                    }
-
-                    Button(action: sendOrCancelMessage) {
+                    Button(action: handleTrailingActionTap) {
                         ZStack {
                             Circle()
-                                .fill(isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight)
+                                .fill(trailingActionBackgroundColor)
                                 .frame(width: 32, height: 32)
 
-                            Image(systemName: showStopAction ? "stop.fill" : "arrow.up")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight)
+                            trailingActionIcon
+                                .foregroundColor(trailingActionForegroundColor)
                         }
                     }
-                    .disabled(isSendActionDisabled)
-                    .accessibilityLabel(showStopAction ? "Stop generating" : "Send message")
+                    .scaleEffect(reduceMotion || !isPulsing ? 1.0 : 1.1)
+                    .animation(
+                        reduceMotion ? nil : (isPulsing ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .easeInOut(duration: 0.2)),
+                        value: isPulsing
+                    )
+                    .onChange(of: viewModel.isRecording) { _, isRecording in
+                        isPulsing = isRecording
+                    }
+                    .disabled(isTrailingActionDisabled)
+                    .accessibilityLabel(trailingActionAccessibilityLabel)
+                    .accessibilityValue(viewModel.isTranscribing ? "Transcribing" : "")
                     .accessibleHitTarget()
                     .padding(.trailing, 8)
                 }
@@ -648,6 +650,14 @@ struct MessageInputView: View {
         .accessibilityValue(viewModel.currentModel.displayName)
         .accessibilityHint("Changes the AI model")
         .padding(.leading, 4)
+    }
+
+    private func handleTrailingActionTap() {
+        if trailingAction == .voice {
+            handleAudioButtonTap()
+        } else {
+            sendOrCancelMessage()
+        }
     }
 
     private func sendOrCancelMessage() {
