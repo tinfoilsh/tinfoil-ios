@@ -417,22 +417,41 @@ actor ChatRecoveryCoordinator {
                 }
             }
             guard let token = payload.recoveryToken.fields else { return }
-            let stream = try await ChatRecoveryClient.shared.fetch(
+            let key = turnKey(
+                chatId: chatId,
+                turnId: envelope.turnId,
+                storage: storage
+            )
+            let recovered = try await ChatRecoveryClient.shared.fetch(
                 sessionId: payload.sessionId,
                 token: token
             )
             guard !Task.isCancelled else { return }
+            if !(200..<300).contains(recovered.statusCode) {
+                for try await _ in recovered.stream {}
+                guard generation == accountGeneration,
+                      activeAccountId == userId,
+                      !cancelledTurns.contains(key),
+                      !(await isChatStreaming(chatId)),
+                      !Task.isCancelled
+                else {
+                    return
+                }
+                await removeTerminal(
+                    chatId: chatId,
+                    turnId: envelope.turnId,
+                    userId: userId,
+                    sessionId: payload.sessionId,
+                    storage: storage
+                )
+                return
+            }
             let response = try await reconstructMessage(
-                stream: stream,
+                stream: recovered.stream,
                 chatId: chatId,
                 turnId: envelope.turnId,
                 userId: userId,
                 generation: generation,
-                storage: storage
-            )
-            let key = turnKey(
-                chatId: chatId,
-                turnId: envelope.turnId,
                 storage: storage
             )
             guard generation == accountGeneration,

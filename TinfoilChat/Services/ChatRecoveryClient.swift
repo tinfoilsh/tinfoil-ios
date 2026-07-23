@@ -23,6 +23,11 @@ struct RecoverableChatStream {
     let token: ChatRecoveryTokenPayload
 }
 
+struct RecoveredChatStream {
+    let stream: AsyncThrowingStream<ChatStreamResult, Error>
+    let statusCode: Int
+}
+
 actor ChatRecoveryClient {
     static let shared = ChatRecoveryClient()
 
@@ -107,7 +112,7 @@ actor ChatRecoveryClient {
     func fetch(
         sessionId: String,
         token: ChatRecoveryTokenFields
-    ) async throws -> AsyncThrowingStream<ChatStreamResult, Error> {
+    ) async throws -> RecoveredChatStream {
         guard let exportedSecret = Data(lowercaseHex: token.exportedSecret),
               exportedSecret.count == EHBPConstants.exportLength,
               let requestEnc = Data(lowercaseHex: token.requestEnc),
@@ -121,60 +126,45 @@ actor ChatRecoveryClient {
             bytes.task.cancel()
             throw ChatRecoveryClientError.invalidResponse
         }
-        switch response.statusCode {
-        case 404:
+        let nonce: Data
+        do {
+            nonce = try recoveryResponseNonce(from: response)
+        } catch {
             bytes.task.cancel()
-            throw ChatRecoveryClientError.state(.missing)
-        case 409:
-            bytes.task.cancel()
-            throw ChatRecoveryClientError.state(.processing)
-        case 410:
-            bytes.task.cancel()
-            throw ChatRecoveryClientError.state(.failed)
-        case let statusCode where !(200..<300).contains(statusCode):
-            bytes.task.cancel()
-            throw ChatRecoveryClientError.httpStatus(statusCode)
-        default:
-            guard let nonceHex = response.value(
-                      forHTTPHeaderField: EHBPProtocol.responseNonceHeader
-                  ),
-                  nonceHex == nonceHex.lowercased(),
-                  let nonce = Data(lowercaseHex: nonceHex),
-                  nonce.count == EHBPConstants.responseNonceLength
-            else {
-                bytes.task.cancel()
-                throw ChatRecoveryClientError.invalidResponse
-            }
-            let responseDecryptor = try SessionRecoveryToken(
-                exportedSecret: exportedSecret,
-                requestEnc: requestEnc
-            ).makeResponseDecryptor(
-                responseNonce: nonce
-            )
-            let plaintext = AsyncThrowingStream<Data, Error> { continuation in
-                let task = Task {
-                    do {
-                        var decryptor = responseDecryptor
-                        for try await byte in bytes {
-                            try Task.checkCancellation()
-                            if let chunk = try decryptor.push(byte) {
-                                continuation.yield(chunk)
-                            }
-                        }
-                        try decryptor.finish()
-                        continuation.finish()
-                    } catch {
-                        bytes.task.cancel()
-                        continuation.finish(throwing: error)
-                    }
-                }
-                continuation.onTermination = { _ in
-                    task.cancel()
-                    bytes.task.cancel()
-                }
-            }
-            return Self.decodeSSE(plaintext)
+            throw error
         }
+        let responseDecryptor = try SessionRecoveryToken(
+            exportedSecret: exportedSecret,
+            requestEnc: requestEnc
+        ).makeResponseDecryptor(
+            responseNonce: nonce
+        )
+        let plaintext = AsyncThrowingStream<Data, Error> { continuation in
+            let task = Task {
+                do {
+                    var decryptor = responseDecryptor
+                    for try await byte in bytes {
+                        try Task.checkCancellation()
+                        if let chunk = try decryptor.push(byte) {
+                            continuation.yield(chunk)
+                        }
+                    }
+                    try decryptor.finish()
+                    continuation.finish()
+                } catch {
+                    bytes.task.cancel()
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+                bytes.task.cancel()
+            }
+        }
+        return RecoveredChatStream(
+            stream: Self.decodeSSE(plaintext),
+            statusCode: response.statusCode
+        )
     }
 
     func delete(sessionId: String) async throws {
@@ -302,6 +292,30 @@ actor ChatRecoveryClient {
             continuation.onTermination = { _ in task.cancel() }
         }
     }
+}
+
+func recoveryResponseNonce(from response: HTTPURLResponse) throws -> Data {
+    guard let nonceHex = response.value(
+        forHTTPHeaderField: EHBPProtocol.responseNonceHeader
+    ) else {
+        switch response.statusCode {
+        case 404:
+            throw ChatRecoveryClientError.state(.missing)
+        case 410:
+            throw ChatRecoveryClientError.state(.failed)
+        case let statusCode where !(200..<300).contains(statusCode):
+            throw ChatRecoveryClientError.httpStatus(statusCode)
+        default:
+            throw ChatRecoveryClientError.invalidResponse
+        }
+    }
+    guard nonceHex == nonceHex.lowercased(),
+          let nonce = Data(lowercaseHex: nonceHex),
+          nonce.count == EHBPConstants.responseNonceLength
+    else {
+        throw ChatRecoveryClientError.invalidResponse
+    }
+    return nonce
 }
 
 private extension Data {
