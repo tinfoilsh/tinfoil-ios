@@ -1,7 +1,6 @@
 .sentryclirc
 TinfoilChat.xcodeproj/project.xcworkspace/xcuserdata
 TinfoilChat.xcodeproj/xcuserdata/*
-CLAUDE.md
 .build/
 *.noindex/
 TinfoilChat-*/
