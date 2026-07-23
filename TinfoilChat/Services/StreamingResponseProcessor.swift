@@ -234,26 +234,25 @@ final class StreamingResponseProcessor: @unchecked Sendable {
         if isWebSearchEnabled, let annotations = chunk.choices.first?.delta.annotations {
             var didCollectNewSource = false
             for annotation in annotations where annotation.type == "url_citation" {
-                if let citation = annotation.urlCitation {
-                    let source = WebSearchSource(
-                        title: citation.title ?? citation.url,
-                        url: citation.url
-                    )
-                    collectedSources.append(source)
-                    collectedAnnotations.append(
-                        Annotation(
-                            type: "url_citation",
-                            url_citation: URLCitation(
-                                title: citation.title ?? citation.url,
-                                url: citation.url,
-                                start_index: nil,
-                                end_index: nil
-                            )
+                let citation = annotation.urlCitation
+                let source = WebSearchSource(
+                    title: citation.title ?? citation.url,
+                    url: citation.url
+                )
+                collectedSources.append(source)
+                collectedAnnotations.append(
+                    Annotation(
+                        type: "url_citation",
+                        url_citation: URLCitation(
+                            title: citation.title ?? citation.url,
+                            url: citation.url,
+                            start_index: nil,
+                            end_index: nil
                         )
                     )
-                    didCollectNewSource = true
-                    outcome.didMutateState = true
-                }
+                )
+                didCollectNewSource = true
+                outcome.didMutateState = true
             }
             // Mirror the running sources onto the most recent WebSearchInstance.
             // When the router sent `.completed` before any sources, we held the
