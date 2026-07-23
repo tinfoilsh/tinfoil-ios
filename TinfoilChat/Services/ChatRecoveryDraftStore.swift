@@ -12,6 +12,7 @@ final class ChatRecoveryDraftStore: ObservableObject {
 
     @Published private(set) var drafts: [ChatRecoveryDraftKey: Message] = [:]
     private var accountGeneration = 0
+    private var scanGeneration = 0
     private var discardedChatIds: Set<String> = []
     private var discardedKeys: Set<ChatRecoveryDraftKey> = []
 
@@ -21,10 +22,12 @@ final class ChatRecoveryDraftStore: ObservableObject {
         _ draft: Message,
         chatId: String,
         turnId: String,
-        generation: Int
+        generation: Int,
+        scanGeneration: Int? = nil
     ) {
         let key = ChatRecoveryDraftKey(chatId: chatId, turnId: turnId)
         guard generation == accountGeneration,
+              scanGeneration == nil || scanGeneration == self.scanGeneration,
               !discardedChatIds.contains(chatId),
               !discardedKeys.contains(key)
         else {
@@ -35,6 +38,11 @@ final class ChatRecoveryDraftStore: ObservableObject {
         streamingDraft.isStreaming = true
         guard drafts[key] != streamingDraft else { return }
         drafts[key] = streamingDraft
+    }
+
+    func beginScan(generation: Int) {
+        guard generation >= scanGeneration else { return }
+        scanGeneration = generation
     }
 
     func clear(chatId: String, turnId: String) {
@@ -57,6 +65,7 @@ final class ChatRecoveryDraftStore: ObservableObject {
     func reset(generation: Int) {
         guard generation >= accountGeneration else { return }
         accountGeneration = generation
+        scanGeneration = 0
         discardedChatIds.removeAll()
         discardedKeys.removeAll()
         clearAll()

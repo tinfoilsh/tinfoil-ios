@@ -61,6 +61,12 @@ func shouldBlockMessageSendForRecovery(
     !isStreaming && !pendingRecoveries.isEmpty
 }
 
+func recoveryScanHasStalled(lastProgressAt: Date?, now: Date) -> Bool {
+    guard let lastProgressAt else { return false }
+    return now.timeIntervalSince(lastProgressAt)
+        >= Constants.ChatRecovery.scanStallTimeoutSeconds
+}
+
 @MainActor
 class ChatViewModel: ObservableObject {
     // Published properties for UI updates
@@ -299,6 +305,7 @@ class ChatViewModel: ObservableObject {
     private var recoveryScanTimer: Timer?
     private var recoveryScanTask: Task<Void, Never>?
     private var recoveryScanGeneration = 0
+    private var recoveryScanLastProgressAt: Date?
     private var recoveryScansSuspended = false
     private var recoveryRescanRequested = false
     private var didBecomeActiveObserver: NSObjectProtocol?
@@ -663,16 +670,15 @@ class ChatViewModel: ObservableObject {
         autoSyncTimer?.invalidate()
         recoveryScanTimer?.invalidate()
         recoveryScanTimer = nil
+        setupRecoveryScanTimer()
 
         // Do not start auto-sync when cloud sync is disabled
         if !SettingsManager.shared.isCloudSyncEnabled {
-            setupRecoveryScanTimer()
             return
         }
 
         // Do not start auto-sync until encryption key is set up
         if !EncryptionService.shared.hasEncryptionKey() {
-            setupRecoveryScanTimer()
             return
         }
 
@@ -852,10 +858,24 @@ class ChatViewModel: ObservableObject {
     private func scanPendingRecoveries() {
         guard let userId = currentUserId else { return }
         guard !recoveryScansSuspended else { return }
-        if recoveryScanTask != nil {
+        if let activeTask = recoveryScanTask {
             recoveryRescanRequested = true
-            return
+            guard recoveryScanHasStalled(
+                lastProgressAt: recoveryScanLastProgressAt,
+                now: Date()
+            ) else {
+                return
+            }
+            recoveryRescanRequested = false
+            activeTask.cancel()
+            recoveryScanTask = nil
+            startRecoveryScan(userId: userId, replacingActiveScan: true)
+        } else {
+            startRecoveryScan(userId: userId, replacingActiveScan: false)
         }
+    }
+
+    private func startRecoveryScan(userId: String, replacingActiveScan: Bool) {
         var storages: [ChatRecoveryStorage] = [.local]
         if SettingsManager.shared.isCloudSyncEnabled,
            EncryptionService.shared.hasEncryptionKey() {
@@ -864,13 +884,19 @@ class ChatViewModel: ObservableObject {
         recoveryScanGeneration += 1
         let generation = recoveryScanGeneration
         let storagesToScan = storages
+        recoveryScanLastProgressAt = Date()
         recoveryScanTask = Task { [weak self] in
             await ChatRecoveryCoordinator.shared.scan(
                 userId: userId,
-                storages: storagesToScan
+                storages: storagesToScan,
+                replacingActiveScan: replacingActiveScan,
+                onProgress: { [weak self] in
+                    await self?.recordRecoveryScanProgress(generation: generation)
+                }
             )
             guard let self, self.recoveryScanGeneration == generation else { return }
             self.recoveryScanTask = nil
+            self.recoveryScanLastProgressAt = nil
             if self.recoveryRescanRequested {
                 self.recoveryRescanRequested = false
                 self.scanPendingRecoveries()
@@ -884,8 +910,18 @@ class ChatViewModel: ObservableObject {
         recoveryScanGeneration += 1
         let task = recoveryScanTask
         recoveryScanTask = nil
+        recoveryScanLastProgressAt = nil
         task?.cancel()
         await task?.value
+    }
+
+    private func recordRecoveryScanProgress(generation: Int) {
+        guard recoveryScanGeneration == generation,
+              recoveryScanTask != nil
+        else {
+            return
+        }
+        recoveryScanLastProgressAt = Date()
     }
 
     func resumeRecoveryScans() {

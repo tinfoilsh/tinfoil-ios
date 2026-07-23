@@ -32,7 +32,7 @@ actor ChatRecoverySync {
 
     enum Mutation {
         case add(PendingRecoveryEnvelope)
-        case remove(turnId: String)
+        case remove(PendingRecoveryEnvelope)
         case cancel(turnId: String, response: Message?)
         case replace(old: PendingRecoveryEnvelope, new: PendingRecoveryEnvelope)
         case complete(
@@ -49,6 +49,7 @@ actor ChatRecoverySync {
         storage: ChatRecoveryStorage,
         mutation: Mutation
     ) async throws {
+        try Task.checkCancellation()
         if storage == .local {
             try await mutateLocal(
                 chatId: chatId,
@@ -61,19 +62,23 @@ actor ChatRecoverySync {
         var lastError: Error = ChatRecoverySyncError.conflict
         for _ in 0..<Constants.ChatRecovery.maxMutationAttempts {
             do {
+                try Task.checkCancellation()
                 guard await Clerk.shared.user?.id == userId else {
                     throw ChatRecoverySyncError.chatMissing
                 }
                 guard let remote = try await CloudStorageService.shared.downloadChat(chatId) else {
                     throw ChatRecoverySyncError.chatMissing
                 }
+                try Task.checkCancellation()
                 let loadedLocal = try? await EncryptedFileStorage.cloud.loadChat(
                     chatId: chatId,
                     userId: userId
                 )
+                try Task.checkCancellation()
                 guard let remoteChat = await MainActor.run(body: { remote.toChat() }) else {
                     throw ChatRecoverySyncError.chatMissing
                 }
+                try Task.checkCancellation()
                 guard !remoteChat.decryptionFailed, !remoteChat.dataCorrupted else {
                     throw ChatRecoverySyncError.chatMissing
                 }
@@ -89,10 +94,12 @@ actor ChatRecoverySync {
                 guard await Clerk.shared.user?.id == userId else {
                     throw ChatRecoverySyncError.chatMissing
                 }
+                try Task.checkCancellation()
                 let result = try await CloudStorageService.shared.uploadChat(
                     StoredChat(from: candidate, syncVersion: remote.syncVersion),
                     idempotencyKey: UUID().uuidString.lowercased()
                 )
+                try Task.checkCancellation()
                 applyAttachmentRewrites(result.rewrites, to: &candidate)
                 candidate.syncVersion = result.syncVersion ?? remote.syncVersion + 1
                 candidate.syncedAt = Date()
@@ -101,6 +108,7 @@ actor ChatRecoverySync {
                 guard await Clerk.shared.user?.id == userId else {
                     throw ChatRecoverySyncError.chatMissing
                 }
+                try Task.checkCancellation()
                 await applyLocally(
                     candidate,
                     mutation: mutation,
@@ -125,6 +133,7 @@ actor ChatRecoverySync {
         mutation: Mutation
     ) async throws {
         for _ in 0..<Constants.ChatRecovery.maxMutationAttempts {
+            try Task.checkCancellation()
             guard await Clerk.shared.user?.id == userId,
                   let local = try await EncryptedFileStorage.local.loadChat(
                       chatId: chatId,
@@ -133,6 +142,7 @@ actor ChatRecoverySync {
             else {
                 throw ChatRecoverySyncError.chatMissing
             }
+            try Task.checkCancellation()
             var candidate = local
             try apply(mutation, to: &candidate, authoritativeRemote: local)
             candidate.updatedAt = Date()
@@ -140,6 +150,7 @@ actor ChatRecoverySync {
             guard await Clerk.shared.user?.id == userId else {
                 throw ChatRecoverySyncError.chatMissing
             }
+            try Task.checkCancellation()
             if try await EncryptedFileStorage.local.applyRemoteChatIfFresh(
                 candidate,
                 userId: userId,
@@ -242,8 +253,13 @@ actor ChatRecoverySync {
                 throw ChatRecoverySyncError.pendingLimitReached
             }
             pending.append(envelope)
-        case .remove(let turnId):
-            pending.removeAll { $0.turnId == turnId }
+        case .remove(let envelope):
+            guard authoritativeRemote.pendingRecoveries?.contains(envelope) == true,
+                  let index = pending.firstIndex(of: envelope)
+            else {
+                throw ChatRecoverySyncError.envelopeMissing
+            }
+            pending.remove(at: index)
         case .cancel(let turnId, let response):
             guard authoritativeRemote.pendingRecoveries?.contains(where: {
                 $0.turnId == turnId
@@ -330,6 +346,7 @@ actor ChatRecoverySync {
         expectedBaselineUpdatedAt: Date?
     ) async {
         for _ in 0..<Constants.ChatRecovery.maxMutationAttempts {
+            guard !Task.isCancelled else { return }
             let loaded = try? await EncryptedFileStorage.cloud.loadChat(
                 chatId: uploaded.id,
                 userId: userId
@@ -357,6 +374,7 @@ actor ChatRecoverySync {
                 expectedLocalUpdatedAt: expectedUpdatedAt,
                 allowLocallyModified: true
             )) ?? false
+            guard !Task.isCancelled else { return }
             if applied {
                 if candidate.locallyModified {
                     await CloudSyncService.shared.backupChat(candidate.id)
