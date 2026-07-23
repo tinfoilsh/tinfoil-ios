@@ -609,14 +609,12 @@ actor ChatRecoveryCoordinator {
                     isStreaming: true
                 )
                 if recoveredMessageIsMeaningful(draft) {
-                    await MainActor.run {
-                        ChatRecoveryDraftStore.shared.replace(
-                            draft,
-                            chatId: chatId,
-                            turnId: turnId,
-                            generation: generation
-                        )
-                    }
+                    try await publishRecoveryDraft(
+                        draft,
+                        chatId: chatId,
+                        turnId: turnId,
+                        generation: generation
+                    )
                 }
             }
         }
@@ -638,16 +636,39 @@ actor ChatRecoveryCoordinator {
         if recoveredMessageIsMeaningful(message) {
             var finalDraft = message
             finalDraft.isStreaming = true
-            await MainActor.run {
-                ChatRecoveryDraftStore.shared.replace(
-                    finalDraft,
-                    chatId: chatId,
-                    turnId: turnId,
-                    generation: generation
-                )
-            }
+            try await publishRecoveryDraft(
+                finalDraft,
+                chatId: chatId,
+                turnId: turnId,
+                generation: generation
+            )
         }
         return message
+    }
+
+    private func publishRecoveryDraft(
+        _ draft: Message,
+        chatId: String,
+        turnId: String,
+        generation: Int
+    ) async throws {
+        let published = await MainActor.run {
+            guard !StreamingTracker.shared.isStreaming(chatId) else {
+                ChatRecoveryDraftStore.shared.clear(
+                    chatId: chatId,
+                    turnId: turnId
+                )
+                return false
+            }
+            ChatRecoveryDraftStore.shared.replace(
+                draft,
+                chatId: chatId,
+                turnId: turnId,
+                generation: generation
+            )
+            return true
+        }
+        guard published else { throw CancellationError() }
     }
 
     private func recoveredMessage(

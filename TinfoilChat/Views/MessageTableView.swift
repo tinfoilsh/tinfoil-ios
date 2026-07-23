@@ -24,6 +24,15 @@ struct MessageTableView: UIViewRepresentable {
     @Binding var tableOpacity: Double
     let keyboardHeight: CGFloat
 
+    private func hasRecoveryDraft(_ message: Message) -> Bool {
+        message.turnId.map { recoveryDraftTurnIds.contains($0) } ?? false
+    }
+
+    private var usesStreamingLayout: Bool {
+        guard let lastMessage = messages.last else { return isLoading }
+        return isLoading || hasRecoveryDraft(lastMessage)
+    }
+
     func makeUIView(context: Context) -> UITableView {
         let tableView = UITableView(frame: .zero, style: .plain)
         tableView.backgroundColor = .clear
@@ -97,9 +106,9 @@ struct MessageTableView: UIViewRepresentable {
         // collapsed height immediately and can't overlap the rows added after
         // it. The stale wrapper's buffer state and cached height go with it.
         let previousStreamingMessageId = context.coordinator.streamingMessageId
-        context.coordinator.streamingMessageId = isLoading ? messages.last?.id : nil
+        context.coordinator.streamingMessageId = usesStreamingLayout ? messages.last?.id : nil
         if let staleId = previousStreamingMessageId,
-           staleId != messages.last?.id,
+           staleId != context.coordinator.streamingMessageId,
            let staleWrapper = context.coordinator.messageWrappers[staleId] {
             staleWrapper.resetBuffer()
             context.coordinator.messageHeightCache.removeValue(forKey: staleId)
@@ -118,7 +127,7 @@ struct MessageTableView: UIViewRepresentable {
                 // the same conversation stays on screen with its wrappers
                 // retained, so a stream that ends across the conversion must
                 // still collapse its buffer through the normal path.
-                context.coordinator.lastIsLoading = isLoading
+                context.coordinator.lastUsesStreamingLayout = usesStreamingLayout
                 context.coordinator.messageWrappers.removeAll()
                 context.coordinator.shownMessageIds.removeAll()
 
@@ -186,10 +195,21 @@ struct MessageTableView: UIViewRepresentable {
             context.coordinator.lastMessageCount = messages.count
             context.coordinator.heightCache.removeAll()
             tableView.reloadData()
-        } else if isLoading && !messages.isEmpty {
+        } else if usesStreamingLayout && !messages.isEmpty {
             // During streaming, update the last message wrapper directly
             if let lastMessage = messages.last,
                let wrapper = context.coordinator.messageWrappers[lastMessage.id] {
+                if hasRecoveryDraft(lastMessage) {
+                    context.coordinator.heightCache.removeValue(
+                        forKey: IndexPath(row: messages.count - 1, section: 0)
+                    )
+                    context.coordinator.messageHeightCache.removeValue(
+                        forKey: lastMessage.id
+                    )
+                    context.coordinator.contentEstimateCache.removeValue(
+                        forKey: lastMessage.id
+                    )
+                }
 
                 let isArchived = messages.count - 1 < archivedMessagesStartIndex
                 let showArchiveSeparator = messages.count - 1 == archivedMessagesStartIndex && archivedMessagesStartIndex > 0
@@ -216,9 +236,7 @@ struct MessageTableView: UIViewRepresentable {
                         isDarkMode: coordinator.parent.isDarkMode,
                         isLastMessage: true,
                         isLoading: coordinator.parent.isLoading,
-                        hasRecoveryDraft: currentMessage.turnId.map {
-                            coordinator.parent.recoveryDraftTurnIds.contains($0)
-                        } ?? false,
+                        hasRecoveryDraft: coordinator.parent.hasRecoveryDraft(currentMessage),
                         isArchived: isArchived,
                         showArchiveSeparator: showArchiveSeparator,
                         messageIndex: coordinator.parent.messages.count - 1
@@ -231,19 +249,47 @@ struct MessageTableView: UIViewRepresentable {
                     }
                 }
             }
+            for (index, message) in messages.dropLast().enumerated() {
+                guard hasRecoveryDraft(message),
+                      let wrapper = context.coordinator.messageWrappers[message.id]
+                else {
+                    continue
+                }
+                context.coordinator.heightCache.removeValue(
+                    forKey: IndexPath(row: index, section: 0)
+                )
+                context.coordinator.messageHeightCache.removeValue(forKey: message.id)
+                context.coordinator.contentEstimateCache.removeValue(forKey: message.id)
+                wrapper.update(
+                    message: message,
+                    isDarkMode: isDarkMode,
+                    isLastMessage: false,
+                    isLoading: false,
+                    hasRecoveryDraft: true,
+                    isArchived: index < archivedMessagesStartIndex,
+                    showArchiveSeparator: index == archivedMessagesStartIndex
+                        && archivedMessagesStartIndex > 0,
+                    messageIndex: index
+                )
+            }
         } else {
             for (index, message) in messages.enumerated() {
                 guard let wrapper = context.coordinator.messageWrappers[message.id] else {
                     continue
+                }
+                if hasRecoveryDraft(message) {
+                    context.coordinator.heightCache.removeValue(
+                        forKey: IndexPath(row: index, section: 0)
+                    )
+                    context.coordinator.messageHeightCache.removeValue(forKey: message.id)
+                    context.coordinator.contentEstimateCache.removeValue(forKey: message.id)
                 }
                 wrapper.update(
                     message: message,
                     isDarkMode: isDarkMode,
                     isLastMessage: index == messages.count - 1,
                     isLoading: false,
-                    hasRecoveryDraft: message.turnId.map {
-                        recoveryDraftTurnIds.contains($0)
-                    } ?? false,
+                    hasRecoveryDraft: hasRecoveryDraft(message),
                     isArchived: index < archivedMessagesStartIndex,
                     showArchiveSeparator: index == archivedMessagesStartIndex
                         && archivedMessagesStartIndex > 0,
@@ -252,10 +298,11 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
-        let isLoadingChanged = context.coordinator.lastIsLoading != isLoading
-        context.coordinator.lastIsLoading = isLoading
+        let streamingLayoutChanged =
+            context.coordinator.lastUsesStreamingLayout != usesStreamingLayout
+        context.coordinator.lastUsesStreamingLayout = usesStreamingLayout
 
-        if isLoadingChanged && !isLoading {
+        if streamingLayoutChanged && !usesStreamingLayout {
             let preservedOffset = tableView.contentOffset.y
             context.coordinator.preservedOffsetAfterStreaming = preservedOffset
             context.coordinator.isCollapsingStreamingBuffer = true
@@ -281,9 +328,7 @@ struct MessageTableView: UIViewRepresentable {
                     isDarkMode: isDarkMode,
                     isLastMessage: true,
                     isLoading: false,
-                    hasRecoveryDraft: lastMessage.turnId.map {
-                        recoveryDraftTurnIds.contains($0)
-                    } ?? false,
+                    hasRecoveryDraft: hasRecoveryDraft(lastMessage),
                     isArchived: isArchived,
                     showArchiveSeparator: showArchiveSeparator,
                     messageIndex: messages.count - 1
@@ -395,7 +440,7 @@ struct MessageTableView: UIViewRepresentable {
         var lastScrollTrigger: UUID?
         var lastScrollToUserTrigger: UUID?
         var lastMessageCount: Int = 0
-        var lastIsLoading: Bool = false
+        var lastUsesStreamingLayout: Bool = false
         var cellReuseIdentifierSuffix: String = ""
         var lastKeyboardHeight: CGFloat = 0
         var lastIsDarkMode: Bool = false
@@ -511,9 +556,7 @@ struct MessageTableView: UIViewRepresentable {
                     isDarkMode: parent.isDarkMode,
                     isLastMessage: isLastMessage,
                     isLoading: parent.isLoading && isLastMessage,
-                    hasRecoveryDraft: message.turnId.map {
-                        parent.recoveryDraftTurnIds.contains($0)
-                    } ?? false,
+                    hasRecoveryDraft: parent.hasRecoveryDraft(message),
                     isArchived: isArchived,
                     showArchiveSeparator: showArchiveSeparator,
                     messageIndex: indexPath.row
@@ -649,11 +692,14 @@ struct MessageTableView: UIViewRepresentable {
             // appended rows behind it) can still render its buffer this tick.
             // Trust the wrapper's claim wherever the row sits so that inflated
             // frame never enters the height caches.
+            if parent.hasRecoveryDraft(message) {
+                return true
+            }
             if let wrapper = messageWrappers[message.id], wrapper.isLoading, wrapper.isLastMessage {
                 return true
             }
             guard indexPath.row == parent.messages.count - 1 else { return false }
-            return parent.isLoading
+            return parent.usesStreamingLayout
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -670,7 +716,7 @@ struct MessageTableView: UIViewRepresentable {
 
             let targetInset: CGFloat
 
-            if parent.isLoading, let lastMessage = parent.messages.last,
+            if parent.usesStreamingLayout, let lastMessage = parent.messages.last,
                let wrapper = messageWrappers[lastMessage.id], wrapper.actualContentHeight > 0 {
 
                 let screenHeight = UIScreen.main.bounds.height
@@ -684,7 +730,7 @@ struct MessageTableView: UIViewRepresentable {
                 } else {
                     targetInset = streamingInset
                 }
-            } else if parent.isLoading && isUserMessageScrollMode {
+            } else if parent.usesStreamingLayout && isUserMessageScrollMode {
                 targetInset = insetForUserMessageAtTop(tableView)
             } else if isUserMessageScrollMode {
                 // Streaming has ended but the user is still reading with their
@@ -973,7 +1019,7 @@ struct ObservableMessageCell: View {
     /// is measuring cells (queued dispatch landing at stream end). Requiring
     /// the coordinator's synchronous id keeps the buffer off such rows.
     private var showsStreamingBuffer: Bool {
-        wrapper.isLoading && wrapper.isLastMessage
+        (wrapper.isLoading || wrapper.hasRecoveryDraft) && wrapper.isLastMessage
             && coordinator?.streamingMessageId == wrapper.message.id
     }
 

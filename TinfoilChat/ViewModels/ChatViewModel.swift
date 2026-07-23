@@ -1640,7 +1640,6 @@ class ChatViewModel: ObservableObject {
 
         let userId = currentUserId
         discardMessageQueue(chatId: id)
-        ChatRecoveryDraftStore.shared.discard(chatId: id)
         let canceledStreamTask = cancelGeneration(
             chatId: id,
             announce: false
@@ -1664,6 +1663,7 @@ class ChatViewModel: ObservableObject {
             }
 
             await Chat.deleteChatFromStorage(chatId: id, userId: userId)
+            ChatRecoveryDraftStore.shared.discard(chatId: id)
 
             if let index = localChats.firstIndex(where: { $0.id == id }) {
                 localChats.remove(at: index)
@@ -2122,6 +2122,7 @@ class ChatViewModel: ObservableObject {
             recoveryStorage = nil
         }
         streamingTracker.startStreaming(streamChatId)
+        ChatRecoveryDraftStore.shared.prune(chatId: streamChatId, retaining: [])
         let streamModel = currentModel
         let streamProject = activeProject
         let streamProjectDocuments = projectDocuments
