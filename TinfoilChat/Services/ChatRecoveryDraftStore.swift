@@ -92,8 +92,8 @@ func messagesApplyingRecoveryDrafts(
     drafts: [ChatRecoveryDraftKey: Message]
 ) -> [Message] {
     guard !pendingTurnIds.isEmpty, !drafts.isEmpty else { return messages }
-    let draftsByTurnId = Dictionary(
-        uniqueKeysWithValues: drafts.compactMap { key, draft in
+    let draftsByTurnId: [String: Message] = Dictionary(
+        uniqueKeysWithValues: drafts.compactMap { key, draft -> (String, Message)? in
             guard key.chatId == chatId, pendingTurnIds.contains(key.turnId) else {
                 return nil
             }
@@ -102,7 +102,7 @@ func messagesApplyingRecoveryDrafts(
     )
     guard !draftsByTurnId.isEmpty else { return messages }
 
-    let persistedAssistantTurnIds = Set(messages.compactMap { message in
+    let persistedAssistantTurnIds: Set<String> = Set(messages.compactMap { message -> String? in
         guard message.role == .assistant else { return nil }
         return message.turnId
     })
