@@ -18,6 +18,20 @@ enum Constants {
         static let publishableKey = "pk_live_Y2xlcmsudGluZm9pbC5zaCQ"
     }
 
+    enum Security {
+        static let totpCodeLength = 6
+        static let asciiDigits = Set("0123456789")
+        static let backupCodesFilename = "tinfoil-backup-codes.txt"
+        static let backupCodesTitle = "Tinfoil backup codes"
+        static let qrCodeCorrectionLevel = "M"
+        static let reverificationRequiredErrorCode = "session_reverification_required"
+        static let reverificationMetadataKey = "reverification"
+        static let reverificationLevelMetadataKeyPath = "reverification.level"
+        static let multiFactorReverificationTypes = Set(["strict_mfa"])
+        static let secondFactorReverificationTypes = Set(["strict", "moderate", "lax"])
+        static let errorMessage = "Could not update multi-factor authentication. Please try again."
+    }
+
     enum Config {
         static let configURL = URL(string: "https://api.tinfoil.sh/api/config/mobile")!
         static let modelsURL = URL(string: "https://api.tinfoil.sh/api/config/models?mobile=true&chat=true")!

@@ -16,6 +16,8 @@ private let testModel = ModelType(
         chat: true,
         paid: false,
         multimodal: false,
+        toolCalling: nil,
+        attributes: nil,
         reasoningConfig: nil
     )
 )

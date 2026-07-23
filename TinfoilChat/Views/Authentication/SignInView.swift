@@ -27,6 +27,8 @@ struct SignInView: View {
   @State private var mfaType: SignIn.MfaType = .totp
   @State private var availableMfaTypes: [SignIn.MfaType] = []
   @State private var isVerifyingMfa = false
+  @State private var isSendingMfaCode = false
+  @State private var mfaSendTask: Task<Void, Never>? = nil
   
   private var emailIsEmpty: Bool {
     return email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -62,6 +64,21 @@ struct SignInView: View {
     }
     .sheet(isPresented: $showForgotPassword) {
       ForgotPasswordView(isPresented: $showForgotPassword)
+    }
+    .onAppear {
+      presentSecondFactorIfNeeded()
+    }
+    .onChange(of: clerk.auth.currentSignIn?.status) { _, _ in
+      presentSecondFactorIfNeeded()
+    }
+    .onDisappear {
+      mfaSendTask?.cancel()
+      mfaSendTask = nil
+      isSendingMfaCode = false
+      isVerifyingMfa = false
+      needsMfa = false
+      mfaType = .totp
+      mfaCode = ""
     }
     .preference(key: VerificationModePreferenceKey.self, value: needsMfa)
   }
@@ -171,18 +188,18 @@ struct SignInView: View {
         .disabled(isVerifyingMfa)
       
       Button {
-        guard !isVerifyingMfa else { return }
+        guard !isVerifyingMfa, !isSendingMfaCode else { return }
         Task {
           await verifyMfaCode()
         }
       } label: {
         HStack {
-          if isVerifyingMfa {
+          if isVerifyingMfa || isSendingMfaCode {
             ProgressView()
               .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .black : .white))
               .padding(.trailing, 8)
           }
-          Text(isVerifyingMfa ? "Verifying..." : "Verify")
+          Text(isVerifyingMfa ? "Verifying..." : isSendingMfaCode ? "Sending code..." : "Verify")
         }
         .font(.headline)
         .foregroundColor(colorScheme == .dark ? .black : .white)
@@ -190,14 +207,14 @@ struct SignInView: View {
         .frame(height: 50)
         .background(
           colorScheme == .dark ?
-            (isVerifyingMfa ? Color.white.opacity(0.7) : Color.white) :
-            (isVerifyingMfa ? Color.black.opacity(0.7) : Color.black)
+            (isVerifyingMfa || isSendingMfaCode ? Color.white.opacity(0.7) : Color.white) :
+            (isVerifyingMfa || isSendingMfaCode ? Color.black.opacity(0.7) : Color.black)
         )
         .cornerRadius(8)
         .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
       }
       .buttonStyle(PressableButtonStyle())
-      .disabled(isVerifyingMfa)
+      .disabled(isVerifyingMfa || isSendingMfaCode)
       
       if hasAlternativeMfaMethod {
         Button("Try another method") {
@@ -210,6 +227,9 @@ struct SignInView: View {
       }
       
       Button("Cancel") {
+        mfaSendTask?.cancel()
+        mfaSendTask = nil
+        isSendingMfaCode = false
         needsMfa = false
         mfaCode = ""
         errorMessage = nil
@@ -237,23 +257,35 @@ struct SignInView: View {
     mfaCode = ""
     errorMessage = nil
     mfaType = nextType
+    sendMfaCodeIfNeeded(for: nextType)
+  }
+  
+  /// Requests code delivery for phone/email factors, keeping verification
+  /// disabled until the code has been sent.
+  private func sendMfaCodeIfNeeded(for type: SignIn.MfaType) {
+    mfaSendTask?.cancel()
+    guard type == .phoneCode || type == .emailCode else {
+      mfaSendTask = nil
+      isSendingMfaCode = false
+      return
+    }
     
-    if nextType == .phoneCode || nextType == .emailCode {
-      Task {
-        do {
-          if var currentSignIn = clerk.auth.currentSignIn {
-            if nextType == .phoneCode {
-              currentSignIn = try await currentSignIn.sendMfaPhoneCode()
-            } else {
-              currentSignIn = try await currentSignIn.sendMfaEmailCode()
-            }
-          }
-        } catch {
-          await MainActor.run {
-            errorMessage = "Failed to send code: \(error.localizedDescription)"
+    isSendingMfaCode = true
+    mfaSendTask = Task {
+      do {
+        if var currentSignIn = clerk.auth.currentSignIn {
+          if type == .phoneCode {
+            currentSignIn = try await currentSignIn.sendMfaPhoneCode()
+          } else {
+            currentSignIn = try await currentSignIn.sendMfaEmailCode()
           }
         }
+      } catch {
+        guard !Task.isCancelled else { return }
+        errorMessage = "Failed to send code: \(error.localizedDescription)"
       }
+      guard !Task.isCancelled else { return }
+      isSendingMfaCode = false
     }
   }
   
@@ -272,6 +304,51 @@ struct SignInView: View {
   
   // MARK: - Actions
   
+  /// Presents the second-factor step for any in-progress sign-in that
+  /// requires it, whether it started with a password or an SSO provider.
+  private func presentSecondFactorIfNeeded() {
+    guard !needsMfa,
+          let signIn = clerk.auth.currentSignIn,
+          signIn.status == .needsSecondFactor else {
+      return
+    }
+    
+    let resolvedTypes = resolveAvailableMfaTypes(from: signIn.supportedSecondFactors)
+    let preferredType = resolvedTypes.first ?? .totp
+    availableMfaTypes = resolvedTypes
+    mfaType = preferredType
+    mfaCode = ""
+    errorMessage = nil
+    needsMfa = true
+    isLoading = false
+    
+    // A recreated view can rediscover an attempt that already has an
+    // undelivered code pending; avoid spamming the user with another one.
+    if !hasPendingSecondFactorCode(signIn, for: preferredType) {
+      sendMfaCodeIfNeeded(for: preferredType)
+    }
+  }
+  
+  private func hasPendingSecondFactorCode(_ signIn: SignIn, for type: SignIn.MfaType) -> Bool {
+    let expectedStrategy: FactorStrategy
+    switch type {
+    case .phoneCode:
+      expectedStrategy = .phoneCode
+    case .emailCode:
+      expectedStrategy = .emailCode
+    default:
+      return false
+    }
+    
+    guard let verification = signIn.secondFactorVerification,
+          verification.strategy == expectedStrategy,
+          verification.status == .unverified,
+          let expireAt = verification.expireAt else {
+      return false
+    }
+    return expireAt > Date()
+  }
+  
   private func signIn(email: String, password: String) async {
     await MainActor.run {
       isLoading = true
@@ -283,24 +360,8 @@ struct SignInView: View {
       
       switch signIn.status {
       case .needsSecondFactor:
-        let resolvedTypes = resolveAvailableMfaTypes(from: signIn.supportedSecondFactors)
-        let preferredType = resolvedTypes.first ?? .totp
-        
-        if preferredType == .phoneCode {
-          if var currentSignIn = clerk.auth.currentSignIn {
-            currentSignIn = try await currentSignIn.sendMfaPhoneCode()
-          }
-        } else if preferredType == .emailCode {
-          if var currentSignIn = clerk.auth.currentSignIn {
-            currentSignIn = try await currentSignIn.sendMfaEmailCode()
-          }
-        }
-        
         await MainActor.run {
-          availableMfaTypes = resolvedTypes
-          mfaType = preferredType
-          needsMfa = true
-          isLoading = false
+          presentSecondFactorIfNeeded()
         }
         
       case .complete:

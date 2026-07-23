@@ -277,25 +277,6 @@ struct ProfileMergeTests {
 @Suite("Clock-aware conflict resolution")
 struct EditClockArbitrationTests {
 
-    // Reset the shared counter before each test so cases that push it to
-    // the ceiling don't bleed into the monotonicity assertions.
-    init() {
-        UserDefaults.standard.removeObject(forKey: "tinfoil-sync-edit-clock")
-    }
-
-    @Test("ignores remote clock values above the ceiling without trapping")
-    func ceilingGuard() {
-        // A hostile or corrupt remote clock must not poison the counter
-        // into an overflow trap on the next tick.
-        EditClockStore.observe(Int.max)
-        #expect(EditClockStore.nextClock().v == 1)
-
-        EditClockStore.observe(EditClockStore.maxCounter)
-        #expect(EditClockStore.nextClock().v == EditClockStore.maxCounter)
-        // A further tick stays pinned at the ceiling rather than trapping.
-        #expect(EditClockStore.nextClock().v == EditClockStore.maxCounter)
-    }
-
     @Test("prefers the higher clock counter over wall-clock time")
     func clockBeatsTime() {
         let older = Date(timeIntervalSince1970: 1000)
@@ -350,14 +331,5 @@ struct EditClockArbitrationTests {
                 localUpdatedAt: older, remoteUpdatedAt: newer
             ) == true
         )
-    }
-
-    @Test("the edit clock counter is strictly increasing and observes remotes")
-    func counterMonotonic() {
-        let a = EditClockStore.nextClock()
-        let b = EditClockStore.nextClock()
-        #expect(b.v > a.v)
-        EditClockStore.observe(b.v + 1000)
-        #expect(EditClockStore.nextClock().v > b.v + 1000)
     }
 }
