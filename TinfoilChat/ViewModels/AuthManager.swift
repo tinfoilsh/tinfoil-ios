@@ -244,14 +244,13 @@ class AuthManager: ObservableObject {
         // Handle chat state BEFORE clearing auth so the view model can still
         // save the current chat (hasChatAccess depends on isAuthenticated).
         await chatViewModel?.handleSignOut()
+        await ChatRecoveryCoordinator.shared.reset(accountId: nil)
 
         // Sign-out performs a full local wipe so that no content, encryption
         // keys, or personalization bleed into the next account on a shared
         // device. This runs before isAuthenticated is cleared below so the
         // view model can still resolve the signing-out user's id for the wipe.
         await ProfileManager.shared.clearLocalProfileForAccountRemoval()
-        EncryptionService.shared.clearKey()
-        await DeviceEncryptionService.shared.clearKey()
         if let chatViewModel {
             await chatViewModel.wipeLocalChatsForSignOut()
         } else {
@@ -260,6 +259,8 @@ class AuthManager: ObservableObject {
             // outlive the account on a shared device.
             await Chat.deleteAllChatsFromStorage(userId: localUserId)
         }
+        EncryptionService.shared.clearKey()
+        await DeviceEncryptionService.shared.clearKey()
         SettingsManager.shared.clearAllSettings()
 
         localUserData = nil

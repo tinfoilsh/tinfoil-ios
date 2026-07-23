@@ -242,7 +242,8 @@ class ProfileSyncService: ObservableObject {
         do {
             let result = try await pushAtVersion(profile.version ?? 0)
             return (result.success, result.version, nil)
-        } catch let error as SyncEnclaveError where Self.isStaleBlobConflict(error) {
+        } catch let error as SyncEnclaveError
+            where EnclaveErrorRecovery.isVersionConflict(error) {
             // Optimistic-concurrency conflict: the server holds a
             // version our push was not based on. Re-read it and merge
             // field by field so neither device's edits are lost, then
@@ -312,15 +313,6 @@ class ProfileSyncService: ObservableObject {
             for: unknownFieldsKey,
             service: unknownFieldsService
         )
-    }
-
-    /// A STALE_BLOB (HTTP 412) push means our If-Match version no longer
-    /// matches the server: either the row advanced under another writer
-    /// or we tried to create a profile that already exists.
-    private static func isStaleBlobConflict(_ error: SyncEnclaveError) -> Bool {
-        error.code == WireCodes.staleBlob
-            || error.status == 412
-            || (error.status == 409 && error.code == WireCodes.syncConflict)
     }
 
     /// Re-attempt a profile fetch after a key change. The enclave

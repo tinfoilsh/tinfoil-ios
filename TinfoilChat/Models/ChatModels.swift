@@ -10,6 +10,16 @@ import Foundation
 import UIKit
 import ClerkKit
 
+struct PendingRecoveryEnvelope: Codable, Equatable, Sendable {
+    let v: Int
+    let turnId: String
+    let keyId: String
+    let createdAt: String
+    let expiresAt: String
+    let nonce: String
+    let ciphertext: String
+}
+
 /// Represents a chat conversation
 struct Chat: Identifiable, Codable {
     enum TitleState: String, Codable {
@@ -24,6 +34,7 @@ struct Chat: Identifiable, Codable {
     var title: String
     var titleState: TitleState
     var messages: [Message]
+    var pendingRecoveries: [PendingRecoveryEnvelope]?
     var hasActiveStream: Bool = false
     var createdAt: Date
     var modelType: ModelType
@@ -101,6 +112,7 @@ struct Chat: Identifiable, Codable {
         title: String = Chat.placeholderTitle,
         titleState: TitleState? = nil,
         messages: [Message] = [],
+        pendingRecoveries: [PendingRecoveryEnvelope]? = nil,
         createdAt: Date = Date(),
         modelType: ModelType,
         language: String? = nil,
@@ -123,6 +135,7 @@ struct Chat: Identifiable, Codable {
         self.title = title
         self.titleState = resolvedTitleState
         self.messages = messages
+        self.pendingRecoveries = pendingRecoveries
         self.createdAt = createdAt
         self.modelType = modelType
         self.language = language
@@ -189,7 +202,7 @@ struct Chat: Identifiable, Codable {
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, title, titleState, messages, createdAt, modelType, language, userId
+        case id, title, titleState, messages, pendingRecoveries, createdAt, modelType, language, userId
         case syncVersion, syncedAt, locallyModified, updatedAt
         case decryptionFailed, dataCorrupted, formatVersion, isLocalOnly, projectId, promptPresetId
         case webSearchEnabled
@@ -202,6 +215,7 @@ struct Chat: Identifiable, Codable {
         id = try container.decode(String.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
         messages = try container.decode([Message].self, forKey: .messages)
+        pendingRecoveries = try container.decodeIfPresent([PendingRecoveryEnvelope].self, forKey: .pendingRecoveries)
         titleState = (try? container.decode(TitleState.self, forKey: .titleState)) ?? Chat.deriveTitleState(for: title, messages: messages)
         // hasActiveStream is transient UI state — always reset to false on decode
         hasActiveStream = false
@@ -235,6 +249,7 @@ struct Chat: Identifiable, Codable {
         try container.encode(title, forKey: .title)
         try container.encode(titleState, forKey: .titleState)
         try container.encode(messages, forKey: .messages)
+        try container.encodeIfPresent(pendingRecoveries, forKey: .pendingRecoveries)
         // hasActiveStream is transient UI state — never encode it
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(modelType, forKey: .modelType)
@@ -686,6 +701,7 @@ struct QueuedMessage: Identifiable, Equatable {
 struct Message: Identifiable, Codable, Equatable {
     let id: String
     let role: MessageRole
+    var turnId: String? = nil
     var content: String
     var thoughts: String? = nil
     var isThinking: Bool = false
@@ -780,9 +796,10 @@ struct Message: Identifiable, Codable, Equatable {
         return formatter
     }()
     
-    init(id: String = UUID().uuidString.lowercased(), role: MessageRole, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], thinkingChunks: [ThinkingChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = []) {
+    init(id: String = UUID().uuidString.lowercased(), role: MessageRole, turnId: String? = nil, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], thinkingChunks: [ThinkingChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = []) {
         self.id = id
         self.role = role
+        self.turnId = turnId
         self.content = content
         self.thoughts = thoughts
         self.isThinking = isThinking
@@ -798,7 +815,7 @@ struct Message: Identifiable, Codable, Equatable {
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, role, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, isRateLimitError, isHourlyLimitError, isConnectionError, generationTimeSeconds, webSearchState
+        case id, role, turnId, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, isRateLimitError, isHourlyLimitError, isConnectionError, generationTimeSeconds, webSearchState
         case webSearch // Alternative key used by React app
         case urlFetches
         case attachments
@@ -815,6 +832,7 @@ struct Message: Identifiable, Codable, Equatable {
         // Make id optional for cross-platform compatibility with React
         id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString.lowercased()
         role = try container.decode(MessageRole.self, forKey: .role)
+        turnId = try container.decodeIfPresent(String.self, forKey: .turnId)
         content = try container.decode(String.self, forKey: .content)
         thoughts = try container.decodeIfPresent(String.self, forKey: .thoughts)
         isThinking = try container.decodeIfPresent(Bool.self, forKey: .isThinking) ?? false
@@ -1004,6 +1022,7 @@ struct Message: Identifiable, Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(role.rawValue, forKey: .role)
+        try container.encodeIfPresent(turnId, forKey: .turnId)
         try container.encode(content, forKey: .content)
         try container.encodeIfPresent(thoughts, forKey: .thoughts)
         try container.encode(isThinking, forKey: .isThinking)

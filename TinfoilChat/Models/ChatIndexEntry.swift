@@ -26,6 +26,7 @@ struct ChatIndexEntry: Codable, Identifiable, Equatable {
     var isLocalOnly: Bool = false
     var userId: String?
     var language: String?
+    var hasPendingRecoveries: Bool?
 
     /// Whether this entry represents a chat worth showing in the sidebar
     var isDisplayable: Bool {
@@ -55,5 +56,6 @@ struct ChatIndexEntry: Codable, Identifiable, Equatable {
         self.isLocalOnly = chat.isLocalOnly
         self.userId = chat.userId
         self.language = chat.language
+        self.hasPendingRecoveries = chat.pendingRecoveries?.isEmpty == false
     }
 }

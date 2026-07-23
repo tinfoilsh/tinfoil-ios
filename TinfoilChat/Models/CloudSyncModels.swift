@@ -63,6 +63,7 @@ struct StoredChat: Codable {
     var title: String
     var titleState: Chat.TitleState?
     var messages: [Message]
+    var pendingRecoveries: [PendingRecoveryEnvelope]?
     var createdAt: Date      // Will be encoded as ISO string for API
     var updatedAt: Date      // Will be encoded as ISO string for API
     var modelType: ModelType?  // Not synced - local UI preference only
@@ -136,6 +137,7 @@ struct StoredChat: Codable {
         self.title = title
         self.titleState = nil
         self.messages = messages
+        self.pendingRecoveries = nil
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.modelType = nil
@@ -152,6 +154,7 @@ struct StoredChat: Codable {
         self.title = chat.title
         self.titleState = chat.titleState
         self.messages = chat.messages
+        self.pendingRecoveries = chat.pendingRecoveries
         self.createdAt = chat.createdAt
         self.updatedAt = chat.updatedAt
         self.modelType = chat.modelType
@@ -190,6 +193,7 @@ struct StoredChat: Codable {
             title: title,
             titleState: titleState,
             messages: messages,
+            pendingRecoveries: pendingRecoveries,
             createdAt: createdAt,
             modelType: model,
             language: language,
@@ -219,7 +223,7 @@ struct StoredChat: Codable {
     
     // Custom encoding for cross-platform compatibility
     enum CodingKeys: String, CodingKey {
-        case id, title, titleState, messages, createdAt, updatedAt
+        case id, title, titleState, messages, pendingRecoveries, createdAt, updatedAt
         case language, userId
         case syncVersion, syncedAt, locallyModified
         case decryptionFailed, dataCorrupted, formatVersion, projectId
@@ -235,6 +239,7 @@ struct StoredChat: Codable {
         try container.encode(title, forKey: .title)
         try container.encodeIfPresent(titleState, forKey: .titleState)
         try container.encode(messages, forKey: .messages)
+        try container.encodeIfPresent(pendingRecoveries, forKey: .pendingRecoveries)
 
         // Dates as ISO strings with fractional seconds (matching JavaScript's toISOString())
         let isoFormatter = ISO8601DateFormatter()
@@ -272,6 +277,7 @@ struct StoredChat: Codable {
         title = try container.decode(String.self, forKey: .title)
         titleState = try container.decodeIfPresent(Chat.TitleState.self, forKey: .titleState)
         messages = try container.decode([Message].self, forKey: .messages)
+        pendingRecoveries = try container.decodeIfPresent([PendingRecoveryEnvelope].self, forKey: .pendingRecoveries)
         
         // Dates from ISO strings - configure formatter to handle fractional seconds
         let isoFormatter = ISO8601DateFormatter()

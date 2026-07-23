@@ -37,8 +37,13 @@ actor DeviceEncryptionService: ChatEncryptor {
     }
 
     func decryptData(_ encrypted: EncryptedData) async throws -> Data {
-        let key = try getOrCreateKey()
+        let key = try getExistingKey()
         return try AESGCMHelper.open(encrypted, using: key)
+    }
+
+    func getKeyBytesOrThrow() throws -> Data {
+        let key = try getExistingKey()
+        return key.withUnsafeBytes { Data($0) }
     }
 
     // MARK: - Key Management
@@ -51,18 +56,24 @@ actor DeviceEncryptionService: ChatEncryptor {
 
     // MARK: - Private
 
-    private func getOrCreateKey() throws -> SymmetricKey {
+    private func getExistingKey() throws -> SymmetricKey {
         if let key = cachedKey { return key }
-
-        if let existing = loadKeyFromKeychain() {
-            cachedKey = existing
-            return existing
+        guard let key = loadKeyFromKeychain() else {
+            throw EncryptionError.keyNotInitialized
         }
+        cachedKey = key
+        return key
+    }
 
-        let newKey = SymmetricKey(size: .bits256)
-        try saveKeyToKeychain(newKey)
-        cachedKey = newKey
-        return newKey
+    private func getOrCreateKey() throws -> SymmetricKey {
+        do {
+            return try getExistingKey()
+        } catch EncryptionError.keyNotInitialized {
+            let newKey = SymmetricKey(size: .bits256)
+            try saveKeyToKeychain(newKey)
+            cachedKey = newKey
+            return newKey
+        }
     }
 
     private func loadKeyFromKeychain() -> SymmetricKey? {

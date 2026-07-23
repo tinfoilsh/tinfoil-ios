@@ -587,6 +587,14 @@ actor EncryptedFileStorage {
         return try await loadChats(chatIds: entries.map(\.id), userId: userId)
     }
 
+    func loadChatsWithPendingRecoveries(userId: String) async throws -> [Chat] {
+        let entries = try await loadIndex(userId: userId)
+        let chatIds = entries.compactMap {
+            $0.hasPendingRecoveries == true ? $0.id : nil
+        }
+        return try await loadChats(chatIds: chatIds, userId: userId)
+    }
+
     // MARK: - Error Recovery
 
     func rebuildIndex(userId: String) async throws -> [ChatIndexEntry] {

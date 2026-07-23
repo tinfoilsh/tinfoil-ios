@@ -213,19 +213,83 @@ enum LegacyBlobMigration {
     /// Drop the local alternative-keys list once the migration
     /// report confirms every observed row has been re-sealed.
     @discardableResult
-    static func finalizeAlternativesIfMigrated(_ report: MigrationReport) -> Bool {
+    static func finalizeAlternativesIfMigrated(_ report: MigrationReport) async -> Bool {
         guard report.fullyMigrated else { return false }
+        guard let userId = await Clerk.shared.user?.id,
+              let primary = try? EncryptionService.shared.getKeyBytesOrThrow(),
+              let primaryKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: primary)
+        else {
+            return false
+        }
+        guard let entries = try? await EncryptedFileStorage.cloud.loadIndex(userId: userId)
+        else {
+            return false
+        }
+        for entry in entries {
+            guard let chat = try? await EncryptedFileStorage.cloud.loadChat(
+                chatId: entry.id,
+                userId: userId
+            ) else {
+                return false
+            }
+            if chat.pendingRecoveries?.contains(where: { $0.keyId != primaryKeyId }) == true {
+                return false
+            }
+        }
+        guard await remoteRecoveriesUseOnlyPrimary(
+            userId: userId,
+            primaryKeyId: primaryKeyId
+        ) else {
+            return false
+        }
         EncryptionService.shared.clearFallbackKeys()
         return true
     }
 
     static func runAndFinalize() async -> MigrationReport {
         let report = await run()
-        _ = finalizeAlternativesIfMigrated(report)
+        _ = await finalizeAlternativesIfMigrated(report)
         return report
     }
 
     // MARK: - Private
+
+    private static func remoteRecoveriesUseOnlyPrimary(
+        userId: String,
+        primaryKeyId: String
+    ) async -> Bool {
+        var cursor: String?
+        var seenCursors: Set<String> = []
+        repeat {
+            guard await Clerk.shared.user?.id == userId,
+                  let page = try? await CloudStorageService.shared.listChats(
+                      limit: Constants.SyncEnclave.listStatusPageLimit,
+                      continuationToken: cursor,
+                      includeContent: true
+                  )
+            else {
+                return false
+            }
+            for remote in page.conversations {
+                guard let content = remote.content,
+                      let data = content.data(using: .utf8),
+                      let chat = try? JSONDecoder().decode(StoredChat.self, from: data)
+                else {
+                    return false
+                }
+                if chat.pendingRecoveries?.contains(where: {
+                    $0.keyId != primaryKeyId
+                }) == true {
+                    return false
+                }
+            }
+            cursor = page.nextContinuationToken
+            if let cursor, !cursor.isEmpty, !seenCursors.insert(cursor).inserted {
+                return false
+            }
+        } while cursor?.isEmpty == false
+        return true
+    }
 
     /// Stable, non-secret fingerprint of the migration candidate key set
     /// (primary plus alternatives) the way `CEKEncoding.migrationKeys()`

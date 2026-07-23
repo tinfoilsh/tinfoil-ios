@@ -13,6 +13,7 @@ struct ChatListView: View {
     let onRequestSignIn: () -> Void
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @Binding var messageText: String
+    @ObservedObject private var recoveryDraftStore = ChatRecoveryDraftStore.shared
 
     @State private var isAtBottom = true
     @State private var userHasScrolled = false
@@ -25,22 +26,54 @@ struct ChatListView: View {
     @State private var tableOpacity = 1.0
     @State private var archivedMessagesStartIndex = 0
 
+    private var pendingRecoveryTurnIds: Set<String> {
+        Set((viewModel.currentChat?.pendingRecoveries ?? []).map(\.turnId))
+    }
+
+    private var recoveryDraftTurnIds: Set<String> {
+        let chatId = viewModel.currentChat?.id
+        return Set(recoveryDraftStore.drafts.keys.compactMap { key in
+            key.chatId == chatId && pendingRecoveryTurnIds.contains(key.turnId)
+                ? key.turnId
+                : nil
+        })
+    }
+
     private var messages: [Message] {
-        viewModel.messages
+        guard let chatId = viewModel.currentChat?.id else {
+            return viewModel.messages
+        }
+        return messagesApplyingRecoveryDrafts(
+            viewModel.messages,
+            chatId: chatId,
+            pendingTurnIds: pendingRecoveryTurnIds,
+            drafts: recoveryDraftStore.drafts
+        )
     }
 
     /// Token estimation walks every message, so the result is cached and
     /// refreshed only when the conversation, model, or message count changes
     /// instead of on every body evaluation during streaming.
     private func refreshArchivedMessagesStartIndex() {
-        archivedMessagesStartIndex = TokenEstimation.findContextStartIndex(
-            messages: messages,
+        let persistedMessages = viewModel.messages
+        let persistedStartIndex = TokenEstimation.findContextStartIndex(
+            messages: persistedMessages,
             budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow)
         )
+        guard persistedMessages.indices.contains(persistedStartIndex) else {
+            archivedMessagesStartIndex = 0
+            return
+        }
+        let boundaryMessageId = persistedMessages[persistedStartIndex].id
+        archivedMessagesStartIndex = messages.firstIndex {
+            $0.id == boundaryMessageId
+        } ?? persistedStartIndex
     }
 
     var body: some View {
         MessageTableView(
+            messages: messages,
+            recoveryDraftTurnIds: recoveryDraftTurnIds,
             archivedMessagesStartIndex: archivedMessagesStartIndex,
             isDarkMode: isDarkMode,
             isLoading: isLoading,
@@ -137,6 +170,7 @@ struct ChatListView: View {
         .onAppear {
             setupKeyboardObservers()
             refreshArchivedMessagesStartIndex()
+            pruneRecoveryDrafts()
         }
         .onDisappear {
             removeKeyboardObservers()
@@ -163,8 +197,12 @@ struct ChatListView: View {
                 }
             }
         }
+        .onChange(of: pendingRecoveryTurnIds) { _, _ in
+            pruneRecoveryDrafts()
+        }
         .onChange(of: viewModel.currentChat?.createdAt) { _, _ in
             refreshArchivedMessagesStartIndex()
+            pruneRecoveryDrafts()
             userHasScrolled = false
             viewModel.isScrollInteractionActive = false
 
@@ -208,5 +246,13 @@ struct ChatListView: View {
     private func removeKeyboardObservers() {
         NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
+    }
+
+    private func pruneRecoveryDrafts() {
+        guard let chatId = viewModel.currentChat?.id else { return }
+        recoveryDraftStore.prune(
+            chatId: chatId,
+            retaining: pendingRecoveryTurnIds
+        )
     }
 }

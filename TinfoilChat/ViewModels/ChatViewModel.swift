@@ -54,6 +54,19 @@ struct ChatStreamState {
     }
 }
 
+func shouldBlockMessageSendForRecovery(
+    pendingRecoveries: [PendingRecoveryEnvelope],
+    isStreaming: Bool
+) -> Bool {
+    !isStreaming && !pendingRecoveries.isEmpty
+}
+
+func recoveryScanHasStalled(lastProgressAt: Date?, now: Date) -> Bool {
+    guard let lastProgressAt else { return false }
+    return now.timeIntervalSince(lastProgressAt)
+        >= Constants.ChatRecovery.scanStallTimeoutSeconds
+}
+
 @MainActor
 class ChatViewModel: ObservableObject {
     // Published properties for UI updates
@@ -158,7 +171,13 @@ class ChatViewModel: ObservableObject {
         }
     }
     @Published var syncErrors: [String] = []
-    private var encryptionKey: String?  // Keep private for security
+    private var encryptionKey: String? {  // Keep private for security
+        didSet {
+            if encryptionKey != nil, authManager?.isAuthenticated == true {
+                setupAutoSyncTimer()
+            }
+        }
+    }
     @Published var isFirstTimeUser: Bool = false
     @Published var showEncryptionSetup: Bool = false
     @Published var shouldShowKeyImport: Bool = false
@@ -280,11 +299,19 @@ class ChatViewModel: ObservableObject {
     // Private properties
     private var client: TinfoilAI?
     private var streamTasks: [String: Task<Void, Never>] = [:]
+    private var recoveryAttempts: [String: ChatRecoveryAttempt] = [:]
     private var thinkingSummaryServices: [String: ThinkingSummaryService] = [:]
     private var autoSyncTimer: Timer?
+    private var recoveryScanTimer: Timer?
+    private var recoveryScanTask: Task<Void, Never>?
+    private var recoveryScanGeneration = 0
+    private var recoveryScanLastProgressAt: Date?
+    private var recoveryScansSuspended = false
+    private var recoveryRescanRequested = false
     private var didBecomeActiveObserver: NSObjectProtocol?
     private var willResignActiveObserver: NSObjectProtocol?
     private var sharedSettingsObserver: NSObjectProtocol?
+    private var chatRecoveryObserver: NSObjectProtocol?
     private var networkStatusCancellable: AnyCancellable?
     private var streamUpdateTimers: [String: Timer] = [:]
     private var pendingStreamUpdates: [String: Chat] = [:]
@@ -334,6 +361,13 @@ class ChatViewModel: ObservableObject {
     var isLoading: Bool {
         guard let chatId = currentChat?.id else { return false }
         return streamState.isStreaming(chatId: chatId)
+    }
+
+    var hasPendingResponseRecovery: Bool {
+        shouldBlockMessageSendForRecovery(
+            pendingRecoveries: currentChat?.pendingRecoveries ?? [],
+            isStreaming: isLoading
+        )
     }
 
     /// Whether the given chat has a response currently being generated,
@@ -504,6 +538,7 @@ class ChatViewModel: ObservableObject {
         // Setup app lifecycle observers
         setupAppLifecycleObservers()
         setupSharedSettingsObserver()
+        setupChatRecoveryObserver()
 
         // Setup network status observer for automatic retry on reconnection
         setupNetworkStatusObserver()
@@ -529,9 +564,12 @@ class ChatViewModel: ObservableObject {
     }
     
     deinit {
-        // Stop auto-sync timer
+        // Stop sync timers
         autoSyncTimer?.invalidate()
         autoSyncTimer = nil
+        recoveryScanTimer?.invalidate()
+        recoveryScanTimer = nil
+        recoveryScanTask?.cancel()
 
         // Stop stream update timers
         streamUpdateTimers.values.forEach { $0.invalidate() }
@@ -552,6 +590,54 @@ class ChatViewModel: ObservableObject {
         }
         if let observer = sharedSettingsObserver {
             NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = chatRecoveryObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    private func setupChatRecoveryObserver() {
+        chatRecoveryObserver = NotificationCenter.default.addObserver(
+            forName: .chatRecoveryDidUpdate,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in
+                guard let self,
+                      let chatId = notification.userInfo?[
+                          ChatRecoveryNotificationKey.chatId
+                      ] as? String,
+                      let userId = notification.userInfo?[
+                          ChatRecoveryNotificationKey.userId
+                      ] as? String,
+                      self.currentUserId == userId,
+                      let storageValue = notification.userInfo?[
+                          ChatRecoveryNotificationKey.storage
+                      ] as? String,
+                      let storage = ChatRecoveryStorage(rawValue: storageValue),
+                      !self.streamingTracker.isStreaming(chatId),
+                      let recovered = try? await storage.fileStorage.loadChat(
+                          chatId: chatId,
+                          userId: userId
+                      )
+                else {
+                    return
+                }
+                guard self.currentUserId == userId,
+                      !self.streamingTracker.isStreaming(chatId)
+                else {
+                    return
+                }
+                ChatRecoveryDraftStore.shared.prune(
+                    chatId: chatId,
+                    retaining: Set((recovered.pendingRecoveries ?? []).map(\.turnId))
+                )
+                self.replaceChat(recovered)
+                if self.currentChat?.id == chatId {
+                    self.currentChat = recovered
+                    self.scheduleMessageQueueDrain(chatId: chatId)
+                }
+            }
         }
     }
 
@@ -582,6 +668,9 @@ class ChatViewModel: ObservableObject {
     private func setupAutoSyncTimer() {
         // Invalidate existing timer if any
         autoSyncTimer?.invalidate()
+        recoveryScanTimer?.invalidate()
+        recoveryScanTimer = nil
+        setupRecoveryScanTimer()
 
         // Do not start auto-sync when cloud sync is disabled
         if !SettingsManager.shared.isCloudSyncEnabled {
@@ -642,6 +731,7 @@ class ChatViewModel: ObservableObject {
                     }
 
                 }
+                self.scanPendingRecoveries()
 
                 // Also backup current chat if it has changes
                 if let currentChat = await MainActor.run(body: { self.currentChat }),
@@ -656,6 +746,21 @@ class ChatViewModel: ObservableObject {
         }
         // Ensure the timer fires during UI interactions (scrolling, modal sheets)
         if let timer = autoSyncTimer {
+            RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+
+    private func setupRecoveryScanTimer() {
+        guard authManager?.isAuthenticated == true else { return }
+        recoveryScanTimer = Timer.scheduledTimer(
+            withTimeInterval: Constants.Sync.chatSyncIntervalSeconds,
+            repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.scanPendingRecoveries()
+            }
+        }
+        if let timer = recoveryScanTimer {
             RunLoop.main.add(timer, forMode: .common)
         }
     }
@@ -683,27 +788,28 @@ class ChatViewModel: ObservableObject {
                 self?.retryClientSetup()
             }
             
-            // Resume auto-sync timer if authenticated and cloud sync is enabled
+            // Resume cloud sync or local recovery polling
             Task { @MainActor in
-                if self?.authManager?.isAuthenticated == true && SettingsManager.shared.isCloudSyncEnabled {
-                    // Skip sync if no encryption key is set
-                    if !EncryptionService.shared.hasEncryptionKey() {
-                        return
-                    }
+                guard let self, self.authManager?.isAuthenticated == true else { return }
+                self.setupAutoSyncTimer()
+                self.scanPendingRecoveries()
 
-                    self?.setupAutoSyncTimer()
-
-                    // Perform immediate sync when returning from background
-                    if let syncResult = await self?.cloudSync.syncAllChats() {
-                        // Update last sync date
-                        self?.lastSyncDate = Date()
-
-                        // Update chats if needed
-                        if syncResult.downloaded > 0 || syncResult.deleted > 0 {
-                            await self?.updateChatsAfterSync()
-                        }
-                    }
+                guard SettingsManager.shared.isCloudSyncEnabled,
+                      EncryptionService.shared.hasEncryptionKey()
+                else {
+                    return
                 }
+
+                // Perform immediate sync when returning from background
+                let syncResult = await self.cloudSync.syncAllChats()
+                // Update last sync date
+                self.lastSyncDate = Date()
+
+                // Update chats if needed
+                if syncResult.downloaded > 0 || syncResult.deleted > 0 {
+                    await self.updateChatsAfterSync()
+                }
+                self.scanPendingRecoveries()
             }
         }
         
@@ -714,9 +820,11 @@ class ChatViewModel: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                // Pause auto-sync timer
+                // Pause sync timers
                 self?.autoSyncTimer?.invalidate()
                 self?.autoSyncTimer = nil
+                self?.recoveryScanTimer?.invalidate()
+                self?.recoveryScanTimer = nil
                 
                 // Do one final sync before going to background
                 if self?.authManager?.isAuthenticated == true && SettingsManager.shared.isCloudSyncEnabled {
@@ -735,6 +843,7 @@ class ChatViewModel: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] isConnected in
                 guard let self = self, isConnected else { return }
+                self.scanPendingRecoveries()
 
                 // Only retry if verification failed (has error) and not currently initializing
                 guard self.verificationError != nil && !self.isVerifying && !self.isClientInitializing else { return }
@@ -744,6 +853,80 @@ class ChatViewModel: ObservableObject {
                     self?.retryClientSetup()
                 }
             }
+    }
+
+    private func scanPendingRecoveries() {
+        guard let userId = currentUserId else { return }
+        guard !recoveryScansSuspended else { return }
+        if let activeTask = recoveryScanTask {
+            recoveryRescanRequested = true
+            guard recoveryScanHasStalled(
+                lastProgressAt: recoveryScanLastProgressAt,
+                now: Date()
+            ) else {
+                return
+            }
+            recoveryRescanRequested = false
+            activeTask.cancel()
+            recoveryScanTask = nil
+            startRecoveryScan(userId: userId, replacingActiveScan: true)
+        } else {
+            startRecoveryScan(userId: userId, replacingActiveScan: false)
+        }
+    }
+
+    private func startRecoveryScan(userId: String, replacingActiveScan: Bool) {
+        var storages: [ChatRecoveryStorage] = [.local]
+        if SettingsManager.shared.isCloudSyncEnabled,
+           EncryptionService.shared.hasEncryptionKey() {
+            storages.append(.cloud)
+        }
+        recoveryScanGeneration += 1
+        let generation = recoveryScanGeneration
+        let storagesToScan = storages
+        recoveryScanLastProgressAt = Date()
+        recoveryScanTask = Task { [weak self] in
+            await ChatRecoveryCoordinator.shared.scan(
+                userId: userId,
+                storages: storagesToScan,
+                replacingActiveScan: replacingActiveScan,
+                onProgress: { [weak self] in
+                    await self?.recordRecoveryScanProgress(generation: generation)
+                }
+            )
+            guard let self, self.recoveryScanGeneration == generation else { return }
+            self.recoveryScanTask = nil
+            self.recoveryScanLastProgressAt = nil
+            if self.recoveryRescanRequested {
+                self.recoveryRescanRequested = false
+                self.scanPendingRecoveries()
+            }
+        }
+    }
+
+    private func suspendRecoveryScans() async {
+        recoveryScansSuspended = true
+        recoveryRescanRequested = false
+        recoveryScanGeneration += 1
+        let task = recoveryScanTask
+        recoveryScanTask = nil
+        recoveryScanLastProgressAt = nil
+        task?.cancel()
+        await task?.value
+    }
+
+    private func recordRecoveryScanProgress(generation: Int) {
+        guard recoveryScanGeneration == generation,
+              recoveryScanTask != nil
+        else {
+            return
+        }
+        recoveryScanLastProgressAt = Date()
+    }
+
+    func resumeRecoveryScans() {
+        recoveryScansSuspended = false
+        scanPendingRecoveries()
     }
 
     private func setupTinfoilClient() {
@@ -1192,6 +1375,14 @@ class ChatViewModel: ObservableObject {
         let wasCurrent = currentChat?.id == chatId
         guard var chat = chatForProjectMove(chatId) else { return }
         let wasLocal = chat.isLocalOnly
+        let hasPendingLocalRecovery = wasLocal && (
+            recoveryAttempts[chatId] != nil || chat.pendingRecoveries?.isEmpty == false
+        )
+        guard !streamingTracker.isStreaming(chatId),
+              !hasPendingLocalRecovery
+        else {
+            return
+        }
 
         chat.projectId = projectId
         chat.isLocalOnly = false
@@ -1508,6 +1699,7 @@ class ChatViewModel: ObservableObject {
             }
 
             await Chat.deleteChatFromStorage(chatId: id, userId: userId)
+            ChatRecoveryDraftStore.shared.discard(chatId: id)
 
             if let index = localChats.firstIndex(where: { $0.id == id }) {
                 localChats.remove(at: index)
@@ -1664,6 +1856,7 @@ class ChatViewModel: ObservableObject {
         let hasAttachments = !pendingAttachments.isEmpty
         guard hasText || hasAttachments else { return false }
         guard attachmentsAreReadyToSend(pendingAttachments) else { return false }
+        guard !hasPendingResponseRecovery else { return false }
 
         if isLoading {
             guard !isMessageQueueFull else { return false }
@@ -1769,6 +1962,7 @@ class ChatViewModel: ObservableObject {
     private func drainMessageQueue(chatId: String) {
         guard currentChat?.id == chatId,
               !streamState.isStreaming(chatId: chatId),
+              !hasPendingResponseRecovery,
               var queue = messageQueues[chatId],
               !queue.isEmpty else { return }
 
@@ -1925,8 +2119,23 @@ class ChatViewModel: ObservableObject {
 
         AccessibilityAnnouncer.announce(Constants.Accessibility.generatingResponse)
 
+        let turnId = UUID().uuidString.lowercased()
+        var turnChat = initialChat
+        turnChat.hasActiveStream = true
+        if let userIndex = turnChat.messages.lastIndex(where: { $0.role == .user }) {
+            turnChat.messages[userIndex].turnId = turnId
+            turnChat.locallyModified = true
+            turnChat.updatedAt = Date()
+            updateChat(turnChat)
+        }
+
         // Create initial empty assistant message as a placeholder
-        let assistantMessage = Message(role: .assistant, content: "", isCollapsed: true)
+        let assistantMessage = Message(
+            role: .assistant,
+            turnId: turnId,
+            content: "",
+            isCollapsed: true
+        )
         addMessage(assistantMessage)
 
         guard var updatedStreamChat = currentChat else { return }
@@ -1935,9 +2144,21 @@ class ChatViewModel: ObservableObject {
         updateChat(updatedStreamChat)
         let streamChat = updatedStreamChat
         streamState.start(chatId: streamChatId)
-        streamingTracker.startStreaming(streamChatId)
 
         let conversationMessages = streamChat.messages
+        let recoveryUserId = currentUserId
+        let recoveryStorage: ChatRecoveryStorage?
+        if recoveryUserId == nil || streamChat.isTemporary {
+            recoveryStorage = nil
+        } else if streamChat.isLocalOnly {
+            recoveryStorage = .local
+        } else if SettingsManager.shared.isCloudSyncEnabled {
+            recoveryStorage = .cloud
+        } else {
+            recoveryStorage = nil
+        }
+        streamingTracker.startStreaming(streamChatId)
+        ChatRecoveryDraftStore.shared.prune(chatId: streamChatId, retaining: [])
         let streamModel = currentModel
         let streamProject = activeProject
         let streamProjectDocuments = projectDocuments
@@ -1966,8 +2187,21 @@ class ChatViewModel: ObservableObject {
             }
             
             var hasRetriedWithFreshKey = false
+            var recoveryAttempt: ChatRecoveryAttempt?
 
             retryLoop: do {
+                if !hasRetriedWithFreshKey {
+                    if let recoveryStorage {
+                        await self.drainPendingSaves()
+                        if recoveryStorage == .cloud {
+                            try await self.cloudSync.backupChatAndWait(
+                                streamChatId,
+                                requiredTurnId: turnId
+                            )
+                        }
+                    }
+                }
+
                 // Wait for client initialization if needed
                 if client == nil || isClientInitializing {
                     // If client setup hasn't started, start it
@@ -2152,7 +2386,48 @@ class ChatViewModel: ObservableObject {
                 // TinfoilEventParser; the SDK-level callback variant is
                 // no longer needed because the router emits nothing
                 // auxiliary on the chat stream.
-                let stream: AsyncThrowingStream<ChatStreamResult, Error> = client.chatsStream(query: chatQuery)
+                let stream: AsyncThrowingStream<ChatStreamResult, Error>
+                var recoveryEnvelope: PendingRecoveryEnvelope?
+                if let recoveryStorage, let userId = recoveryUserId {
+                    let bearerToken = SessionTokenManager.shared.currentToken
+                    guard !bearerToken.isEmpty else {
+                        throw NSError(
+                            domain: "TinfoilChat",
+                            code: 401,
+                            userInfo: [NSLocalizedDescriptionKey: "Authentication token unavailable."]
+                        )
+                    }
+                    let attempt = try await ChatRecoveryCoordinator.shared.begin(
+                        chatId: streamChatId,
+                        turnId: turnId,
+                        userId: userId,
+                        storage: recoveryStorage
+                    )
+                    recoveryAttempt = attempt
+                    recoveryAttempts[streamChatId] = attempt
+                    let recoverable = try await ChatRecoveryClient.shared.start(
+                        query: chatQuery,
+                        sessionId: attempt.sessionId,
+                        bearerToken: bearerToken,
+                        userId: userId
+                    )
+                    let envelope = try await ChatRecoveryCoordinator.shared.register(
+                        attempt: attempt,
+                        token: recoverable.token
+                    )
+                    recoveryEnvelope = envelope
+                    if let location = findChatLocation(streamChatId) {
+                        var chat = self.chat(at: location)
+                        var pending = chat.pendingRecoveries ?? []
+                        pending.removeAll { $0.turnId == turnId }
+                        pending.append(envelope)
+                        chat.pendingRecoveries = pending
+                        updateChat(chat)
+                    }
+                    stream = recoverable.stream
+                } else {
+                    stream = client.chatsStream(query: chatQuery)
+                }
 
                 // Applies one decoded marker event to the current chat.
                 // Mirrors the behavior the legacy SDK onWebSearchEvent
@@ -2459,6 +2734,34 @@ class ChatViewModel: ObservableObject {
                     }
                 }
 
+                if let attempt = recoveryAttempt,
+                   let envelope = recoveryEnvelope,
+                   let response = finalizedChat?.messages.last(where: {
+                       $0.role == .assistant && $0.turnId == turnId
+                   }) {
+                    do {
+                        try await ChatRecoveryCoordinator.shared.complete(
+                            attempt: attempt,
+                            envelope: envelope,
+                            response: response,
+                            title: finalizedChat?.title,
+                            titleState: finalizedChat?.titleState
+                        )
+                    } catch {
+                        recoveryAttempts.removeValue(forKey: streamChatId)
+                        recoveryAttempt = nil
+                        throw error
+                    }
+                    if var chat = finalizedChat {
+                        chat.pendingRecoveries?.removeAll { $0.turnId == turnId }
+                        if chat.pendingRecoveries?.isEmpty == true {
+                            chat.pendingRecoveries = nil
+                        }
+                        finalizedChat = chat
+                    }
+                    recoveryAttempts.removeValue(forKey: streamChatId)
+                }
+
                 guard !Task.isCancelled else { return }
 
                 // Save with the resolved title and trigger cloud backup
@@ -2492,12 +2795,26 @@ class ChatViewModel: ObservableObject {
 
                 if shouldRetry {
                     hasRetriedWithFreshKey = true
+                    if let attempt = recoveryAttempt {
+                        await ChatRecoveryCoordinator.shared.cancel(attempt: attempt)
+                        recoveryAttempt = nil
+                        recoveryAttempts.removeValue(forKey: streamChatId)
+                        if let location = findChatLocation(streamChatId) {
+                            var chat = self.chat(at: location)
+                            chat.pendingRecoveries?.removeAll { $0.turnId == turnId }
+                            if chat.pendingRecoveries?.isEmpty == true {
+                                chat.pendingRecoveries = nil
+                            }
+                            updateChat(chat)
+                        }
+                    }
                     // The token is reminted by acquireTokenForSend at the top of
                     // the retry pass (forceRefresh), so no separate refresh here.
                     if await MainActor.run(body: { self.client != nil }) {
                         continue retryLoop
                     }
                 }
+                recoveryAttempts.removeValue(forKey: streamChatId)
 
                 // Handle error
                 await MainActor.run {
@@ -2626,6 +2943,19 @@ class ChatViewModel: ObservableObject {
         if nsError.domain == "TinfoilChat" && nsError.code == 401 {
             return "Authentication error. Please sign in again."
         }
+
+        if case ChatRecoveryClientError.httpStatus(let statusCode) = error {
+            switch statusCode {
+            case 401:
+                return "Authentication error. Please sign in again."
+            case 429:
+                return "You've reached your daily limit of free requests. Your limit will reset tomorrow, or you can upgrade to Premium for unlimited access."
+            case 500...599:
+                return "The service is having trouble right now. Please try again in a moment, or switch to a different model."
+            default:
+                return "The model couldn't process this request. Please try again, or start a new chat if the problem persists."
+            }
+        }
         
         // HTTP status errors from the OpenAI SDK. Handle every code here so
         // the raw enum dump (including the NSHTTPURLResponse description)
@@ -2719,6 +3049,9 @@ class ChatViewModel: ObservableObject {
 
     /// Checks if an error indicates the user has hit their rate limit
     static func isRateLimitError(_ error: Error) -> Bool {
+        if case ChatRecoveryClientError.httpStatus(429) = error {
+            return true
+        }
         if case OpenAIError.statusError(_, let statusCode) = error, statusCode == 429 {
             return true
         }
@@ -2734,6 +3067,10 @@ class ChatViewModel: ObservableObject {
 
     /// Checks if an error is a client request error (4xx, excluding 401 which is handled by retry)
     private func isRequestError(_ error: Error) -> Bool {
+        if case ChatRecoveryClientError.httpStatus(let statusCode) = error,
+           (400...499).contains(statusCode), statusCode != 401 {
+            return true
+        }
         if case OpenAIError.statusError(_, let statusCode) = error,
            (400...499).contains(statusCode), statusCode != 401 {
             return true
@@ -2747,6 +3084,9 @@ class ChatViewModel: ObservableObject {
 
     /// Checks if an error is an authentication error (401)
     static func isAuthenticationError(_ error: Error) -> Bool {
+        if case ChatRecoveryClientError.httpStatus(401) = error {
+            return true
+        }
         // Streaming path: the SDK checks the HTTP status code before reading the body
         // and throws OpenAIError.statusError with the original status code
         if case OpenAIError.statusError(_, let statusCode) = error,
@@ -2786,11 +3126,34 @@ class ChatViewModel: ObservableObject {
         guard streamState.isStreaming(chatId: chatId) else { return nil }
 
         let streamTask = streamTasks[chatId]
+        let recoveryAttempt = recoveryAttempts.removeValue(forKey: chatId)
+        let stoppedResponse = recoveryAttempt.flatMap { attempt -> Message? in
+            guard let location = findChatLocation(chatId) else { return nil }
+            return chat(at: location).messages.last {
+                $0.role == .assistant && $0.turnId == attempt.turnId
+            }
+        }
+        let recoveryCleanup = recoveryAttempt.map { attempt in
+            Task.detached(priority: .userInitiated) {
+                await ChatRecoveryCoordinator.shared.cancel(
+                    attempt: attempt,
+                    response: stoppedResponse
+                )
+            }
+        }
         streamTask?.cancel()
         flushPendingStreamUpdate(chatId: chatId)
         if let location = findChatLocation(chatId) {
             var chat = chat(at: location)
             chat.hasActiveStream = false
+            if let recoveryAttempt {
+                chat.pendingRecoveries?.removeAll {
+                    $0.turnId == recoveryAttempt.turnId
+                }
+                if chat.pendingRecoveries?.isEmpty == true {
+                    chat.pendingRecoveries = nil
+                }
+            }
             updateChat(chat)
             streamingTracker.endStreaming(chat.id)
         } else {
@@ -2801,7 +3164,15 @@ class ChatViewModel: ObservableObject {
         if announce {
             AccessibilityAnnouncer.announce(Constants.Accessibility.generationStopped)
         }
-        return streamTask
+        return Task {
+            await recoveryCleanup?.value
+            await streamTask?.value
+            if let recoveryAttempt {
+                await ChatRecoveryCoordinator.shared.deleteSession(
+                    attempt: recoveryAttempt
+                )
+            }
+        }
     }
 
     private func cancelAllGenerations() -> [Task<Void, Never>] {
@@ -3219,6 +3590,10 @@ class ChatViewModel: ObservableObject {
         if authStateChanged {
             // Clear cached session token and reinitialize client only when auth changes
             SessionTokenManager.shared.clearSessionToken()
+            let accountId = isAuthenticated ? authManager?.localUserId : nil
+            Task {
+                await ChatRecoveryCoordinator.shared.reset(accountId: accountId)
+            }
             setupTinfoilClient()
         }
 
@@ -3247,6 +3622,7 @@ class ChatViewModel: ObservableObject {
                 }
 
                 self.ensureBlankChatAtTop()
+                self.scanPendingRecoveries()
             }
         }
     }
@@ -3259,9 +3635,12 @@ class ChatViewModel: ObservableObject {
         let canceledStreamTasks = cancelAllGenerations()
         await drainStreamTasks(canceledStreamTasks)
 
-        // Stop auto-sync timer when signing out
+        // Stop sync timers when signing out
         autoSyncTimer?.invalidate()
         autoSyncTimer = nil
+        recoveryScanTimer?.invalidate()
+        recoveryScanTimer = nil
+        await suspendRecoveryScans()
 
         // Save all local chats with content to disk before clearing in-memory state.
         // This is called while isAuthenticated is still true (see clearAuthState ordering)
@@ -3310,10 +3689,12 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Clear all local chats and reset to fresh state
-    func clearAllChatsFromDevice() async {
+    func clearAllChatsFromDevice(resumeRecoveryScans: Bool = true) async {
         let canceledStreamTasks = cancelAllGenerations()
+        await suspendRecoveryScans()
 
         // Clear all chats from memory
+        ChatRecoveryDraftStore.shared.clearAll()
         chats.removeAll()
         localChats.removeAll()
         currentChat = nil
@@ -3339,6 +3720,9 @@ class ChatViewModel: ObservableObject {
         
         // Clear encryption key reference
         encryptionKey = nil
+        if resumeRecoveryScans {
+            recoveryScansSuspended = false
+        }
     }
 
     /// Erase on-disk chats for the signed-out user during sign-out cleanup.
@@ -3380,6 +3764,7 @@ class ChatViewModel: ObservableObject {
 
     /// Handle sign-in by loading user's saved chats and triggering sync
     func handleSignIn() {
+        recoveryScansSuspended = false
         #if DEBUG
         print("handleSignIn called")
         #endif
@@ -3475,6 +3860,7 @@ class ChatViewModel: ObservableObject {
                             SettingsManager.shared.isLocalOnlyModeEnabled = true
                         }
                     }
+                    self.scanPendingRecoveries()
 
                     // If no cloud key exists, try passkey recovery before falling back
                     if !EncryptionService.shared.hasEncryptionKey() {
@@ -3705,6 +4091,7 @@ class ChatViewModel: ObservableObject {
             
             // Setup pagination token
             await setupPaginationForAppRestart()
+            scanPendingRecoveries()
         } catch {
             await MainActor.run {
                 self.syncErrors.append(error.localizedDescription)
@@ -3819,6 +4206,7 @@ class ChatViewModel: ObservableObject {
                 self.chats = result.chats
                 normalizeChatsArray()
             }
+            scanPendingRecoveries()
         } catch {
             #if DEBUG
             print("Failed to perform initial sync: \(error)")
@@ -4035,6 +4423,7 @@ class ChatViewModel: ObservableObject {
             self.paginationToken = savedPaginationToken
             self.isPaginationActive = savedIsPaginationActive
         }
+        scanPendingRecoveries()
     }
     
     /// Reset pagination and reload all chats from storage (used after sync)
