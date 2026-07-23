@@ -50,6 +50,38 @@ struct ChatRecoveryDraftStoreTests {
         #expect(stored?.isStreaming == true)
     }
 
+    @Test func rejectsDraftsFromSupersededScans() {
+        let store = ChatRecoveryDraftStore()
+        store.reset(generation: 1)
+        store.beginScan(generation: 4)
+        store.replace(
+            Message(role: .assistant, turnId: "turn-1", content: "Current"),
+            chatId: "chat-1",
+            turnId: "turn-1",
+            generation: 1,
+            scanGeneration: 4
+        )
+
+        store.beginScan(generation: 5)
+        store.replace(
+            Message(role: .assistant, turnId: "turn-1", content: "Stale"),
+            chatId: "chat-1",
+            turnId: "turn-1",
+            generation: 1,
+            scanGeneration: 4
+        )
+        #expect(store.drafts.values.first?.content == "Current")
+
+        store.replace(
+            Message(role: .assistant, turnId: "turn-1", content: "Fresh"),
+            chatId: "chat-1",
+            turnId: "turn-1",
+            generation: 1,
+            scanGeneration: 5
+        )
+        #expect(store.drafts.values.first?.content == "Fresh")
+    }
+
     @Test func prunesByChatAndResetClearsEveryDraft() {
         let store = ChatRecoveryDraftStore()
         let drafts = [

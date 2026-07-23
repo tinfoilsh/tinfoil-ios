@@ -166,6 +166,7 @@ enum Constants {
         static let keyIdHexLength = 32
         static let tokenFieldHexLength = 64
         static let requestTimeoutSeconds: TimeInterval = 30
+        static let scanStallTimeoutSeconds: TimeInterval = 120
         static let hkdfInfo = "tinfoil-chat-recovery-envelope-v1"
         static let aadLabel = "tinfoil-chat-recovery-envelope-aad-v1"
         static let sessionHeader = "X-Session-Id"

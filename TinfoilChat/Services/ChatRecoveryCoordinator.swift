@@ -58,19 +58,33 @@ final class ChatRecoveryPhaseTracker: ObservableObject {
     }
 }
 
+func recoveryDraftHasVisibleContent(_ message: Message) -> Bool {
+    !message.content.isEmpty
+        || message.thoughts?.isEmpty == false
+        || message.segments?.isEmpty == false
+        || message.webSearches?.isEmpty == false
+        || message.webSearchState != nil
+        || !message.urlFetches.isEmpty
+        || !message.toolCalls.isEmpty
+        || message.annotations?.isEmpty == false
+        || message.timeline?.isEmpty == false
+}
+
 actor ChatRecoveryCoordinator {
     static let shared = ChatRecoveryCoordinator()
 
     private var accountGeneration = 0
+    private var scanGeneration = 0
     private var cancelledTurns: Set<String> = []
     private var activeAccountId: String?
-    private var isScanning = false
+    private var activeScanGeneration: Int?
 
     func reset(accountId: String?) async {
         accountGeneration += 1
+        scanGeneration += 1
         activeAccountId = accountId
         cancelledTurns.removeAll()
-        isScanning = false
+        activeScanGeneration = nil
         let generation = accountGeneration
         await MainActor.run {
             ChatRecoveryPhaseTracker.shared.clearAll()
@@ -263,17 +277,46 @@ actor ChatRecoveryCoordinator {
         try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
     }
 
-    func scan(userId: String, storages: [ChatRecoveryStorage]) async {
+    func scan(
+        userId: String,
+        storages: [ChatRecoveryStorage],
+        replacingActiveScan: Bool,
+        onProgress: @escaping @Sendable () async -> Void
+    ) async {
         if activeAccountId != userId {
             await reset(accountId: userId)
         }
-        guard !isScanning else { return }
-        isScanning = true
-        defer { isScanning = false }
-        let generation = accountGeneration
+        guard replacingActiveScan || activeScanGeneration == nil else { return }
+        scanGeneration += 1
+        let currentScanGeneration = scanGeneration
+        activeScanGeneration = currentScanGeneration
+        defer {
+            if activeScanGeneration == currentScanGeneration {
+                activeScanGeneration = nil
+            }
+        }
+        let currentAccountGeneration = accountGeneration
+        await MainActor.run {
+            ChatRecoveryDraftStore.shared.beginScan(
+                generation: currentScanGeneration
+            )
+        }
+        guard scanIsCurrent(
+            accountGeneration: currentAccountGeneration,
+            scanGeneration: currentScanGeneration,
+            userId: userId
+        ) else {
+            return
+        }
         var work: [(String, PendingRecoveryEnvelope, ChatRecoveryStorage)] = []
         for storage in storages {
-            guard !Task.isCancelled else { return }
+            guard scanIsCurrent(
+                accountGeneration: currentAccountGeneration,
+                scanGeneration: currentScanGeneration,
+                userId: userId
+            ) else {
+                return
+            }
             let storedChats = (try? await storage.fileStorage.loadChatsWithPendingRecoveries(
                 userId: userId
             )) ?? []
@@ -293,8 +336,10 @@ actor ChatRecoveryCoordinator {
                             chatId: item.0,
                             envelope: item.1,
                             userId: userId,
-                            generation: generation,
-                            storage: item.2
+                            accountGeneration: currentAccountGeneration,
+                            scanGeneration: currentScanGeneration,
+                            storage: item.2,
+                            onProgress: onProgress
                         )
                     }
                 }
@@ -307,8 +352,10 @@ actor ChatRecoveryCoordinator {
                             chatId: item.0,
                             envelope: item.1,
                             userId: userId,
-                            generation: generation,
-                            storage: item.2
+                            accountGeneration: currentAccountGeneration,
+                            scanGeneration: currentScanGeneration,
+                            storage: item.2,
+                            onProgress: onProgress
                         )
                     }
                 }
@@ -320,12 +367,16 @@ actor ChatRecoveryCoordinator {
         chatId: String,
         envelope originalEnvelope: PendingRecoveryEnvelope,
         userId: String,
-        generation: Int,
-        storage: ChatRecoveryStorage
+        accountGeneration: Int,
+        scanGeneration: Int,
+        storage: ChatRecoveryStorage,
+        onProgress: @escaping @Sendable () async -> Void
     ) async {
-        guard !Task.isCancelled,
-              generation == accountGeneration,
-              activeAccountId == userId,
+        guard scanIsCurrent(
+            accountGeneration: accountGeneration,
+            scanGeneration: scanGeneration,
+            userId: userId
+        ),
               !(await isChatStreaming(chatId))
         else {
             return
@@ -344,6 +395,13 @@ actor ChatRecoveryCoordinator {
             )
             payload = opened.payload
             if storage == .cloud && opened.usedHistoricalKey {
+                guard scanIsCurrent(
+                    accountGeneration: accountGeneration,
+                    scanGeneration: scanGeneration,
+                    userId: userId
+                ) else {
+                    return
+                }
                 let currentCEK = try EncryptionService.shared.getKeyBytesOrThrow()
                 let rewrapped = try ChatRecoveryCrypto.rewrap(
                     envelope: envelope,
@@ -358,6 +416,13 @@ actor ChatRecoveryCoordinator {
                     storage: storage,
                     mutation: .replace(old: envelope, new: rewrapped)
                 )
+                guard scanIsCurrent(
+                    accountGeneration: accountGeneration,
+                    scanGeneration: scanGeneration,
+                    userId: userId
+                ) else {
+                    return
+                }
                 envelope = rewrapped
                 postRecoveryUpdate(
                     chatId: chatId,
@@ -366,36 +431,70 @@ actor ChatRecoveryCoordinator {
                 )
             }
         } catch ChatRecoveryCryptoError.expired {
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ) else {
+                return
+            }
             await removeTerminal(
                 chatId: chatId,
-                turnId: envelope.turnId,
+                envelope: envelope,
                 userId: userId,
                 sessionId: nil,
-                storage: storage
+                storage: storage,
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration
             )
             return
         } catch ChatRecoveryCryptoError.invalidEnvelope,
                 ChatRecoveryCryptoError.decryptionFailed {
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ) else {
+                return
+            }
             await removeTerminal(
                 chatId: chatId,
-                turnId: envelope.turnId,
+                envelope: envelope,
                 userId: userId,
                 sessionId: nil,
-                storage: storage
+                storage: storage,
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration
             )
             return
         } catch {
             return
         }
 
-        guard !Task.isCancelled,
-              generation == accountGeneration,
-              activeAccountId == userId
-        else {
+        guard scanIsCurrent(
+            accountGeneration: accountGeneration,
+            scanGeneration: scanGeneration,
+            userId: userId
+        ) else {
             return
         }
         do {
             let state = try await ChatRecoveryClient.shared.state(sessionId: payload.sessionId)
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ) else {
+                return
+            }
+            await onProgress()
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ) else {
+                return
+            }
             let turnId = envelope.turnId
             switch state {
             case .processing:
@@ -405,10 +504,12 @@ actor ChatRecoveryCoordinator {
             case .failed, .missing:
                 await removeTerminal(
                     chatId: chatId,
-                    turnId: envelope.turnId,
+                    envelope: envelope,
                     userId: userId,
                     sessionId: payload.sessionId,
-                    storage: storage
+                    storage: storage,
+                    accountGeneration: accountGeneration,
+                    scanGeneration: scanGeneration
                 )
                 return
             case .complete:
@@ -426,23 +527,33 @@ actor ChatRecoveryCoordinator {
                 sessionId: payload.sessionId,
                 token: token
             )
-            guard !Task.isCancelled else { return }
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ) else {
+                return
+            }
             if !(200..<300).contains(recovered.statusCode) {
                 for try await _ in recovered.stream {}
-                guard generation == accountGeneration,
-                      activeAccountId == userId,
+                guard scanIsCurrent(
+                    accountGeneration: accountGeneration,
+                    scanGeneration: scanGeneration,
+                    userId: userId
+                ),
                       !cancelledTurns.contains(key),
-                      !(await isChatStreaming(chatId)),
-                      !Task.isCancelled
+                      !(await isChatStreaming(chatId))
                 else {
                     return
                 }
                 await removeTerminal(
                     chatId: chatId,
-                    turnId: envelope.turnId,
+                    envelope: envelope,
                     userId: userId,
                     sessionId: payload.sessionId,
-                    storage: storage
+                    storage: storage,
+                    accountGeneration: accountGeneration,
+                    scanGeneration: scanGeneration
                 )
                 return
             }
@@ -451,21 +562,39 @@ actor ChatRecoveryCoordinator {
                 chatId: chatId,
                 turnId: envelope.turnId,
                 userId: userId,
-                generation: generation,
-                storage: storage
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                storage: storage,
+                onProgress: onProgress
             )
-            guard generation == accountGeneration,
-                  activeAccountId == userId,
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ),
                   !cancelledTurns.contains(key)
             else {
-                try? await ChatRecoveryClient.shared.delete(sessionId: payload.sessionId)
                 return
             }
             guard !(await isChatStreaming(chatId)) else { return }
-            guard !Task.isCancelled else { return }
             let finalState = try await ChatRecoveryClient.shared.state(
                 sessionId: payload.sessionId
             )
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ) else {
+                return
+            }
+            await onProgress()
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ) else {
+                return
+            }
             switch finalState {
             case .processing:
                 await MainActor.run {
@@ -475,10 +604,12 @@ actor ChatRecoveryCoordinator {
             case .failed, .missing:
                 await removeTerminal(
                     chatId: chatId,
-                    turnId: envelope.turnId,
+                    envelope: envelope,
                     userId: userId,
                     sessionId: payload.sessionId,
-                    storage: storage
+                    storage: storage,
+                    accountGeneration: accountGeneration,
+                    scanGeneration: scanGeneration
                 )
                 return
             case .complete:
@@ -486,11 +617,13 @@ actor ChatRecoveryCoordinator {
                     ChatRecoveryPhaseTracker.shared.setPhase(.restoring, turnId: turnId)
                 }
             }
-            guard generation == accountGeneration,
-                  activeAccountId == userId,
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ),
                   !cancelledTurns.contains(key),
-                  !(await isChatStreaming(chatId)),
-                  !Task.isCancelled
+                  !(await isChatStreaming(chatId))
             else {
                 return
             }
@@ -505,6 +638,13 @@ actor ChatRecoveryCoordinator {
                     titleState: nil
                 )
             )
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ) else {
+                return
+            }
             try? await ChatRecoveryClient.shared.delete(sessionId: payload.sessionId)
             await MainActor.run {
                 ChatRecoveryPhaseTracker.shared.clear(turnId: turnId)
@@ -515,6 +655,13 @@ actor ChatRecoveryCoordinator {
                 storage: storage
             )
         } catch ChatRecoverySyncError.envelopeMissing {
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ) else {
+                return
+            }
             await MainActor.run {
                 ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
             }
@@ -532,12 +679,21 @@ actor ChatRecoveryCoordinator {
             )
         } catch ChatRecoveryClientError.state(let state)
             where state == .failed || state == .missing {
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ) else {
+                return
+            }
             await removeTerminal(
                 chatId: chatId,
-                turnId: envelope.turnId,
+                envelope: envelope,
                 userId: userId,
                 sessionId: payload.sessionId,
-                storage: storage
+                storage: storage,
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration
             )
         } catch {
             return
@@ -598,14 +754,17 @@ actor ChatRecoveryCoordinator {
         chatId: String,
         turnId: String,
         userId: String,
-        generation: Int,
-        storage: ChatRecoveryStorage
+        accountGeneration: Int,
+        scanGeneration: Int,
+        storage: ChatRecoveryStorage,
+        onProgress: @escaping @Sendable () async -> Void
     ) async throws -> Message {
         let processor = StreamingResponseProcessor(
             isWebSearchEnabled: true,
             hapticEnabled: false
         )
         var eventState = RecoveredEventState()
+        var lastProgressDraft: Message?
         for try await chunk in stream {
             let parsed = processor.parse(chunk)
             for event in parsed.events {
@@ -617,7 +776,8 @@ actor ChatRecoveryCoordinator {
                     chatId: chatId,
                     turnId: turnId,
                     userId: userId,
-                    generation: generation,
+                    accountGeneration: accountGeneration,
+                    scanGeneration: scanGeneration,
                     storage: storage
                 )
                 let draft = recoveredMessage(
@@ -627,12 +787,19 @@ actor ChatRecoveryCoordinator {
                     turnId: turnId,
                     isStreaming: true
                 )
-                if recoveredMessageIsMeaningful(draft) {
+                if recoveryDraftHasVisibleContent(draft) {
+                    if draft != lastProgressDraft {
+                        lastProgressDraft = draft
+                        await onProgress()
+                    }
                     try await publishRecoveryDraft(
                         draft,
                         chatId: chatId,
                         turnId: turnId,
-                        generation: generation
+                        accountGeneration: accountGeneration,
+                        scanGeneration: scanGeneration,
+                        userId: userId,
+                        storage: storage
                     )
                 }
             }
@@ -642,7 +809,8 @@ actor ChatRecoveryCoordinator {
             chatId: chatId,
             turnId: turnId,
             userId: userId,
-            generation: generation,
+            accountGeneration: accountGeneration,
+            scanGeneration: scanGeneration,
             storage: storage
         )
         let message = recoveredMessage(
@@ -652,14 +820,20 @@ actor ChatRecoveryCoordinator {
             turnId: turnId,
             isStreaming: false
         )
-        if recoveredMessageIsMeaningful(message) {
+        if recoveryDraftHasVisibleContent(message) {
+            if message != lastProgressDraft {
+                await onProgress()
+            }
             var finalDraft = message
             finalDraft.isStreaming = true
             try await publishRecoveryDraft(
                 finalDraft,
                 chatId: chatId,
                 turnId: turnId,
-                generation: generation
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId,
+                storage: storage
             )
         }
         return message
@@ -669,8 +843,19 @@ actor ChatRecoveryCoordinator {
         _ draft: Message,
         chatId: String,
         turnId: String,
-        generation: Int
+        accountGeneration: Int,
+        scanGeneration: Int,
+        userId: String,
+        storage: ChatRecoveryStorage
     ) async throws {
+        try ensureRecoveryIsCurrent(
+            chatId: chatId,
+            turnId: turnId,
+            userId: userId,
+            accountGeneration: accountGeneration,
+            scanGeneration: scanGeneration,
+            storage: storage
+        )
         let published = await MainActor.run {
             guard !StreamingTracker.shared.isStreaming(chatId) else {
                 ChatRecoveryDraftStore.shared.clear(
@@ -683,10 +868,19 @@ actor ChatRecoveryCoordinator {
                 draft,
                 chatId: chatId,
                 turnId: turnId,
-                generation: generation
+                generation: accountGeneration,
+                scanGeneration: scanGeneration
             )
             return true
         }
+        try ensureRecoveryIsCurrent(
+            chatId: chatId,
+            turnId: turnId,
+            userId: userId,
+            accountGeneration: accountGeneration,
+            scanGeneration: scanGeneration,
+            storage: storage
+        )
         guard published else { throw CancellationError() }
     }
 
@@ -713,6 +907,7 @@ actor ChatRecoveryCoordinator {
             content: snapshot.responseContent,
             thoughts: snapshot.thoughts,
             isThinking: snapshot.isThinking,
+            timestamp: .distantPast,
             generationTimeSeconds: snapshot.generationTimeSeconds,
             contentChunks: snapshot.contentChunks,
             thinkingChunks: snapshot.thinkingChunks,
@@ -730,57 +925,81 @@ actor ChatRecoveryCoordinator {
         return message
     }
 
-    private func recoveredMessageIsMeaningful(_ message: Message) -> Bool {
-        !message.content.isEmpty
-            || message.thoughts?.isEmpty == false
-            || message.isThinking
-            || message.segments?.isEmpty == false
-            || message.webSearches?.isEmpty == false
-            || message.webSearchState != nil
-            || !message.urlFetches.isEmpty
-            || !message.toolCalls.isEmpty
-            || message.annotations?.isEmpty == false
-            || message.timeline?.isEmpty == false
-    }
-
     private func ensureRecoveryIsCurrent(
         chatId: String,
         turnId: String,
         userId: String,
-        generation: Int,
+        accountGeneration: Int,
+        scanGeneration: Int,
         storage: ChatRecoveryStorage
     ) throws {
         let key = turnKey(chatId: chatId, turnId: turnId, storage: storage)
-        guard !Task.isCancelled,
-              generation == accountGeneration,
-              activeAccountId == userId,
+        guard scanIsCurrent(
+            accountGeneration: accountGeneration,
+            scanGeneration: scanGeneration,
+            userId: userId
+        ),
               !cancelledTurns.contains(key)
         else {
             throw CancellationError()
         }
     }
 
+    private func scanIsCurrent(
+        accountGeneration: Int,
+        scanGeneration: Int,
+        userId: String
+    ) -> Bool {
+        !Task.isCancelled
+            && accountGeneration == self.accountGeneration
+            && scanGeneration == self.scanGeneration
+            && activeAccountId == userId
+    }
+
     private func removeTerminal(
         chatId: String,
-        turnId: String,
+        envelope: PendingRecoveryEnvelope,
         userId: String,
         sessionId: String?,
-        storage: ChatRecoveryStorage
+        storage: ChatRecoveryStorage,
+        accountGeneration: Int,
+        scanGeneration: Int
     ) async {
-        await MainActor.run {
-            ChatRecoveryPhaseTracker.shared.clear(turnId: turnId)
-            ChatRecoveryDraftStore.shared.discard(
-                chatId: chatId,
-                turnId: turnId
-            )
+        guard scanIsCurrent(
+            accountGeneration: accountGeneration,
+            scanGeneration: scanGeneration,
+            userId: userId
+        ),
+              !(await isChatStreaming(chatId)),
+              scanIsCurrent(
+                  accountGeneration: accountGeneration,
+                  scanGeneration: scanGeneration,
+                  userId: userId
+              )
+        else {
+            return
         }
         do {
             try await ChatRecoverySync.shared.mutate(
                 chatId: chatId,
                 userId: userId,
                 storage: storage,
-                mutation: .remove(turnId: turnId)
+                mutation: .remove(envelope)
             )
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ) else {
+                return
+            }
+            await MainActor.run {
+                ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
+                ChatRecoveryDraftStore.shared.discard(
+                    chatId: chatId,
+                    turnId: envelope.turnId
+                )
+            }
             if let sessionId {
                 try? await ChatRecoveryClient.shared.delete(sessionId: sessionId)
             }
@@ -790,7 +1009,12 @@ actor ChatRecoveryCoordinator {
                 storage: storage
             )
         } catch {
-            if let sessionId {
+            if let sessionId,
+               scanIsCurrent(
+                   accountGeneration: accountGeneration,
+                   scanGeneration: scanGeneration,
+                   userId: userId
+               ) {
                 try? await ChatRecoveryClient.shared.delete(sessionId: sessionId)
             }
             return
