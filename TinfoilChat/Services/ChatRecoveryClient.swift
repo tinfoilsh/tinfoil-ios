@@ -157,7 +157,7 @@ actor ChatRecoveryClient {
                         var decryptor = responseDecryptor
                         for try await byte in bytes {
                             try Task.checkCancellation()
-                            for chunk in try decryptor.push(Data([byte])) {
+                            if let chunk = try decryptor.push(byte) {
                                 continuation.yield(chunk)
                             }
                         }

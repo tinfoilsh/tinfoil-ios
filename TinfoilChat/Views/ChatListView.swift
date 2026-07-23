@@ -55,10 +55,19 @@ struct ChatListView: View {
     /// refreshed only when the conversation, model, or message count changes
     /// instead of on every body evaluation during streaming.
     private func refreshArchivedMessagesStartIndex() {
-        archivedMessagesStartIndex = TokenEstimation.findContextStartIndex(
-            messages: viewModel.messages,
+        let persistedMessages = viewModel.messages
+        let persistedStartIndex = TokenEstimation.findContextStartIndex(
+            messages: persistedMessages,
             budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow)
         )
+        guard persistedMessages.indices.contains(persistedStartIndex) else {
+            archivedMessagesStartIndex = 0
+            return
+        }
+        let boundaryMessageId = persistedMessages[persistedStartIndex].id
+        archivedMessagesStartIndex = messages.firstIndex {
+            $0.id == boundaryMessageId
+        } ?? persistedStartIndex
     }
 
     var body: some View {
