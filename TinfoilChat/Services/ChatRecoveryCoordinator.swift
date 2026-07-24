@@ -479,7 +479,9 @@ actor ChatRecoveryCoordinator {
             return
         }
         do {
-            let state = try await ChatRecoveryClient.shared.state(sessionId: payload.sessionId)
+            let initialStatus = try await ChatRecoveryClient.shared.status(
+                sessionId: payload.sessionId
+            )
             guard scanIsCurrent(
                 accountGeneration: accountGeneration,
                 scanGeneration: scanGeneration,
@@ -496,7 +498,7 @@ actor ChatRecoveryCoordinator {
                 return
             }
             let turnId = envelope.turnId
-            switch state {
+            switch initialStatus.state {
             case .processing:
                 await MainActor.run {
                     ChatRecoveryPhaseTracker.shared.setPhase(.generating, turnId: turnId)
@@ -523,100 +525,164 @@ actor ChatRecoveryCoordinator {
                 turnId: envelope.turnId,
                 storage: storage
             )
-            let recovered = try await ChatRecoveryClient.shared.fetch(
-                sessionId: payload.sessionId,
-                token: token
-            )
-            guard scanIsCurrent(
-                accountGeneration: accountGeneration,
-                scanGeneration: scanGeneration,
-                userId: userId
-            ) else {
-                return
-            }
-            if !(200..<300).contains(recovered.statusCode) {
-                for try await _ in recovered.stream {}
-                guard scanIsCurrent(
-                    accountGeneration: accountGeneration,
-                    scanGeneration: scanGeneration,
-                    userId: userId
-                ),
-                      !cancelledTurns.contains(key),
-                      !(await isChatStreaming(chatId))
-                else {
-                    return
+            var response: Message?
+            for attempt in 0..<Constants.ChatRecovery.maxStreamAttempts {
+                do {
+                    let recovered = try await ChatRecoveryClient.shared.fetch(
+                        sessionId: payload.sessionId,
+                        token: token
+                    )
+                    guard scanIsCurrent(
+                        accountGeneration: accountGeneration,
+                        scanGeneration: scanGeneration,
+                        userId: userId
+                    ) else {
+                        return
+                    }
+                    if !(200..<300).contains(recovered.statusCode) {
+                        for try await _ in recovered.stream {}
+                        guard scanIsCurrent(
+                            accountGeneration: accountGeneration,
+                            scanGeneration: scanGeneration,
+                            userId: userId
+                        ),
+                              !cancelledTurns.contains(key),
+                              !(await isChatStreaming(chatId))
+                        else {
+                            return
+                        }
+                        await removeTerminal(
+                            chatId: chatId,
+                            envelope: envelope,
+                            userId: userId,
+                            sessionId: payload.sessionId,
+                            storage: storage,
+                            accountGeneration: accountGeneration,
+                            scanGeneration: scanGeneration
+                        )
+                        return
+                    }
+                    let recoveredResponse = try await reconstructMessage(
+                        stream: recovered.stream,
+                        chatId: chatId,
+                        turnId: envelope.turnId,
+                        userId: userId,
+                        accountGeneration: accountGeneration,
+                        scanGeneration: scanGeneration,
+                        storage: storage,
+                        onProgress: onProgress
+                    )
+                    guard scanIsCurrent(
+                        accountGeneration: accountGeneration,
+                        scanGeneration: scanGeneration,
+                        userId: userId
+                    ),
+                          !cancelledTurns.contains(key),
+                          !(await isChatStreaming(chatId))
+                    else {
+                        return
+                    }
+                    let finalStatus = try await ChatRecoveryClient.shared.status(
+                        sessionId: payload.sessionId
+                    )
+                    guard scanIsCurrent(
+                        accountGeneration: accountGeneration,
+                        scanGeneration: scanGeneration,
+                        userId: userId
+                    ) else {
+                        return
+                    }
+                    await onProgress()
+                    guard scanIsCurrent(
+                        accountGeneration: accountGeneration,
+                        scanGeneration: scanGeneration,
+                        userId: userId
+                    ) else {
+                        return
+                    }
+                    switch finalStatus.state {
+                    case .processing:
+                        await MainActor.run {
+                            ChatRecoveryPhaseTracker.shared.setPhase(
+                                .generating,
+                                turnId: turnId
+                            )
+                        }
+                        if attempt + 1 < Constants.ChatRecovery.maxStreamAttempts {
+                            continue
+                        }
+                        return
+                    case .failed, .missing:
+                        await removeTerminal(
+                            chatId: chatId,
+                            envelope: envelope,
+                            userId: userId,
+                            sessionId: payload.sessionId,
+                            storage: storage,
+                            accountGeneration: accountGeneration,
+                            scanGeneration: scanGeneration
+                        )
+                        return
+                    case .complete:
+                        await MainActor.run {
+                            ChatRecoveryPhaseTracker.shared.setPhase(
+                                .restoring,
+                                turnId: turnId
+                            )
+                        }
+                    }
+                    let encryptedByteCount = await recovered.encryptedByteCount()
+                    guard scanIsCurrent(
+                        accountGeneration: accountGeneration,
+                        scanGeneration: scanGeneration,
+                        userId: userId
+                    ) else {
+                        return
+                    }
+                    if encryptedByteCount < finalStatus.persistedBytes {
+                        if attempt + 1 < Constants.ChatRecovery.maxStreamAttempts {
+                            continue
+                        }
+                        return
+                    }
+                    response = recoveredResponse
+                    break
+                } catch {
+                    guard scanIsCurrent(
+                        accountGeneration: accountGeneration,
+                        scanGeneration: scanGeneration,
+                        userId: userId
+                    ),
+                          !cancelledTurns.contains(key),
+                          !(await isChatStreaming(chatId)),
+                          let retryStatus = try? await ChatRecoveryClient.shared.status(
+                              sessionId: payload.sessionId
+                          )
+                    else {
+                        return
+                    }
+                    await onProgress()
+                    switch retryStatus.state {
+                    case .processing, .complete:
+                        guard attempt + 1 < Constants.ChatRecovery.maxStreamAttempts else {
+                            return
+                        }
+                        continue
+                    case .failed, .missing:
+                        await removeTerminal(
+                            chatId: chatId,
+                            envelope: envelope,
+                            userId: userId,
+                            sessionId: payload.sessionId,
+                            storage: storage,
+                            accountGeneration: accountGeneration,
+                            scanGeneration: scanGeneration
+                        )
+                        return
+                    }
                 }
-                await removeTerminal(
-                    chatId: chatId,
-                    envelope: envelope,
-                    userId: userId,
-                    sessionId: payload.sessionId,
-                    storage: storage,
-                    accountGeneration: accountGeneration,
-                    scanGeneration: scanGeneration
-                )
-                return
             }
-            let response = try await reconstructMessage(
-                stream: recovered.stream,
-                chatId: chatId,
-                turnId: envelope.turnId,
-                userId: userId,
-                accountGeneration: accountGeneration,
-                scanGeneration: scanGeneration,
-                storage: storage,
-                onProgress: onProgress
-            )
-            guard scanIsCurrent(
-                accountGeneration: accountGeneration,
-                scanGeneration: scanGeneration,
-                userId: userId
-            ),
-                  !cancelledTurns.contains(key)
-            else {
-                return
-            }
-            guard !(await isChatStreaming(chatId)) else { return }
-            let finalState = try await ChatRecoveryClient.shared.state(
-                sessionId: payload.sessionId
-            )
-            guard scanIsCurrent(
-                accountGeneration: accountGeneration,
-                scanGeneration: scanGeneration,
-                userId: userId
-            ) else {
-                return
-            }
-            await onProgress()
-            guard scanIsCurrent(
-                accountGeneration: accountGeneration,
-                scanGeneration: scanGeneration,
-                userId: userId
-            ) else {
-                return
-            }
-            switch finalState {
-            case .processing:
-                await MainActor.run {
-                    ChatRecoveryPhaseTracker.shared.setPhase(.generating, turnId: turnId)
-                }
-                return
-            case .failed, .missing:
-                await removeTerminal(
-                    chatId: chatId,
-                    envelope: envelope,
-                    userId: userId,
-                    sessionId: payload.sessionId,
-                    storage: storage,
-                    accountGeneration: accountGeneration,
-                    scanGeneration: scanGeneration
-                )
-                return
-            case .complete:
-                await MainActor.run {
-                    ChatRecoveryPhaseTracker.shared.setPhase(.restoring, turnId: turnId)
-                }
-            }
+            guard let response else { return }
             guard scanIsCurrent(
                 accountGeneration: accountGeneration,
                 scanGeneration: scanGeneration,

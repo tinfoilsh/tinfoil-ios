@@ -171,6 +171,7 @@ enum Constants {
         static let maxPendingPerChat = 8
         static let maxConcurrentScans = 3
         static let maxMutationAttempts = 4
+        static let maxStreamAttempts = 2
         static let maxCiphertextBytes = 4_096
         static let maxIdentifierLength = 256
         static let sessionIdBytes = 16

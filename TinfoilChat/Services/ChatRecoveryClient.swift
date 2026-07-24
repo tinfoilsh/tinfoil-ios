@@ -26,14 +26,51 @@ struct RecoverableChatStream {
 struct RecoveredChatStream {
     let stream: AsyncThrowingStream<ChatStreamResult, Error>
     let statusCode: Int
+    let encryptedByteCount: @Sendable () async -> Int
+}
+
+struct ChatRecoveryStatus: Decodable, Sendable {
+    let state: ChatRecoveryState
+    let persistedBytes: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case state = "status"
+        case persistedBytes = "bytes"
+    }
+
+    init(state: ChatRecoveryState, persistedBytes: Int) {
+        self.state = state
+        self.persistedBytes = persistedBytes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        state = try container.decode(ChatRecoveryState.self, forKey: .state)
+        persistedBytes = try container.decode(Int.self, forKey: .persistedBytes)
+        guard persistedBytes >= 0 else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .persistedBytes,
+                in: container,
+                debugDescription: "Persisted byte count must not be negative"
+            )
+        }
+    }
+}
+
+private actor ChatRecoveryByteCounter {
+    private var count = 0
+
+    func set(_ count: Int) {
+        self.count = count
+    }
+
+    func value() -> Int {
+        count
+    }
 }
 
 actor ChatRecoveryClient {
     static let shared = ChatRecoveryClient()
-
-    private struct StatusResponse: Decodable {
-        let status: ChatRecoveryState
-    }
 
     private var verifiedEndpoint: (enclaveURL: String, publicKey: Data)?
 
@@ -92,20 +129,23 @@ actor ChatRecoveryClient {
         )
     }
 
-    func state(sessionId: String) async throws -> ChatRecoveryState {
+    func status(sessionId: String) async throws -> ChatRecoveryStatus {
         let response = try await request(sessionId: sessionId, suffix: "/status")
         switch response.statusCode {
         case 404:
-            return .missing
+            return ChatRecoveryStatus(state: .missing, persistedBytes: 0)
         case 410:
-            return .failed
+            return ChatRecoveryStatus(state: .failed, persistedBytes: 0)
         default:
             guard (200..<300).contains(response.statusCode),
-                  let status = try? JSONDecoder().decode(StatusResponse.self, from: response.data)
+                  let status = try? JSONDecoder().decode(
+                      ChatRecoveryStatus.self,
+                      from: response.data
+                  )
             else {
                 throw ChatRecoveryClientError.invalidResponse
             }
-            return status.status
+            return status
         }
     }
 
@@ -139,19 +179,24 @@ actor ChatRecoveryClient {
         ).makeResponseDecryptor(
             responseNonce: nonce
         )
+        let byteCounter = ChatRecoveryByteCounter()
         let plaintext = AsyncThrowingStream<Data, Error> { continuation in
             let task = Task {
+                var encryptedByteCount = 0
                 do {
                     var decryptor = responseDecryptor
                     for try await byte in bytes {
                         try Task.checkCancellation()
+                        encryptedByteCount += 1
                         if let chunk = try decryptor.push(byte) {
                             continuation.yield(chunk)
                         }
                     }
                     try decryptor.finish()
+                    await byteCounter.set(encryptedByteCount)
                     continuation.finish()
                 } catch {
+                    await byteCounter.set(encryptedByteCount)
                     bytes.task.cancel()
                     continuation.finish(throwing: error)
                 }
@@ -163,7 +208,10 @@ actor ChatRecoveryClient {
         }
         return RecoveredChatStream(
             stream: Self.decodeSSE(plaintext),
-            statusCode: response.statusCode
+            statusCode: response.statusCode,
+            encryptedByteCount: {
+                await byteCounter.value()
+            }
         )
     }
 

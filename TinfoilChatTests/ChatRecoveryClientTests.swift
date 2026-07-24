@@ -5,6 +5,32 @@ import Testing
 
 @Suite("Chat recovery client")
 struct ChatRecoveryClientTests {
+    @Test("status decodes persisted encrypted bytes")
+    func statusBytes() throws {
+        let status = try JSONDecoder().decode(
+            ChatRecoveryStatus.self,
+            from: Data(#"{"status":"processing","bytes":128}"#.utf8)
+        )
+
+        #expect(status.state == .processing)
+        #expect(status.persistedBytes == 128)
+    }
+
+    @Test("status rejects invalid persisted encrypted bytes", arguments: [
+        #"{"status":"complete"}"#,
+        #"{"status":"complete","bytes":-1}"#,
+        #"{"status":"complete","bytes":"128"}"#,
+    ])
+    func invalidStatusBytes(json: String) {
+        do {
+            _ = try JSONDecoder().decode(
+                ChatRecoveryStatus.self,
+                from: Data(json.utf8)
+            )
+            Issue.record("Expected invalid persisted bytes to fail")
+        } catch {}
+    }
+
     @Test("plain conflict is not treated as processing")
     func plainConflict() throws {
         let response = try #require(HTTPURLResponse(
