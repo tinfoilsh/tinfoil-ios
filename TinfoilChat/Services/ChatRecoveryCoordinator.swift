@@ -108,6 +108,7 @@ func recoveredTitleMessages(
 actor ChatRecoveryCoordinator {
     private struct ActiveRecoveryTask {
         let id: UUID
+        let turnId: String
         let task: Task<Void, Never>
     }
 
@@ -282,8 +283,11 @@ actor ChatRecoveryCoordinator {
             turnId: attempt.turnId,
             storage: attempt.storage
         ))
+        let shouldClearPhase = !hasActiveRecovery(turnId: attempt.turnId)
         await MainActor.run {
-            ChatRecoveryPhaseTracker.shared.clear(turnId: attempt.turnId)
+            if shouldClearPhase {
+                ChatRecoveryPhaseTracker.shared.clear(turnId: attempt.turnId)
+            }
             ChatRecoveryDraftStore.shared.discard(
                 chatId: attempt.chatId,
                 turnId: attempt.turnId
@@ -332,8 +336,14 @@ actor ChatRecoveryCoordinator {
         defer { cancelledTurns.remove(key) }
         let recoveryTask = activeRecoveryTasks[key]?.task
         recoveryTask?.cancel()
+        let shouldClearPhase = !hasActiveRecovery(
+            turnId: envelope.turnId,
+            excluding: key
+        )
         await MainActor.run {
-            ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
+            if shouldClearPhase {
+                ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
+            }
             ChatRecoveryDraftStore.shared.discard(
                 chatId: chatId,
                 turnId: envelope.turnId
@@ -493,7 +503,11 @@ actor ChatRecoveryCoordinator {
                 onProgress: onProgress
             )
         }
-        activeRecoveryTasks[key] = ActiveRecoveryTask(id: id, task: task)
+        activeRecoveryTasks[key] = ActiveRecoveryTask(
+            id: id,
+            turnId: envelope.turnId,
+            task: task
+        )
         await MainActor.run {
             ChatRecoveryPhaseTracker.shared.setPhase(
                 .generating,
@@ -507,8 +521,10 @@ actor ChatRecoveryCoordinator {
         }
         if activeRecoveryTasks[key]?.id == id {
             activeRecoveryTasks.removeValue(forKey: key)
-            await MainActor.run {
-                ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
+            if !hasActiveRecovery(turnId: envelope.turnId) {
+                await MainActor.run {
+                    ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
+                }
             }
         }
     }
@@ -888,7 +904,6 @@ actor ChatRecoveryCoordinator {
                 userId: userId
             ) {
                 await MainActor.run {
-                    ChatRecoveryPhaseTracker.shared.clear(turnId: turnId)
                     ChatRecoveryDraftStore.shared.clear(
                         chatId: chatId,
                         turnId: turnId
@@ -908,9 +923,6 @@ actor ChatRecoveryCoordinator {
                 userId: userId
             ) else {
                 return
-            }
-            await MainActor.run {
-                ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
             }
             if storage == .cloud {
                 try? await ChatRecoverySync.shared.refreshFromRemote(
@@ -1248,7 +1260,6 @@ actor ChatRecoveryCoordinator {
                 userId: userId
             ) {
                 await MainActor.run {
-                    ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
                     ChatRecoveryDraftStore.shared.discard(
                         chatId: chatId,
                         turnId: envelope.turnId
@@ -1302,6 +1313,15 @@ actor ChatRecoveryCoordinator {
         storage: ChatRecoveryStorage
     ) -> String {
         "\(storage.rawValue)\u{0}\(chatId)\u{0}\(turnId)"
+    }
+
+    private func hasActiveRecovery(
+        turnId: String,
+        excluding key: String? = nil
+    ) -> Bool {
+        activeRecoveryTasks.contains {
+            $0.key != key && $0.value.turnId == turnId
+        }
     }
 
     private func postRecoveryUpdate(
