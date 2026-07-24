@@ -523,6 +523,7 @@ struct MessageInputView: View {
                     .disabled(isTrailingActionDisabled)
                     .accessibilityLabel(trailingActionAccessibilityLabel)
                     .accessibilityValue(viewModel.isTranscribing ? "Transcribing" : "")
+                    .accessibleHitTarget()
                     .padding(.trailing, 8)
                 }
                 .padding(.vertical, 8)
