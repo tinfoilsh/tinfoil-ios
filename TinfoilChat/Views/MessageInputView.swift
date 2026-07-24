@@ -103,7 +103,9 @@ struct MessageInputView: View {
     private var showStopAction: Bool {
         shouldShowMessageStopAction(
             isStreaming: viewModel.isLoading,
-            hasActiveRecovery: viewModel.activeRecoveryEnvelope != nil,
+            hasActiveRecovery: viewModel.activeRecoveryEnvelope(
+                trackedBy: recoveryPhaseTracker
+            ) != nil,
             hasSubmittableContent: hasSubmittableContent,
             isMessageQueueFull: viewModel.isMessageQueueFull
         )

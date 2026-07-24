@@ -79,9 +79,10 @@ actor SummarizerService {
         }
 
         let truncatedContent = assistantMessage.content
-            .split(separator: " ", omittingEmptySubsequences: true)
+            .split(whereSeparator: \.isWhitespace)
             .prefix(Constants.TitleGeneration.wordThreshold)
             .joined(separator: " ")
+        guard !truncatedContent.isEmpty else { return nil }
 
         guard let title = try? await summarize(
             content: truncatedContent,

@@ -370,9 +370,11 @@ class ChatViewModel: ObservableObject {
         )
     }
 
-    var activeRecoveryEnvelope: PendingRecoveryEnvelope? {
+    func activeRecoveryEnvelope(
+        trackedBy phaseTracker: ChatRecoveryPhaseTracker = .shared
+    ) -> PendingRecoveryEnvelope? {
         (currentChat?.pendingRecoveries ?? []).first {
-            ChatRecoveryPhaseTracker.shared.isActive(turnId: $0.turnId)
+            phaseTracker.isActive(turnId: $0.turnId)
         }
     }
 
@@ -3130,7 +3132,7 @@ class ChatViewModel: ObservableObject {
         guard let chat = currentChat,
               chat.id == chatId,
               let userId = currentUserId,
-              let envelope = activeRecoveryEnvelope
+              let envelope = activeRecoveryEnvelope()
         else {
             return
         }

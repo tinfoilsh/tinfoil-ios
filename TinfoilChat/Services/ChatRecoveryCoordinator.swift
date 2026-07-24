@@ -494,6 +494,12 @@ actor ChatRecoveryCoordinator {
             )
         }
         activeRecoveryTasks[key] = ActiveRecoveryTask(id: id, task: task)
+        await MainActor.run {
+            ChatRecoveryPhaseTracker.shared.setPhase(
+                .generating,
+                turnId: envelope.turnId
+            )
+        }
         await withTaskCancellationHandler {
             await task.value
         } onCancel: {
@@ -501,6 +507,9 @@ actor ChatRecoveryCoordinator {
         }
         if activeRecoveryTasks[key]?.id == id {
             activeRecoveryTasks.removeValue(forKey: key)
+            await MainActor.run {
+                ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
+            }
         }
     }
 
@@ -825,6 +834,16 @@ actor ChatRecoveryCoordinator {
             }
             guard let response else { return }
             let persistedResponse = recoveredResponseForPersistence(response)
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ),
+                  !cancelledTurns.contains(key),
+                  !(await isChatStreaming(chatId))
+            else {
+                return
+            }
             let storedChat = try? await storage.fileStorage.loadChat(
                 chatId: chatId,
                 userId: userId
