@@ -70,6 +70,15 @@ func recoveryDraftHasVisibleContent(_ message: Message) -> Bool {
         || message.timeline?.isEmpty == false
 }
 
+func recoveredResponseForPersistence(
+    _ message: Message,
+    timestamp: Date = Date()
+) -> Message {
+    var response = message
+    response.timestamp = timestamp
+    return response
+}
+
 actor ChatRecoveryCoordinator {
     static let shared = ChatRecoveryCoordinator()
 
@@ -683,6 +692,7 @@ actor ChatRecoveryCoordinator {
                 }
             }
             guard let response else { return }
+            let persistedResponse = recoveredResponseForPersistence(response)
             guard scanIsCurrent(
                 accountGeneration: accountGeneration,
                 scanGeneration: scanGeneration,
@@ -699,11 +709,12 @@ actor ChatRecoveryCoordinator {
                 storage: storage,
                 mutation: .complete(
                     envelope: envelope,
-                    response: response,
+                    response: persistedResponse,
                     title: nil,
                     titleState: nil
                 )
             )
+            await deleteSessionAfterMutation(payload.sessionId)
             guard scanIsCurrent(
                 accountGeneration: accountGeneration,
                 scanGeneration: scanGeneration,
@@ -711,7 +722,6 @@ actor ChatRecoveryCoordinator {
             ) else {
                 return
             }
-            try? await ChatRecoveryClient.shared.delete(sessionId: payload.sessionId)
             await MainActor.run {
                 ChatRecoveryPhaseTracker.shared.clear(turnId: turnId)
             }
@@ -1052,6 +1062,7 @@ actor ChatRecoveryCoordinator {
                 storage: storage,
                 mutation: .remove(envelope)
             )
+            await deleteSessionAfterMutation(sessionId)
             guard scanIsCurrent(
                 accountGeneration: accountGeneration,
                 scanGeneration: scanGeneration,
@@ -1065,9 +1076,6 @@ actor ChatRecoveryCoordinator {
                     chatId: chatId,
                     turnId: envelope.turnId
                 )
-            }
-            if let sessionId {
-                try? await ChatRecoveryClient.shared.delete(sessionId: sessionId)
             }
             postRecoveryUpdate(
                 chatId: chatId,
@@ -1085,6 +1093,13 @@ actor ChatRecoveryCoordinator {
             }
             return
         }
+    }
+
+    private func deleteSessionAfterMutation(_ sessionId: String?) async {
+        guard let sessionId else { return }
+        await Task {
+            try? await ChatRecoveryClient.shared.delete(sessionId: sessionId)
+        }.value
     }
 
     private func randomSessionId() throws -> String {

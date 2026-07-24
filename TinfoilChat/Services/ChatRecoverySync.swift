@@ -99,22 +99,19 @@ actor ChatRecoverySync {
                     StoredChat(from: candidate, syncVersion: remote.syncVersion),
                     idempotencyKey: UUID().uuidString.lowercased()
                 )
-                try Task.checkCancellation()
                 applyAttachmentRewrites(result.rewrites, to: &candidate)
                 candidate.syncVersion = result.syncVersion ?? remote.syncVersion + 1
                 candidate.syncedAt = Date()
                 candidate.locallyModified = false
                 candidate.clockVersion = candidate.syncVersion
-                guard await Clerk.shared.user?.id == userId else {
-                    throw ChatRecoverySyncError.chatMissing
-                }
-                try Task.checkCancellation()
-                await applyLocally(
-                    candidate,
-                    mutation: mutation,
-                    userId: userId,
-                    expectedBaselineUpdatedAt: local?.updatedAt
-                )
+                await Task {
+                    await self.applyLocally(
+                        candidate,
+                        mutation: mutation,
+                        userId: userId,
+                        expectedBaselineUpdatedAt: local?.updatedAt
+                    )
+                }.value
                 return
             } catch let error as SyncEnclaveError
                 where EnclaveErrorRecovery.isVersionConflict(error) {
@@ -346,7 +343,6 @@ actor ChatRecoverySync {
         expectedBaselineUpdatedAt: Date?
     ) async {
         for _ in 0..<Constants.ChatRecovery.maxMutationAttempts {
-            guard !Task.isCancelled else { return }
             let loaded = try? await EncryptedFileStorage.cloud.loadChat(
                 chatId: uploaded.id,
                 userId: userId
@@ -374,7 +370,6 @@ actor ChatRecoverySync {
                 expectedLocalUpdatedAt: expectedUpdatedAt,
                 allowLocallyModified: true
             )) ?? false
-            guard !Task.isCancelled else { return }
             if applied {
                 if candidate.locallyModified {
                     await CloudSyncService.shared.backupChat(candidate.id)

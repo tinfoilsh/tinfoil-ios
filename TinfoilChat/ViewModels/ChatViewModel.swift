@@ -731,8 +731,6 @@ class ChatViewModel: ObservableObject {
                     }
 
                 }
-                self.scanPendingRecoveries()
-
                 // Also backup current chat if it has changes
                 if let currentChat = await MainActor.run(body: { self.currentChat }),
                    !currentChat.messages.isEmpty,

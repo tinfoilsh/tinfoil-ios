@@ -3,7 +3,7 @@ import Testing
 @testable import TinfoilChat
 
 struct ChatRecoverySchedulingTests {
-    @Test func emptyThinkingStateKeepsRecoveryIndicatorVisible() {
+    @Test func emptyThinkingDraftDoesNotReplaceRecoveryIndicator() {
         let emptyThinking = Message(
             role: .assistant,
             content: "",
@@ -18,6 +18,23 @@ struct ChatRecoverySchedulingTests {
 
         #expect(!recoveryDraftHasVisibleContent(emptyThinking))
         #expect(recoveryDraftHasVisibleContent(recoveredThought))
+    }
+
+    @Test func persistedRecoveryUsesCompletionTimestamp() {
+        let draft = Message(
+            role: .assistant,
+            content: "Recovered response",
+            timestamp: .distantPast
+        )
+        let completionTimestamp = Date(timeIntervalSince1970: 1_000)
+
+        let persisted = recoveredResponseForPersistence(
+            draft,
+            timestamp: completionTimestamp
+        )
+
+        #expect(draft.timestamp == .distantPast)
+        #expect(persisted.timestamp == completionTimestamp)
     }
 
     @Test func replacesOnlyScansThatHaveStoppedMakingProgress() {
