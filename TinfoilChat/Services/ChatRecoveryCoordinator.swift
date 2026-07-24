@@ -714,22 +714,24 @@ actor ChatRecoveryCoordinator {
                     titleState: nil
                 )
             )
-            await deleteSessionAfterMutation(payload.sessionId)
-            guard scanIsCurrent(
+            if accountIsCurrent(
                 accountGeneration: accountGeneration,
-                scanGeneration: scanGeneration,
                 userId: userId
-            ) else {
-                return
+            ) {
+                await MainActor.run {
+                    ChatRecoveryPhaseTracker.shared.clear(turnId: turnId)
+                    ChatRecoveryDraftStore.shared.clear(
+                        chatId: chatId,
+                        turnId: turnId
+                    )
+                }
+                postRecoveryUpdate(
+                    chatId: chatId,
+                    userId: userId,
+                    storage: storage
+                )
             }
-            await MainActor.run {
-                ChatRecoveryPhaseTracker.shared.clear(turnId: turnId)
-            }
-            postRecoveryUpdate(
-                chatId: chatId,
-                userId: userId,
-                storage: storage
-            )
+            await deleteSessionAfterMutation(payload.sessionId)
         } catch ChatRecoverySyncError.envelopeMissing {
             guard scanIsCurrent(
                 accountGeneration: accountGeneration,
@@ -1027,8 +1029,18 @@ actor ChatRecoveryCoordinator {
         userId: String
     ) -> Bool {
         !Task.isCancelled
-            && accountGeneration == self.accountGeneration
+            && accountIsCurrent(
+                accountGeneration: accountGeneration,
+                userId: userId
+            )
             && scanGeneration == self.scanGeneration
+    }
+
+    private func accountIsCurrent(
+        accountGeneration: Int,
+        userId: String
+    ) -> Bool {
+        accountGeneration == self.accountGeneration
             && activeAccountId == userId
     }
 
@@ -1062,26 +1074,24 @@ actor ChatRecoveryCoordinator {
                 storage: storage,
                 mutation: .remove(envelope)
             )
-            await deleteSessionAfterMutation(sessionId)
-            guard scanIsCurrent(
+            if accountIsCurrent(
                 accountGeneration: accountGeneration,
-                scanGeneration: scanGeneration,
                 userId: userId
-            ) else {
-                return
-            }
-            await MainActor.run {
-                ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
-                ChatRecoveryDraftStore.shared.discard(
+            ) {
+                await MainActor.run {
+                    ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
+                    ChatRecoveryDraftStore.shared.discard(
+                        chatId: chatId,
+                        turnId: envelope.turnId
+                    )
+                }
+                postRecoveryUpdate(
                     chatId: chatId,
-                    turnId: envelope.turnId
+                    userId: userId,
+                    storage: storage
                 )
             }
-            postRecoveryUpdate(
-                chatId: chatId,
-                userId: userId,
-                storage: storage
-            )
+            await deleteSessionAfterMutation(sessionId)
         } catch {
             if let sessionId,
                scanIsCurrent(
