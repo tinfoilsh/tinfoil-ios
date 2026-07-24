@@ -299,11 +299,18 @@ actor ChatRecoverySync {
             } else {
                 chat.messages.append(response)
             }
-            if let title {
-                chat.title = title
-            }
-            if let titleState {
-                chat.titleState = titleState
+            let canApplyGeneratedTitle = titleState != .generated
+                || (
+                    authoritativeRemote.titleState == .placeholder
+                        && chat.titleState == .placeholder
+                )
+            if canApplyGeneratedTitle {
+                if let title {
+                    chat.title = title
+                }
+                if let titleState {
+                    chat.titleState = titleState
+                }
             }
         }
         chat.pendingRecoveries = pending.isEmpty ? nil : pending

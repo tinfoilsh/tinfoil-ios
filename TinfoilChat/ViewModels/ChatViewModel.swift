@@ -370,6 +370,12 @@ class ChatViewModel: ObservableObject {
         )
     }
 
+    var activeRecoveryEnvelope: PendingRecoveryEnvelope? {
+        (currentChat?.pendingRecoveries ?? []).first {
+            ChatRecoveryPhaseTracker.shared.isActive(turnId: $0.turnId)
+        }
+    }
+
     /// Whether the given chat has a response currently being generated,
     /// regardless of which chat is on screen.
     func isChatStreaming(_ chatId: String) -> Bool {
@@ -2720,7 +2726,9 @@ class ChatViewModel: ObservableObject {
 
                 // Generate title before save to avoid uploading placeholder title
                 if var chat = finalizedChat, chat.needsGeneratedTitle && chat.messages.count >= 2 {
-                    if let generated = await self.generateLLMTitle(from: chat.messages) {
+                    if let generated = await SummarizerService.shared.generateChatTitle(
+                        from: chat.messages
+                    ) {
                         chat.title = generated
                         chat.titleState = .generated
                         chat.locallyModified = true
@@ -3112,8 +3120,29 @@ class ChatViewModel: ObservableObject {
     /// Cancels the current message generation
     func cancelGeneration() {
         guard let chatId = currentChat?.id else { return }
-        _ = cancelGeneration(chatId: chatId, announce: true)
+        if cancelGeneration(chatId: chatId, announce: true) == nil {
+            cancelRecoveredGeneration(chatId: chatId)
+        }
         self.showVerifierSheet = false
+    }
+
+    private func cancelRecoveredGeneration(chatId: String) {
+        guard let chat = currentChat,
+              chat.id == chatId,
+              let userId = currentUserId,
+              let envelope = activeRecoveryEnvelope
+        else {
+            return
+        }
+        let storage: ChatRecoveryStorage = chat.isLocalOnly ? .local : .cloud
+        Task {
+            await ChatRecoveryCoordinator.shared.cancelRecoveredTurn(
+                chatId: chatId,
+                envelope: envelope,
+                userId: userId,
+                storage: storage
+            )
+        }
     }
 
     @discardableResult
@@ -4620,35 +4649,7 @@ class ChatViewModel: ObservableObject {
     }
 }
 
-// MARK: - LLM Title Generation
 extension ChatViewModel {
-    /// Generates a concise chat title using the title model, based on the assistant's first response.
-    fileprivate func generateLLMTitle(from messages: [Message]) async -> String? {
-        // Find the first assistant message
-        guard let assistantMessage = messages.first(where: { $0.role == .assistant }),
-              !assistantMessage.content.isEmpty else {
-            return nil
-        }
-
-        // Truncate content to word threshold
-        let words = assistantMessage.content.split(separator: " ", omittingEmptySubsequences: true)
-        let truncatedContent = words
-            .prefix(Constants.TitleGeneration.wordThreshold)
-            .joined(separator: " ")
-
-        do {
-            let title = try await SummarizerService.shared.summarize(
-                content: truncatedContent,
-                style: .titleSummary
-            )
-
-            guard !title.isEmpty else { return nil }
-            return title
-        } catch {
-            return nil
-        }
-    }
-
     // MARK: - Audio Recording
 
     /// Check if audio input is available (premium feature with audio model)

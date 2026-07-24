@@ -71,6 +71,26 @@ actor SummarizerService {
         let decoded = try JSONDecoder().decode(SummarizeResponse.self, from: response.body)
         return decoded.summary
     }
+
+    func generateChatTitle(from messages: [Message]) async -> String? {
+        guard let assistantMessage = messages.first(where: { $0.role == .assistant }),
+              !assistantMessage.content.isEmpty else {
+            return nil
+        }
+
+        let truncatedContent = assistantMessage.content
+            .split(separator: " ", omittingEmptySubsequences: true)
+            .prefix(Constants.TitleGeneration.wordThreshold)
+            .joined(separator: " ")
+
+        guard let title = try? await summarize(
+            content: truncatedContent,
+            style: .titleSummary
+        ), !title.isEmpty else {
+            return nil
+        }
+        return title
+    }
 }
 
 // MARK: - Models

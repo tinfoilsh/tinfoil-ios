@@ -56,6 +56,10 @@ final class ChatRecoveryPhaseTracker: ObservableObject {
         guard !phases.isEmpty else { return }
         phases.removeAll()
     }
+
+    func isActive(turnId: String) -> Bool {
+        phases[turnId] != nil
+    }
 }
 
 func recoveryDraftHasVisibleContent(_ message: Message) -> Bool {
@@ -79,12 +83,40 @@ func recoveredResponseForPersistence(
     return response
 }
 
+func recoveredTitleMessages(
+    titleState: Chat.TitleState,
+    messages: [Message],
+    response: Message,
+    turnId: String
+) -> [Message]? {
+    guard titleState == .placeholder,
+          messages.first(where: { $0.role == .user })?.turnId == turnId
+    else {
+        return nil
+    }
+    var titleMessages = messages
+    if let index = titleMessages.firstIndex(where: {
+        $0.role == .assistant && $0.turnId == turnId
+    }) {
+        titleMessages[index] = response
+    } else {
+        titleMessages.append(response)
+    }
+    return titleMessages
+}
+
 actor ChatRecoveryCoordinator {
+    private struct ActiveRecoveryTask {
+        let id: UUID
+        let task: Task<Void, Never>
+    }
+
     static let shared = ChatRecoveryCoordinator()
 
     private var accountGeneration = 0
     private var scanGeneration = 0
     private var cancelledTurns: Set<String> = []
+    private var activeRecoveryTasks: [String: ActiveRecoveryTask] = [:]
     private var activeAccountId: String?
     private var activeScanGeneration: Int?
 
@@ -93,6 +125,8 @@ actor ChatRecoveryCoordinator {
         scanGeneration += 1
         activeAccountId = accountId
         cancelledTurns.removeAll()
+        activeRecoveryTasks.values.forEach { $0.task.cancel() }
+        activeRecoveryTasks.removeAll()
         activeScanGeneration = nil
         let generation = accountGeneration
         await MainActor.run {
@@ -282,6 +316,67 @@ actor ChatRecoveryCoordinator {
         }
     }
 
+    func cancelRecoveredTurn(
+        chatId: String,
+        envelope: PendingRecoveryEnvelope,
+        userId: String,
+        storage: ChatRecoveryStorage
+    ) async {
+        guard activeAccountId == userId else { return }
+        let key = turnKey(
+            chatId: chatId,
+            turnId: envelope.turnId,
+            storage: storage
+        )
+        cancelledTurns.insert(key)
+        defer { cancelledTurns.remove(key) }
+        let recoveryTask = activeRecoveryTasks[key]?.task
+        recoveryTask?.cancel()
+        await MainActor.run {
+            ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
+            ChatRecoveryDraftStore.shared.discard(
+                chatId: chatId,
+                turnId: envelope.turnId
+            )
+        }
+        await recoveryTask?.value
+        let openedEnvelope = try? await openEnvelope(
+            envelope,
+            chatId: chatId,
+            userId: userId,
+            storage: storage
+        )
+        let sessionId = openedEnvelope?.payload.sessionId
+        do {
+            try await ChatRecoverySync.shared.mutate(
+                chatId: chatId,
+                userId: userId,
+                storage: storage,
+                mutation: .cancel(turnId: envelope.turnId, response: nil)
+            )
+        } catch ChatRecoverySyncError.envelopeMissing {
+            if storage == .cloud {
+                try? await ChatRecoverySync.shared.refreshFromRemote(
+                    chatId: chatId,
+                    userId: userId
+                )
+            }
+        } catch {
+            if let sessionId {
+                try? await ChatRecoveryClient.shared.delete(sessionId: sessionId)
+            }
+            return
+        }
+        if let sessionId {
+            try? await ChatRecoveryClient.shared.delete(sessionId: sessionId)
+        }
+        postRecoveryUpdate(
+            chatId: chatId,
+            userId: userId,
+            storage: storage
+        )
+    }
+
     func deleteSession(attempt: ChatRecoveryAttempt) async {
         try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
     }
@@ -341,7 +436,7 @@ actor ChatRecoveryCoordinator {
                 guard !Task.isCancelled else { return }
                 if let item = iterator.next() {
                     group.addTask {
-                        await self.recover(
+                        await self.performRecovery(
                             chatId: item.0,
                             envelope: item.1,
                             userId: userId,
@@ -357,7 +452,7 @@ actor ChatRecoveryCoordinator {
                 guard !Task.isCancelled else { return }
                 if let item = iterator.next() {
                     group.addTask {
-                        await self.recover(
+                        await self.performRecovery(
                             chatId: item.0,
                             envelope: item.1,
                             userId: userId,
@@ -369,6 +464,43 @@ actor ChatRecoveryCoordinator {
                     }
                 }
             }
+        }
+    }
+
+    private func performRecovery(
+        chatId: String,
+        envelope: PendingRecoveryEnvelope,
+        userId: String,
+        accountGeneration: Int,
+        scanGeneration: Int,
+        storage: ChatRecoveryStorage,
+        onProgress: @escaping @Sendable () async -> Void
+    ) async {
+        let key = turnKey(
+            chatId: chatId,
+            turnId: envelope.turnId,
+            storage: storage
+        )
+        let id = UUID()
+        let task = Task {
+            await recover(
+                chatId: chatId,
+                envelope: envelope,
+                userId: userId,
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                storage: storage,
+                onProgress: onProgress
+            )
+        }
+        activeRecoveryTasks[key] = ActiveRecoveryTask(id: id, task: task)
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+        if activeRecoveryTasks[key]?.id == id {
+            activeRecoveryTasks.removeValue(forKey: key)
         }
     }
 
@@ -693,6 +825,24 @@ actor ChatRecoveryCoordinator {
             }
             guard let response else { return }
             let persistedResponse = recoveredResponseForPersistence(response)
+            let storedChat = try? await storage.fileStorage.loadChat(
+                chatId: chatId,
+                userId: userId
+            )
+            let titleMessages = storedChat.flatMap {
+                recoveredTitleMessages(
+                    titleState: $0.titleState,
+                    messages: $0.messages,
+                    response: persistedResponse,
+                    turnId: envelope.turnId
+                )
+            }
+            var generatedTitle: String?
+            if let titleMessages {
+                generatedTitle = await SummarizerService.shared.generateChatTitle(
+                    from: titleMessages
+                )
+            }
             guard scanIsCurrent(
                 accountGeneration: accountGeneration,
                 scanGeneration: scanGeneration,
@@ -710,8 +860,8 @@ actor ChatRecoveryCoordinator {
                 mutation: .complete(
                     envelope: envelope,
                     response: persistedResponse,
-                    title: nil,
-                    titleState: nil
+                    title: generatedTitle,
+                    titleState: generatedTitle == nil ? nil : .generated
                 )
             )
             if accountIsCurrent(

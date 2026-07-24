@@ -37,6 +37,40 @@ struct ChatRecoverySchedulingTests {
         #expect(persisted.timestamp == completionTimestamp)
     }
 
+    @Test func recoveredFirstResponseCanGenerateAChatTitle() throws {
+        let user = Message(
+            role: .user,
+            turnId: "turn-1",
+            content: "Question"
+        )
+        let partial = Message(
+            role: .assistant,
+            turnId: "turn-1",
+            content: "Partial"
+        )
+        let recovered = Message(
+            role: .assistant,
+            turnId: "turn-1",
+            content: "Recovered response"
+        )
+
+        let messages = try #require(recoveredTitleMessages(
+            titleState: .placeholder,
+            messages: [user, partial],
+            response: recovered,
+            turnId: "turn-1"
+        ))
+
+        #expect(messages.count == 2)
+        #expect(messages[1].content == "Recovered response")
+        #expect(recoveredTitleMessages(
+            titleState: .manual,
+            messages: [user, partial],
+            response: recovered,
+            turnId: "turn-1"
+        ) == nil)
+    }
+
     @Test func replacesOnlyScansThatHaveStoppedMakingProgress() {
         let now = Date(timeIntervalSince1970: 1_000)
         let freshProgress = now.addingTimeInterval(

@@ -112,4 +112,19 @@ struct PendingResponseRecoveryPresentationTests {
             isStreaming: false
         ))
     }
+
+    @Test func activeRecoveredResponseShowsStopAction() {
+        #expect(shouldShowMessageStopAction(
+            isStreaming: false,
+            hasActiveRecovery: true,
+            hasSubmittableContent: false,
+            isMessageQueueFull: false
+        ))
+        #expect(!shouldShowMessageStopAction(
+            isStreaming: false,
+            hasActiveRecovery: false,
+            hasSubmittableContent: false,
+            isMessageQueueFull: false
+        ))
+    }
 }

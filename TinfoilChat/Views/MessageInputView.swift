@@ -24,6 +24,16 @@ func cameraPermissionAction(for status: AVAuthorizationStatus) -> CameraPermissi
     }
 }
 
+func shouldShowMessageStopAction(
+    isStreaming: Bool,
+    hasActiveRecovery: Bool,
+    hasSubmittableContent: Bool,
+    isMessageQueueFull: Bool
+) -> Bool {
+    hasActiveRecovery
+        || (isStreaming && (!hasSubmittableContent || isMessageQueueFull))
+}
+
 /// Input area for typing messages, including attachments and send button
 struct MessageInputView: View {
     // MARK: - Constants
@@ -44,6 +54,7 @@ struct MessageInputView: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @EnvironmentObject private var authManager: AuthManager
+    @ObservedObject private var recoveryPhaseTracker = ChatRecoveryPhaseTracker.shared
     @State private var textHeight: CGFloat = Layout.defaultHeight
     /// Reflects whether the editor has grown beyond a single line, so callers
     /// can hide content that would otherwise be pushed off-screen.
@@ -90,7 +101,12 @@ struct MessageInputView: View {
     /// submittable, or the queue already full, it reverts to a stop button
     /// so the stream can always be cancelled. Mirrors the webapp.
     private var showStopAction: Bool {
-        viewModel.isLoading && (!hasSubmittableContent || viewModel.isMessageQueueFull)
+        shouldShowMessageStopAction(
+            isStreaming: viewModel.isLoading,
+            hasActiveRecovery: viewModel.activeRecoveryEnvelope != nil,
+            hasSubmittableContent: hasSubmittableContent,
+            isMessageQueueFull: viewModel.isMessageQueueFull
+        )
     }
 
     private enum TrailingAction {
