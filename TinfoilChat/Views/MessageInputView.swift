@@ -102,13 +102,17 @@ struct MessageInputView: View {
     /// The trailing button doubles as voice input while the draft is empty
     /// and becomes the send button once the user enters text or attaches
     /// files; while a stream with nothing submittable is in flight it turns
-    /// into a stop button. An active recording or transcription pins the
-    /// voice role so the microphone can always be stopped.
+    /// into a stop button. An active recording pins the voice role so the
+    /// microphone can always be stopped, but a pending transcription yields
+    /// to stop so an in-flight stream stays cancellable.
     private var trailingAction: TrailingAction {
-        if showAudioButton && (viewModel.isRecording || viewModel.isTranscribing) {
+        if showAudioButton && viewModel.isRecording {
             return .voice
         }
         if showStopAction { return .stop }
+        if showAudioButton && viewModel.isTranscribing {
+            return .voice
+        }
         if showAudioButton,
            messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            viewModel.pendingAttachments.isEmpty {
