@@ -123,7 +123,7 @@ struct MessageInputView: View {
 
     private var trailingActionIconName: String {
         switch trailingAction {
-        case .voice: return viewModel.isRecording ? "stop.fill" : "mic.fill"
+        case .voice: return viewModel.isRecording ? "stop.fill" : "waveform"
         case .send: return "arrow.up"
         case .stop: return "stop.fill"
         }
