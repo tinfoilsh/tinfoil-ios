@@ -57,6 +57,48 @@ enum SyncConflictResolver {
 
 // MARK: - Sync Models
 
+private struct ValidatedPendingRecoveries: Decodable {
+    let envelopes: [PendingRecoveryEnvelope]
+
+    init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        if let count = container.count,
+           count > Constants.ChatRecovery.maxPendingPerChat {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Too many pending recovery envelopes"
+            )
+        }
+        var envelopes: [PendingRecoveryEnvelope] = []
+        var turnIds: Set<String> = []
+        while !container.isAtEnd {
+            guard envelopes.count < Constants.ChatRecovery.maxPendingPerChat else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Too many pending recovery envelopes"
+                )
+            }
+            let envelope = try container.decode(PendingRecoveryEnvelope.self)
+            do {
+                try ChatRecoveryCrypto.validate(envelope)
+            } catch {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Invalid pending recovery envelope"
+                )
+            }
+            guard turnIds.insert(envelope.turnId).inserted else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Duplicate pending recovery turn"
+                )
+            }
+            envelopes.append(envelope)
+        }
+        self.envelopes = envelopes
+    }
+}
+
 /// Extended chat model with sync metadata
 struct StoredChat: Codable {
     let id: String
@@ -277,7 +319,10 @@ struct StoredChat: Codable {
         title = try container.decode(String.self, forKey: .title)
         titleState = try container.decodeIfPresent(Chat.TitleState.self, forKey: .titleState)
         messages = try container.decode([Message].self, forKey: .messages)
-        pendingRecoveries = try container.decodeIfPresent([PendingRecoveryEnvelope].self, forKey: .pendingRecoveries)
+        pendingRecoveries = try container.decodeIfPresent(
+            ValidatedPendingRecoveries.self,
+            forKey: .pendingRecoveries
+        )?.envelopes
         
         // Dates from ISO strings - configure formatter to handle fractional seconds
         let isoFormatter = ISO8601DateFormatter()
