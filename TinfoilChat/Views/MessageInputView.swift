@@ -78,8 +78,22 @@ struct MessageInputView: View {
         AppConfig.shared.audioModel != nil
     }
 
-    // State for pulsing animation
-    @State private var isPulsing = false
+    // Tracks a press-and-hold recording so a release is what stops it and
+    // other action paths don't re-toggle the microphone.
+    @State private var isHoldToRecordActive = false
+    @State private var isFloatingRecordingBubbleVisible = false
+
+    // The in-flight recorder startup for a hold, awaited on release so a
+    // fast release can't try to stop a recording that hasn't started yet
+    // and leave it running.
+    @State private var holdToRecordStartTask: Task<Void, Never>?
+
+    /// The recording look (red stop button) keys off the hold itself as well
+    /// as the recorder, so feedback is instant instead of waiting for the
+    /// audio session to spin up.
+    private var showsRecordingState: Bool {
+        viewModel.isRecording || isHoldToRecordActive
+    }
 
     // Clears the editor's UITextView imperatively at send time, so the draft
     // disappears even while the editor keeps focus (queued sends don't
@@ -124,7 +138,7 @@ struct MessageInputView: View {
     /// microphone can always be stopped, but a pending transcription yields
     /// to stop so an in-flight stream stays cancellable.
     private var trailingAction: TrailingAction {
-        if showAudioButton && viewModel.isRecording {
+        if showAudioButton && showsRecordingState {
             return .voice
         }
         if showStopAction { return .stop }
@@ -141,7 +155,7 @@ struct MessageInputView: View {
 
     private var trailingActionIconName: String {
         switch trailingAction {
-        case .voice: return viewModel.isRecording ? "stop.fill" : "waveform"
+        case .voice: return showsRecordingState ? "stop.fill" : "waveform"
         case .send: return "arrow.up"
         case .stop: return "stop.fill"
         }
@@ -149,7 +163,7 @@ struct MessageInputView: View {
 
     private var trailingActionAccessibilityLabel: String {
         switch trailingAction {
-        case .voice: return viewModel.isRecording ? "Stop recording" : "Voice input"
+        case .voice: return showsRecordingState ? "Stop recording" : "Voice input"
         case .send: return "Send message"
         case .stop: return "Stop generating"
         }
@@ -169,12 +183,12 @@ struct MessageInputView: View {
     }
 
     private var trailingActionForegroundColor: Color {
-        if viewModel.isRecording { return .white }
+        if showsRecordingState { return .white }
         return isDarkMode ? Color.sendButtonForegroundDark : Color.sendButtonForegroundLight
     }
 
     private var trailingActionBackgroundColor: Color {
-        if viewModel.isRecording { return .red }
+        if showsRecordingState { return .red }
         return isDarkMode ? Color.sendButtonBackgroundDark : Color.sendButtonBackgroundLight
     }
 
@@ -522,29 +536,7 @@ struct MessageInputView: View {
 
                     Spacer()
 
-                    Button(action: handleTrailingActionTap) {
-                        trailingActionIcon
-                            .frame(width: 24, height: 24)
-                            .foregroundColor(trailingActionForegroundColor)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.circle)
-                    .glassEffect(.regular.interactive(), in: .circle)
-                    .clipShape(.circle)
-                    .tint(trailingActionBackgroundColor)
-                    .scaleEffect(reduceMotion || !isPulsing ? 1.0 : 1.1)
-                    .animation(
-                        reduceMotion ? nil : (isPulsing ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .easeInOut(duration: 0.2)),
-                        value: isPulsing
-                    )
-                    .onChange(of: viewModel.isRecording) { _, isRecording in
-                        isPulsing = isRecording
-                    }
-                    .disabled(isTrailingActionDisabled)
-                    .accessibilityLabel(trailingActionAccessibilityLabel)
-                    .accessibilityValue(viewModel.isTranscribing ? "Transcribing" : "")
-                    .accessibleHitTarget()
-                    .padding(.trailing, 8)
+                    trailingActionButton
                 }
                 .padding(.vertical, 8)
             }
@@ -591,29 +583,7 @@ struct MessageInputView: View {
 
                     Spacer()
 
-                    Button(action: handleTrailingActionTap) {
-                        ZStack {
-                            Circle()
-                                .fill(trailingActionBackgroundColor)
-                                .frame(width: 32, height: 32)
-
-                            trailingActionIcon
-                                .foregroundColor(trailingActionForegroundColor)
-                        }
-                    }
-                    .scaleEffect(reduceMotion || !isPulsing ? 1.0 : 1.1)
-                    .animation(
-                        reduceMotion ? nil : (isPulsing ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .easeInOut(duration: 0.2)),
-                        value: isPulsing
-                    )
-                    .onChange(of: viewModel.isRecording) { _, isRecording in
-                        isPulsing = isRecording
-                    }
-                    .disabled(isTrailingActionDisabled)
-                    .accessibilityLabel(trailingActionAccessibilityLabel)
-                    .accessibilityValue(viewModel.isTranscribing ? "Transcribing" : "")
-                    .accessibleHitTarget()
-                    .padding(.trailing, 8)
+                    trailingActionButton
                 }
                 .padding(.vertical, 8)
             }
@@ -677,7 +647,101 @@ struct MessageInputView: View {
         .padding(.leading, 4)
     }
 
+    /// UIKit owns the complete touch lifecycle here. Its long-press
+    /// recognizer and floating window-level bubble avoid SwiftUI's input
+    /// layout, clipping, and coordinate-space changes during the gesture.
+    @ViewBuilder
+    private var trailingActionButton: some View {
+        ZStack {
+            styledTrailingActionContent
+                .opacity(isFloatingRecordingBubbleVisible ? 0 : 1)
+                .accessibilityHidden(true)
+
+            HoldToRecordControl(
+                isEnabled: !isTrailingActionDisabled,
+                allowsHoldToRecord: allowsHoldToRecord,
+                reduceMotion: reduceMotion,
+                accessibilityLabel: trailingActionAccessibilityLabel,
+                accessibilityValue: viewModel.isTranscribing ? "Transcribing" : "",
+                onTap: handleTrailingActionTap,
+                onHoldBegan: beginHoldToRecord,
+                onHoldEnded: endHoldToRecord,
+                onBubbleVisibilityChanged: { isFloatingRecordingBubbleVisible = $0 }
+            )
+            .frame(
+                width: Constants.Audio.recordingButtonHitTargetSize,
+                height: Constants.Audio.recordingButtonHitTargetSize
+            )
+        }
+        .frame(
+            width: Constants.Audio.recordingButtonHitTargetSize,
+            height: Constants.Audio.recordingButtonHitTargetSize
+        )
+        .opacity(isTrailingActionDisabled ? 0.6 : 1.0)
+        .allowsHitTesting(!isTrailingActionDisabled)
+        .padding(.trailing, 8)
+    }
+
+    private var allowsHoldToRecord: Bool {
+        showAudioButton
+            && trailingAction != .stop
+            && !viewModel.isRecording
+            && !viewModel.isTranscribing
+    }
+
+    @ViewBuilder
+    private var styledTrailingActionContent: some View {
+        if #available(iOS 26, *) {
+            trailingActionIcon
+                .frame(width: 24, height: 24)
+                .foregroundColor(trailingActionForegroundColor)
+                .padding(4)
+                .glassEffect(.regular.tint(trailingActionBackgroundColor).interactive(), in: .circle)
+        } else {
+            ZStack {
+                Circle()
+                    .fill(trailingActionBackgroundColor)
+                    .frame(width: 32, height: 32)
+
+                trailingActionIcon
+                    .foregroundColor(trailingActionForegroundColor)
+            }
+        }
+    }
+
+    private func endHoldToRecord() {
+        guard isHoldToRecordActive else { return }
+        isHoldToRecordActive = false
+        let startTask = holdToRecordStartTask
+        holdToRecordStartTask = nil
+        Task {
+            // The recorder starts asynchronously (permission prompt,
+            // session setup), so wait for the startup to finish before
+            // stopping; otherwise a fast release finds nothing to stop
+            // and the recording outlives the hold.
+            await startTask?.value
+            await stopRecordingAndInsertTranscription()
+        }
+    }
+
+    /// Holding records in both the microphone and send roles, so a drafted
+    /// message can still be extended by voice; the transcription appends to
+    /// the text. Only the stop role is excluded, since holding stop must
+    /// keep meaning stop.
+    private func beginHoldToRecord() -> Bool {
+        guard showAudioButton,
+              trailingAction != .stop,
+              !viewModel.isRecording,
+              !viewModel.isTranscribing else { return false }
+        isHoldToRecordActive = true
+        holdToRecordStartTask = Task {
+            await viewModel.startAudioRecording()
+        }
+        return true
+    }
+
     private func handleTrailingActionTap() {
+        if isHoldToRecordActive { return }
         if trailingAction == .voice {
             handleAudioButtonTap()
         } else {
@@ -713,17 +777,23 @@ struct MessageInputView: View {
     }
 
     private func handleAudioButtonTap() {
-        Task {
-            if viewModel.isRecording {
-                if let transcription = await viewModel.stopAudioRecordingAndTranscribe() {
-                    if messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        messageText = transcription
-                    } else {
-                        messageText += " " + transcription
-                    }
-                }
-            } else {
+        if viewModel.isRecording {
+            Task {
+                await stopRecordingAndInsertTranscription()
+            }
+        } else {
+            Task {
                 await viewModel.startAudioRecording()
+            }
+        }
+    }
+
+    private func stopRecordingAndInsertTranscription() async {
+        if let transcription = await viewModel.stopAudioRecordingAndTranscribe() {
+            if messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                messageText = transcription
+            } else {
+                messageText += " " + transcription
             }
         }
     }
@@ -751,6 +821,314 @@ struct MessageInputView: View {
         if let url = URL(string: UIApplication.openSettingsURLString) {
             UIApplication.shared.open(url)
         }
+    }
+}
+
+private struct HoldToRecordControl: UIViewRepresentable {
+    let isEnabled: Bool
+    let allowsHoldToRecord: Bool
+    let reduceMotion: Bool
+    let accessibilityLabel: String
+    let accessibilityValue: String
+    let onTap: () -> Void
+    let onHoldBegan: () -> Bool
+    let onHoldEnded: () -> Void
+    let onBubbleVisibilityChanged: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> HoldToRecordTouchView {
+        let view = HoldToRecordTouchView()
+        context.coordinator.attach(to: view)
+        return view
+    }
+
+    func updateUIView(_ uiView: HoldToRecordTouchView, context: Context) {
+        context.coordinator.configure(
+            isEnabled: isEnabled,
+            allowsHoldToRecord: allowsHoldToRecord,
+            reduceMotion: reduceMotion,
+            accessibilityLabel: accessibilityLabel,
+            accessibilityValue: accessibilityValue,
+            onTap: onTap,
+            onHoldBegan: onHoldBegan,
+            onHoldEnded: onHoldEnded,
+            onBubbleVisibilityChanged: onBubbleVisibilityChanged
+        )
+    }
+
+    static func dismantleUIView(_ uiView: HoldToRecordTouchView, coordinator: Coordinator) {
+        coordinator.cancelActiveInteraction()
+    }
+
+    final class Coordinator: NSObject {
+        private weak var sourceView: HoldToRecordTouchView?
+        private weak var sourceWindow: UIWindow?
+        private var bubbleView: FloatingRecordingBubbleView?
+        private var tapRecognizer: UITapGestureRecognizer?
+        private var longPressRecognizer: UILongPressGestureRecognizer?
+        private var isEnabled = true
+        private var allowsHoldToRecord = false
+        private var reduceMotion = false
+        private var isHoldActive = false
+        private var isReturningBubble = false
+        private var sourceCenterInWindow = CGPoint.zero
+        private var holdStartLocationInWindow = CGPoint.zero
+        private var onTap: () -> Void = {}
+        private var onHoldBegan: () -> Bool = { false }
+        private var onHoldEnded: () -> Void = {}
+        private var onBubbleVisibilityChanged: (Bool) -> Void = { _ in }
+
+        func attach(to view: HoldToRecordTouchView) {
+            sourceView = view
+            view.backgroundColor = .clear
+            view.isOpaque = false
+            view.isAccessibilityElement = true
+            view.onAccessibilityActivate = { [weak self] in
+                self?.activateTap() ?? false
+            }
+
+            let longPress = UILongPressGestureRecognizer(
+                target: self,
+                action: #selector(handleLongPress(_:))
+            )
+            longPress.minimumPressDuration = Constants.Audio.holdToRecordMinimumPressSeconds
+            longPress.allowableMovement = .greatestFiniteMagnitude
+            view.addGestureRecognizer(longPress)
+            longPressRecognizer = longPress
+
+            let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+            tap.require(toFail: longPress)
+            view.addGestureRecognizer(tap)
+            tapRecognizer = tap
+        }
+
+        func configure(
+            isEnabled: Bool,
+            allowsHoldToRecord: Bool,
+            reduceMotion: Bool,
+            accessibilityLabel: String,
+            accessibilityValue: String,
+            onTap: @escaping () -> Void,
+            onHoldBegan: @escaping () -> Bool,
+            onHoldEnded: @escaping () -> Void,
+            onBubbleVisibilityChanged: @escaping (Bool) -> Void
+        ) {
+            self.isEnabled = isEnabled
+            self.allowsHoldToRecord = allowsHoldToRecord
+            self.reduceMotion = reduceMotion
+            self.onTap = onTap
+            self.onHoldBegan = onHoldBegan
+            self.onHoldEnded = onHoldEnded
+            self.onBubbleVisibilityChanged = onBubbleVisibilityChanged
+
+            sourceView?.accessibilityLabel = accessibilityLabel
+            sourceView?.accessibilityValue = accessibilityValue
+            updateAccessibilityTraits()
+            updateInteractionState()
+        }
+
+        @objc private func handleTap() {
+            _ = activateTap()
+        }
+
+        @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
+            switch recognizer.state {
+            case .began:
+                beginHold(using: recognizer)
+            case .changed:
+                moveBubble(using: recognizer)
+            case .ended, .cancelled, .failed:
+                finishHold()
+            default:
+                break
+            }
+        }
+
+        private func activateTap() -> Bool {
+            guard isEnabled, !isReturningBubble, !isHoldActive else { return false }
+            onTap()
+            return true
+        }
+
+        private func beginHold(using recognizer: UILongPressGestureRecognizer) {
+            guard isEnabled,
+                  allowsHoldToRecord,
+                  !isHoldActive,
+                  !isReturningBubble,
+                  let sourceView,
+                  let window = sourceView.window,
+                  onHoldBegan() else { return }
+
+            isHoldActive = true
+            sourceWindow = window
+            sourceCenterInWindow = sourceView.convert(
+                CGPoint(x: sourceView.bounds.midX, y: sourceView.bounds.midY),
+                to: window
+            )
+            holdStartLocationInWindow = recognizer.location(in: window)
+
+            let bubble = FloatingRecordingBubbleView(reduceMotion: reduceMotion)
+            bubble.center = sourceCenterInWindow
+            bubble.transform = CGAffineTransform(
+                scaleX: Constants.Audio.recordingButtonScale,
+                y: Constants.Audio.recordingButtonScale
+            )
+            window.addSubview(bubble)
+            bubbleView = bubble
+            onBubbleVisibilityChanged(true)
+            bubble.startPulsing()
+            updateInteractionState()
+        }
+
+        private func moveBubble(using recognizer: UILongPressGestureRecognizer) {
+            guard isHoldActive, let sourceWindow, let bubbleView else { return }
+            let location = recognizer.location(in: sourceWindow)
+            bubbleView.center = CGPoint(
+                x: sourceCenterInWindow.x + location.x - holdStartLocationInWindow.x,
+                y: sourceCenterInWindow.y + location.y - holdStartLocationInWindow.y
+            )
+        }
+
+        private func finishHold() {
+            guard isHoldActive else { return }
+            isHoldActive = false
+            isReturningBubble = true
+            onHoldEnded()
+            updateInteractionState()
+
+            guard let bubbleView else {
+                completeBubbleReturn()
+                return
+            }
+
+            bubbleView.stopPulsing()
+            let animations = {
+                bubbleView.center = self.sourceCenterInWindow
+                bubbleView.transform = .identity
+            }
+            let completion: (Bool) -> Void = { [weak self] _ in
+                self?.completeBubbleReturn()
+            }
+
+            if reduceMotion {
+                animations()
+                completion(true)
+            } else {
+                UIView.animate(
+                    withDuration: Constants.Audio.recordingButtonReturnDuration,
+                    delay: 0,
+                    usingSpringWithDamping: Constants.Audio.recordingButtonReturnDamping,
+                    initialSpringVelocity: 0,
+                    options: [.beginFromCurrentState, .allowUserInteraction],
+                    animations: animations,
+                    completion: completion
+                )
+            }
+        }
+
+        private func completeBubbleReturn() {
+            bubbleView?.removeFromSuperview()
+            bubbleView = nil
+            sourceWindow = nil
+            isReturningBubble = false
+            onBubbleVisibilityChanged(false)
+            updateInteractionState()
+        }
+
+        func cancelActiveInteraction() {
+            if isHoldActive {
+                isHoldActive = false
+                onHoldEnded()
+            }
+            bubbleView?.removeFromSuperview()
+            bubbleView = nil
+            sourceWindow = nil
+            isReturningBubble = false
+            onBubbleVisibilityChanged(false)
+        }
+
+        private func updateInteractionState() {
+            let acceptsInput = isEnabled && !isReturningBubble
+            sourceView?.isUserInteractionEnabled = acceptsInput
+            tapRecognizer?.isEnabled = acceptsInput
+            longPressRecognizer?.isEnabled = acceptsInput && (allowsHoldToRecord || isHoldActive)
+        }
+
+        private func updateAccessibilityTraits() {
+            var traits: UIAccessibilityTraits = [.button]
+            if !isEnabled {
+                traits.insert(.notEnabled)
+            }
+            sourceView?.accessibilityTraits = traits
+        }
+    }
+}
+
+private final class HoldToRecordTouchView: UIView {
+    var onAccessibilityActivate: (() -> Bool)?
+
+    override func accessibilityActivate() -> Bool {
+        onAccessibilityActivate?() ?? false
+    }
+}
+
+private final class FloatingRecordingBubbleView: UIView {
+    private static let pulseAnimationKey = "recordingPulse"
+
+    private let circleView = UIView()
+    private let iconView = UIImageView()
+    private let reduceMotion: Bool
+
+    init(reduceMotion: Bool) {
+        self.reduceMotion = reduceMotion
+        super.init(
+            frame: CGRect(
+                origin: .zero,
+                size: CGSize(
+                    width: Constants.Audio.recordingButtonDiameter,
+                    height: Constants.Audio.recordingButtonDiameter
+                )
+            )
+        )
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+
+        circleView.frame = bounds
+        circleView.backgroundColor = .systemRed
+        circleView.layer.cornerRadius = Constants.Audio.recordingButtonDiameter / 2
+        addSubview(circleView)
+
+        let configuration = UIImage.SymbolConfiguration(
+            pointSize: Constants.Audio.recordingButtonIconPointSize,
+            weight: .semibold
+        )
+        iconView.image = UIImage(systemName: "stop.fill", withConfiguration: configuration)
+        iconView.tintColor = .white
+        iconView.contentMode = .center
+        iconView.frame = circleView.bounds
+        circleView.addSubview(iconView)
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    func startPulsing() {
+        guard !reduceMotion else { return }
+        let pulse = CABasicAnimation(keyPath: "transform.scale")
+        pulse.fromValue = 1
+        pulse.toValue = Constants.Audio.recordingButtonPulseScale
+        pulse.duration = Constants.Audio.recordingButtonPulseDuration
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        circleView.layer.add(pulse, forKey: Self.pulseAnimationKey)
+    }
+
+    func stopPulsing() {
+        circleView.layer.removeAnimation(forKey: Self.pulseAnimationKey)
     }
 }
 
