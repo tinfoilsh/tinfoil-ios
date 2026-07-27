@@ -1063,7 +1063,7 @@ actor ChatRecoveryCoordinator {
                 }
             }
         }
-        processor.finishStream()
+        try processor.finishStream()
         try ensureRecoveryIsCurrent(
             chatId: chatId,
             turnId: turnId,

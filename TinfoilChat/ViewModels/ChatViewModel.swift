@@ -2650,7 +2650,7 @@ class ChatViewModel: ObservableObject {
                         }
                     }
 
-                    processor.finishStream()
+                    try processor.finishStream()
                 }
 
                 // Propagate cancellation from cancelGeneration (which cancels
