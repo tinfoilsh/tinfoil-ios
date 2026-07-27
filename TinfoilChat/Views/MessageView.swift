@@ -360,8 +360,9 @@ struct MessageView: View {
                             )
                         }
 
-                        // Show loading dots when there's no web search, or when search has completed with sources
-                        if message.webSearchState == nil || (message.webSearchState?.status == .completed && !(message.webSearchState?.sources.isEmpty ?? true)) {
+                        // Show loading dots unless a web search is actively in
+                        // flight, in which case the search box itself pulses
+                        if message.webSearchState?.status != .searching {
                             LoadingDotsView(isDarkMode: isDarkMode)
                                 .padding(.horizontal)
                         }
@@ -579,7 +580,8 @@ struct MessageView: View {
                 if message.role == .assistant &&
                    isLoading &&
                    isLastMessage &&
-                   (!message.content.isEmpty || message.thoughts != nil || message.isThinking) {
+                   (!message.content.isEmpty || message.thoughts != nil || message.isThinking ||
+                    !(message.segments?.isEmpty ?? true)) {
                     StreamingIndicatorDot(isDarkMode: isDarkMode)
                         .padding(.top, 4)
                         .frame(maxWidth: .infinity, alignment: .leading)

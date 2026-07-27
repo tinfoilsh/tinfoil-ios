@@ -74,7 +74,7 @@ private struct StatCardsView: View {
                     Text(stat.label)
                         .font(.caption.weight(.medium))
                         .foregroundColor(GenUIStyle.mutedText(isDarkMode))
-                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     HStack(spacing: 6) {
                         Text(stat.value.stringValue)
