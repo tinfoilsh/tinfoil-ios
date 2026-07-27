@@ -283,7 +283,7 @@ actor ChatRecoverySync {
             pending[index] = new
         case .complete(let envelope, let response, let title, let titleState):
             let alreadyCompleted = authoritativeRemote.messages.contains {
-                sameRecoveredResponse($0, response)
+                recoveredResponsesMatch($0, response)
             }
             guard (authoritativeRemote.pendingRecoveries?.contains(envelope) == true
                     || alreadyCompleted),
@@ -292,13 +292,11 @@ actor ChatRecoverySync {
                 throw ChatRecoverySyncError.envelopeMissing
             }
             pending.removeAll { $0.turnId == envelope.turnId }
-            if let index = chat.messages.firstIndex(where: {
-                $0.role == .assistant && $0.turnId == envelope.turnId
-            }) {
-                chat.messages[index] = response
-            } else {
-                chat.messages.append(response)
-            }
+            chat.messages = mergingRecoveredResponse(
+                response,
+                into: chat.messages,
+                turnId: envelope.turnId
+            )
             let canApplyGeneratedTitle = titleState != .generated
                 || (
                     authoritativeRemote.titleState == .placeholder
@@ -314,21 +312,6 @@ actor ChatRecoverySync {
             }
         }
         chat.pendingRecoveries = pending.isEmpty ? nil : pending
-    }
-
-    private func sameRecoveredResponse(_ lhs: Message, _ rhs: Message) -> Bool {
-        lhs.role == .assistant
-            && lhs.turnId == rhs.turnId
-            && lhs.content == rhs.content
-            && lhs.thoughts == rhs.thoughts
-            && lhs.generationTimeSeconds == rhs.generationTimeSeconds
-            && lhs.segments == rhs.segments
-            && lhs.webSearches == rhs.webSearches
-            && lhs.webSearchState == rhs.webSearchState
-            && lhs.urlFetches == rhs.urlFetches
-            && lhs.toolCalls == rhs.toolCalls
-            && lhs.timeline == rhs.timeline
-            && lhs.annotations == rhs.annotations
     }
 
     private func stampEdit(_ chat: inout Chat, observedRemote: Chat) {

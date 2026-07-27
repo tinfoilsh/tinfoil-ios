@@ -8,9 +8,16 @@ struct ChatRecoveryDraftKey: Hashable {
 
 @MainActor
 final class ChatRecoveryDraftStore: ObservableObject {
+    private struct ReplayState {
+        let sessionId: String
+        let checkpoint: Message?
+        var checkpointReached: Bool
+    }
+
     static let shared = ChatRecoveryDraftStore()
 
     @Published private(set) var drafts: [ChatRecoveryDraftKey: Message] = [:]
+    private var replayStates: [ChatRecoveryDraftKey: ReplayState] = [:]
     private var accountGeneration = 0
     private var scanGeneration = 0
     private var discardedChatIds: Set<String> = []
@@ -40,6 +47,65 @@ final class ChatRecoveryDraftStore: ObservableObject {
         drafts[key] = streamingDraft
     }
 
+    func beginReplayAttempt(
+        chatId: String,
+        turnId: String,
+        sessionId: String,
+        fallbackCheckpoint: Message?
+    ) {
+        let key = ChatRecoveryDraftKey(chatId: chatId, turnId: turnId)
+        if let replay = replayStates[key],
+           replay.sessionId != sessionId {
+            drafts.removeValue(forKey: key)
+        }
+        let checkpoint = drafts[key] ?? fallbackCheckpoint
+        replayStates[key] = ReplayState(
+            sessionId: sessionId,
+            checkpoint: checkpoint,
+            checkpointReached: checkpoint == nil
+        )
+    }
+
+    func replaceDuringReplay(
+        _ draft: Message,
+        chatId: String,
+        turnId: String,
+        sessionId: String,
+        generation: Int,
+        scanGeneration: Int
+    ) -> Bool? {
+        let key = ChatRecoveryDraftKey(chatId: chatId, turnId: turnId)
+        guard generation == accountGeneration,
+              scanGeneration == self.scanGeneration,
+              !discardedChatIds.contains(chatId),
+              !discardedKeys.contains(key),
+              var replay = replayStates[key],
+              replay.sessionId == sessionId
+        else {
+            return nil
+        }
+        if !replay.checkpointReached {
+            if let checkpoint = replay.checkpoint,
+               recoveryReplayCheckpointMatches(checkpoint, draft) {
+                replay.checkpointReached = true
+                replayStates[key] = replay
+            }
+            return false
+        }
+        var streamingDraft = draft
+        streamingDraft.turnId = turnId
+        streamingDraft.isStreaming = true
+        let changed = drafts[key] != streamingDraft
+        replace(
+            draft,
+            chatId: chatId,
+            turnId: turnId,
+            generation: generation,
+            scanGeneration: scanGeneration
+        )
+        return changed
+    }
+
     func beginScan(generation: Int) {
         guard generation >= scanGeneration else { return }
         scanGeneration = generation
@@ -50,16 +116,23 @@ final class ChatRecoveryDraftStore: ObservableObject {
             chatId: chatId,
             turnId: turnId
         )
-        guard drafts[key] != nil else { return }
+        guard drafts[key] != nil || replayStates[key] != nil else { return }
         drafts.removeValue(forKey: key)
+        replayStates.removeValue(forKey: key)
     }
 
     func prune(chatId: String, retaining turnIds: Set<String>) {
         let pruned = drafts.filter { key, _ in
             key.chatId != chatId || turnIds.contains(key.turnId)
         }
-        guard pruned != drafts else { return }
+        let prunedReplayStates = replayStates.filter { key, _ in
+            key.chatId != chatId || turnIds.contains(key.turnId)
+        }
+        guard pruned != drafts || prunedReplayStates.count != replayStates.count else {
+            return
+        }
         drafts = pruned
+        replayStates = prunedReplayStates
     }
 
     func reset(generation: Int) {
@@ -89,8 +162,9 @@ final class ChatRecoveryDraftStore: ObservableObject {
     }
 
     func clearAll() {
-        guard !drafts.isEmpty else { return }
+        guard !drafts.isEmpty || !replayStates.isEmpty else { return }
         drafts.removeAll()
+        replayStates.removeAll()
     }
 }
 

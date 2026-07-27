@@ -71,6 +71,33 @@ struct ChatRecoverySchedulingTests {
         ) == nil)
     }
 
+    @Test func insertsRecoveredResponseAfterItsUserTurn() {
+        let firstUser = Message(
+            role: .user,
+            turnId: "turn-1",
+            content: "First question"
+        )
+        let secondUser = Message(
+            role: .user,
+            turnId: "turn-2",
+            content: "Second question"
+        )
+        let recovered = Message(
+            role: .assistant,
+            turnId: "turn-1",
+            content: "Recovered response"
+        )
+
+        let messages = mergingRecoveredResponse(
+            recovered,
+            into: [firstUser, secondUser],
+            turnId: "turn-1"
+        )
+
+        #expect(messages.map(\.turnId) == ["turn-1", "turn-1", "turn-2"])
+        #expect(messages.map(\.role) == [.user, .assistant, .user])
+    }
+
     @Test func replacesOnlyScansThatHaveStoppedMakingProgress() {
         let now = Date(timeIntervalSince1970: 1_000)
         let freshProgress = now.addingTimeInterval(
@@ -83,5 +110,20 @@ struct ChatRecoverySchedulingTests {
         #expect(!recoveryScanHasStalled(lastProgressAt: nil, now: now))
         #expect(!recoveryScanHasStalled(lastProgressAt: freshProgress, now: now))
         #expect(recoveryScanHasStalled(lastProgressAt: staleProgress, now: now))
+    }
+
+    @Test func retryDelayUsesACappedExponentialBackoff() {
+        #expect(
+            chatRecoveryRetryDelayNanoseconds(attempt: 0)
+                == Constants.ChatRecovery.retryBaseDelayNanoseconds
+        )
+        #expect(
+            chatRecoveryRetryDelayNanoseconds(attempt: 1)
+                == Constants.ChatRecovery.retryBaseDelayNanoseconds * 2
+        )
+        #expect(
+            chatRecoveryRetryDelayNanoseconds(attempt: 100)
+                == Constants.ChatRecovery.retryMaxDelayNanoseconds
+        )
     }
 }
