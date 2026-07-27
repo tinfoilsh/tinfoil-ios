@@ -325,6 +325,7 @@ struct UIKitScrollView: UIViewRepresentable {
                                 isDarkMode: isDarkMode,
                                 isLastMessage: actualIndex == messages.count - 1,
                                 isLoading: false,
+                                hasRecoveryDraft: false,
                                 messageIndex: actualIndex
                             )
                             .markdownStyleHost(isDarkMode: isDarkMode)
@@ -464,6 +465,7 @@ struct StreamingMessageContainer: View {
                 isDarkMode: isDarkMode,
                 isLastMessage: true,
                 isLoading: isLoading,
+                hasRecoveryDraft: false,
                 messageIndex: messageIndex
             )
             .markdownStyleHost(isDarkMode: isDarkMode)

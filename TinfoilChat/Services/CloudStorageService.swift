@@ -114,10 +114,7 @@ class CloudStorageService: ObservableObject {
     @discardableResult
     func uploadChat(_ chat: StoredChat, idempotencyKey: String) async throws -> UploadChatResult {
         var chatToUpload = chat
-        let rewrites = try await encryptAndUploadAttachments(
-            &chatToUpload,
-            idempotencyKey: idempotencyKey
-        )
+        let rewrites = try await encryptAndUploadAttachments(&chatToUpload)
         stripBase64FromMessages(&chatToUpload.messages)
 
         let plaintext = try JSONEncoder().encode(chatToUpload)
@@ -157,14 +154,11 @@ class CloudStorageService: ObservableObject {
     }
 
     private func encryptAndUploadAttachments(
-        _ chat: inout StoredChat,
-        idempotencyKey: String
+        _ chat: inout StoredChat
     ) async throws -> [AttachmentRewrite] {
         var rewrites: [AttachmentRewrite] = []
-        var attachmentIndex = 0
         for msgIdx in chat.messages.indices {
             for attIdx in chat.messages[msgIdx].attachments.indices {
-                defer { attachmentIndex += 1 }
                 let att = chat.messages[msgIdx].attachments[attIdx]
                 guard att.type == .image,
                       let base64 = att.base64,
@@ -173,8 +167,9 @@ class CloudStorageService: ObservableObject {
                     continue
                 }
                 let attIdemKey = attachmentIdempotencyKey(
-                    uploadKey: idempotencyKey,
-                    attachmentIndex: attachmentIndex
+                    chatId: chat.id,
+                    clientId: att.id,
+                    plaintext: raw
                 )
                 // The enclave mints both the durable attachment id
                 // and a fresh per-attachment AES-256 key. The chat
@@ -211,10 +206,16 @@ class CloudStorageService: ObservableObject {
         }
     }
 
-    private func attachmentIdempotencyKey(uploadKey: String, attachmentIndex: Int) -> String {
-        let input = "attachment:\(uploadKey):\(attachmentIndex)"
-        let digest = SHA256.hash(data: Data(input.utf8))
-        return digest.prefix(16).map { String(format: "%02x", $0) }.joined()
+    private func attachmentIdempotencyKey(
+        chatId: String,
+        clientId: String,
+        plaintext: Data
+    ) -> String {
+        var hasher = SHA256()
+        hasher.update(data: Data("attachment:\(chatId):\(clientId):".utf8))
+        hasher.update(data: plaintext)
+        let digest = hasher.finalize()
+        return dataToHex(Data(digest.prefix(16)))
     }
 
     // MARK: - Download

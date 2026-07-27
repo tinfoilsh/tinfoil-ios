@@ -10,6 +10,8 @@ import Textual
 import ObjectiveC
 
 struct MessageTableView: UIViewRepresentable {
+    let messages: [Message]
+    let recoveryDraftTurnIds: Set<String>
     let archivedMessagesStartIndex: Int
     let isDarkMode: Bool
     let isLoading: Bool
@@ -22,8 +24,13 @@ struct MessageTableView: UIViewRepresentable {
     @Binding var tableOpacity: Double
     let keyboardHeight: CGFloat
 
-    private var messages: [Message] {
-        viewModel.messages
+    private func hasRecoveryDraft(_ message: Message) -> Bool {
+        message.turnId.map { recoveryDraftTurnIds.contains($0) } ?? false
+    }
+
+    private var usesStreamingLayout: Bool {
+        guard let lastMessage = messages.last else { return isLoading }
+        return isLoading || hasRecoveryDraft(lastMessage)
     }
 
     func makeUIView(context: Context) -> UITableView {
@@ -85,7 +92,7 @@ struct MessageTableView: UIViewRepresentable {
 
         // Detect ID conversion (temp → permanent) by checking if message IDs match
         // This is more reliable than checking wrappers since wrappers only exist for rendered cells
-        let currentMessageIds = Set(viewModel.messages.map { $0.id })
+        let currentMessageIds = Set(messages.map { $0.id })
         let isIdConversion = chatIdChanged && !currentMessageIds.isEmpty &&
             currentMessageIds == context.coordinator.lastMessageIds
 
@@ -99,9 +106,9 @@ struct MessageTableView: UIViewRepresentable {
         // collapsed height immediately and can't overlap the rows added after
         // it. The stale wrapper's buffer state and cached height go with it.
         let previousStreamingMessageId = context.coordinator.streamingMessageId
-        context.coordinator.streamingMessageId = isLoading ? messages.last?.id : nil
+        context.coordinator.streamingMessageId = usesStreamingLayout ? messages.last?.id : nil
         if let staleId = previousStreamingMessageId,
-           staleId != messages.last?.id,
+           staleId != context.coordinator.streamingMessageId,
            let staleWrapper = context.coordinator.messageWrappers[staleId] {
             staleWrapper.resetBuffer()
             context.coordinator.messageHeightCache.removeValue(forKey: staleId)
@@ -120,7 +127,7 @@ struct MessageTableView: UIViewRepresentable {
                 // the same conversation stays on screen with its wrappers
                 // retained, so a stream that ends across the conversion must
                 // still collapse its buffer through the normal path.
-                context.coordinator.lastIsLoading = isLoading
+                context.coordinator.lastUsesStreamingLayout = usesStreamingLayout
                 context.coordinator.messageWrappers.removeAll()
                 context.coordinator.shownMessageIds.removeAll()
 
@@ -188,10 +195,22 @@ struct MessageTableView: UIViewRepresentable {
             context.coordinator.lastMessageCount = messages.count
             context.coordinator.heightCache.removeAll()
             tableView.reloadData()
-        } else if isLoading && !messages.isEmpty {
+        } else if usesStreamingLayout && !messages.isEmpty {
             // During streaming, update the last message wrapper directly
             if let lastMessage = messages.last,
                let wrapper = context.coordinator.messageWrappers[lastMessage.id] {
+                let lastMessageId = lastMessage.id
+                if hasRecoveryDraft(lastMessage) {
+                    context.coordinator.heightCache.removeValue(
+                        forKey: IndexPath(row: messages.count - 1, section: 0)
+                    )
+                    context.coordinator.messageHeightCache.removeValue(
+                        forKey: lastMessage.id
+                    )
+                    context.coordinator.contentEstimateCache.removeValue(
+                        forKey: lastMessage.id
+                    )
+                }
 
                 let isArchived = messages.count - 1 < archivedMessagesStartIndex
                 let showArchiveSeparator = messages.count - 1 == archivedMessagesStartIndex && archivedMessagesStartIndex > 0
@@ -211,13 +230,19 @@ struct MessageTableView: UIViewRepresentable {
                     // stale wrapper or recalculating heights against the old row
                     // set would desync the table from its datasource.
                     guard coordinator.lastChatId == currentChatId,
-                          let currentMessage = coordinator.parent.messages.last else { return }
+                          coordinator.streamingMessageId == lastMessageId,
+                          let currentMessage = coordinator.parent.messages.last,
+                          currentMessage.id == lastMessageId
+                    else {
+                        return
+                    }
 
                     wrapper.update(
                         message: currentMessage,
                         isDarkMode: coordinator.parent.isDarkMode,
                         isLastMessage: true,
                         isLoading: coordinator.parent.isLoading,
+                        hasRecoveryDraft: coordinator.parent.hasRecoveryDraft(currentMessage),
                         isArchived: isArchived,
                         showArchiveSeparator: showArchiveSeparator,
                         messageIndex: coordinator.parent.messages.count - 1
@@ -230,12 +255,60 @@ struct MessageTableView: UIViewRepresentable {
                     }
                 }
             }
+            for (index, message) in messages.dropLast().enumerated() {
+                guard hasRecoveryDraft(message),
+                      let wrapper = context.coordinator.messageWrappers[message.id]
+                else {
+                    continue
+                }
+                context.coordinator.heightCache.removeValue(
+                    forKey: IndexPath(row: index, section: 0)
+                )
+                context.coordinator.messageHeightCache.removeValue(forKey: message.id)
+                context.coordinator.contentEstimateCache.removeValue(forKey: message.id)
+                wrapper.update(
+                    message: message,
+                    isDarkMode: isDarkMode,
+                    isLastMessage: false,
+                    isLoading: false,
+                    hasRecoveryDraft: true,
+                    isArchived: index < archivedMessagesStartIndex,
+                    showArchiveSeparator: index == archivedMessagesStartIndex
+                        && archivedMessagesStartIndex > 0,
+                    messageIndex: index
+                )
+            }
+        } else {
+            for (index, message) in messages.enumerated() {
+                guard let wrapper = context.coordinator.messageWrappers[message.id] else {
+                    continue
+                }
+                if hasRecoveryDraft(message) {
+                    context.coordinator.heightCache.removeValue(
+                        forKey: IndexPath(row: index, section: 0)
+                    )
+                    context.coordinator.messageHeightCache.removeValue(forKey: message.id)
+                    context.coordinator.contentEstimateCache.removeValue(forKey: message.id)
+                }
+                wrapper.update(
+                    message: message,
+                    isDarkMode: isDarkMode,
+                    isLastMessage: index == messages.count - 1,
+                    isLoading: false,
+                    hasRecoveryDraft: hasRecoveryDraft(message),
+                    isArchived: index < archivedMessagesStartIndex,
+                    showArchiveSeparator: index == archivedMessagesStartIndex
+                        && archivedMessagesStartIndex > 0,
+                    messageIndex: index
+                )
+            }
         }
 
-        let isLoadingChanged = context.coordinator.lastIsLoading != isLoading
-        context.coordinator.lastIsLoading = isLoading
+        let streamingLayoutChanged =
+            context.coordinator.lastUsesStreamingLayout != usesStreamingLayout
+        context.coordinator.lastUsesStreamingLayout = usesStreamingLayout
 
-        if isLoadingChanged && !isLoading {
+        if streamingLayoutChanged && !usesStreamingLayout {
             let preservedOffset = tableView.contentOffset.y
             context.coordinator.preservedOffsetAfterStreaming = preservedOffset
             context.coordinator.isCollapsingStreamingBuffer = true
@@ -261,6 +334,7 @@ struct MessageTableView: UIViewRepresentable {
                     isDarkMode: isDarkMode,
                     isLastMessage: true,
                     isLoading: false,
+                    hasRecoveryDraft: hasRecoveryDraft(lastMessage),
                     isArchived: isArchived,
                     showArchiveSeparator: showArchiveSeparator,
                     messageIndex: messages.count - 1
@@ -372,7 +446,7 @@ struct MessageTableView: UIViewRepresentable {
         var lastScrollTrigger: UUID?
         var lastScrollToUserTrigger: UUID?
         var lastMessageCount: Int = 0
-        var lastIsLoading: Bool = false
+        var lastUsesStreamingLayout: Bool = false
         var cellReuseIdentifierSuffix: String = ""
         var lastKeyboardHeight: CGFloat = 0
         var lastIsDarkMode: Bool = false
@@ -401,16 +475,16 @@ struct MessageTableView: UIViewRepresentable {
             self.parent = parent
         }
 
-        func getOrCreateWrapper(for message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool, messageIndex: Int) -> ObservableMessageWrapper {
+        func getOrCreateWrapper(for message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, hasRecoveryDraft: Bool, isArchived: Bool, showArchiveSeparator: Bool, messageIndex: Int) -> ObservableMessageWrapper {
             if let existing = messageWrappers[message.id] {
-                existing.update(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator, messageIndex: messageIndex)
+                existing.update(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, hasRecoveryDraft: hasRecoveryDraft, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator, messageIndex: messageIndex)
                 // Never re-animate existing messages
                 existing.shouldAnimateAppearance = false
                 return existing
             } else {
                 let isFirstTimeShown = !shownMessageIds.contains(message.id)
                 shownMessageIds.insert(message.id)
-                let wrapper = ObservableMessageWrapper(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator, shouldAnimateAppearance: isFirstTimeShown, messageIndex: messageIndex)
+                let wrapper = ObservableMessageWrapper(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, hasRecoveryDraft: hasRecoveryDraft, isArchived: isArchived, showArchiveSeparator: showArchiveSeparator, shouldAnimateAppearance: isFirstTimeShown, messageIndex: messageIndex)
                 messageWrappers[message.id] = wrapper
                 return wrapper
             }
@@ -488,6 +562,7 @@ struct MessageTableView: UIViewRepresentable {
                     isDarkMode: parent.isDarkMode,
                     isLastMessage: isLastMessage,
                     isLoading: parent.isLoading && isLastMessage,
+                    hasRecoveryDraft: parent.hasRecoveryDraft(message),
                     isArchived: isArchived,
                     showArchiveSeparator: showArchiveSeparator,
                     messageIndex: indexPath.row
@@ -623,11 +698,14 @@ struct MessageTableView: UIViewRepresentable {
             // appended rows behind it) can still render its buffer this tick.
             // Trust the wrapper's claim wherever the row sits so that inflated
             // frame never enters the height caches.
+            if parent.hasRecoveryDraft(message) {
+                return true
+            }
             if let wrapper = messageWrappers[message.id], wrapper.isLoading, wrapper.isLastMessage {
                 return true
             }
             guard indexPath.row == parent.messages.count - 1 else { return false }
-            return parent.isLoading
+            return parent.usesStreamingLayout
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -644,7 +722,7 @@ struct MessageTableView: UIViewRepresentable {
 
             let targetInset: CGFloat
 
-            if parent.isLoading, let lastMessage = parent.messages.last,
+            if parent.usesStreamingLayout, let lastMessage = parent.messages.last,
                let wrapper = messageWrappers[lastMessage.id], wrapper.actualContentHeight > 0 {
 
                 let screenHeight = UIScreen.main.bounds.height
@@ -658,7 +736,7 @@ struct MessageTableView: UIViewRepresentable {
                 } else {
                     targetInset = streamingInset
                 }
-            } else if parent.isLoading && isUserMessageScrollMode {
+            } else if parent.usesStreamingLayout && isUserMessageScrollMode {
                 targetInset = insetForUserMessageAtTop(tableView)
             } else if isUserMessageScrollMode {
                 // Streaming has ended but the user is still reading with their
@@ -827,27 +905,29 @@ class ObservableMessageWrapper: ObservableObject {
     @Published var isDarkMode: Bool
     @Published var isLastMessage: Bool
     @Published var isLoading: Bool
+    @Published var hasRecoveryDraft: Bool
     @Published var isArchived: Bool
     @Published var showArchiveSeparator: Bool
-    @Published var shouldAnimateAppearance: Bool = false
+    var shouldAnimateAppearance: Bool = false
     @Published var messageIndex: Int
     var bufferMultiplier: CGFloat = Constants.StreamingBuffer.initialMultiplier
     var actualContentHeight: CGFloat = 0
     var cachedHeight: CGFloat?
     var cachedHeightKey: Int?
 
-    init(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool, shouldAnimateAppearance: Bool = true, messageIndex: Int = 0) {
+    init(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, hasRecoveryDraft: Bool = false, isArchived: Bool, showArchiveSeparator: Bool, shouldAnimateAppearance: Bool = true, messageIndex: Int = 0) {
         self.message = message
         self.isDarkMode = isDarkMode
         self.isLastMessage = isLastMessage
         self.isLoading = isLoading
+        self.hasRecoveryDraft = hasRecoveryDraft
         self.isArchived = isArchived
         self.showArchiveSeparator = showArchiveSeparator
         self.shouldAnimateAppearance = shouldAnimateAppearance
         self.messageIndex = messageIndex
     }
 
-    func update(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, isArchived: Bool, showArchiveSeparator: Bool, messageIndex: Int) {
+    func update(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, hasRecoveryDraft: Bool, isArchived: Bool, showArchiveSeparator: Bool, messageIndex: Int) {
         let contentChanged = self.message.content != message.content ||
                             self.message.thoughts != message.thoughts ||
                             self.message.contentChunks != message.contentChunks ||
@@ -860,10 +940,15 @@ class ObservableMessageWrapper: ObservableObject {
                             self.message.urlFetches != message.urlFetches ||
                             self.message.segments != message.segments ||
                             self.message.webSearches != message.webSearches ||
+                            self.message.toolCalls != message.toolCalls ||
+                            self.message.timeline != message.timeline ||
+                            self.message.annotations != message.annotations ||
+                            self.message.webSearchBeforeThinking != message.webSearchBeforeThinking ||
                             self.isDarkMode != isDarkMode
 
         let metadataChanged = self.isLastMessage != isLastMessage ||
                               self.isLoading != isLoading ||
+                              self.hasRecoveryDraft != hasRecoveryDraft ||
                               self.isArchived != isArchived ||
                               self.showArchiveSeparator != showArchiveSeparator ||
                               self.messageIndex != messageIndex
@@ -885,6 +970,7 @@ class ObservableMessageWrapper: ObservableObject {
             self.isDarkMode = isDarkMode
             self.isLastMessage = isLastMessage
             self.isLoading = isLoading
+            self.hasRecoveryDraft = hasRecoveryDraft
             self.isArchived = isArchived
             self.showArchiveSeparator = showArchiveSeparator
             self.messageIndex = messageIndex
@@ -939,7 +1025,7 @@ struct ObservableMessageCell: View {
     /// is measuring cells (queued dispatch landing at stream end). Requiring
     /// the coordinator's synchronous id keeps the buffer off such rows.
     private var showsStreamingBuffer: Bool {
-        wrapper.isLoading && wrapper.isLastMessage
+        (wrapper.isLoading || wrapper.hasRecoveryDraft) && wrapper.isLastMessage
             && coordinator?.streamingMessageId == wrapper.message.id
     }
 
@@ -974,6 +1060,7 @@ struct ObservableMessageCell: View {
                     isDarkMode: wrapper.isDarkMode,
                     isLastMessage: wrapper.isLastMessage,
                     isLoading: wrapper.isLoading,
+                    hasRecoveryDraft: wrapper.hasRecoveryDraft,
                     messageIndex: wrapper.messageIndex
                 )
                 .environmentObject(viewModel)

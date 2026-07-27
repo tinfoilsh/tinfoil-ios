@@ -425,6 +425,94 @@ class CloudSyncService: ObservableObject {
         }
     }
 
+    func backupChatAndWait(_ chatId: String, requiredTurnId: String) async throws {
+        let generation = accountGeneration
+        guard let userId = await getCurrentUserId(),
+              await cloudStorage.isAuthenticated(), await canWriteToCloud(),
+              generation == accountGeneration
+        else {
+            throw SyncEnclaveError(message: "chat is not ready for cloud backup")
+        }
+
+        beginPendingUpload(chatId)
+        defer { endPendingUpload(chatId, generation: generation) }
+        for _ in 0..<Constants.ChatRecovery.maxMutationAttempts {
+            guard generation == accountGeneration,
+                  let chat = try? await EncryptedFileStorage.cloud.loadChat(
+                      chatId: chatId,
+                      userId: userId
+                  ),
+                  chat.messages.contains(where: {
+                      $0.role == .user && $0.turnId == requiredTurnId
+                  })
+            else {
+                throw SyncEnclaveError(message: "required chat turn is not ready for backup")
+            }
+            do {
+                let result = try await cloudStorage.uploadChat(
+                    StoredChat(from: chat, syncVersion: chat.syncVersion),
+                    idempotencyKey: newSyncEnclaveIdempotencyKey()
+                )
+                guard generation == accountGeneration else {
+                    throw SyncEnclaveError(message: "account changed during cloud backup")
+                }
+                let newVersion = result.syncVersion ?? chat.syncVersion + 1
+                let fullySynced = try await EncryptedFileStorage.cloud.finalizeUploadIfFresh(
+                    chatId: chat.id,
+                    userId: userId,
+                    expectedUpdatedAt: chat.updatedAt,
+                    syncVersion: newVersion,
+                    attachmentRewrites: result.rewrites.map {
+                        (
+                            clientId: $0.clientId,
+                            serverId: $0.serverId,
+                            encryptionKey: $0.encryptionKey
+                        )
+                    }
+                )
+                if fullySynced {
+                    SyncHealthStore.shared.reportChatSynced(chat.id)
+                }
+                return
+            } catch let error as SyncEnclaveError
+                where EnclaveErrorRecovery.isVersionConflict(error) {
+                guard let remote = try await cloudStorage.downloadChat(chatId),
+                      let remoteChat = await convertStoredChat(remote)
+                else {
+                    throw error
+                }
+                let localClock = trustedChatClock(chat)
+                let remoteClock = trustedChatClock(remoteChat)
+                guard !SyncConflictResolver.remoteWins(
+                    localClock: localClock,
+                    remoteClock: remoteClock,
+                    localUpdatedAt: chat.updatedAt,
+                    remoteUpdatedAt: remoteChat.updatedAt
+                ) else {
+                    throw error
+                }
+                try await EncryptedFileStorage.cloud.updateSyncMetadata(
+                    chatId: chatId,
+                    userId: userId,
+                    syncVersion: remote.syncVersion,
+                    syncedAt: chat.syncedAt ?? Date(),
+                    locallyModified: true
+                )
+            }
+        }
+        throw SyncEnclaveError(message: "required chat turn could not be backed up")
+    }
+
+    private func trustedChatClock(_ chat: Chat) -> EditClock? {
+        guard let clock = chat.clock,
+              let writer = chat.writer,
+              chat.clockVersion == chat.syncVersion
+        else {
+            return nil
+        }
+        return EditClock(v: clock, w: writer)
+    }
+
     private func beginPendingUpload(_ chatId: String) {
         pendingUploadCounts[chatId, default: 0] += 1
         pendingUploadChatIds.insert(chatId)

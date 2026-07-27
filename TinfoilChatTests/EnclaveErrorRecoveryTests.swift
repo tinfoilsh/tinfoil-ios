@@ -101,6 +101,50 @@ struct EnclaveErrorRecoveryTests {
         #expect(decision.classification.kind == .terminal)
     }
 
+    @Test func versionConflictExcludesStaleKey() {
+        #expect(EnclaveErrorRecovery.isVersionConflict(
+            SyncEnclaveError(
+                message: "conflict",
+                status: 409,
+                code: WireCodes.syncConflict
+            )
+        ))
+        #expect(EnclaveErrorRecovery.isVersionConflict(
+            SyncEnclaveError(message: "stale blob", status: 412)
+        ))
+        #expect(EnclaveErrorRecovery.isVersionConflict(
+            SyncEnclaveError(message: "conflict", status: 409)
+        ))
+        #expect(EnclaveErrorRecovery.isVersionConflict(
+            SyncEnclaveError(
+                message: "conflict",
+                status: 409,
+                code: SyncEnclaveError.httpStatusFallbackCode(409)
+            )
+        ))
+        #expect(EnclaveErrorRecovery.isVersionConflict(
+            SyncEnclaveError(
+                message: "stale blob",
+                status: 412,
+                code: SyncEnclaveError.httpStatusFallbackCode(412)
+            )
+        ))
+        #expect(!EnclaveErrorRecovery.isVersionConflict(
+            SyncEnclaveError(
+                message: "stale key",
+                status: 409,
+                code: WireCodes.staleKey
+            )
+        ))
+        #expect(!EnclaveErrorRecovery.isVersionConflict(
+            SyncEnclaveError(
+                message: "unknown key",
+                status: 412,
+                code: WireCodes.unknownKey
+            )
+        ))
+    }
+
     // MARK: - Non-SyncEnclaveError fallback
 
     @Test func wrappedVerificationFailureMapsToBlockAllSync() {

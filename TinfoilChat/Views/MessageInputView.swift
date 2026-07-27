@@ -24,6 +24,16 @@ func cameraPermissionAction(for status: AVAuthorizationStatus) -> CameraPermissi
     }
 }
 
+func shouldShowMessageStopAction(
+    isStreaming: Bool,
+    hasActiveRecovery: Bool,
+    hasSubmittableContent: Bool,
+    isMessageQueueFull: Bool
+) -> Bool {
+    hasActiveRecovery
+        || (isStreaming && (!hasSubmittableContent || isMessageQueueFull))
+}
+
 /// Input area for typing messages, including attachments and send button
 struct MessageInputView: View {
     // MARK: - Constants
@@ -44,6 +54,7 @@ struct MessageInputView: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @EnvironmentObject private var authManager: AuthManager
+    @ObservedObject private var recoveryPhaseTracker = ChatRecoveryPhaseTracker.shared
     @State private var textHeight: CGFloat = Layout.defaultHeight
     /// Reflects whether the editor has grown beyond a single line, so callers
     /// can hide content that would otherwise be pushed off-screen.
@@ -90,7 +101,14 @@ struct MessageInputView: View {
     /// submittable, or the queue already full, it reverts to a stop button
     /// so the stream can always be cancelled. Mirrors the webapp.
     private var showStopAction: Bool {
-        viewModel.isLoading && (!hasSubmittableContent || viewModel.isMessageQueueFull)
+        shouldShowMessageStopAction(
+            isStreaming: viewModel.isLoading,
+            hasActiveRecovery: viewModel.activeRecoveryEnvelope(
+                trackedBy: recoveryPhaseTracker
+            ) != nil,
+            hasSubmittableContent: hasSubmittableContent,
+            isMessageQueueFull: viewModel.isMessageQueueFull
+        )
     }
 
     private enum TrailingAction {
@@ -138,12 +156,14 @@ struct MessageInputView: View {
     }
 
     /// The send action greys out while a draft can't be dispatched because
-    /// an attachment is still processing; voice greys out while a recording
-    /// is being transcribed.
+    /// an attachment is still processing or the previous response is being
+    /// recovered; voice greys out while a recording is being transcribed.
     private var isTrailingActionDisabled: Bool {
         switch trailingAction {
         case .voice: return viewModel.isTranscribing
-        case .send: return !attachmentsAreReadyToSend(viewModel.pendingAttachments)
+        case .send:
+            return viewModel.hasPendingResponseRecovery
+                || !attachmentsAreReadyToSend(viewModel.pendingAttachments)
         case .stop: return false
         }
     }
