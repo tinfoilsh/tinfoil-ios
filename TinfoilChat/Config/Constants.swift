@@ -337,6 +337,15 @@ enum Constants {
 
     enum Audio {
         static let recordingTimeoutSeconds: TimeInterval = 600  // 10 minutes
+        static let holdToRecordMinimumPressSeconds: TimeInterval = 0.3
+        static let recordingButtonDiameter: CGFloat = 32
+        static let recordingButtonHitTargetSize: CGFloat = 44
+        static let recordingButtonIconPointSize: CGFloat = 16
+        static let recordingButtonScale: CGFloat = 2
+        static let recordingButtonPulseScale: CGFloat = 1.1
+        static let recordingButtonPulseDuration: TimeInterval = 0.8
+        static let recordingButtonReturnDuration: TimeInterval = 0.3
+        static let recordingButtonReturnDamping: CGFloat = 0.72
         static let sampleRate: Double = 44100.0
         static let numberOfChannels: Int = 1  // Mono
     }
