@@ -259,6 +259,19 @@ enum ChatRecoveryCrypto {
         return now >= expiry
     }
 
+    static func dateImmediatelyBeforeExpiry(
+        _ envelope: PendingRecoveryEnvelope
+    ) throws -> Date {
+        try validate(envelope)
+        guard let expiry = parseTimestamp(envelope.expiresAt) else {
+            throw ChatRecoveryCryptoError.invalidEnvelope
+        }
+        return Date(
+            timeIntervalSinceReferenceDate:
+                expiry.timeIntervalSinceReferenceDate.nextDown
+        )
+    }
+
     private static func envelopeKey(_ cek: Data) throws -> SymmetricKey {
         guard cek.count == Constants.ChatRecovery.cekBytes else {
             throw ChatRecoveryCryptoError.invalidKey

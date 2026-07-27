@@ -94,15 +94,77 @@ func recoveredTitleMessages(
     else {
         return nil
     }
-    var titleMessages = messages
-    if let index = titleMessages.firstIndex(where: {
+    return mergingRecoveredResponse(
+        response,
+        into: messages,
+        turnId: turnId
+    )
+}
+
+func mergingRecoveredResponse(
+    _ response: Message,
+    into messages: [Message],
+    turnId: String
+) -> [Message] {
+    var messages = messages
+    if let existingIndex = messages.firstIndex(where: {
         $0.role == .assistant && $0.turnId == turnId
     }) {
-        titleMessages[index] = response
+        messages[existingIndex] = response
+    } else if let userIndex = messages.lastIndex(where: {
+        $0.role == .user && $0.turnId == turnId
+    }) {
+        messages.insert(response, at: messages.index(after: userIndex))
     } else {
-        titleMessages.append(response)
+        messages.append(response)
     }
-    return titleMessages
+    return messages
+}
+
+func recoveryResponsePayloadMatches(_ lhs: Message, _ rhs: Message) -> Bool {
+    lhs.role == .assistant
+        && lhs.role == rhs.role
+        && lhs.turnId == rhs.turnId
+        && lhs.content == rhs.content
+        && lhs.thoughts == rhs.thoughts
+        && lhs.isThinking == rhs.isThinking
+        && lhs.webSearchState == rhs.webSearchState
+        && lhs.urlFetches == rhs.urlFetches
+        && lhs.toolCalls == rhs.toolCalls
+        && (lhs.annotations ?? []) == (rhs.annotations ?? [])
+        && lhs.webSearchBeforeThinking == rhs.webSearchBeforeThinking
+}
+
+func chatRecoveryRetryDelayNanoseconds(attempt: Int) -> UInt64 {
+    var delay = Constants.ChatRecovery.retryBaseDelayNanoseconds
+    for _ in 0..<max(0, attempt) {
+        let (next, overflow) = delay.multipliedReportingOverflow(by: 2)
+        if overflow || next >= Constants.ChatRecovery.retryMaxDelayNanoseconds {
+            return Constants.ChatRecovery.retryMaxDelayNanoseconds
+        }
+        delay = next
+    }
+    return delay
+}
+
+func recoveryRetryDeadlineReached(
+    _ envelope: PendingRecoveryEnvelope,
+    now: Date = Date()
+) -> Bool {
+    (try? ChatRecoveryCrypto.isExpired(envelope, now: now)) ?? true
+}
+
+func registrationFailureDefinitelyDidNotPersist(_ error: Error) -> Bool {
+    if let syncError = error as? ChatRecoverySyncError {
+        switch syncError {
+        case .chatMissing, .envelopeMissing, .pendingLimitReached, .conflict:
+            return true
+        }
+    }
+    if let enclaveError = error as? SyncEnclaveError {
+        return EnclaveErrorRecovery.isVersionConflict(enclaveError)
+    }
+    return false
 }
 
 actor ChatRecoveryCoordinator {
@@ -181,21 +243,31 @@ actor ChatRecoveryCoordinator {
             try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
             throw CancellationError()
         }
-        let cek: Data
-        switch attempt.storage {
-        case .cloud:
-            cek = try EncryptionService.shared.getKeyBytesOrThrow()
-        case .local:
-            cek = try await DeviceEncryptionService.shared.getKeyBytesOrThrow()
+        let envelope: PendingRecoveryEnvelope
+        do {
+            let cek: Data
+            switch attempt.storage {
+            case .cloud:
+                cek = try EncryptionService.shared.getKeyBytesOrThrow()
+            case .local:
+                cek = try await DeviceEncryptionService.shared.getKeyBytesOrThrow()
+            }
+            envelope = try ChatRecoveryCrypto.encrypt(
+                cek: cek,
+                userId: attempt.userId,
+                chatId: attempt.chatId,
+                turnId: attempt.turnId,
+                sessionId: attempt.sessionId,
+                recoveryToken: token
+            )
+        } catch {
+            Task {
+                try? await ChatRecoveryClient.shared.delete(
+                    sessionId: attempt.sessionId
+                )
+            }
+            throw error
         }
-        let envelope = try ChatRecoveryCrypto.encrypt(
-            cek: cek,
-            userId: attempt.userId,
-            chatId: attempt.chatId,
-            turnId: attempt.turnId,
-            sessionId: attempt.sessionId,
-            recoveryToken: token
-        )
         do {
             try await ChatRecoverySync.shared.mutate(
                 chatId: attempt.chatId,
@@ -204,11 +276,12 @@ actor ChatRecoveryCoordinator {
                 mutation: .add(envelope)
             )
         } catch {
-            if case ChatRecoverySyncError.pendingLimitReached = error {
-                try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
-            } else if attempt.storage == .local,
-                      case ChatRecoverySyncError.chatMissing = error {
-                try? await ChatRecoveryClient.shared.delete(sessionId: attempt.sessionId)
+            if registrationFailureDefinitelyDidNotPersist(error) {
+                Task {
+                    try? await ChatRecoveryClient.shared.delete(
+                        sessionId: attempt.sessionId
+                    )
+                }
             }
             throw error
         }
@@ -604,11 +677,34 @@ actor ChatRecoveryCoordinator {
             ) else {
                 return
             }
+            let cleanupDate = try? ChatRecoveryCrypto.dateImmediatelyBeforeExpiry(
+                envelope
+            )
+            let sessionId: String?
+            if let cleanupDate,
+               let opened = try? await openEnvelope(
+                   envelope,
+                   chatId: chatId,
+                   userId: userId,
+                   storage: storage,
+                   now: cleanupDate
+               ) {
+                sessionId = opened.payload.sessionId
+            } else {
+                sessionId = nil
+            }
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ) else {
+                return
+            }
             await removeTerminal(
                 chatId: chatId,
                 envelope: envelope,
                 userId: userId,
-                sessionId: nil,
+                sessionId: sessionId,
                 storage: storage,
                 accountGeneration: accountGeneration,
                 scanGeneration: scanGeneration
@@ -656,6 +752,7 @@ actor ChatRecoveryCoordinator {
                 return
             }
             await onProgress()
+            var highestPersistedBytes = initialStatus.persistedBytes
             guard scanIsCurrent(
                 accountGeneration: accountGeneration,
                 scanGeneration: scanGeneration,
@@ -691,9 +788,44 @@ actor ChatRecoveryCoordinator {
                 turnId: envelope.turnId,
                 storage: storage
             )
+            let persistedCheckpoint = (
+                try? await storage.fileStorage.loadChat(
+                    chatId: chatId,
+                    userId: userId
+                )
+            )?.messages.first(where: {
+                $0.role == .assistant && $0.turnId == envelope.turnId
+            })
+            guard scanIsCurrent(
+                accountGeneration: accountGeneration,
+                scanGeneration: scanGeneration,
+                userId: userId
+            ) else {
+                return
+            }
             var response: Message?
-            for attempt in 0..<Constants.ChatRecovery.maxStreamAttempts {
+            for attempt in 0... {
+                if recoveryRetryDeadlineReached(envelope) {
+                    await removeTerminal(
+                        chatId: chatId,
+                        envelope: envelope,
+                        userId: userId,
+                        sessionId: payload.sessionId,
+                        storage: storage,
+                        accountGeneration: accountGeneration,
+                        scanGeneration: scanGeneration
+                    )
+                    return
+                }
                 do {
+                    await MainActor.run {
+                        ChatRecoveryDraftStore.shared.beginReplayAttempt(
+                            chatId: chatId,
+                            turnId: envelope.turnId,
+                            sessionId: payload.sessionId,
+                            fallbackCheckpoint: persistedCheckpoint
+                        )
+                    }
                     let recovered = try await ChatRecoveryClient.shared.fetch(
                         sessionId: payload.sessionId,
                         token: token
@@ -732,6 +864,7 @@ actor ChatRecoveryCoordinator {
                         stream: recovered.stream,
                         chatId: chatId,
                         turnId: envelope.turnId,
+                        sessionId: payload.sessionId,
                         userId: userId,
                         accountGeneration: accountGeneration,
                         scanGeneration: scanGeneration,
@@ -758,7 +891,10 @@ actor ChatRecoveryCoordinator {
                     ) else {
                         return
                     }
-                    await onProgress()
+                    if finalStatus.persistedBytes > highestPersistedBytes {
+                        highestPersistedBytes = finalStatus.persistedBytes
+                        await onProgress()
+                    }
                     guard scanIsCurrent(
                         accountGeneration: accountGeneration,
                         scanGeneration: scanGeneration,
@@ -774,10 +910,8 @@ actor ChatRecoveryCoordinator {
                                 turnId: turnId
                             )
                         }
-                        if attempt + 1 < Constants.ChatRecovery.maxStreamAttempts {
-                            continue
-                        }
-                        return
+                        try await waitForRecoveryRetry(attempt: attempt)
+                        continue
                     case .failed, .missing:
                         await removeTerminal(
                             chatId: chatId,
@@ -806,10 +940,8 @@ actor ChatRecoveryCoordinator {
                         return
                     }
                     if encryptedByteCount < finalStatus.persistedBytes {
-                        if attempt + 1 < Constants.ChatRecovery.maxStreamAttempts {
-                            continue
-                        }
-                        return
+                        try await waitForRecoveryRetry(attempt: attempt)
+                        continue
                     }
                     response = recoveredResponse
                     break
@@ -827,12 +959,13 @@ actor ChatRecoveryCoordinator {
                     else {
                         return
                     }
-                    await onProgress()
+                    if retryStatus.persistedBytes > highestPersistedBytes {
+                        highestPersistedBytes = retryStatus.persistedBytes
+                        await onProgress()
+                    }
                     switch retryStatus.state {
                     case .processing, .complete:
-                        guard attempt + 1 < Constants.ChatRecovery.maxStreamAttempts else {
-                            return
-                        }
+                        try await waitForRecoveryRetry(attempt: attempt)
                         continue
                     case .failed, .missing:
                         await removeTerminal(
@@ -963,7 +1096,8 @@ actor ChatRecoveryCoordinator {
         _ envelope: PendingRecoveryEnvelope,
         chatId: String,
         userId: String,
-        storage: ChatRecoveryStorage
+        storage: ChatRecoveryStorage,
+        now: Date = Date()
     ) async throws -> (
         payload: ChatRecoveryEnvelopePayload,
         cek: Data,
@@ -975,7 +1109,8 @@ actor ChatRecoveryCoordinator {
                 cek: deviceKey,
                 userId: userId,
                 chatId: chatId,
-                envelope: envelope
+                envelope: envelope,
+                now: now
             )
             return (payload, deviceKey, false)
         }
@@ -986,7 +1121,8 @@ actor ChatRecoveryCoordinator {
                 cek: primary,
                 userId: userId,
                 chatId: chatId,
-                envelope: envelope
+                envelope: envelope,
+                now: now
             )
             return (payload, primary, false)
         }
@@ -1001,17 +1137,25 @@ actor ChatRecoveryCoordinator {
                 cek: cek,
                 userId: userId,
                 chatId: chatId,
-                envelope: envelope
+                envelope: envelope,
+                now: now
             )
             return (payload, cek, true)
         }
         throw ChatRecoveryCryptoError.invalidKey
     }
 
+    private func waitForRecoveryRetry(attempt: Int) async throws {
+        try await Task<Never, Never>.sleep(
+            nanoseconds: chatRecoveryRetryDelayNanoseconds(attempt: attempt)
+        )
+    }
+
     private func reconstructMessage(
         stream: AsyncThrowingStream<ChatStreamResult, Error>,
         chatId: String,
         turnId: String,
+        sessionId: String,
         userId: String,
         accountGeneration: Int,
         scanGeneration: Int,
@@ -1047,23 +1191,24 @@ actor ChatRecoveryCoordinator {
                     isStreaming: true
                 )
                 if recoveryDraftHasVisibleContent(draft) {
-                    if draft != lastProgressDraft {
-                        lastProgressDraft = draft
-                        await onProgress()
-                    }
-                    try await publishRecoveryDraft(
+                    let published = try await publishRecoveryDraft(
                         draft,
                         chatId: chatId,
                         turnId: turnId,
+                        sessionId: sessionId,
                         accountGeneration: accountGeneration,
                         scanGeneration: scanGeneration,
                         userId: userId,
                         storage: storage
                     )
+                    if published && draft != lastProgressDraft {
+                        lastProgressDraft = draft
+                        await onProgress()
+                    }
                 }
             }
         }
-        processor.finishStream()
+        try processor.finishStream()
         try ensureRecoveryIsCurrent(
             chatId: chatId,
             turnId: turnId,
@@ -1080,20 +1225,21 @@ actor ChatRecoveryCoordinator {
             isStreaming: false
         )
         if recoveryDraftHasVisibleContent(message) {
-            if message != lastProgressDraft {
-                await onProgress()
-            }
             var finalDraft = message
             finalDraft.isStreaming = true
-            try await publishRecoveryDraft(
+            let published = try await publishRecoveryDraft(
                 finalDraft,
                 chatId: chatId,
                 turnId: turnId,
+                sessionId: sessionId,
                 accountGeneration: accountGeneration,
                 scanGeneration: scanGeneration,
                 userId: userId,
                 storage: storage
             )
+            if published && message != lastProgressDraft {
+                await onProgress()
+            }
         }
         return message
     }
@@ -1102,11 +1248,12 @@ actor ChatRecoveryCoordinator {
         _ draft: Message,
         chatId: String,
         turnId: String,
+        sessionId: String,
         accountGeneration: Int,
         scanGeneration: Int,
         userId: String,
         storage: ChatRecoveryStorage
-    ) async throws {
+    ) async throws -> Bool {
         try ensureRecoveryIsCurrent(
             chatId: chatId,
             turnId: turnId,
@@ -1115,22 +1262,22 @@ actor ChatRecoveryCoordinator {
             scanGeneration: scanGeneration,
             storage: storage
         )
-        let published = await MainActor.run {
+        let published = await MainActor.run { () -> Bool? in
             guard !StreamingTracker.shared.isStreaming(chatId) else {
                 ChatRecoveryDraftStore.shared.clear(
                     chatId: chatId,
                     turnId: turnId
                 )
-                return false
+                return nil
             }
-            ChatRecoveryDraftStore.shared.replace(
+            return ChatRecoveryDraftStore.shared.replaceDuringReplay(
                 draft,
                 chatId: chatId,
                 turnId: turnId,
+                sessionId: sessionId,
                 generation: accountGeneration,
                 scanGeneration: scanGeneration
             )
-            return true
         }
         try ensureRecoveryIsCurrent(
             chatId: chatId,
@@ -1140,7 +1287,8 @@ actor ChatRecoveryCoordinator {
             scanGeneration: scanGeneration,
             storage: storage
         )
-        guard published else { throw CancellationError() }
+        guard let published else { throw CancellationError() }
+        return published
     }
 
     private func recoveredMessage(

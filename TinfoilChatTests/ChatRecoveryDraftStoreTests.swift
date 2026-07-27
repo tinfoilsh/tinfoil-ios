@@ -82,6 +82,76 @@ struct ChatRecoveryDraftStoreTests {
         #expect(store.drafts.values.first?.content == "Fresh")
     }
 
+    @Test func replayNeverRegressesTheVisibleDraft() {
+        let store = ChatRecoveryDraftStore()
+        store.reset(generation: 1)
+        store.beginScan(generation: 4)
+        var checkpoint = Message(
+            role: .assistant,
+            turnId: "turn-1",
+            content: "Partial",
+            generationTimeSeconds: 1
+        )
+        checkpoint.thinkingDuration = 1
+        checkpoint.timeline = [.string("platform-derived")]
+        checkpoint.searchReasoning = "platform-derived"
+        var replayCheckpoint = checkpoint
+        replayCheckpoint.generationTimeSeconds = 2
+        replayCheckpoint.thinkingDuration = 2
+        replayCheckpoint.segments = []
+        replayCheckpoint.webSearches = []
+        replayCheckpoint.timeline = []
+        replayCheckpoint.annotations = []
+        replayCheckpoint.searchReasoning = nil
+        store.beginReplayAttempt(
+            chatId: "chat-1",
+            turnId: "turn-1",
+            sessionId: "session-1",
+            fallbackCheckpoint: checkpoint
+        )
+
+        #expect(store.replaceDuringReplay(
+            Message(role: .assistant, turnId: "turn-1", content: "Part"),
+            chatId: "chat-1",
+            turnId: "turn-1",
+            sessionId: "session-1",
+            generation: 1,
+            scanGeneration: 4
+        ) == false)
+        #expect(store.replaceDuringReplay(
+            replayCheckpoint,
+            chatId: "chat-1",
+            turnId: "turn-1",
+            sessionId: "session-1",
+            generation: 1,
+            scanGeneration: 4
+        ) == false)
+        #expect(store.replaceDuringReplay(
+            Message(role: .assistant, turnId: "turn-1", content: "Partial response"),
+            chatId: "chat-1",
+            turnId: "turn-1",
+            sessionId: "session-1",
+            generation: 1,
+            scanGeneration: 4
+        ) == true)
+
+        store.beginReplayAttempt(
+            chatId: "chat-1",
+            turnId: "turn-1",
+            sessionId: "session-1",
+            fallbackCheckpoint: checkpoint
+        )
+        #expect(store.replaceDuringReplay(
+            Message(role: .assistant, turnId: "turn-1", content: "Part"),
+            chatId: "chat-1",
+            turnId: "turn-1",
+            sessionId: "session-1",
+            generation: 1,
+            scanGeneration: 4
+        ) == false)
+        #expect(store.drafts.values.first?.content == "Partial response")
+    }
+
     @Test func prunesByChatAndResetClearsEveryDraft() {
         let store = ChatRecoveryDraftStore()
         let drafts = [

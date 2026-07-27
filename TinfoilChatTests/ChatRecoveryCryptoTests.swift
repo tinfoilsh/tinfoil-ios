@@ -162,6 +162,20 @@ struct ChatRecoveryCryptoTests {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let expiry = formatter.date(from: envelope.expiresAt)!
+        let cleanupDate = try ChatRecoveryCrypto.dateImmediatelyBeforeExpiry(
+            envelope
+        )
+        let payload = try ChatRecoveryCrypto.decrypt(
+            cek: Data(repeating: 1, count: SyncEnclaveKeyBundle.cekByteCount),
+            userId: userId,
+            chatId: chatId,
+            envelope: envelope,
+            now: cleanupDate
+        )
+        #expect(cleanupDate < expiry)
+        #expect(payload.sessionId == sessionId)
+        #expect(!recoveryRetryDeadlineReached(envelope, now: cleanupDate))
+        #expect(recoveryRetryDeadlineReached(envelope, now: expiry))
         #expect(try ChatRecoveryCrypto.isExpired(envelope, now: expiry))
         #expect(throws: ChatRecoveryCryptoError.expired) {
             try ChatRecoveryCrypto.decrypt(

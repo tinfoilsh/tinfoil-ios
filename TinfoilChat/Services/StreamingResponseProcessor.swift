@@ -7,6 +7,10 @@
 import Foundation
 import OpenAI
 
+enum StreamingResponseProcessorError: Error {
+    case incompleteResponse
+}
+
 /// Owns all per-chunk parsing state for one streaming response (event
 /// markers, thinking state machine, chunkers, tool calls, web search
 /// bookkeeping) so the stream can be consumed off the main actor. The main
@@ -109,6 +113,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     private var responseContent: String
     private var currentThoughts: String?
     private var generationTimeSeconds: TimeInterval?
+    private var receivedFinishReason = false
 
     private let isWebSearchEnabled: Bool
     private let hapticEnabled: Bool
@@ -175,6 +180,9 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     /// the main actor before `process` runs so segment ordering matches the
     /// order in which markers arrived relative to the surrounding text.
     func parse(_ chunk: ChatStreamResult) -> ParsedChunk {
+        if chunk.choices.contains(where: { $0.finishReason != nil }) {
+            receivedFinishReason = true
+        }
         var content = chunk.choices.first?.delta.content ?? ""
         var events: [TinfoilWebSearchCallEvent] = []
         if !content.isEmpty {
@@ -457,10 +465,13 @@ final class StreamingResponseProcessor: @unchecked Sendable {
         return outcome
     }
 
-    /// Runs once after the stream ends (completed or cancelled, not thrown):
-    /// drains parser tails, closes any open thinking state, and finalizes the
-    /// chunkers so `snapshot()` reflects the completed response.
-    func finishStream() {
+    /// Runs once after a completed stream ends: validates application-level
+    /// completion, drains parser tails, closes any open thinking state, and
+    /// finalizes the chunkers so `snapshot()` reflects the completed response.
+    func finishStream() throws {
+        guard receivedFinishReason else {
+            throw StreamingResponseProcessorError.incompleteResponse
+        }
         // Drain any bytes the tinfoil-event parser is still
         // holding back at the stream boundary. Anything in the
         // tail is either an unterminated marker body (router
