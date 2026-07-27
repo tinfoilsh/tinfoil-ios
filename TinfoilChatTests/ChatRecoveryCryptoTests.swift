@@ -174,6 +174,8 @@ struct ChatRecoveryCryptoTests {
         )
         #expect(cleanupDate < expiry)
         #expect(payload.sessionId == sessionId)
+        #expect(!recoveryRetryDeadlineReached(envelope, now: cleanupDate))
+        #expect(recoveryRetryDeadlineReached(envelope, now: expiry))
         #expect(try ChatRecoveryCrypto.isExpired(envelope, now: expiry))
         #expect(throws: ChatRecoveryCryptoError.expired) {
             try ChatRecoveryCrypto.decrypt(

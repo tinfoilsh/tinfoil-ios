@@ -283,7 +283,7 @@ actor ChatRecoverySync {
             pending[index] = new
         case .complete(let envelope, let response, let title, let titleState):
             let alreadyCompleted = authoritativeRemote.messages.contains {
-                recoveredResponsesMatch($0, response)
+                recoveryResponsePayloadMatches($0, response)
             }
             guard (authoritativeRemote.pendingRecoveries?.contains(envelope) == true
                     || alreadyCompleted),

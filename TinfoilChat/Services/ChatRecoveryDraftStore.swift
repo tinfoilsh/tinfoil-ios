@@ -86,7 +86,7 @@ final class ChatRecoveryDraftStore: ObservableObject {
         }
         if !replay.checkpointReached {
             if let checkpoint = replay.checkpoint,
-               recoveryReplayCheckpointMatches(checkpoint, draft) {
+               recoveryResponsePayloadMatches(checkpoint, draft) {
                 replay.checkpointReached = true
                 replayStates[key] = replay
             }
@@ -96,13 +96,9 @@ final class ChatRecoveryDraftStore: ObservableObject {
         streamingDraft.turnId = turnId
         streamingDraft.isStreaming = true
         let changed = drafts[key] != streamingDraft
-        replace(
-            draft,
-            chatId: chatId,
-            turnId: turnId,
-            generation: generation,
-            scanGeneration: scanGeneration
-        )
+        if changed {
+            drafts[key] = streamingDraft
+        }
         return changed
     }
 

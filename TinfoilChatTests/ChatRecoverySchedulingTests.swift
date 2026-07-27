@@ -126,4 +126,55 @@ struct ChatRecoverySchedulingTests {
                 == Constants.ChatRecovery.retryMaxDelayNanoseconds
         )
     }
+
+    @Test func recoveredPayloadComparisonIgnoresDerivedMetadata() {
+        var persisted = Message(
+            role: .assistant,
+            turnId: "turn-1",
+            content: "Recovered response",
+            generationTimeSeconds: 1
+        )
+        persisted.thinkingDuration = 1
+        persisted.timeline = [.string("platform-derived")]
+        persisted.searchReasoning = "platform-derived"
+        var reconstructed = Message(
+            role: .assistant,
+            turnId: "turn-1",
+            content: "Recovered response",
+            generationTimeSeconds: 2
+        )
+        reconstructed.thinkingDuration = 2
+        reconstructed.segments = []
+        reconstructed.webSearches = []
+        reconstructed.timeline = []
+        reconstructed.annotations = []
+
+        #expect(recoveryResponsePayloadMatches(persisted, reconstructed))
+        reconstructed.content = "Different response"
+        #expect(!recoveryResponsePayloadMatches(persisted, reconstructed))
+    }
+
+    @Test func registrationCleanupRequiresADefinitePreCommitFailure() {
+        #expect(registrationFailureDefinitelyDidNotPersist(
+            ChatRecoverySyncError.chatMissing
+        ))
+        #expect(registrationFailureDefinitelyDidNotPersist(
+            ChatRecoverySyncError.pendingLimitReached
+        ))
+        #expect(registrationFailureDefinitelyDidNotPersist(
+            ChatRecoverySyncError.conflict
+        ))
+        #expect(registrationFailureDefinitelyDidNotPersist(
+            SyncEnclaveError(message: "conflict", status: 409, code: nil)
+        ))
+        #expect(!registrationFailureDefinitelyDidNotPersist(
+            CancellationError()
+        ))
+        #expect(!registrationFailureDefinitelyDidNotPersist(
+            NSError(
+                domain: NSURLErrorDomain,
+                code: NSURLErrorNetworkConnectionLost
+            )
+        ))
+    }
 }

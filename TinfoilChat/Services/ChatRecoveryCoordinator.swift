@@ -121,27 +121,7 @@ func mergingRecoveredResponse(
     return messages
 }
 
-func recoveredResponsesMatch(_ lhs: Message, _ rhs: Message) -> Bool {
-    lhs.role == .assistant
-        && lhs.role == rhs.role
-        && lhs.turnId == rhs.turnId
-        && lhs.content == rhs.content
-        && lhs.thoughts == rhs.thoughts
-        && lhs.isThinking == rhs.isThinking
-        && lhs.thinkingDuration == rhs.thinkingDuration
-        && lhs.generationTimeSeconds == rhs.generationTimeSeconds
-        && lhs.segments == rhs.segments
-        && lhs.webSearches == rhs.webSearches
-        && lhs.webSearchState == rhs.webSearchState
-        && lhs.urlFetches == rhs.urlFetches
-        && lhs.toolCalls == rhs.toolCalls
-        && lhs.timeline == rhs.timeline
-        && lhs.annotations == rhs.annotations
-        && lhs.searchReasoning == rhs.searchReasoning
-        && lhs.webSearchBeforeThinking == rhs.webSearchBeforeThinking
-}
-
-func recoveryReplayCheckpointMatches(_ lhs: Message, _ rhs: Message) -> Bool {
+func recoveryResponsePayloadMatches(_ lhs: Message, _ rhs: Message) -> Bool {
     lhs.role == .assistant
         && lhs.role == rhs.role
         && lhs.turnId == rhs.turnId
@@ -165,6 +145,26 @@ func chatRecoveryRetryDelayNanoseconds(attempt: Int) -> UInt64 {
         delay = next
     }
     return delay
+}
+
+func recoveryRetryDeadlineReached(
+    _ envelope: PendingRecoveryEnvelope,
+    now: Date = Date()
+) -> Bool {
+    (try? ChatRecoveryCrypto.isExpired(envelope, now: now)) ?? true
+}
+
+func registrationFailureDefinitelyDidNotPersist(_ error: Error) -> Bool {
+    if let syncError = error as? ChatRecoverySyncError {
+        switch syncError {
+        case .chatMissing, .envelopeMissing, .pendingLimitReached, .conflict:
+            return true
+        }
+    }
+    if let enclaveError = error as? SyncEnclaveError {
+        return EnclaveErrorRecovery.isVersionConflict(enclaveError)
+    }
+    return false
 }
 
 actor ChatRecoveryCoordinator {
@@ -260,6 +260,15 @@ actor ChatRecoveryCoordinator {
                 sessionId: attempt.sessionId,
                 recoveryToken: token
             )
+        } catch {
+            Task {
+                try? await ChatRecoveryClient.shared.delete(
+                    sessionId: attempt.sessionId
+                )
+            }
+            throw error
+        }
+        do {
             try await ChatRecoverySync.shared.mutate(
                 chatId: attempt.chatId,
                 userId: attempt.userId,
@@ -267,10 +276,12 @@ actor ChatRecoveryCoordinator {
                 mutation: .add(envelope)
             )
         } catch {
-            Task {
-                try? await ChatRecoveryClient.shared.delete(
-                    sessionId: attempt.sessionId
-                )
+            if registrationFailureDefinitelyDidNotPersist(error) {
+                Task {
+                    try? await ChatRecoveryClient.shared.delete(
+                        sessionId: attempt.sessionId
+                    )
+                }
             }
             throw error
         }
@@ -794,6 +805,18 @@ actor ChatRecoveryCoordinator {
             }
             var response: Message?
             for attempt in 0... {
+                if recoveryRetryDeadlineReached(envelope) {
+                    await removeTerminal(
+                        chatId: chatId,
+                        envelope: envelope,
+                        userId: userId,
+                        sessionId: payload.sessionId,
+                        storage: storage,
+                        accountGeneration: accountGeneration,
+                        scanGeneration: scanGeneration
+                    )
+                    return
+                }
                 do {
                     await MainActor.run {
                         ChatRecoveryDraftStore.shared.beginReplayAttempt(
