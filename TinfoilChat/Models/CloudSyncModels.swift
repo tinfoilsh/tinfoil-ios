@@ -436,9 +436,21 @@ struct ChatListResponse: Codable {
     }
 }
 
-/// Response from deleted-since API
-struct DeletedChatsResponse: Codable {
-    let deletedIds: [String]
+/// Row-update and delete-tombstone event streams collected from one
+/// list-status walk. The deletion reconciliation pass needs both from
+/// the same walk so it can arbitrate a tombstone against a later
+/// re-create of the same row.
+struct ChatEventsSinceResponse {
+    struct Update {
+        let id: String
+        let updatedAt: String
+    }
+    struct Delete {
+        let id: String
+        let deletedAt: String
+    }
+    let updates: [Update]
+    let deletes: [Delete]
 }
 
 /// Remote chat metadata from API
