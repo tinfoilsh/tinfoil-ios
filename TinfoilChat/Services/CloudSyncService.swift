@@ -2452,14 +2452,21 @@ class CloudSyncService: ObservableObject {
                 latestEventAt = max(latestEventAt ?? at, at)
                 latestUpdateAt[update.id] = max(latestUpdateAt[update.id] ?? .distantPast, at)
             }
+            var allResolved = true
             var latestDeleteAt: [String: Date] = [:]
             for tombstone in events.deletes {
-                guard let at = parseISODate(tombstone.deletedAt) else { continue }
+                guard let at = parseISODate(tombstone.deletedAt) else {
+                    // A tombstone whose timestamp cannot be parsed cannot
+                    // be arbitrated or applied. Hold the watermark behind
+                    // it so the next pass replays it, instead of advancing
+                    // past the deletion and skipping it forever.
+                    allResolved = false
+                    continue
+                }
                 latestEventAt = max(latestEventAt ?? at, at)
                 latestDeleteAt[tombstone.id] = max(latestDeleteAt[tombstone.id] ?? .distantPast, at)
             }
 
-            var allResolved = true
             for (id, deletedAt) in latestDeleteAt {
                 guard generation == accountGeneration else {
                     outcome.failed = true
@@ -2482,10 +2489,22 @@ class CloudSyncService: ObservableObject {
                 // phantom deletion and trigger a needless UI reload. A
                 // local-only chat lives outside cloud storage, so loadChat
                 // returns nil and it is preserved.
-                let existing = try? await EncryptedFileStorage.cloud.loadChat(
-                    chatId: id,
-                    userId: userId
-                )
+                let existing: Chat?
+                do {
+                    existing = try await EncryptedFileStorage.cloud.loadChat(
+                        chatId: id,
+                        userId: userId
+                    )
+                } catch {
+                    // A transient read/decryption failure is not proof of
+                    // absence: treating it as absent would advance the
+                    // watermark past a tombstone that was never applied.
+                    // Hold the watermark so the next pass re-checks it.
+                    // Not `failed`: an unreadable row cannot be uploaded,
+                    // so it carries no resurrection risk.
+                    allResolved = false
+                    continue
+                }
                 guard generation == accountGeneration else {
                     outcome.failed = true
                     return outcome
