@@ -1185,6 +1185,35 @@ class CloudSyncService: ObservableObject {
         return result
     }
 
+    private static let uploadsSkippedUnreconciledDeletionsError =
+        "Skipped uploading local changes: remote deletions could not be reconciled"
+
+    /// Upload leg shared by the full and delta sync paths. Uploading
+    /// dirty chats before deletions reconcile can resurrect chats
+    /// deleted on another device, so a failed pass keeps local changes
+    /// queued until a pass succeeds.
+    private func backupUnsyncedChatsAfterDeletions(
+        _ deletions: RemoteDeletionsOutcome,
+        generation: Int
+    ) async -> SyncResult {
+        if deletions.failed {
+            return SyncResult(
+                uploaded: 0,
+                downloaded: 0,
+                deleted: deletions.removed,
+                errors: [Self.uploadsSkippedUnreconciledDeletionsError]
+            )
+        }
+        let backupResult = await backupUnsyncedChats()
+        guard generation == accountGeneration else { return SyncResult() }
+        return SyncResult(
+            uploaded: backupResult.uploaded,
+            downloaded: 0,
+            deleted: deletions.removed,
+            errors: backupResult.errors
+        )
+    }
+
     private func doSyncAllChats() async -> SyncResult {
         let generation = accountGeneration
         guard let userId = await getCurrentUserId() else { return SyncResult() }
@@ -1197,27 +1226,11 @@ class CloudSyncService: ObservableObject {
         )
         guard generation == accountGeneration else { return SyncResult() }
 
-        if deletions.failed {
-            // Uploading dirty chats before deletions reconcile can
-            // resurrect chats deleted on another device, so keep local
-            // changes queued until a pass succeeds.
-            result = SyncResult(
-                uploaded: 0,
-                downloaded: 0,
-                deleted: deletions.removed,
-                errors: ["Skipped uploading local changes: remote deletions could not be reconciled"]
-            )
-        } else {
-            // First, backup any unsynced local changes
-            let backupResult = await backupUnsyncedChats()
-            guard generation == accountGeneration else { return SyncResult() }
-            result = SyncResult(
-                uploaded: backupResult.uploaded,
-                downloaded: 0,
-                deleted: deletions.removed,
-                errors: backupResult.errors
-            )
-        }
+        result = await backupUnsyncedChatsAfterDeletions(
+            deletions,
+            generation: generation
+        )
+        guard generation == accountGeneration else { return SyncResult() }
 
         // Then, get list of remote chats with content
         do {
@@ -1496,27 +1509,11 @@ class CloudSyncService: ObservableObject {
         )
         guard generation == accountGeneration else { return SyncResult() }
 
-        if deletions.failed {
-            // Uploading dirty chats before deletions reconcile can
-            // resurrect chats deleted on another device, so keep local
-            // changes queued until a pass succeeds.
-            result = SyncResult(
-                uploaded: 0,
-                downloaded: 0,
-                deleted: deletions.removed,
-                errors: ["Skipped uploading local changes: remote deletions could not be reconciled"]
-            )
-        } else {
-            // Backup any unsynced local changes first (matches doSyncAllChats behavior)
-            let backupResult = await backupUnsyncedChats()
-            guard generation == accountGeneration else { return SyncResult() }
-            result = SyncResult(
-                uploaded: backupResult.uploaded,
-                downloaded: 0,
-                deleted: deletions.removed,
-                errors: backupResult.errors
-            )
-        }
+        result = await backupUnsyncedChatsAfterDeletions(
+            deletions,
+            generation: generation
+        )
+        guard generation == accountGeneration else { return SyncResult() }
 
         do {
             _ = try? await encryptionService.initialize()
