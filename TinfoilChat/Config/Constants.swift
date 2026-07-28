@@ -423,6 +423,12 @@ enum Constants {
         enum Sync {
             static let chatStatus = "tinfoil-sync-chat-status"
             static let allChatsStatus = "tinfoil-sync-all-chats-status"
+            /// Server timestamp up to which chat delete tombstones have been
+            /// fetched AND applied locally. Kept separate from `chatStatus`:
+            /// the status cache is a disposable freshness snapshot, while
+            /// this watermark encodes durable reconciliation progress and
+            /// must never advance past an unapplied tombstone.
+            static let chatDeletesWatermark = "tinfoil-sync-chat-deletes-watermark"
             static let projectChatStatusPrefix = "tinfoil-sync-project-chat-status-"
 
             static func projectChatStatus(projectId: String) -> String {

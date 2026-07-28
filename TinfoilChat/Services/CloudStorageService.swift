@@ -112,7 +112,11 @@ class CloudStorageService: ObservableObject {
     /// the caller can persist them against the freshest local copy
     /// without mutating the chat object passed in.
     @discardableResult
-    func uploadChat(_ chat: StoredChat, idempotencyKey: String) async throws -> UploadChatResult {
+    func uploadChat(
+        _ chat: StoredChat,
+        idempotencyKey: String,
+        restoreDeleted: Bool = false
+    ) async throws -> UploadChatResult {
         var chatToUpload = chat
         let rewrites = try await encryptAndUploadAttachments(&chatToUpload)
         stripBase64FromMessages(&chatToUpload.messages)
@@ -132,10 +136,21 @@ class CloudStorageService: ObservableObject {
         } else {
             metadata["projectId"] = AnyCodable(NSNull())
         }
+        if restoreDeleted {
+            metadata["restoreDeleted"] = AnyCodable(true)
+        }
 
-        let ifMatch: String? = chatToUpload.syncVersion > 0
-            ? String(chatToUpload.syncVersion)
-            : "0"
+        // A restore re-creates a row whose server copy is gone, so there
+        // is no etag to CAS against; `if_match=null` is the enclave's
+        // create-new sentinel.
+        let ifMatch: String?
+        if restoreDeleted {
+            ifMatch = nil
+        } else {
+            ifMatch = chatToUpload.syncVersion > 0
+                ? String(chatToUpload.syncVersion)
+                : "0"
+        }
         let response = try await SyncEnclaveAPI.push(
             EnclavePushRequest(
                 scope: .chat,
@@ -412,19 +427,25 @@ class CloudStorageService: ObservableObject {
         return ChatSyncStatus(count: count, lastUpdated: lastUpdated)
     }
 
-    func getDeletedChatsSince(since: String) async throws -> DeletedChatsResponse {
-        var deletedIds: [String] = []
+    /// Walk the list-status pages once and return both event streams
+    /// since `since`: row updates and delete tombstones.
+    func listChatEventsSince(since: String) async throws -> ChatEventsSinceResponse {
+        var updates: [ChatEventsSinceResponse.Update] = []
+        var deletes: [ChatEventsSinceResponse.Delete] = []
         var cursor: String? = since
         repeat {
             let status = try await SyncEnclaveAPI.listStatus(
                 EnclaveListStatusRequest(scope: .chat, cursor: cursor, limit: Constants.SyncEnclave.listStatusPageLimit, projectId: nil)
             )
+            for entry in status.updates {
+                updates.append(.init(id: entry.id, updatedAt: entry.updatedAt))
+            }
             for entry in status.deletes {
-                deletedIds.append(entry.id)
+                deletes.append(.init(id: entry.id, deletedAt: entry.deletedAt))
             }
             cursor = status.nextCursor
         } while hasNextCursor(cursor)
-        return DeletedChatsResponse(deletedIds: deletedIds)
+        return ChatEventsSinceResponse(updates: updates, deletes: deletes)
     }
 
     // MARK: - Delete

@@ -683,6 +683,9 @@ class CloudSyncService: ObservableObject {
     ///   snapshot. Rebase the local row onto the server's current
     ///   version (so the next upload's CAS base matches) and re-upload,
     ///   letting local win instead of looping on STALE_BLOB forever.
+    /// - Remote row is gone entirely (deleted on another device): a
+    ///   locally modified copy wins by re-creating the row through the
+    ///   restore path, unless its tombstone is already being applied.
     ///
     /// If the pull itself fails the chat stays locallyModified and the
     /// next sync cycle retries.
@@ -692,18 +695,43 @@ class CloudSyncService: ObservableObject {
         userId: String
     ) async {
         do {
-            guard var downloadedChat = try await cloudStorage.downloadChat(chatId) else {
-                return
-            }
+            let remoteChat = try await cloudStorage.downloadChat(chatId)
             guard generation == accountGeneration else { return }
-            if downloadedChat.modelType == nil {
-                downloadedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
-            }
 
             let localChat = try? await EncryptedFileStorage.cloud.loadChat(
                 chatId: chatId,
                 userId: userId
             )
+            guard generation == accountGeneration else { return }
+
+            // The remote row vanished (concurrent delete). A clean local
+            // copy is removed by the deletion reconciliation pass. A
+            // locally modified copy carries writes the server never saw;
+            // there is no etag left to CAS against, so a plain re-upload
+            // would loop on STALE_BLOB forever. The newer local content
+            // wins by re-creating the row through the explicit restore
+            // path — unless the reconciliation pass has already recorded
+            // the tombstone, in which case the deletion is being applied
+            // right now and wins.
+            guard var downloadedChat = remoteChat else {
+                guard let localChat,
+                      localChat.locallyModified,
+                      !localChat.isLocalOnly,
+                      !deletedChatsTracker.isDeleted(chatId) else {
+                    return
+                }
+                try await uploadAndMarkSynced(
+                    localChat,
+                    idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                    generation: generation,
+                    userId: userId,
+                    restoreDeleted: true
+                )
+                return
+            }
+            if downloadedChat.modelType == nil {
+                downloadedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+            }
 
             // A chat's edit clock is trusted only when it was maintained
             // at the row's current synced version; otherwise a
@@ -1147,26 +1175,33 @@ class CloudSyncService: ObservableObject {
         var result = SyncResult()
 
         // Delete local chats that were deleted on another device
-        var deletedCount = 0
-        if let cachedStatus = getCachedSyncStatus(),
-           let lastUpdated = cachedStatus.lastUpdated {
-            deletedCount = await deleteRemotelyDeletedChats(
-                since: lastUpdated,
-                generation: generation,
-                userId: userId
-            )
-        }
+        let deletions = await reconcileRemoteDeletions(
+            generation: generation,
+            userId: userId
+        )
         guard generation == accountGeneration else { return SyncResult() }
 
-        // First, backup any unsynced local changes
-        let backupResult = await backupUnsyncedChats()
-        guard generation == accountGeneration else { return SyncResult() }
-        result = SyncResult(
-            uploaded: backupResult.uploaded,
-            downloaded: 0,
-            deleted: deletedCount,
-            errors: backupResult.errors
-        )
+        if deletions.failed {
+            // Uploading dirty chats before deletions reconcile can
+            // resurrect chats deleted on another device, so keep local
+            // changes queued until a pass succeeds.
+            result = SyncResult(
+                uploaded: 0,
+                downloaded: 0,
+                deleted: deletions.removed,
+                errors: ["Skipped uploading local changes: remote deletions could not be reconciled"]
+            )
+        } else {
+            // First, backup any unsynced local changes
+            let backupResult = await backupUnsyncedChats()
+            guard generation == accountGeneration else { return SyncResult() }
+            result = SyncResult(
+                uploaded: backupResult.uploaded,
+                downloaded: 0,
+                deleted: deletions.removed,
+                errors: backupResult.errors
+            )
+        }
 
         // Then, get list of remote chats with content
         do {
@@ -1439,22 +1474,33 @@ class CloudSyncService: ObservableObject {
         var result = SyncResult()
 
         // Delete local chats that were deleted on another device
-        let deletedCount = await deleteRemotelyDeletedChats(
-            since: since,
+        let deletions = await reconcileRemoteDeletions(
             generation: generation,
             userId: userId
         )
         guard generation == accountGeneration else { return SyncResult() }
 
-        // Backup any unsynced local changes first (matches doSyncAllChats behavior)
-        let backupResult = await backupUnsyncedChats()
-        guard generation == accountGeneration else { return SyncResult() }
-        result = SyncResult(
-            uploaded: backupResult.uploaded,
-            downloaded: 0,
-            deleted: deletedCount,
-            errors: backupResult.errors
-        )
+        if deletions.failed {
+            // Uploading dirty chats before deletions reconcile can
+            // resurrect chats deleted on another device, so keep local
+            // changes queued until a pass succeeds.
+            result = SyncResult(
+                uploaded: 0,
+                downloaded: 0,
+                deleted: deletions.removed,
+                errors: ["Skipped uploading local changes: remote deletions could not be reconciled"]
+            )
+        } else {
+            // Backup any unsynced local changes first (matches doSyncAllChats behavior)
+            let backupResult = await backupUnsyncedChats()
+            guard generation == accountGeneration else { return SyncResult() }
+            result = SyncResult(
+                uploaded: backupResult.uploaded,
+                downloaded: 0,
+                deleted: deletions.removed,
+                errors: backupResult.errors
+            )
+        }
 
         do {
             _ = try? await encryptionService.initialize()
@@ -1612,18 +1658,15 @@ class CloudSyncService: ObservableObject {
             // was missed locally, after which the count gate never reopens and
             // the orphan lingers until a full reload. Re-run the tombstone
             // reconciliation here so a missed deletion self-heals on the next
-            // tick. The pass is idempotent and only reports chats actually
-            // removed locally, so it triggers a UI reload only when needed.
-            if let cachedStatus = getCachedSyncStatus(),
-               let lastUpdated = cachedStatus.lastUpdated {
-                let reconciled = await deleteRemotelyDeletedChats(
-                    since: lastUpdated,
-                    generation: generation,
-                    userId: userId
-                )
-                if reconciled > 0 {
-                    return SyncResult(deleted: reconciled)
-                }
+            // tick. The pass resumes from its own durable watermark, is
+            // idempotent, and only reports chats actually removed locally,
+            // so it triggers a UI reload only when needed.
+            let deletions = await reconcileRemoteDeletions(
+                generation: generation,
+                userId: userId
+            )
+            if deletions.removed > 0 {
+                return SyncResult(deleted: deletions.removed)
             }
             return SyncResult()
         }
@@ -2011,6 +2054,10 @@ class CloudSyncService: ObservableObject {
             where key.hasPrefix(Constants.StorageKeys.Sync.projectChatStatusPrefix) {
             UserDefaults.standard.removeObject(forKey: key)
         }
+        // The deletes watermark is scoped to the account's tombstone
+        // history, so the next account (or re-login) must replay from
+        // epoch rather than resume at the previous account's position.
+        ChatDeletesWatermark.clear()
         // Drop any in-flight key registration so the next signed-in user
         // never awaits a task started under the previous user's key.
         emptyRemoteRegistration?.cancel()
@@ -2303,12 +2350,17 @@ class CloudSyncService: ObservableObject {
         _ chat: Chat,
         idempotencyKey: String,
         generation: Int,
-        userId: String
+        userId: String,
+        restoreDeleted: Bool = false
     ) async throws {
         guard !streamingTracker.isStreaming(chat.id) else { return }
 
         let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion)
-        let result = try await cloudStorage.uploadChat(storedChat, idempotencyKey: idempotencyKey)
+        let result = try await cloudStorage.uploadChat(
+            storedChat,
+            idempotencyKey: idempotencyKey,
+            restoreDeleted: restoreDeleted
+        )
         guard generation == accountGeneration else { return }
         let newVersion = result.syncVersion ?? chat.syncVersion + 1
         let fullySynced = try await EncryptedFileStorage.cloud.finalizeUploadIfFresh(
@@ -2357,23 +2409,73 @@ class CloudSyncService: ObservableObject {
         )
     }
 
-    /// Delete local chats that were deleted on another device since `since` timestamp.
-    /// Returns the number of chats deleted locally.
-    @discardableResult
-    private func deleteRemotelyDeletedChats(
-        since: String,
+    /// Outcome of one remote-deletion reconciliation pass.
+    struct RemoteDeletionsOutcome {
+        /// Chats removed locally by this pass.
+        var removed: Int = 0
+        /// Every tombstone in the fetched window was resolved: applied
+        /// locally, already absent, or superseded by a newer remote
+        /// write. Only a reconciled pass advances the durable watermark.
+        var reconciled: Bool = false
+        /// The tombstone fetch errored. Local state cannot yet be
+        /// trusted against remote deletions, so callers must not upload
+        /// dirty chats (a re-upload would resurrect a chat deleted
+        /// elsewhere).
+        var failed: Bool = false
+    }
+
+    /// Delete local chats whose remote rows carry deletion tombstones,
+    /// resuming from the durable deletes watermark. The watermark only
+    /// advances after a fully reconciled pass so a failed or interrupted
+    /// pass replays the same window next time.
+    private func reconcileRemoteDeletions(
         generation: Int,
         userId: String
-    ) async -> Int {
+    ) async -> RemoteDeletionsOutcome {
+        var outcome = RemoteDeletionsOutcome()
         do {
-            let deleted = try await cloudStorage.getDeletedChatsSince(since: since)
-            guard generation == accountGeneration,
-                  !deleted.deletedIds.isEmpty else {
-                return 0
+            let since = ChatDeletesWatermark.load()
+            let events = try await cloudStorage.listChatEventsSince(since: since)
+            guard generation == accountGeneration else {
+                outcome.failed = true
+                return outcome
             }
-            var removedCount = 0
-            for id in deleted.deletedIds {
-                guard generation == accountGeneration else { break }
+
+            // Newest server-side write per chat in this window. A
+            // tombstone is only authoritative when no later write exists:
+            // a row re-created after its tombstone (restore, or an upload
+            // that raced the delete) must survive.
+            var latestUpdateAt: [String: Date] = [:]
+            var latestEventAt: Date?
+            for update in events.updates {
+                guard let at = parseISODate(update.updatedAt) else { continue }
+                latestEventAt = max(latestEventAt ?? at, at)
+                latestUpdateAt[update.id] = max(latestUpdateAt[update.id] ?? .distantPast, at)
+            }
+            var latestDeleteAt: [String: Date] = [:]
+            for tombstone in events.deletes {
+                guard let at = parseISODate(tombstone.deletedAt) else { continue }
+                latestEventAt = max(latestEventAt ?? at, at)
+                latestDeleteAt[tombstone.id] = max(latestDeleteAt[tombstone.id] ?? .distantPast, at)
+            }
+
+            var allResolved = true
+            for (id, deletedAt) in latestDeleteAt {
+                guard generation == accountGeneration else {
+                    outcome.failed = true
+                    return outcome
+                }
+                if let updatedAt = latestUpdateAt[id], updatedAt > deletedAt {
+                    // The row was re-created after the tombstone; the live
+                    // row wins. Unblock ingestion in case an earlier pass
+                    // recorded the tombstone. On a same-timestamp tie
+                    // deletion wins instead: a live row wrongly deleted
+                    // locally is re-downloaded once the tracker entry
+                    // expires with the session, while a dead row wrongly
+                    // kept local would never be cleaned up.
+                    deletedChatsTracker.removeFromDeleted(id)
+                    continue
+                }
                 // Skip chats already absent locally (a prior reconciliation
                 // pass handled them, or they were never stored here). This
                 // keeps repeated passes idempotent so they never report a
@@ -2384,6 +2486,10 @@ class CloudSyncService: ObservableObject {
                     chatId: id,
                     userId: userId
                 )
+                guard generation == accountGeneration else {
+                    outcome.failed = true
+                    return outcome
+                }
                 guard let expectedUpdatedAt = existing?.updatedAt else { continue }
                 let removed = (try? await EncryptedFileStorage.cloud.deleteChatIfEvictable(
                     chatId: id,
@@ -2391,16 +2497,34 @@ class CloudSyncService: ObservableObject {
                     shouldEvict: { $0.updatedAt == expectedUpdatedAt },
                     shouldEvictOnLoadError: { _ in false }
                 )) ?? false
-                guard generation == accountGeneration else { break }
+                guard generation == accountGeneration else {
+                    outcome.failed = true
+                    return outcome
+                }
                 if removed {
                     deletedChatsTracker.markAsDeleted(id)
-                    removedCount += 1
+                    outcome.removed += 1
+                } else {
+                    // The row changed under us (an in-flight local edit) or
+                    // could not be verified. Leave it for the conflict path
+                    // to arbitrate and hold the watermark behind this
+                    // tombstone so the next pass re-checks it. Not `failed`:
+                    // a row that cannot be loaded cannot be uploaded either,
+                    // so it carries no resurrection risk.
+                    allResolved = false
                 }
             }
-            return removedCount
+
+            outcome.reconciled = allResolved
+            if allResolved, let latestEventAt, generation == accountGeneration {
+                ChatDeletesWatermark.advance(latestEventAt: latestEventAt)
+            }
+            return outcome
         } catch {
-            // Non-fatal: continue even if deletion check fails
-            return 0
+            // Without the tombstone window we cannot know which local
+            // chats are stale; report failed so upload legs hold off.
+            outcome.failed = true
+            return outcome
         }
     }
 
