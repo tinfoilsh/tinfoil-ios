@@ -55,7 +55,6 @@ enum ChatDeletesWatermark {
     /// value.
     static func advance(latestEventAt: Date, defaults: UserDefaults = .standard) {
         let candidate = latestEventAt.addingTimeInterval(-overlapSeconds)
-        guard candidate.timeIntervalSince1970 > 0 else { return }
         if let current = formatter.date(from: load(defaults: defaults)),
            candidate <= current {
             return
