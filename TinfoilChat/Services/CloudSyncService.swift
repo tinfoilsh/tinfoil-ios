@@ -720,6 +720,22 @@ class CloudSyncService: ObservableObject {
                       !deletedChatsTracker.isDeleted(chatId) else {
                     return
                 }
+                // The row may have been tombstoned after the last pass
+                // fetched its deletion window, in which case the tracker
+                // doesn't know about it yet. Reconcile deletions now so a
+                // fresh tombstone is applied and recorded rather than
+                // overwritten by the restore below; a failed pass skips
+                // the restore and the next sync retries the upload (and
+                // this arbitration) from scratch.
+                let deletions = await reconcileRemoteDeletions(
+                    generation: generation,
+                    userId: userId
+                )
+                guard generation == accountGeneration else { return }
+                guard !deletions.failed,
+                      !deletedChatsTracker.isDeleted(chatId) else {
+                    return
+                }
                 try await uploadAndMarkSynced(
                     localChat,
                     idempotencyKey: newSyncEnclaveIdempotencyKey(),
@@ -2459,7 +2475,11 @@ class CloudSyncService: ObservableObject {
                     // A tombstone whose timestamp cannot be parsed cannot
                     // be arbitrated or applied. Hold the watermark behind
                     // it so the next pass replays it, instead of advancing
-                    // past the deletion and skipping it forever.
+                    // past the deletion and skipping it forever. Record it
+                    // in the tracker too, so ingestion and the gone-row
+                    // restore path won't resurrect a dirty local copy
+                    // while arbitration is impossible.
+                    deletedChatsTracker.markAsDeleted(tombstone.id)
                     allResolved = false
                     continue
                 }
