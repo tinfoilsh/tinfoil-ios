@@ -168,6 +168,9 @@ private actor UploadCoalescer {
                 if !prepared {
                     preparedAttempt = try await prepareUpload(chatId, idempotencyKey)
                     prepared = true
+                    guard workerGeneration == generation else {
+                        return CancellationError()
+                    }
                 }
                 if let uploadAttempt = preparedAttempt {
                     try await uploadAttempt()
