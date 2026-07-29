@@ -37,8 +37,23 @@ private func parseISODate(_ dateString: String) -> Date? {
     return nil
 }
 
+/// One frozen upload attempt. The prepare function captures the chat
+/// snapshot and returns this closure; every retry replays it, so the
+/// bytes pushed to the enclave are identical across attempts and the
+/// enclave can de-duplicate them into a single committed effect.
+private typealias UploadAttempt = @MainActor @Sendable () async throws -> Void
+
 /// Coalesces rapid upload requests per chat into single uploads with exponential backoff retry.
 /// Uses a dirty-flag + worker-loop pattern to batch rapid successive writes.
+///
+/// The coalescer owns the idempotency key: it mints one per logical
+/// write and calls prepare once to freeze that write's payload; `nil`
+/// means there is nothing to upload (deleted/ineligible/streaming
+/// chat). Retries re-run the returned attempt, never prepare — the
+/// enclave's operation hash covers the plaintext, so a retry that
+/// re-read a chat edited between attempts would replay different
+/// bytes under the same key and fail with 409 IDEMPOTENCY_CONFLICT
+/// instead of deduping.
 private actor UploadCoalescer {
     private struct ChatUploadState {
         var dirty: Bool = false
@@ -50,10 +65,10 @@ private actor UploadCoalescer {
 
     private var states: [String: ChatUploadState] = [:]
     private var generation = 0
-    private let uploadFn: @Sendable (String, String) async throws -> Void
+    private let prepareUpload: @Sendable (String, String) async throws -> UploadAttempt?
 
-    init(uploadFn: @escaping @Sendable (String, String) async throws -> Void) {
-        self.uploadFn = uploadFn
+    init(prepareUpload: @escaping @Sendable (String, String) async throws -> UploadAttempt?) {
+        self.prepareUpload = prepareUpload
     }
 
     func enqueue(_ chatId: String) {
@@ -140,10 +155,23 @@ private actor UploadCoalescer {
         generation workerGeneration: Int
     ) async -> Error? {
         var lastError: Error?
+        // Frozen on the first successful prepare so every retry replays
+        // the exact payload the enclave may have already committed. Only
+        // a failed prepare re-runs; a failed attempt never re-reads the
+        // chat. Edits that land mid-write set `dirty` and go out as the
+        // next logical write under a fresh key.
+        var preparedAttempt: UploadAttempt?
+        var prepared = false
 
         for attempt in 0...Constants.Sync.uploadMaxRetries {
             do {
-                try await uploadFn(chatId, idempotencyKey)
+                if !prepared {
+                    preparedAttempt = try await prepareUpload(chatId, idempotencyKey)
+                    prepared = true
+                }
+                if let uploadAttempt = preparedAttempt {
+                    try await uploadAttempt()
+                }
                 guard workerGeneration == generation else {
                     return CancellationError()
                 }
@@ -529,17 +557,26 @@ class CloudSyncService: ObservableObject {
         }
     }
 
-    private func doBackupChat(_ chatId: String, idempotencyKey: String) async throws {
+    /// Prepare one logical chat upload for the coalescer. Runs the
+    /// eligibility checks, snapshots the chat, and returns a frozen
+    /// attempt closure; the coalescer replays that closure on every
+    /// retry so the enclave sees byte-identical plaintext under the
+    /// same idempotency key. Re-reading the chat per retry instead
+    /// would replay different bytes whenever the chat was edited
+    /// between attempts, turning a committed-but-lost write into a
+    /// 409 IDEMPOTENCY_CONFLICT. Returns nil when there is nothing
+    /// to upload.
+    private func doBackupChat(_ chatId: String, idempotencyKey: String) async throws -> UploadAttempt? {
         let generation = accountGeneration
-        guard let userId = await getCurrentUserId() else { return }
-        guard await canWriteToCloud() else { return }
-        guard generation == accountGeneration else { return }
+        guard let userId = await getCurrentUserId() else { return nil }
+        guard await canWriteToCloud() else { return nil }
+        guard generation == accountGeneration else { return nil }
 
         // Check if chat is currently streaming
         if streamingTracker.isStreaming(chatId) {
             // Check if we already have a callback registered for this chat
             if streamingCallbacks.contains(chatId) {
-                return
+                return nil
             }
             
             
@@ -559,7 +596,7 @@ class CloudSyncService: ObservableObject {
                 }
             }
             
-            return
+            return nil
         }
         
         // Load chat from storage
@@ -567,38 +604,41 @@ class CloudSyncService: ObservableObject {
             chatId: chatId,
             userId: userId
         ) else {
-            return // Chat might have been deleted
+            return nil // Chat might have been deleted
         }
-        guard generation == accountGeneration else { return }
+        guard generation == accountGeneration else { return nil }
         
         
         // Don't sync blank, empty, decryption-failure, or local-only chats.
         // Local-only chats are the user's explicit choice to keep a chat off
         // the cloud, so they must never be uploaded.
         if chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed || chat.isLocalOnly {
-            return
+            return nil
         }
 
         // Double-check streaming status right before upload
         if streamingTracker.isStreaming(chatId) {
-            return
+            return nil
         }
         
-        do {
-            try await uploadAndMarkSynced(
-                chat,
-                idempotencyKey: idempotencyKey,
-                generation: generation,
-                userId: userId
-            )
-        } catch {
-            guard generation == accountGeneration else { return }
-            try await handleUploadFailure(
-                chatId: chatId,
-                error: error,
-                generation: generation,
-                userId: userId
-            )
+        return { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.uploadAndMarkSynced(
+                    chat,
+                    idempotencyKey: idempotencyKey,
+                    generation: generation,
+                    userId: userId
+                )
+            } catch {
+                guard generation == self.accountGeneration else { return }
+                try await self.handleUploadFailure(
+                    chatId: chatId,
+                    error: error,
+                    generation: generation,
+                    userId: userId
+                )
+            }
         }
     }
 
