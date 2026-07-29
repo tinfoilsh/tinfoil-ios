@@ -121,7 +121,7 @@ class CloudStorageService: ObservableObject {
         let rewrites = try await encryptAndUploadAttachments(&chatToUpload)
         stripBase64FromMessages(&chatToUpload.messages)
 
-        let plaintext = try JSONEncoder().encode(chatToUpload)
+        let plaintext = try Self.encodeChatPlaintext(chatToUpload)
         let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
 
         var metadata: [String: AnyCodable] = [
@@ -181,7 +181,7 @@ class CloudStorageService: ObservableObject {
                       let raw = Data(base64Encoded: base64) else {
                     continue
                 }
-                let attIdemKey = attachmentIdempotencyKey(
+                let attIdemKey = Self.attachmentIdempotencyKey(
                     chatId: chat.id,
                     clientId: att.id,
                     plaintext: raw
@@ -221,7 +221,13 @@ class CloudStorageService: ObservableObject {
         }
     }
 
-    private func attachmentIdempotencyKey(
+    static func encodeChatPlaintext(_ chat: StoredChat) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(chat)
+    }
+
+    static func attachmentIdempotencyKey(
         chatId: String,
         clientId: String,
         plaintext: Data
