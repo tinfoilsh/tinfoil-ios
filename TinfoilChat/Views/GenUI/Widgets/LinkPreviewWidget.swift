@@ -18,7 +18,7 @@ struct LinkPreviewWidget: GenUIWidget {
     }
 
     let name = "render_link_preview"
-    let description = "Display a rich preview card for a single web link. Use when linking to an article, page, or resource and you want to surface title, description, and favicon. The card fetches metadata (title, description, site name, image, favicon) from the opengraph-metadata.tinfoil.sh enclave. Provide only the URL and a fallback title — every other field is resolved server-side."
+    let description = "Display a rich preview card for a single web link. Use when linking to an article, page, or resource and you want to surface title, description, and favicon. The card fetches metadata and the favicon from the opengraph-metadata.tinfoil.sh enclave. Provide only the URL and a fallback title — every other field is resolved server-side."
     let promptHint = "rich preview card for a single web link"
 
     var schema: JSONSchema {

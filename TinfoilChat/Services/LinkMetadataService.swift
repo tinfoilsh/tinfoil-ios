@@ -2,11 +2,10 @@
 //  LinkMetadataService.swift
 //  TinfoilChat
 //
-//  Fetches OpenGraph metadata (title/description/site_name/image/favicon)
+//  Fetches OpenGraph metadata and favicons
 //  for a URL from the `opengraph-metadata.tinfoil.sh` enclave through an
 //  attested `SecureClient`. Mirrors the webapp's `metadata-client.ts` so
-//  the iOS link-preview widget surfaces the same rich card (hero image
-//  + favicon + title + description) as the web build.
+//  the iOS link-preview widget surfaces the same rich card as the web build.
 //
 //  In-flight requests for the same URL are deduplicated so multiple
 //  `LinkPreviewView` instances rendering the same link share a single
@@ -21,7 +20,6 @@ struct LinkMetadata: Equatable, Sendable {
     let description: String?
     let siteName: String?
     let image: String?
-    let faviconBytes: Data?
     let cached: Bool
 }
 
@@ -35,8 +33,11 @@ private struct MetadataResponse: Decodable {
     let description: String?
     let site_name: String?
     let image: String?
-    let favicon_bytes: Data?
     let cached: Bool?
+}
+
+private struct FaviconResponse: Decodable {
+    let favicon_bytes: Data
 }
 
 enum LinkMetadataError: Error {
@@ -49,11 +50,11 @@ actor LinkMetadataService {
     static let shared = LinkMetadataService()
 
     private var cache: [String: LinkMetadata] = [:]
-    /// Insertion order of cache keys, oldest first, so the cache can
-    /// evict instead of growing without bound (entries carry raw
-    /// favicon bytes).
     private var cacheOrder: [String] = []
     private var inFlight: [String: Task<LinkMetadata, Error>] = [:]
+    private var faviconCache: [String: Data] = [:]
+    private var faviconCacheOrder: [String] = []
+    private var faviconInFlight: [String: Task<Data, Error>] = [:]
 
     private var client: SecureClient?
     private var verificationTask: Task<SecureClient, Error>?
@@ -105,6 +106,24 @@ actor LinkMetadataService {
         return result
     }
 
+    func favicon(for url: String) async throws -> Data {
+        guard let host = URL(string: url)?.host?.lowercased() else {
+            throw LinkMetadataError.invalidURL
+        }
+        if let cached = faviconCache[host] { return cached }
+        if let existing = faviconInFlight[host] { return try await existing.value }
+
+        let task = Task<Data, Error> {
+            try await self.fetchFavicon(url: url)
+        }
+        faviconInFlight[host] = task
+
+        defer { faviconInFlight[host] = nil }
+        let result = try await task.value
+        storeFaviconInCache(result, for: host)
+        return result
+    }
+
     private func storeInCache(_ metadata: LinkMetadata, for url: String) {
         if cache[url] == nil {
             cacheOrder.append(url)
@@ -113,6 +132,17 @@ actor LinkMetadataService {
         while cacheOrder.count > Constants.Metadata.cacheEntryLimit {
             let evicted = cacheOrder.removeFirst()
             cache[evicted] = nil
+        }
+    }
+
+    private func storeFaviconInCache(_ favicon: Data, for host: String) {
+        if faviconCache[host] == nil {
+            faviconCacheOrder.append(host)
+        }
+        faviconCache[host] = favicon
+        while faviconCacheOrder.count > Constants.Metadata.cacheEntryLimit {
+            let evicted = faviconCacheOrder.removeFirst()
+            faviconCache[evicted] = nil
         }
     }
 
@@ -138,9 +168,27 @@ actor LinkMetadataService {
                 description: decoded.description,
                 siteName: decoded.site_name,
                 image: decoded.image,
-                faviconBytes: decoded.favicon_bytes,
                 cached: decoded.cached ?? false
             )
+        } catch {
+            throw LinkMetadataError.decodingFailed
+        }
+    }
+
+    private func fetchFavicon(url: String) async throws -> Data {
+        let client = try await getClient()
+        let body = try JSONEncoder().encode(MetadataRequest(url: url))
+        let response = try await client.post(
+            url: "\(Constants.Metadata.enclaveURL)/favicon",
+            headers: ["Content-Type": "application/json"],
+            body: body
+        )
+
+        guard (200..<300).contains(response.statusCode) else {
+            throw LinkMetadataError.badStatus(response.statusCode)
+        }
+        do {
+            return try JSONDecoder().decode(FaviconResponse.self, from: response.body).favicon_bytes
         } catch {
             throw LinkMetadataError.decodingFailed
         }

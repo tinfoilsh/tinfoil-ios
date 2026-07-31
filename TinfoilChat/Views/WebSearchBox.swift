@@ -209,13 +209,13 @@ struct FaviconImage: View {
             iconImage = nil
             loadFailed = false
             do {
-                let metadata = try await LinkMetadataService.shared.metadata(for: url)
+                let bytes = try await LinkMetadataService.shared.favicon(for: url)
                 // The shared in-flight fetch doesn't observe this
                 // task's cancellation, so a superseded task can reach
                 // this point; bail before stomping the new task's state.
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    if let bytes = metadata.faviconBytes, let image = UIImage(data: bytes) {
+                    if let image = UIImage(data: bytes) {
                         iconImage = image
                     } else {
                         loadFailed = true
@@ -227,6 +227,7 @@ struct FaviconImage: View {
                 // surface a failure for an expected cancel.
                 return
             } catch {
+                guard !Task.isCancelled else { return }
                 await MainActor.run { loadFailed = true }
             }
         }
