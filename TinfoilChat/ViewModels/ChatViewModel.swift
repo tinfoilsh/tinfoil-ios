@@ -371,7 +371,7 @@ class ChatViewModel: ObservableObject {
     }
 
     func activeRecoveryEnvelope(
-        trackedBy phaseTracker: ChatRecoveryPhaseTracker = .shared
+        trackedBy phaseTracker: ChatRecoveryPhaseTracker
     ) -> PendingRecoveryEnvelope? {
         (currentChat?.pendingRecoveries ?? []).first {
             phaseTracker.isActive(turnId: $0.turnId)
@@ -2621,9 +2621,10 @@ class ChatViewModel: ObservableObject {
                                 }
                             case .endThinkingSession:
                                 pendingSummaryThoughts = nil
+                                let viewModel = self
                                 await MainActor.run {
                                     summaryService.reset()
-                                    self?.streamState.setThinkingSummary(nil, chatId: streamChatId)
+                                    viewModel?.streamState.setThinkingSummary(nil, chatId: streamChatId)
                                 }
                             case .generate(let thoughts):
                                 pendingSummaryThoughts = thoughts
@@ -2637,8 +2638,9 @@ class ChatViewModel: ObservableObject {
                             let snapshot = processor.snapshot()
                             let thoughtsForSummary = pendingSummaryThoughts
                             pendingSummaryThoughts = nil
+                            let viewModel = self
                             await MainActor.run {
-                                guard let self else { return }
+                                guard let self = viewModel else { return }
                                 self.applyStreamSnapshot(snapshot, streamChatId: streamChatId)
                                 if let thoughtsForSummary {
                                     summaryService.generateSummary(thoughts: thoughtsForSummary) { [weak self] summary in
@@ -3132,7 +3134,7 @@ class ChatViewModel: ObservableObject {
         guard let chat = currentChat,
               chat.id == chatId,
               let userId = currentUserId,
-              let envelope = activeRecoveryEnvelope()
+              let envelope = activeRecoveryEnvelope(trackedBy: .shared)
         else {
             return
         }
@@ -3542,14 +3544,16 @@ class ChatViewModel: ObservableObject {
 
         // During streaming, batch saves to reduce disk I/O
         if throttleForStreaming {
+            let chatId = updatedChat.id
+
             // Store pending update
-            pendingStreamUpdates[updatedChat.id] = updatedChat
+            pendingStreamUpdates[chatId] = updatedChat
 
             // Cancel existing timer and create new one
-            streamUpdateTimers[updatedChat.id]?.invalidate()
-            streamUpdateTimers[updatedChat.id] = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+            streamUpdateTimers[chatId]?.invalidate()
+            streamUpdateTimers[chatId] = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
                 Task { @MainActor in
-                    self?.flushPendingStreamUpdate(chatId: updatedChat.id)
+                    self?.flushPendingStreamUpdate(chatId: chatId)
                 }
             }
         } else {

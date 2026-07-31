@@ -13,7 +13,7 @@ import UIKit
 
 /// Resolves a citation's favicon bytes from the attested metadata enclave so citation chips never
 /// reach an external icon host directly.
-private func citationFaviconData(for url: URL) async -> Data? {
+private let citationFaviconData: @Sendable (URL) async -> Data? = { url in
     try? await LinkMetadataService.shared.favicon(for: url.absoluteString)
 }
 

@@ -2058,7 +2058,27 @@ private struct SourcesButton: View {
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
+    private func sourceFavicon(url: String, zIndex: Double) -> some View {
+        let backgroundColor: Color = isDarkMode ? .black : .white
+        let borderColor: Color = isDarkMode
+            ? .white.opacity(0.2)
+            : .black.opacity(0.1)
+
+        return FaviconImage(
+            url: url,
+            placeholderColor: .gray,
+            placeholderFontSize: 10
+        )
+        .frame(width: 18, height: 18)
+        .background(backgroundColor)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(borderColor, lineWidth: 1))
+        .zIndex(zIndex)
+    }
+
     var body: some View {
+        let displayedSources = uniqueDomainSources
+
         Button(action: action) {
             HStack(spacing: 4) {
                 Text("Sources")
@@ -2066,17 +2086,11 @@ private struct SourcesButton: View {
 
                 // Overlapping favicons
                 HStack(spacing: -6) {
-                    ForEach(Array(uniqueDomainSources.enumerated()), id: \.offset) { index, entry in
-                        FaviconImage(
+                    ForEach(Array(displayedSources.enumerated()), id: \.offset) { index, entry in
+                        sourceFavicon(
                             url: entry.url,
-                            placeholderColor: .gray,
-                            placeholderFontSize: 10
+                            zIndex: Double(displayedSources.count - index)
                         )
-                        .frame(width: 18, height: 18)
-                        .background(isDarkMode ? Color.black : Color.white)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(isDarkMode ? Color.white.opacity(0.2) : Color.black.opacity(0.1), lineWidth: 1))
-                        .zIndex(Double(uniqueDomainSources.count - index))
                     }
                 }
             }

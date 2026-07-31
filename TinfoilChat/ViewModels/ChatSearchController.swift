@@ -27,7 +27,11 @@ final class ChatSearchController: ObservableObject {
     private let service: ChatSearchService
     private var searchTask: Task<Void, Never>?
 
-    init(service: ChatSearchService = .shared) {
+    init() {
+        self.service = .shared
+    }
+
+    init(service: ChatSearchService) {
         self.service = service
     }
 

@@ -63,7 +63,7 @@ struct ClerkAuthenticatorMFAService: AuthenticatorMFAService {
 
     private func reloadCurrentUser(userId: String) async {
         guard Clerk.shared.user?.id == userId else { return }
-        try? await Clerk.shared.user?.reload()
+        _ = try? await Clerk.shared.user?.reload()
     }
 }
 
