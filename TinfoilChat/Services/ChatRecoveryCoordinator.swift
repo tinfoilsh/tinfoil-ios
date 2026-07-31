@@ -821,7 +821,7 @@ actor ChatRecoveryCoordinator {
                     await MainActor.run {
                         ChatRecoveryDraftStore.shared.beginReplayAttempt(
                             chatId: chatId,
-                            turnId: envelope.turnId,
+                            turnId: turnId,
                             sessionId: payload.sessionId,
                             fallbackCheckpoint: persistedCheckpoint
                         )

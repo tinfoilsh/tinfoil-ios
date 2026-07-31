@@ -244,7 +244,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
             for annotation in annotations where annotation.type == "url_citation" {
                 let citation = annotation.urlCitation
                 let source = WebSearchSource(
-                    title: citation.title ?? citation.url,
+                    title: citation.title,
                     url: citation.url
                 )
                 collectedSources.append(source)
@@ -252,7 +252,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
                     Annotation(
                         type: "url_citation",
                         url_citation: URLCitation(
-                            title: citation.title ?? citation.url,
+                            title: citation.title,
                             url: citation.url,
                             start_index: nil,
                             end_index: nil
