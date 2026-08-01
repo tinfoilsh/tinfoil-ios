@@ -1,5 +1,5 @@
 {
-  "originHash" : "cb79a1b5608e14f62abcbbfcbb528fa9abcbe30aeef206432df644413b822246",
+  "originHash" : "4ac80f0a580e046777bf0dbe0208566c80c6e4952fdaf05ee5f9258f4b2fba63",
   "pins" : [
     {
       "identity" : "clerk-ios",
@@ -143,6 +143,15 @@
       "state" : {
         "revision" : "e6731067a510f6d45bdec8e090698c380a90144d",
         "version" : "0.0.10"
+      }
+    },
+    {
+      "identity" : "tinfoil-passkey-kit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tinfoilsh/tinfoil-passkey-kit",
+      "state" : {
+        "revision" : "803440267cf83d754ab8b1cf66b4dddd9f30e105",
+        "version" : "0.1.0"
       }
     },
     {

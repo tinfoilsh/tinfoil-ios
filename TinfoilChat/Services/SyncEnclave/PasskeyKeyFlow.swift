@@ -27,8 +27,8 @@
 //
 
 import ClerkKit
-import CryptoKit
 import Foundation
+import TinfoilPasskeyKit
 
 enum PasskeyFlowFailure: String, Sendable {
     case userCancelled
@@ -70,14 +70,15 @@ enum PasskeyKeyFlow {
         user: PasskeyUserInfo,
         createdVia: SyncEnclaveCreatedVia = .passkey
     ) async -> PasskeyFlowResult {
-        var cekBytes = [UInt8](repeating: 0, count: SyncEnclaveKeyBundle.cekByteCount)
-        let cekRandomStatus = SecRandomCopyBytes(kSecRandomDefault, cekBytes.count, &cekBytes)
-        guard cekRandomStatus == errSecSuccess else {
-            return .failure(.registerFailed, message: "Secure random generation failed (status \(cekRandomStatus))")
+        let cek: Data
+        do {
+            cek = try PasskeyCrypto.generateCEK()
+        } catch {
+            return .failure(.registerFailed, message: error.localizedDescription)
         }
         let result = await registerKeyWithPasskey(
             user: user,
-            cek: Data(cekBytes),
+            cek: cek,
             createdVia: createdVia
         )
         // A 409 means another device won the register race, so the

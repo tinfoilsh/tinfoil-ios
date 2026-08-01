@@ -13,6 +13,7 @@
 
 import CryptoKit
 import Foundation
+import TinfoilPasskeyKit
 
 struct SyncEnclaveBundleBody {
     /// Base64url-encoded credential id (matches WebAuthn convention).
@@ -52,14 +53,14 @@ struct SyncEnclaveUnwrappedCek {
 
 enum SyncEnclaveKeyBundle {
 
-    static let cekByteCount = 32
-    static let aesGcmIvByteCount = 12
-    static let keyIdByteCount = 16
+    static let cekByteCount = PasskeyProtocol.cekByteCount
+    static let aesGcmIvByteCount = PasskeyProtocol.aesGCMIVByteCount
+    static let keyIdByteCount = PasskeyProtocol.keyIDByteCount
 
     /// HKDF `info` string used to derive the deterministic 16-byte
     /// key_id from a raw CEK. Mirrors the Go enclave's `crypto.DeriveKeyID`
     /// byte-for-byte.
-    static let keyIdInfo = Data("tinfoil-key-id-v1".utf8)
+    static let keyIdInfo = PasskeyProtocol.tinfoilKeyIDInfoV1
 
     /// Wrap a raw 32-byte CEK under a passkey-PRF-derived KEK via
     /// AES-256-GCM. Returns hex-encoded IV + wrapped key in the shape
@@ -72,27 +73,27 @@ enum SyncEnclaveKeyBundle {
         kek: SymmetricKey,
         cek: Data
     ) throws -> SyncEnclaveBundleBody {
-        guard cek.count == cekByteCount else {
-            throw SyncEnclaveKeyBundleError.wrongCekLength(cek.count)
+        do {
+            let wrapped = try PasskeyCrypto.wrapCEK(
+                credentialId: credentialId,
+                kek: kek,
+                cek: cek
+            )
+            return SyncEnclaveBundleBody(
+                credentialId: wrapped.credentialId,
+                kekIvHex: wrapped.kekIvHex,
+                wrappedKeyHex: wrapped.wrappedKeyHex
+            )
+        } catch let error as PasskeyCryptoError {
+            switch error {
+            case .wrongCEKLength(let count):
+                throw SyncEnclaveKeyBundleError.wrongCekLength(count)
+            case .randomGenerationFailed(let status):
+                throw SyncEnclaveKeyBundleError.randomGenerationFailed(status)
+            default:
+                throw error
+            }
         }
-        var ivBytes = [UInt8](repeating: 0, count: aesGcmIvByteCount)
-        let status = SecRandomCopyBytes(kSecRandomDefault, ivBytes.count, &ivBytes)
-        guard status == errSecSuccess else {
-            throw SyncEnclaveKeyBundleError.randomGenerationFailed(status)
-        }
-        let iv = Data(ivBytes)
-        let nonce = try AES.GCM.Nonce(data: iv)
-        let sealed = try AES.GCM.seal(cek, using: kek, nonce: nonce)
-        // The enclave persists kek_iv (12 B) + ciphertext + tag (16 B)
-        // as separate hex strings. SealedBox.ciphertext does not include
-        // the tag — we append it explicitly to match the on-wire layout.
-        var ciphertextAndTag = Data(sealed.ciphertext)
-        ciphertextAndTag.append(sealed.tag)
-        return SyncEnclaveBundleBody(
-            credentialId: credentialId,
-            kekIvHex: dataToHex(iv),
-            wrappedKeyHex: dataToHex(ciphertextAndTag)
-        )
     }
 
     /// Inverse of `wrapCek`. Returns the raw 32-byte CEK from a hex
@@ -120,21 +121,19 @@ enum SyncEnclaveKeyBundle {
         kekIvHex: String,
         wrappedKeyHex: String
     ) throws -> SyncEnclaveUnwrappedCek {
-        let iv = try hexToData(kekIvHex)
-        guard iv.count == aesGcmIvByteCount else {
-            throw SyncEnclaveKeyBundleError.wrongIvLength(iv.count)
+        let plaintext: Data
+        do {
+            plaintext = try PasskeyCrypto.decryptWrappedPayload(
+                WrappedCEK(
+                    credentialId: "",
+                    kekIvHex: kekIvHex,
+                    wrappedKeyHex: wrappedKeyHex
+                ),
+                using: kek
+            )
+        } catch PasskeyCryptoError.wrongIVLength(let count) {
+            throw SyncEnclaveKeyBundleError.wrongIvLength(count)
         }
-        let combinedCipher = try hexToData(wrappedKeyHex)
-        // AES-GCM tag is 128 bits / 16 bytes.
-        let tagSize = 16
-        guard combinedCipher.count > tagSize else {
-            throw SyncEnclaveError(message: "Wrapped CEK too short to contain tag")
-        }
-        let ciphertext = combinedCipher.prefix(combinedCipher.count - tagSize)
-        let tag = combinedCipher.suffix(tagSize)
-        let nonce = try AES.GCM.Nonce(data: iv)
-        let sealed = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
-        let plaintext = try AES.GCM.open(sealed, using: kek)
         if plaintext.count == cekByteCount {
             return SyncEnclaveUnwrappedCek(cek: plaintext, legacyAlternativeKeys: [])
         }
@@ -217,17 +216,16 @@ enum SyncEnclaveKeyBundle {
     /// with `info = "tinfoil-key-id-v1"` and an empty salt — matches the
     /// enclave's `crypto.DeriveKeyID` byte-for-byte.
     static func deriveKeyIdHex(cek: Data) throws -> String {
-        guard cek.count == cekByteCount else {
-            throw SyncEnclaveKeyBundleError.wrongCekLength(cek.count)
+        do {
+            return PasskeyCodec.hexEncode(
+                try PasskeyCrypto.deriveKeyID(
+                    from: cek,
+                    info: keyIdInfo,
+                    outputByteCount: keyIdByteCount
+                )
+            )
+        } catch PasskeyCryptoError.wrongCEKLength(let count) {
+            throw SyncEnclaveKeyBundleError.wrongCekLength(count)
         }
-        let ikm = SymmetricKey(data: cek)
-        let derived = HKDF<SHA256>.deriveKey(
-            inputKeyMaterial: ikm,
-            salt: Data(),
-            info: keyIdInfo,
-            outputByteCount: keyIdByteCount
-        )
-        let bytes = derived.withUnsafeBytes { Data($0) }
-        return dataToHex(bytes)
     }
 }

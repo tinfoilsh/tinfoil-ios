@@ -45,6 +45,7 @@ The app is structured around several key components:
 - **[Services/EncryptionService.swift](TinfoilChat/Services/EncryptionService.swift)**: AES-GCM encryption for local chat storage
 - **[Services/EncryptedFileStorage.swift](TinfoilChat/Services/EncryptedFileStorage.swift)**: Per-chat encrypted file storage
 - **[Services/CloudSyncService.swift](TinfoilChat/Services/CloudSyncService.swift)**: Encrypted cloud backup functionality
+- **[TinfoilPasskeyKit](https://github.com/tinfoilsh/tinfoil-passkey-kit)**: Reusable passkey PRF and CEK-protection Swift package
 - **[Extensions/Model+Tinfoil.swift](TinfoilChat/Extensions/Model+Tinfoil.swift)**: Integration with Tinfoil Swift SDK
 
 ## Reporting Vulnerabilities
