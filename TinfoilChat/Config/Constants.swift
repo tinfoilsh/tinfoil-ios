@@ -6,6 +6,7 @@
 //  Copyright © 2025 Tinfoil. All rights reserved.
 
 import Foundation
+import TinfoilPasskeyKit
 
 /// Application-wide constants
 enum Constants {
@@ -367,10 +368,9 @@ enum Constants {
     enum Passkey {
         static let rpId = "tinfoil.sh"
         static let rpName = "Tinfoil Chat"
-        static let prfSalt = Data("tinfoil-chat-key-encryption".utf8)
-        static let hkdfInfo = Data("tinfoil-chat-kek-v1".utf8)
-        static let challengeByteCount = 32
-        static let kekByteCount = 32
+        static let prfSalt = PasskeyProtocol.tinfoilPRFSaltV1
+        static let hkdfInfo = PasskeyProtocol.tinfoilHKDFInfoV1
+        static let challengeByteCount = PasskeyProtocol.challengeByteCount
         static let prfCacheKeychainAccount = "sh.tinfoil.passkey-prf-cache"
         static let syncCheckIntervalSeconds: TimeInterval = 30
     }

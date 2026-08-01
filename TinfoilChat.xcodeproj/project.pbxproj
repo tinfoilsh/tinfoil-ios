@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1B2C3D40100000000000001 /* TinfoilPasskeyKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40100000000000003 /* TinfoilPasskeyKit */; };
 		99AB00012FABC00100ABC001 /* TinfoilShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 99AB00032FABC00300ABC003 /* TinfoilShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		99DDBFA42F6869250038A729 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = 99DDBFA32F6869250038A729 /* Textual */; };
 		99EAB0012FC0000100EAB001 /* EHBP in Frameworks */ = {isa = PBXBuildFile; productRef = 99EAB0032FC0000300EAB003 /* EHBP */; };
@@ -122,6 +123,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1B2C3D40100000000000001 /* TinfoilPasskeyKit in Frameworks */,
 				99EAB0012FC0000100EAB001 /* EHBP in Frameworks */,
 				99EEFB1B2F9EE9E8005B3D75 /* TinfoilAI in Frameworks */,
 				99F1547C2F4F614400E9174E /* Gzip in Frameworks */,
@@ -237,6 +239,7 @@
 			);
 			name = TinfoilChat;
 			packageProductDependencies = (
+				A1B2C3D40100000000000003 /* TinfoilPasskeyKit */,
 				99F154682F4F60C500E9174E /* ClerkKit */,
 				99F1546A2F4F60C500E9174E /* ClerkKitUI */,
 				99F1546F2F4F610000E9174E /* SwiftMath */,
@@ -284,6 +287,7 @@
 			mainGroup = 99F153B92F4F5F0200E9174E;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				A1B2C3D40100000000000002 /* XCRemoteSwiftPackageReference "tinfoil-passkey-kit" */,
 				99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */,
 				99F1546C2F4F60E900E9174E /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				99F1546D2F4F60F600E9174E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
@@ -745,6 +749,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		A1B2C3D40100000000000002 /* XCRemoteSwiftPackageReference "tinfoil-passkey-kit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/tinfoilsh/tinfoil-passkey-kit";
+			requirement = {
+				kind = exactVersion;
+				version = 0.1.0;
+			};
+		};
 		99DDBFA22F68667C0038A729 /* XCRemoteSwiftPackageReference "textual" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tinfoilsh/textual";
@@ -812,6 +824,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		A1B2C3D40100000000000003 /* TinfoilPasskeyKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D40100000000000002 /* XCRemoteSwiftPackageReference "tinfoil-passkey-kit" */;
+			productName = TinfoilPasskeyKit;
+		};
 		99DDBFA32F6869250038A729 /* Textual */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 99DDBFA22F68667C0038A729 /* XCRemoteSwiftPackageReference "textual" */;
