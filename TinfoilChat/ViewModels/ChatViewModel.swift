@@ -2474,6 +2474,8 @@ class ChatViewModel: ObservableObject {
                             }
                         }
                         chat.messages[lastIndex].segments = processor.currentSegments
+                        chat.messages[lastIndex].isThinking = processor.currentIsThinking
+                        chat.messages[lastIndex].generationTimeSeconds = processor.currentGenerationTimeSeconds
                         self.updateChat(chat, throttleForStreaming: true)
                         return
                     }
@@ -2575,6 +2577,8 @@ class ChatViewModel: ObservableObject {
                     }
                     chat.messages[lastIndex].segments = processor.currentSegments
                     chat.messages[lastIndex].webSearches = processor.currentWebSearches
+                    chat.messages[lastIndex].isThinking = processor.currentIsThinking
+                    chat.messages[lastIndex].generationTimeSeconds = processor.currentGenerationTimeSeconds
                     self.updateChat(chat, throttleForStreaming: true)
                 }
 
