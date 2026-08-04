@@ -2587,8 +2587,12 @@ class ChatViewModel: ObservableObject {
                 // actor is only hopped to for rare event application, haptics,
                 // and the throttled snapshot updates.
                 let consumeTask = Task.detached(priority: .userInitiated) { [weak self] in
-                    var lastUIUpdateTime = Date.distantPast
                     let uiUpdateInterval: TimeInterval = Constants.Streaming.uiUpdateInterval
+                    // Earliest moment the next publish may occur. Advanced on
+                    // every leading-edge publish and whenever a trailing flush
+                    // is scheduled, so flushes count against the throttle and
+                    // the publish rate stays bounded at one per interval.
+                    var nextPublishTime = Date.distantPast
                     // Latest thoughts awaiting a summary request; forwarded with
                     // the next throttled snapshot so summary generation does not
                     // force a main-actor hop per reasoning chunk.
@@ -2601,6 +2605,11 @@ class ChatViewModel: ObservableObject {
                     // reads as a stall followed by a burst. The flush publishes
                     // the held snapshot at the end of the current window instead.
                     var trailingFlushTask: Task<Void, Never>? = nil
+                    // Fire time of the pending trailing flush; nil once it has
+                    // fired or was superseded by a leading-edge publish. Tracked
+                    // here (not in the flush task) so all throttle bookkeeping
+                    // stays on this task without shared mutable state.
+                    var scheduledFlushTime: Date? = nil
                     defer { trailingFlushTask?.cancel() }
 
                     for try await chunk in stream {
@@ -2647,10 +2656,11 @@ class ChatViewModel: ObservableObject {
                         // Update UI at a throttled rate to avoid overwhelming SwiftUI with diffs
                         let now = Date()
                         if outcome.didMutateState {
-                            if now.timeIntervalSince(lastUIUpdateTime) >= uiUpdateInterval {
+                            if now >= nextPublishTime {
                                 trailingFlushTask?.cancel()
                                 trailingFlushTask = nil
-                                lastUIUpdateTime = now
+                                scheduledFlushTime = nil
+                                nextPublishTime = now.addingTimeInterval(uiUpdateInterval)
                                 let snapshot = processor.snapshot()
                                 let thoughtsForSummary = pendingSummaryThoughts
                                 pendingSummaryThoughts = nil
@@ -2671,9 +2681,28 @@ class ChatViewModel: ObservableObject {
                                 // is captured here, serialized with `process`,
                                 // because the processor must never be read from
                                 // the flush task while a later chunk mutates it.
+                                // A newer chunk replaces the pending snapshot but
+                                // keeps the original fire time, and the flush
+                                // consumes a publish slot so the rate stays at
+                                // one per interval. Pending summary thoughts are
+                                // forwarded without being cleared: a reschedule
+                                // must not drop them, and a duplicate request is
+                                // deduplicated by the summary service.
                                 trailingFlushTask?.cancel()
+                                let flushTime: Date
+                                if let pending = scheduledFlushTime, pending > now {
+                                    flushTime = pending
+                                } else {
+                                    // No pending flush (or the previous one
+                                    // already fired): schedule at the next free
+                                    // publish slot and reserve the one after it.
+                                    flushTime = nextPublishTime
+                                    scheduledFlushTime = flushTime
+                                    nextPublishTime = flushTime.addingTimeInterval(uiUpdateInterval)
+                                }
                                 let snapshot = processor.snapshot()
-                                let delay = uiUpdateInterval - now.timeIntervalSince(lastUIUpdateTime)
+                                let thoughtsForSummary = pendingSummaryThoughts
+                                let delay = max(0, flushTime.timeIntervalSince(now))
                                 let viewModel = self
                                 trailingFlushTask = Task {
                                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -2681,6 +2710,12 @@ class ChatViewModel: ObservableObject {
                                     await MainActor.run {
                                         guard !Task.isCancelled, let self = viewModel else { return }
                                         self.applyStreamSnapshot(snapshot, streamChatId: streamChatId)
+                                        if let thoughtsForSummary {
+                                            summaryService.generateSummary(thoughts: thoughtsForSummary) { [weak self] summary in
+                                                guard self?.streamState.isStreaming(chatId: streamChatId) == true else { return }
+                                                self?.streamState.setThinkingSummary(summary, chatId: streamChatId)
+                                            }
+                                        }
                                     }
                                 }
                             }
