@@ -47,19 +47,7 @@ struct StreamingResponseProcessorTests {
         content: String,
         finishReason: String? = nil
     ) throws -> ChatStreamResult {
-        var choice: [String: Any] = [
-            "index": 0,
-            "delta": ["content": content],
-        ]
-        choice["finish_reason"] = finishReason.map { $0 as Any } ?? NSNull()
-        let data = try JSONSerialization.data(withJSONObject: [
-            "id": "chatcmpl-test",
-            "object": "chat.completion.chunk",
-            "created": 1,
-            "model": "gpt-oss-120b",
-            "choices": [choice],
-        ])
-        return try JSONDecoder().decode(ChatStreamResult.self, from: data)
+        try decodeStreamChunk(delta: ["content": content], finishReason: finishReason)
     }
 }
 
@@ -208,14 +196,14 @@ struct StreamingThinkingSegmentTests {
     }
 
     private func reasoningChunk(_ reasoning: String) throws -> ChatStreamResult {
-        try decode(delta: ["reasoning": reasoning])
+        try decodeStreamChunk(delta: ["reasoning": reasoning])
     }
 
     private func contentChunk(
         _ content: String,
         finishReason: String? = nil
     ) throws -> ChatStreamResult {
-        try decode(delta: ["content": content], finishReason: finishReason)
+        try decodeStreamChunk(delta: ["content": content], finishReason: finishReason)
     }
 
     private func toolCallChunk(
@@ -223,7 +211,7 @@ struct StreamingThinkingSegmentTests {
         name: String,
         arguments: String
     ) throws -> ChatStreamResult {
-        try decode(delta: [
+        try decodeStreamChunk(delta: [
             "tool_calls": [
                 [
                     "index": 0,
@@ -234,23 +222,24 @@ struct StreamingThinkingSegmentTests {
             ]
         ])
     }
+}
 
-    private func decode(
-        delta: [String: Any],
-        finishReason: String? = nil
-    ) throws -> ChatStreamResult {
-        var choice: [String: Any] = [
-            "index": 0,
-            "delta": delta,
-        ]
-        choice["finish_reason"] = finishReason.map { $0 as Any } ?? NSNull()
-        let data = try JSONSerialization.data(withJSONObject: [
-            "id": "chatcmpl-test",
-            "object": "chat.completion.chunk",
-            "created": 1,
-            "model": "gpt-oss-120b",
-            "choices": [choice],
-        ])
-        return try JSONDecoder().decode(ChatStreamResult.self, from: data)
-    }
+/// Builds and decodes a `ChatStreamResult` fixture from a raw delta payload.
+private func decodeStreamChunk(
+    delta: [String: Any],
+    finishReason: String? = nil
+) throws -> ChatStreamResult {
+    var choice: [String: Any] = [
+        "index": 0,
+        "delta": delta,
+    ]
+    choice["finish_reason"] = finishReason.map { $0 as Any } ?? NSNull()
+    let data = try JSONSerialization.data(withJSONObject: [
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "created": 1,
+        "model": "gpt-oss-120b",
+        "choices": [choice],
+    ])
+    return try JSONDecoder().decode(ChatStreamResult.self, from: data)
 }
