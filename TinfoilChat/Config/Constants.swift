@@ -52,7 +52,7 @@ enum Constants {
         static let tableMaxColumnWidth: CGFloat = 300
         static let tableFontSize: CGFloat = 16
         static let tableCellHorizontalPadding: CGFloat = 12
-        static let streamingIndicatorDotSize: CGFloat = 10
+        static let streamingIndicatorSize: CGFloat = 10
         static let streamingIndicatorCornerRadius: CGFloat = 3
         static let streamingIndicatorIconColumnWidth: CGFloat = 16
         static let initFailedContentSpacing: CGFloat = 24

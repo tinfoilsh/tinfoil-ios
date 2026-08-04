@@ -1299,7 +1299,7 @@ private struct UnsupportedLaTeXView: View {
 
 /// A pulsating rounded square shown at the bottom of streaming text to
 /// indicate that more content is on the way.
-struct StreamingIndicatorDot: View {
+struct StreamingIndicator: View {
     let isDarkMode: Bool
     @State private var isPulsing = false
 
@@ -1307,8 +1307,8 @@ struct StreamingIndicatorDot: View {
         RoundedRectangle(cornerRadius: Constants.UI.streamingIndicatorCornerRadius, style: .continuous)
             .fill(isDarkMode ? Color.white : Color.black)
             .frame(
-                width: Constants.UI.streamingIndicatorDotSize,
-                height: Constants.UI.streamingIndicatorDotSize
+                width: Constants.UI.streamingIndicatorSize,
+                height: Constants.UI.streamingIndicatorSize
             )
             .scaleEffect(isPulsing ? 1.0 : 0.6)
             .opacity(isPulsing ? 1.0 : 0.4)

@@ -708,7 +708,7 @@ struct MessageView: View {
                    isRenderingStream &&
                    (!message.content.isEmpty || message.thoughts != nil || message.isThinking ||
                     !(message.segments?.isEmpty ?? true)) {
-                    StreamingIndicatorDot(isDarkMode: isDarkMode)
+                    StreamingIndicator(isDarkMode: isDarkMode)
                         .padding(.top, 4)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
