@@ -1339,13 +1339,16 @@ private struct RawContentModalView: View {
                 Image(systemName: icon)
                 Text(label)
             }
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundColor(.white)
+            .font(.system(size: 15, weight: .medium))
+            .foregroundColor(isDarkMode ? .white : .black)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
-            .background(Color.tinfoilAccentDark)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isDarkMode ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+            )
         }
+        .buttonStyle(.plain)
     }
 
     private func copyAll() {
