@@ -2605,10 +2605,11 @@ class ChatViewModel: ObservableObject {
                     // reads as a stall followed by a burst. The flush publishes
                     // the held snapshot at the end of the current window instead.
                     var trailingFlushTask: Task<Void, Never>? = nil
-                    // Fire time of the pending trailing flush; nil once it has
-                    // fired or was superseded by a leading-edge publish. Tracked
-                    // here (not in the flush task) so all throttle bookkeeping
-                    // stays on this task without shared mutable state.
+                    // Fire time of the most recently scheduled trailing flush.
+                    // Cleared when a leading-edge publish supersedes it, but not
+                    // when the flush fires: the flush task never mutates consumer
+                    // state, so a fired flush simply leaves a past date behind
+                    // and the `pending > now` check below treats it as consumed.
                     var scheduledFlushTime: Date? = nil
                     defer { trailingFlushTask?.cancel() }
 
