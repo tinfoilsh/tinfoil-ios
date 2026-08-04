@@ -73,8 +73,8 @@ struct VerifierView: View {
                     Spacer()
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(sheetBackground.ignoresSafeArea())
             .navigationTitle("Verification Center")
@@ -105,7 +105,7 @@ struct VerifierView: View {
                     .foregroundColor(.primary)
                 Spacer()
             }
-            .padding(16)
+            .padding(18)
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(isDarkMode ? Color(.systemGray6).opacity(0.5) : Color(.systemGray6))
@@ -182,7 +182,7 @@ struct VerifierView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
+        .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(doc.securityVerified
@@ -378,7 +378,7 @@ private struct EncryptionTabCards: View {
     let isDarkMode: Bool
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 16) {
             FingerprintCard(
                 icon: "key.fill",
                 label: "Your unique encryption key",
@@ -422,7 +422,7 @@ private struct CodeTabCards: View {
     let isDarkMode: Bool
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 16) {
             FingerprintCard(
                 icon: "touchid",
                 label: "Source code fingerprint",
@@ -513,7 +513,7 @@ private struct RuntimeTabCards: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 16) {
             FingerprintCard(
                 icon: "touchid",
                 label: "Enclave code fingerprint",
@@ -619,7 +619,7 @@ private struct FingerprintCard: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
         }
-        .padding(14)
+        .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(isDarkMode ? Color(.systemGray5).opacity(0.5) : Color(.systemGray6))
@@ -634,7 +634,7 @@ private struct InfoCard<Content: View>: View {
     var body: some View {
         content
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
+            .padding(18)
             .background(
                 RoundedRectangle(cornerRadius: 10)
                     .fill(isDarkMode ? Color(.systemGray5).opacity(0.4) : Color(.systemGray6).opacity(0.7))

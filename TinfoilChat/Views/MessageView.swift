@@ -708,7 +708,7 @@ struct MessageView: View {
                    isRenderingStream &&
                    (!message.content.isEmpty || message.thoughts != nil || message.isThinking ||
                     !(message.segments?.isEmpty ?? true)) {
-                    StreamingIndicatorDot(isDarkMode: isDarkMode)
+                    StreamingIndicator(isDarkMode: isDarkMode)
                         .padding(.top, 4)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -1339,13 +1339,16 @@ private struct RawContentModalView: View {
                 Image(systemName: icon)
                 Text(label)
             }
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundColor(.white)
+            .font(.system(size: 15, weight: .medium))
+            .foregroundColor(isDarkMode ? .white : .black)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
-            .background(Color.tinfoilAccentDark)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isDarkMode ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+            )
         }
+        .buttonStyle(.plain)
     }
 
     private func copyAll() {
@@ -1487,7 +1490,7 @@ struct CollapsibleThinkingBox: View {
                             .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .modifier(TextPulseAnimation())
+                            .modifier(TextShimmerAnimation())
                     } else {
                         HStack(spacing: 4) {
                             Text("Thinking")
@@ -1495,7 +1498,7 @@ struct CollapsibleThinkingBox: View {
                                 .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
                             InlineLoadingDotsView(isDarkMode: isDarkMode)
                         }
-                        .modifier(TextPulseAnimation())
+                        .modifier(TextShimmerAnimation())
                     }
                 } else {
                     Text("Thinking")
@@ -1663,7 +1666,10 @@ struct PulsingAnimation: ViewModifier {
     }
 }
 
-struct TextPulseAnimation: ViewModifier {
+/// Shimmer effect for in-progress text: the content renders dimmed while a
+/// bright band of the content itself sweeps across, so the effect stays
+/// visible for any text color in both light and dark mode.
+struct TextShimmerAnimation: ViewModifier {
     @State private var offset: CGFloat = -1.0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -1672,23 +1678,25 @@ struct TextPulseAnimation: ViewModifier {
             content
         } else {
             content
+                .opacity(0.5)
                 .overlay(
-                    GeometryReader { geometry in
-                        let shimmerWidth = geometry.size.width * 0.4
-                        LinearGradient(
-                            colors: [
-                                .clear,
-                                .white.opacity(0.35),
-                                .clear
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: shimmerWidth)
-                        .offset(x: offset * (geometry.size.width + shimmerWidth))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .mask(content)
+                    content.mask(
+                        GeometryReader { geometry in
+                            let shimmerWidth = geometry.size.width * 0.5
+                            LinearGradient(
+                                colors: [
+                                    .clear,
+                                    .white,
+                                    .clear
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: shimmerWidth)
+                            .offset(x: offset * (geometry.size.width + shimmerWidth))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    )
                 )
                 .onAppear {
                     withAnimation(
