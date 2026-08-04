@@ -72,6 +72,15 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     // Ordered content segments (text + inline event refs) that preserve
     // the exact order in which events arrived relative to streamed text.
     private var segments: [MessageSegment] = []
+    // Index of the currently-open `.thinking` segment, if a thinking
+    // round is in flight. Each thinking round (agentic models think
+    // again between tool calls) gets its own ordered segment so the UI
+    // interleaves thought boxes with tool calls chronologically.
+    private var currentThinkingSegmentIndex: Int? = nil
+    // Total thinking time accumulated across all rounds; feeds the
+    // flat `generationTimeSeconds` while each segment keeps its own
+    // per-round duration.
+    private var totalThinkingSeconds: TimeInterval = 0
     private var webSearches: [WebSearchInstance] = []
     private var nextSearchId = 0
     // Track whether web search started before thinking (shared across the
@@ -90,12 +99,17 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     private var streamingToolCalls: [Int: GenUIToolCall] = [:]
     private var timelineBlocks: [JSONValue] = []
 
+    // Summary actions produced outside `process` (thinking rounds closed
+    // by tool boundaries during main-actor event application). Drained
+    // into the next chunk outcome so the summary session state stays in
+    // sync without an extra main-actor channel.
+    private var pendingSummaryActions: [SummaryAction] = []
+
     // Web search state tracking
     private var collectedSources: [WebSearchSource] = []
     private var collectedAnnotations: [Annotation] = []
 
     private var thinkStartTime: Date? = nil
-    private var hasThinkTag = false
     private var thoughtsBuffer = ""
     private var isInThinkingMode: Bool
     private var isUsingReasoningFormat = false
@@ -108,8 +122,6 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     private var thinkingClosedByContent = false
     private var didRecordWebSearchBeforeThinking = false
     private var webSearchBeforeThinking: Bool? = nil
-    private var initialContentBuffer = ""
-    private var isFirstChunk = true
     private var responseContent: String
     private var currentThoughts: String?
     private var generationTimeSeconds: TimeInterval?
@@ -136,12 +148,15 @@ final class StreamingResponseProcessor: @unchecked Sendable {
         self.currentThoughts = currentThoughts
         self.generationTimeSeconds = generationTimeSeconds
         self.isInThinkingMode = isInThinkingMode
+        self.totalThinkingSeconds = generationTimeSeconds ?? 0
     }
 
     // MARK: - Event application accessors (main actor, serialized)
 
     var currentSegments: [MessageSegment] { segments }
     var currentWebSearches: [WebSearchInstance] { webSearches }
+    var currentIsThinking: Bool { isInThinkingMode }
+    var currentGenerationTimeSeconds: TimeInterval? { generationTimeSeconds }
 
     func markWebSearchStarted() {
         webSearchStarted = true
@@ -153,6 +168,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     }
 
     func appendURLFetchSegment(_ fetchId: String) {
+        closeThinkingRoundForToolBoundary()
         segments.append(.urlFetch(fetchId: fetchId))
     }
 
@@ -160,6 +176,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
         if let idx = webSearches.firstIndex(where: { $0.id == instance.id }) {
             webSearches[idx] = instance
         } else {
+            closeThinkingRoundForToolBoundary()
             webSearches.append(instance)
             segments.append(.webSearch(searchId: instance.id))
         }
@@ -205,6 +222,15 @@ final class StreamingResponseProcessor: @unchecked Sendable {
         let hasReasoningContent = chunk.choices.first?.delta.reasoning != nil
         let reasoningContent = chunk.choices.first?.delta.reasoning ?? ""
 
+        // Thinking rounds closed by tool boundaries during main-actor
+        // event application queue their summary teardown here; forward
+        // it with this chunk's outcome.
+        if !pendingSummaryActions.isEmpty {
+            outcome.summaryActions.append(contentsOf: pendingSummaryActions)
+            pendingSummaryActions.removeAll()
+            outcome.didMutateState = true
+        }
+
         // Accumulate GenUI tool-call deltas. Mirrors the
         // webapp's normalizer: deltas may carry only
         // partial fragments and we merge them by index.
@@ -213,6 +239,11 @@ final class StreamingResponseProcessor: @unchecked Sendable {
         // `TimelineToolCallBlock` exactly.
         if let deltas = chunk.choices.first?.delta.toolCalls {
             thinkingClosedByContent = false
+            closeThinkingRoundForToolBoundary()
+            if !pendingSummaryActions.isEmpty {
+                outcome.summaryActions.append(contentsOf: pendingSummaryActions)
+                pendingSummaryActions.removeAll()
+            }
             for delta in deltas {
                 let index = delta.index
                 let existing = streamingToolCalls[index]
@@ -284,7 +315,6 @@ final class StreamingResponseProcessor: @unchecked Sendable {
         if hasReasoningContent && !isUsingReasoningFormat && !isInThinkingMode {
             isUsingReasoningFormat = true
             isInThinkingMode = true
-            isFirstChunk = false
             thinkingClosedByContent = false
             thinkStartTime = Date()
             if !didRecordWebSearchBeforeThinking {
@@ -294,6 +324,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
             thoughtsBuffer = reasoningContent
             thinkingChunker.appendToken(reasoningContent)
             currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+            openThinkingSegment(initialContent: reasoningContent)
             outcome.didMutateState = true
             // Reset summary service for new thinking session
             outcome.summaryActions.append(.beginThinkingSession)
@@ -301,13 +332,11 @@ final class StreamingResponseProcessor: @unchecked Sendable {
             // the first reasoning delta; close the thinking
             // session and emit it so the text isn't dropped.
             if !content.isEmpty {
-                if let startTime = thinkStartTime {
-                    generationTimeSeconds = Date().timeIntervalSince(startTime)
-                }
+                let roundSeconds = closeThinkingRound()
                 isInThinkingMode = false
                 thinkingClosedByContent = true
-                thinkStartTime = nil
                 thinkingChunker.finalize()
+                closeThinkingSegment(duration: roundSeconds)
                 if responseContent.isEmpty {
                     responseContent = content
                 } else {
@@ -322,6 +351,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
                     thoughtsBuffer += reasoningContent
                     thinkingChunker.appendToken(reasoningContent)
                     currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                    updateOpenThinkingSegment(appending: reasoningContent)
                     outcome.didMutateState = true
                     // Generate thinking summary (reuse existing client)
                     outcome.summaryActions.append(.generate(thoughtsBuffer))
@@ -334,27 +364,34 @@ final class StreamingResponseProcessor: @unchecked Sendable {
                     thoughtsBuffer += reasoningContent
                     thinkingChunker.appendTail(reasoningContent)
                     currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                    appendThinkingSegmentTail(reasoningContent)
                     outcome.didMutateState = true
                 } else {
                     // Reasoning resumed after a tool boundary —
-                    // a new thinking phase of the next model turn.
+                    // a new thinking phase of the next model turn
+                    // rendered as its own thought box, timed on
+                    // its own clock.
                     isInThinkingMode = true
+                    thinkStartTime = Date()
+                    if !thoughtsBuffer.isEmpty {
+                        thoughtsBuffer += "\n\n"
+                    }
                     thoughtsBuffer += reasoningContent
                     thinkingChunker.appendToken(reasoningContent)
                     currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+                    openThinkingSegment(initialContent: reasoningContent)
                     outcome.didMutateState = true
+                    outcome.summaryActions.append(.beginThinkingSession)
                     outcome.summaryActions.append(.generate(thoughtsBuffer))
                 }
             }
 
             if !content.isEmpty && isInThinkingMode {
-                if let startTime = thinkStartTime {
-                    generationTimeSeconds = Date().timeIntervalSince(startTime)
-                }
+                let roundSeconds = closeThinkingRound()
                 isInThinkingMode = false
                 thinkingClosedByContent = true
-                thinkStartTime = nil
                 thinkingChunker.finalize()
+                closeThinkingSegment(duration: roundSeconds)
                 currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
                 // Clear thinking summary and cancel any in-flight summary generation
                 outcome.summaryActions.append(.endThinkingSession)
@@ -379,87 +416,14 @@ final class StreamingResponseProcessor: @unchecked Sendable {
                 outcome.didMutateState = true
             }
         } else if !isUsingReasoningFormat && !content.isEmpty {
-            if isFirstChunk {
-                initialContentBuffer += content
-
-                if initialContentBuffer.contains("<think>") || initialContentBuffer.count > 5 {
-                    isFirstChunk = false
-                    let processContent = initialContentBuffer
-                    initialContentBuffer = ""
-
-                    if let thinkRange = processContent.range(of: "<think>") {
-                        isInThinkingMode = true
-                        hasThinkTag = true
-                        thinkStartTime = Date()
-                        if !didRecordWebSearchBeforeThinking {
-                            didRecordWebSearchBeforeThinking = true
-                            webSearchBeforeThinking = webSearchStarted
-                        }
-                        let afterThink = String(processContent[thinkRange.upperBound...])
-                        thoughtsBuffer = afterThink
-                        thinkingChunker.appendToken(afterThink)
-                        currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                        outcome.didMutateState = true
-                        // Reset summary service for new thinking session
-                        outcome.summaryActions.append(.beginThinkingSession)
-                    } else {
-                        if responseContent.isEmpty {
-                            responseContent = processContent
-                        } else {
-                            responseContent += processContent
-                        }
-                        chunker.appendToken(processContent)
-                        appendText(processContent)
-                        outcome.didMutateState = true
-                    }
-                }
-            } else if hasThinkTag {
-                if let endRange = content.range(of: "</think>") {
-                    let beforeEnd = String(content[..<endRange.lowerBound])
-                    thoughtsBuffer += beforeEnd
-                    thinkingChunker.appendToken(beforeEnd)
-                    thinkingChunker.finalize()
-                    currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                    isInThinkingMode = false
-                    // Clear thinking summary and cancel any in-flight summary generation
-                    outcome.summaryActions.append(.endThinkingSession)
-
-                    let afterEnd = String(content[endRange.upperBound...])
-                    if responseContent.isEmpty {
-                        responseContent = afterEnd
-                    } else {
-                        responseContent += afterEnd
-                    }
-                    chunker.appendToken(afterEnd)
-                    appendText(afterEnd)
-
-                    if let startTime = thinkStartTime {
-                        generationTimeSeconds = Date().timeIntervalSince(startTime)
-                    }
-
-                    hasThinkTag = false
-                    thinkStartTime = nil
-                    thoughtsBuffer = ""
-                    outcome.didMutateState = true
-                } else {
-                    thoughtsBuffer += content
-                    thinkingChunker.appendToken(content)
-                    currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                    isInThinkingMode = true
-                    outcome.didMutateState = true
-                    // Generate thinking summary (reuse existing client)
-                    outcome.summaryActions.append(.generate(thoughtsBuffer))
-                }
+            if responseContent.isEmpty {
+                responseContent = content
             } else {
-                if responseContent.isEmpty {
-                    responseContent = content
-                } else {
-                    responseContent += content
-                }
-                chunker.appendToken(content)
-                appendText(content)
-                outcome.didMutateState = true
+                responseContent += content
             }
+            chunker.appendToken(content)
+            appendText(content)
+            outcome.didMutateState = true
         }
 
         return outcome
@@ -494,32 +458,14 @@ final class StreamingResponseProcessor: @unchecked Sendable {
             }
         }
 
-        // Handle any remaining content when stream ends
-        if isInThinkingMode && !thoughtsBuffer.isEmpty {
-            if isUsingReasoningFormat {
-                currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-            } else {
-                currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
-                if responseContent.isEmpty {
-                    responseContent = thoughtsBuffer
-                    currentThoughts = nil
-                    appendText(thoughtsBuffer)
-                }
+        // Close any thinking round still open when the stream ends.
+        if isInThinkingMode {
+            if !thoughtsBuffer.isEmpty {
+                currentThoughts = thoughtsBuffer
             }
-            if let startTime = thinkStartTime {
-                generationTimeSeconds = Date().timeIntervalSince(startTime)
-            }
+            let roundSeconds = closeThinkingRound()
+            closeThinkingSegment(duration: roundSeconds)
             isInThinkingMode = false
-        } else if isFirstChunk && !initialContentBuffer.isEmpty {
-            if responseContent.isEmpty {
-                responseContent = initialContentBuffer
-            } else {
-                responseContent += initialContentBuffer
-            }
-            _ = chunker.appendToken(initialContentBuffer)
-            appendText(initialContentBuffer)
-            isInThinkingMode = false
-            currentThoughts = nil
         }
 
         chunker.finalize()
@@ -566,6 +512,69 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     }
 
     // MARK: - Private helpers
+
+    /// Stops the current thinking round's clock and folds its elapsed time
+    /// into the cumulative `generationTimeSeconds`. Returns the round's own
+    /// duration for the segment being closed.
+    private func closeThinkingRound() -> TimeInterval? {
+        guard let startTime = thinkStartTime else { return nil }
+        let roundSeconds = Date().timeIntervalSince(startTime)
+        thinkStartTime = nil
+        totalThinkingSeconds += roundSeconds
+        generationTimeSeconds = totalThinkingSeconds
+        return roundSeconds
+    }
+
+    /// Opens a new ordered `.thinking` segment for a thinking round.
+    private func openThinkingSegment(initialContent: String) {
+        segments.append(.thinking(content: initialContent, isThinking: true, duration: nil))
+        currentThinkingSegmentIndex = segments.count - 1
+    }
+
+    private func updateOpenThinkingSegment(appending reasoning: String) {
+        guard let idx = currentThinkingSegmentIndex,
+              case .thinking(let existing, _, _) = segments[idx] else { return }
+        segments[idx] = .thinking(content: existing + reasoning, isThinking: true, duration: nil)
+    }
+
+    private func closeThinkingSegment(duration: TimeInterval?) {
+        guard let idx = currentThinkingSegmentIndex,
+              case .thinking(let existing, _, _) = segments[idx] else {
+            currentThinkingSegmentIndex = nil
+            return
+        }
+        segments[idx] = .thinking(content: existing, isThinking: false, duration: duration)
+        currentThinkingSegmentIndex = nil
+    }
+
+    /// Merges a late reasoning tail into the most recent closed thinking
+    /// segment so it doesn't open a phantom thought box.
+    private func appendThinkingSegmentTail(_ reasoning: String) {
+        for idx in segments.indices.reversed() {
+            if case .thinking(let existing, let isThinking, let duration) = segments[idx] {
+                segments[idx] = .thinking(
+                    content: existing + reasoning,
+                    isThinking: isThinking,
+                    duration: duration
+                )
+                return
+            }
+        }
+    }
+
+    /// Closes the in-flight thinking round when a tool call begins so the
+    /// thought box freezes to "Thought for Xs" instead of pulsing through
+    /// the tool activity. Reasoning arriving afterwards opens a new round.
+    private func closeThinkingRoundForToolBoundary() {
+        guard isInThinkingMode else { return }
+        let roundSeconds = closeThinkingRound()
+        isInThinkingMode = false
+        thinkingClosedByContent = false
+        thinkingChunker.finalize()
+        currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
+        closeThinkingSegment(duration: roundSeconds)
+        pendingSummaryActions.append(.endThinkingSession)
+    }
 
     private func appendText(_ text: String) {
         guard !text.isEmpty else { return }
