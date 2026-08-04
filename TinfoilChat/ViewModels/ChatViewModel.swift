@@ -2593,6 +2593,15 @@ class ChatViewModel: ObservableObject {
                     // the next throttled snapshot so summary generation does not
                     // force a main-actor hop per reasoning chunk.
                     var pendingSummaryThoughts: String? = nil
+                    // Trailing-edge flush for the UI throttle below. The throttle
+                    // only publishes when a new chunk arrives after the interval
+                    // has elapsed, so content landing inside the window would
+                    // otherwise stay invisible until the next chunk — if the
+                    // stream pauses (typical right after the first tokens), that
+                    // reads as a stall followed by a burst. The flush publishes
+                    // the held snapshot at the end of the current window instead.
+                    var trailingFlushTask: Task<Void, Never>? = nil
+                    defer { trailingFlushTask?.cancel() }
 
                     for try await chunk in stream {
                         if Task.isCancelled { break }
@@ -2637,19 +2646,41 @@ class ChatViewModel: ObservableObject {
 
                         // Update UI at a throttled rate to avoid overwhelming SwiftUI with diffs
                         let now = Date()
-                        if outcome.didMutateState && now.timeIntervalSince(lastUIUpdateTime) >= uiUpdateInterval {
-                            lastUIUpdateTime = now
-                            let snapshot = processor.snapshot()
-                            let thoughtsForSummary = pendingSummaryThoughts
-                            pendingSummaryThoughts = nil
-                            let viewModel = self
-                            await MainActor.run {
-                                guard let self = viewModel else { return }
-                                self.applyStreamSnapshot(snapshot, streamChatId: streamChatId)
-                                if let thoughtsForSummary {
-                                    summaryService.generateSummary(thoughts: thoughtsForSummary) { [weak self] summary in
-                                        guard self?.streamState.isStreaming(chatId: streamChatId) == true else { return }
-                                        self?.streamState.setThinkingSummary(summary, chatId: streamChatId)
+                        if outcome.didMutateState {
+                            if now.timeIntervalSince(lastUIUpdateTime) >= uiUpdateInterval {
+                                trailingFlushTask?.cancel()
+                                trailingFlushTask = nil
+                                lastUIUpdateTime = now
+                                let snapshot = processor.snapshot()
+                                let thoughtsForSummary = pendingSummaryThoughts
+                                pendingSummaryThoughts = nil
+                                let viewModel = self
+                                await MainActor.run {
+                                    guard let self = viewModel else { return }
+                                    self.applyStreamSnapshot(snapshot, streamChatId: streamChatId)
+                                    if let thoughtsForSummary {
+                                        summaryService.generateSummary(thoughts: thoughtsForSummary) { [weak self] summary in
+                                            guard self?.streamState.isStreaming(chatId: streamChatId) == true else { return }
+                                            self?.streamState.setThinkingSummary(summary, chatId: streamChatId)
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Inside the throttle window: hold a snapshot and
+                                // publish it when the window closes. The snapshot
+                                // is captured here, serialized with `process`,
+                                // because the processor must never be read from
+                                // the flush task while a later chunk mutates it.
+                                trailingFlushTask?.cancel()
+                                let snapshot = processor.snapshot()
+                                let delay = uiUpdateInterval - now.timeIntervalSince(lastUIUpdateTime)
+                                let viewModel = self
+                                trailingFlushTask = Task {
+                                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                                    guard !Task.isCancelled else { return }
+                                    await MainActor.run {
+                                        guard !Task.isCancelled, let self = viewModel else { return }
+                                        self.applyStreamSnapshot(snapshot, streamChatId: streamChatId)
                                     }
                                 }
                             }
