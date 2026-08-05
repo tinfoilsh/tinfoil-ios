@@ -27,6 +27,8 @@ extension VerificationStepState.Status {
             return .success
         case .failed:
             return .error
+        case .skipped:
+            return .pending
         }
     }
 } 
