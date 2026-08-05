@@ -200,7 +200,13 @@ struct ChatListView: View {
         .onChange(of: pendingRecoveryTurnIds) { _, _ in
             pruneRecoveryDrafts()
         }
-        .onChange(of: viewModel.currentChat?.createdAt) { _, _ in
+        // Keyed off the chat id: reassigning the same chat (e.g. the disk
+        // reload after a stream's backup completes) must not read as a chat
+        // switch, since this handler force-scrolls to the bottom. Timestamps
+        // are unsuitable as the key because createdAt loses sub-millisecond
+        // precision through the cloud sync ISO8601 round-trip, making
+        // reloaded copies of the same chat compare unequal.
+        .onChange(of: viewModel.currentChat?.id) { _, _ in
             refreshArchivedMessagesStartIndex()
             pruneRecoveryDrafts()
             userHasScrolled = false
