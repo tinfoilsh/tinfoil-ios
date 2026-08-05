@@ -770,7 +770,7 @@
 			repositoryURL = "https://github.com/tinfoilsh/tinfoil-swift";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.6.5;
+				minimumVersion = 0.7.0;
 			};
 		};
 		99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
@@ -788,6 +788,8 @@
 				kind = upToNextMajorVersion;
 				minimumVersion = 9.5.1;
 			};
+			traits = (
+			);
 		};
 		99F1546D2F4F60F600E9174E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
 			isa = XCRemoteSwiftPackageReference;
