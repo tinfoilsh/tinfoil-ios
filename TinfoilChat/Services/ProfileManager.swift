@@ -888,11 +888,11 @@ class ProfileManager: ObservableObject {
         return Self.normalizeSystemPromptForSending(customSystemPrompt)
     }
 
-    static func normalizeSystemPromptForSending(_ prompt: String) -> String {
+    nonisolated static func normalizeSystemPromptForSending(_ prompt: String) -> String {
         systemPromptHasContent(prompt) ? prompt : ""
     }
 
-    static func systemPromptHasContent(_ prompt: String) -> Bool {
+    nonisolated static func systemPromptHasContent(_ prompt: String) -> Bool {
         var result = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         if result.hasPrefix("<system>") {
             result = String(result.dropFirst("<system>".count)).trimmingCharacters(in: .whitespacesAndNewlines)
