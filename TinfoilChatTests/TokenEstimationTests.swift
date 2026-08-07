@@ -143,6 +143,22 @@ struct TokenEstimationTests {
         }
     }
 
+    @Test func distinguishesOversizedFixedRequestContent() {
+        #expect(throws: TokenEstimation.RequestBudgetError.fixedOverheadTooLarge) {
+            try TokenEstimation.selectMessagesForRequest(
+                [],
+                budget: .init(
+                    contextWindows: ["5k tokens"],
+                    systemInstructions: String(repeating: "s", count: 4_000),
+                    toolDefinitions: "",
+                    timeReminder: nil,
+                    isMultimodal: false,
+                    maxMessages: 100
+                )
+            )
+        }
+    }
+
     @Test func messageLimitKeepsNewestCompleteTurn() throws {
         let olderUser = message(content: "older question")
         let olderAssistant = message(role: .assistant, content: "older answer")

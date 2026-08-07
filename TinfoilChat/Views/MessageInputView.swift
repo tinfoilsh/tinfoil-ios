@@ -420,7 +420,9 @@ struct MessageInputView: View {
         }
 
         return ContextUsage(
-            percentage: Double(usedTokens) / Double(limitTokens) * 100,
+            percentage: limitTokens > 0
+                ? Double(usedTokens) / Double(limitTokens) * 100
+                : (usedTokens > 0 ? 100 : 0),
             usedTokens: usedTokens,
             limitTokens: limitTokens
         )

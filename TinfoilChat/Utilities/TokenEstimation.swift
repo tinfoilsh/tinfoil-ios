@@ -23,10 +23,16 @@ enum TokenEstimation {
     }
 
     enum RequestBudgetError: LocalizedError, Equatable {
+        case fixedOverheadTooLarge
         case newestTurnTooLarge
 
         var errorDescription: String? {
-            "Your latest message is too large for this model's request limit. Remove an attachment, shorten the message, or choose a model with a larger context window."
+            switch self {
+            case .fixedOverheadTooLarge:
+                return "This chat's instructions and enabled tools are too large for the model's request limit. Disable a tool or choose a model with a larger context window."
+            case .newestTurnTooLarge:
+                return "Your latest message is too large for this model's request limit. Remove an attachment, shorten the message, or choose a model with a larger context window."
+            }
         }
     }
 
@@ -157,7 +163,7 @@ enum TokenEstimation {
         let availableTokens = max(0, contextTokens - fixedTokens)
         let availableMessages = max(0, budget.maxMessages - fixedMessages)
         guard fixedTokens <= contextTokens, fixedMessages <= budget.maxMessages else {
-            throw RequestBudgetError.newestTurnTooLarge
+            throw RequestBudgetError.fixedOverheadTooLarge
         }
         guard !messages.isEmpty else { return [] }
         let groups = requestTurnGroups(messages)

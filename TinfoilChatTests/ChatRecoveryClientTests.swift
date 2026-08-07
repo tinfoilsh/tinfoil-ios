@@ -110,6 +110,42 @@ struct ChatRecoveryClientTests {
         #expect(resultCount == 0)
     }
 
+    @Test("non-success SSE never yields a chat result")
+    func failedStatusWithChatResult() async {
+        let payload = #"{"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":"unexpected"},"finish_reason":null}]}"#
+        let source = AsyncThrowingStream<Data, Error> { continuation in
+            continuation.yield(Data("data: \(payload)".utf8))
+            continuation.finish()
+        }
+        let stream = ChatRecoveryClient.decodeSSE(source, statusCode: 400)
+
+        do {
+            for try await _ in stream {}
+            Issue.record("Expected failed HTTP status to reject the stream")
+        } catch let error as ChatRecoveryClientError {
+            #expect(error.statusCode == 400)
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test("non-success empty SSE still fails")
+    func failedStatusWithEmptyStream() async {
+        let source = AsyncThrowingStream<Data, Error> { continuation in
+            continuation.finish()
+        }
+        let stream = ChatRecoveryClient.decodeSSE(source, statusCode: 500)
+
+        do {
+            for try await _ in stream {}
+            Issue.record("Expected failed HTTP status to reject the stream")
+        } catch let error as ChatRecoveryClientError {
+            #expect(error.statusCode == 500)
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
     @Test("structured context errors are not connectivity failures") @MainActor
     func contextErrorClassification() {
         let error = recoveryHTTPError(

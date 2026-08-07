@@ -365,7 +365,8 @@ class ChatViewModel: ObservableObject {
         let selection = AppConfig.shared.resolveModelSelection(
             currentModel,
             preferMultimodal: hasImages,
-            preferToolCalling: isWebSearchEnabled || SettingsManager.shared.genUIEnabled
+            preferToolCalling: (isWebSearchEnabled && SettingsManager.shared.webSearchAvailable)
+                || SettingsManager.shared.genUIEnabled
         )
         return selection.autoCandidates?.map(\.contextWindow)
             ?? [selection.representative.contextWindow]
@@ -1198,7 +1199,12 @@ class ChatViewModel: ObservableObject {
             guard generation == projectLoadGeneration else { return false }
 
             let syncResult = await cloudSync.smartSync(projectId: projectId)
-            let existingProjectChats = chats.filter { $0.projectId == projectId }
+            let existingProjectChats = chats.filter {
+                $0.projectId == projectId
+                    && !$0.isTemporary
+                    && !$0.isBlankChat
+                    && !$0.decryptionFailed
+            }
             let loadedProjectChats: [Chat]
             if syncResult.downloaded > 0 || syncResult.uploaded > 0 || existingProjectChats.isEmpty {
                 loadedProjectChats = await loadProjectChatsFromStorage(projectId: projectId)

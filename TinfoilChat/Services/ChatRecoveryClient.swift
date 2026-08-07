@@ -384,6 +384,11 @@ actor ChatRecoveryClient {
                        let result = try decodeRecoveryEvent(buffer, statusCode: statusCode) {
                         continuation.yield(result)
                     }
+                    if buffer.isEmpty,
+                       let statusCode,
+                       !(200..<300).contains(statusCode) {
+                        throw recoveryHTTPError(statusCode: statusCode, data: Data())
+                    }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -397,23 +402,23 @@ actor ChatRecoveryClient {
         _ event: Data,
         statusCode: Int?
     ) throws -> ChatStreamResult? {
+        let failedStatus = statusCode.map { !(200..<300).contains($0) } ?? false
         let payload: String?
         if let ssePayload = event.ssePayload {
             payload = ssePayload
-        } else if let statusCode, !(200..<300).contains(statusCode) {
+        } else if failedStatus {
             payload = String(data: event, encoding: .utf8)
         } else {
             return nil
         }
-        guard let payload, !payload.isEmpty, payload != "[DONE]" else { return nil }
-        do {
-            return try JSONDecoder().decode(ChatStreamResult.self, from: Data(payload.utf8))
-        } catch {
-            if let statusCode, !(200..<300).contains(statusCode) {
-                throw recoveryHTTPError(statusCode: statusCode, data: Data(payload.utf8))
-            }
-            throw error
+        if failedStatus, let statusCode {
+            throw recoveryHTTPError(
+                statusCode: statusCode,
+                data: payload.map { Data($0.utf8) } ?? event
+            )
         }
+        guard let payload, !payload.isEmpty, payload != "[DONE]" else { return nil }
+        return try JSONDecoder().decode(ChatStreamResult.self, from: Data(payload.utf8))
     }
 }
 
