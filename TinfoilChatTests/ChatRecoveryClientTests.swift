@@ -67,4 +67,57 @@ struct ChatRecoveryClientTests {
 
         #expect(nonce.count == EHBPConstants.responseNonceLength)
     }
+
+    @Test("structured error body preserves its message")
+    func structuredErrorBody() {
+        let error = recoveryHTTPError(
+            statusCode: 400,
+            data: Data(#"{"error":{"message":"maximum context length exceeded"}}"#.utf8)
+        )
+
+        #expect(error.localizedDescription == "maximum context length exceeded")
+    }
+
+    @Test("trailing SSE error decodes without a final delimiter")
+    func trailingSSEError() async {
+        let source = AsyncThrowingStream<Data, Error> { continuation in
+            continuation.yield(Data("data: {\"error\":{\"message\":\"input is too long\"}}".utf8))
+            continuation.finish()
+        }
+        let stream = ChatRecoveryClient.decodeSSE(source, statusCode: 400)
+
+        do {
+            for try await _ in stream {}
+            Issue.record("Expected trailing SSE error to fail")
+        } catch {
+            #expect(error.localizedDescription == "input is too long")
+        }
+    }
+
+    @Test("successful SSE ignores trailing comments")
+    func trailingSSEComment() async throws {
+        let source = AsyncThrowingStream<Data, Error> { continuation in
+            continuation.yield(Data(": keep-alive".utf8))
+            continuation.finish()
+        }
+        let stream = ChatRecoveryClient.decodeSSE(source, statusCode: 200)
+        var resultCount = 0
+
+        for try await _ in stream {
+            resultCount += 1
+        }
+
+        #expect(resultCount == 0)
+    }
+
+    @Test("structured context errors are not connectivity failures") @MainActor
+    func contextErrorClassification() {
+        let error = recoveryHTTPError(
+            statusCode: 400,
+            data: Data(#"{"error":{"message":"context window exceeded"}}"#.utf8)
+        )
+
+        #expect(ChatViewModel.isContextOverflowError(error))
+        #expect(!ChatViewModel.isConnectionError(error))
+    }
 }

@@ -265,6 +265,18 @@ enum Constants {
         static let contextWindowUsageRatio: Double = 0.9
         /// Fallback context window size when a model doesn't report one.
         static let defaultContextWindowTokens = 64_000
+        /// Tokens held back for the model's response.
+        static let outputReserveTokens = 4_096
+        /// Fallback request message cap when remote configuration is unavailable.
+        static let defaultMaxMessagesPerRequest = 15
+        /// Per-message allowance for role markers and chat-template framing.
+        static let messageOverheadTokens = 6
+        /// Fixed chat-template framing outside individual messages.
+        static let requestOverheadTokens = 3
+        /// Conservative allowance for each image passed to a multimodal model.
+        static let imageInputAllowanceTokens = 4_096
+        /// Synthetic result body added for each GenUI tool call.
+        static let toolResult = "executed"
         /// Usage percentage at which the context indicator switches to the
         /// warning color.
         static let warningThresholdPercent = 80

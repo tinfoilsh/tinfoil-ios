@@ -30,7 +30,7 @@ struct OptimizedChatListView: View {
     private func refreshArchivedMessagesStartIndex() {
         archivedMessagesStartIndex = TokenEstimation.findContextStartIndex(
             messages: messages,
-            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow)
+            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.contextWindowsForCurrentTurn())
         )
     }
 

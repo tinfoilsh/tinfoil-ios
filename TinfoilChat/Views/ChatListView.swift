@@ -58,7 +58,7 @@ struct ChatListView: View {
         let persistedMessages = viewModel.messages
         let persistedStartIndex = TokenEstimation.findContextStartIndex(
             messages: persistedMessages,
-            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow)
+            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.contextWindowsForCurrentTurn())
         )
         guard persistedMessages.indices.contains(persistedStartIndex) else {
             archivedMessagesStartIndex = 0

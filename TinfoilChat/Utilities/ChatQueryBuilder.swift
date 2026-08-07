@@ -69,8 +69,9 @@ struct ChatQueryBuilder {
         thinkingEnabled: Bool = true,
         genUIEnabled: Bool = true,
         autoCandidates: [ModelType]? = nil,
-        includeTimeReminder: Bool = false
-    ) -> ChatQuery {
+        includeTimeReminder: Bool = false,
+        maxMessages: Int = .max
+    ) throws -> ChatQuery {
 
         var messages: [ChatQuery.ChatCompletionMessageParam] = []
 
@@ -92,14 +93,51 @@ struct ChatQueryBuilder {
             effectiveSystemPrompt = systemPrompt.isEmpty ? hint : systemPrompt + "\n\n" + hint
         }
 
+        let rawInstructions = rules.isEmpty ? effectiveSystemPrompt : effectiveSystemPrompt + "\n\n" + rules
+        let requestSystemInstructions: String
         if useSystemRole {
-            let fullPrompt = rules.isEmpty ? effectiveSystemPrompt : effectiveSystemPrompt + "\n\n" + rules
-            if !fullPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                messages.append(.system(.init(content: .textContent(fullPrompt))))
+            requestSystemInstructions = rawInstructions
+        } else if rawInstructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            requestSystemInstructions = ""
+        } else {
+            requestSystemInstructions = "<system>\n\(rawInstructions)\n</system>"
+        }
+
+        let tools: [ChatQuery.ChatCompletionToolParam]? = genUIEnabled
+            ? GenUIRegistry.shared.buildToolParams()
+            : nil
+        let toolDefinitions: String
+        if let tools {
+            let encodedTools = try JSONEncoder().encode(tools)
+            toolDefinitions = String(data: encodedTools, encoding: .utf8) ?? ""
+        } else {
+            toolDefinitions = ""
+        }
+        let timeReminder = includeTimeReminder ? TimeReminder.formatCurrentTimeReminder() : nil
+        let contextWindows: [String]
+        if let autoCandidates, !autoCandidates.isEmpty {
+            contextWindows = autoCandidates.map(\.contextWindow)
+        } else {
+            contextWindows = [contextWindow ?? ""]
+        }
+        let recentMessages = try TokenEstimation.selectMessagesForRequest(
+            conversationMessages,
+            budget: TokenEstimation.RequestBudget(
+                contextWindows: contextWindows,
+                systemInstructions: requestSystemInstructions,
+                toolDefinitions: toolDefinitions,
+                timeReminder: timeReminder,
+                isMultimodal: isMultimodal,
+                maxMessages: maxMessages
+            )
+        )
+
+        if useSystemRole {
+            if !rawInstructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                messages.append(.system(.init(content: .textContent(rawInstructions))))
             }
         }
 
-        let recentMessages = TokenEstimation.selectMessagesWithinBudget(conversationMessages, contextWindow: contextWindow)
         var hasAddedSystemInstructions = useSystemRole
 
         for msg in recentMessages {
@@ -108,7 +146,6 @@ struct ChatQueryBuilder {
 
                 // For models that don't use system role (e.g. DeepSeek): inject system instructions as a separate user message
                 if !hasAddedSystemInstructions {
-                    let rawInstructions = rules.isEmpty ? effectiveSystemPrompt : effectiveSystemPrompt + "\n\n" + rules
                     if !rawInstructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         let systemContent = "<system>\n\(rawInstructions)\n</system>"
                         messages.append(.user(.init(content: .string(systemContent))))
@@ -191,7 +228,7 @@ struct ChatQueryBuilder {
                 if let toolCallParams {
                     for param in toolCallParams {
                         messages.append(.tool(.init(
-                            content: .textContent("executed"),
+                            content: .textContent(Constants.Context.toolResult),
                             toolCallId: param.id
                         )))
                     }
@@ -199,13 +236,9 @@ struct ChatQueryBuilder {
             }
         }
 
-        if includeTimeReminder {
-            messages.append(.user(.init(content: .string(TimeReminder.formatCurrentTimeReminder()))))
+        if let timeReminder {
+            messages.append(.user(.init(content: .string(timeReminder))))
         }
-
-        let tools: [ChatQuery.ChatCompletionToolParam]? = genUIEnabled
-            ? GenUIRegistry.shared.buildToolParams()
-            : nil
 
         // Mirror the webapp: when GenUI tools are present, send
         // `tool_choice: "auto"` and opt in to parallel tool calls so the

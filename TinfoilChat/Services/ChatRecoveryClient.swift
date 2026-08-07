@@ -15,7 +15,36 @@ enum ChatRecoveryClientError: Error {
     case unavailable
     case invalidResponse
     case httpStatus(Int)
+    case httpResponse(Int, String)
     case state(ChatRecoveryState)
+
+    var statusCode: Int? {
+        switch self {
+        case .httpStatus(let statusCode), .httpResponse(let statusCode, _):
+            return statusCode
+        default:
+            return nil
+        }
+    }
+}
+
+extension ChatRecoveryClientError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .httpResponse(_, let body) where !body.isEmpty:
+            return body
+        case .httpStatus(let statusCode), .httpResponse(let statusCode, _):
+            return "Request failed with status \(statusCode)."
+        case .invalidSession:
+            return "The recovery session is invalid."
+        case .unavailable:
+            return "Response recovery is unavailable."
+        case .invalidResponse:
+            return "The recovery service returned an invalid response."
+        case .state(let state):
+            return "Response recovery is \(state.rawValue)."
+        }
+    }
 }
 
 struct RecoverableChatStream {
@@ -109,7 +138,11 @@ actor ChatRecoveryClient {
             body: body
         )
         guard (200..<300).contains(response.response.statusCode) else {
-            throw ChatRecoveryClientError.httpStatus(response.response.statusCode)
+            var body = Data()
+            for try await chunk in response.stream {
+                body.append(chunk)
+            }
+            throw recoveryHTTPError(statusCode: response.response.statusCode, data: body)
         }
         let token = try client.getSessionRecoveryToken()
         let tokenFields = ChatRecoveryTokenFields(
@@ -143,6 +176,9 @@ actor ChatRecoveryClient {
                       from: response.data
                   )
             else {
+                if !(200..<300).contains(response.statusCode) {
+                    throw recoveryHTTPError(statusCode: response.statusCode, data: response.data)
+                }
                 throw ChatRecoveryClientError.invalidResponse
             }
             return status
@@ -165,6 +201,22 @@ actor ChatRecoveryClient {
         guard let response = urlResponse as? HTTPURLResponse else {
             bytes.task.cancel()
             throw ChatRecoveryClientError.invalidResponse
+        }
+        if response.statusCode == 404 {
+            bytes.task.cancel()
+            throw ChatRecoveryClientError.state(.missing)
+        }
+        if response.statusCode == 410 {
+            bytes.task.cancel()
+            throw ChatRecoveryClientError.state(.failed)
+        }
+        if !(200..<300).contains(response.statusCode),
+           response.value(forHTTPHeaderField: EHBPProtocol.responseNonceHeader) == nil {
+            var body = Data()
+            for try await byte in bytes {
+                body.append(byte)
+            }
+            throw recoveryHTTPError(statusCode: response.statusCode, data: body)
         }
         let nonce: Data
         do {
@@ -207,7 +259,7 @@ actor ChatRecoveryClient {
             }
         }
         return RecoveredChatStream(
-            stream: Self.decodeSSE(plaintext),
+            stream: Self.decodeSSE(plaintext, statusCode: response.statusCode),
             statusCode: response.statusCode,
             encryptedByteCount: {
                 await byteCounter.value()
@@ -218,7 +270,7 @@ actor ChatRecoveryClient {
     func delete(sessionId: String) async throws {
         let response = try await request(sessionId: sessionId, method: "DELETE")
         guard (200..<300).contains(response.statusCode) || response.statusCode == 404 else {
-            throw ChatRecoveryClientError.invalidResponse
+            throw recoveryHTTPError(statusCode: response.statusCode, data: response.data)
         }
     }
 
@@ -309,8 +361,9 @@ actor ChatRecoveryClient {
         }
     }
 
-    private static func decodeSSE(
-        _ byteStream: AsyncThrowingStream<Data, Error>
+    static func decodeSSE(
+        _ byteStream: AsyncThrowingStream<Data, Error>,
+        statusCode: Int? = nil
     ) -> AsyncThrowingStream<ChatStreamResult, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -322,15 +375,14 @@ actor ChatRecoveryClient {
                         while let boundary = buffer.eventBoundary {
                             let event = buffer.prefix(boundary.lowerBound)
                             buffer.removeSubrange(..<boundary.upperBound)
-                            guard let payload = event.ssePayload, payload != "[DONE]" else {
-                                continue
+                            if let result = try decodeRecoveryEvent(event, statusCode: statusCode) {
+                                continuation.yield(result)
                             }
-                            let result = try JSONDecoder().decode(
-                                ChatStreamResult.self,
-                                from: Data(payload.utf8)
-                            )
-                            continuation.yield(result)
                         }
+                    }
+                    if !buffer.isEmpty,
+                       let result = try decodeRecoveryEvent(buffer, statusCode: statusCode) {
+                        continuation.yield(result)
                     }
                     continuation.finish()
                 } catch {
@@ -340,6 +392,49 @@ actor ChatRecoveryClient {
             continuation.onTermination = { _ in task.cancel() }
         }
     }
+
+    private static func decodeRecoveryEvent(
+        _ event: Data,
+        statusCode: Int?
+    ) throws -> ChatStreamResult? {
+        let payload: String?
+        if let ssePayload = event.ssePayload {
+            payload = ssePayload
+        } else if let statusCode, !(200..<300).contains(statusCode) {
+            payload = String(data: event, encoding: .utf8)
+        } else {
+            return nil
+        }
+        guard let payload, !payload.isEmpty, payload != "[DONE]" else { return nil }
+        do {
+            return try JSONDecoder().decode(ChatStreamResult.self, from: Data(payload.utf8))
+        } catch {
+            if let statusCode, !(200..<300).contains(statusCode) {
+                throw recoveryHTTPError(statusCode: statusCode, data: Data(payload.utf8))
+            }
+            throw error
+        }
+    }
+}
+
+func recoveryHTTPError(statusCode: Int, data: Data) -> ChatRecoveryClientError {
+    let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let payload = data.ssePayload ?? raw
+    let payloadData = Data(payload.utf8)
+    if let object = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any] {
+        if let error = object["error"] as? [String: Any],
+           let message = error["message"] as? String,
+           !message.isEmpty {
+            return .httpResponse(statusCode, message)
+        }
+        if let message = object["message"] as? String, !message.isEmpty {
+            return .httpResponse(statusCode, message)
+        }
+    }
+    if !payload.isEmpty {
+        return .httpResponse(statusCode, payload)
+    }
+    return .httpStatus(statusCode)
 }
 
 func recoveryResponseNonce(from response: HTTPURLResponse) throws -> Data {

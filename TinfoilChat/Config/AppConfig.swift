@@ -372,7 +372,7 @@ class AppConfig: ObservableObject {
     }
     
     var maxMessagesPerRequest: Int {
-        config!.chatConfig.maxMessagesPerRequest
+        config?.chatConfig.maxMessagesPerRequest ?? Constants.Context.defaultMaxMessagesPerRequest
     }
     
     var systemPrompt: String {

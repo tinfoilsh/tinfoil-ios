@@ -21,6 +21,7 @@ struct ChatContainer: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
     @StateObject private var settings = SettingsManager.shared
+    @ObservedObject private var profileManager = ProfileManager.shared
     
     @State private var isSidebarOpen = false
     @State private var messageText = ""
@@ -313,7 +314,7 @@ struct ChatContainer: View {
                 }
 
                     if let presetId = viewModel.currentChat?.promptPresetId,
-                       let preset = ProfileManager.shared.promptPreset(for: presetId),
+                       let preset = profileManager.promptPreset(for: presetId),
                        !isSidebarOpen && !isVerificationBadgeExpanded {
                         HStack(spacing: 4) {
                             Image(systemName: preset.iconName)
