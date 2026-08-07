@@ -403,9 +403,7 @@ struct MessageInputView: View {
     /// plus the draft input and pending attachments, against the current
     /// model's token budget. Mirrors the webapp's calculation.
     private var contextUsage: ContextUsage {
-        let limitTokens = TokenEstimation.contextTokenBudget(
-            viewModel.contextWindowsForCurrentTurn(pendingAttachments: viewModel.pendingAttachments)
-        )
+        let limitTokens = TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow)
         var usedTokens = TokenEstimation.estimateTokenCount(messageText)
 
         let messages = viewModel.messages
@@ -420,9 +418,7 @@ struct MessageInputView: View {
         }
 
         return ContextUsage(
-            percentage: limitTokens > 0
-                ? Double(usedTokens) / Double(limitTokens) * 100
-                : (usedTokens > 0 ? 100 : 0),
+            percentage: Double(usedTokens) / Double(limitTokens) * 100,
             usedTokens: usedTokens,
             limitTokens: limitTokens
         )

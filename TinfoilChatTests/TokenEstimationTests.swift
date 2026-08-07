@@ -33,12 +33,9 @@ struct TokenEstimationTests {
     }
 
     @Test func budgetIsUsageRatioOfWindow() {
-        #expect(TokenEstimation.contextTokenBudget("100k tokens") ==
-                90_000 - Constants.Context.outputReserveTokens - Constants.Context.requestOverheadTokens)
+        #expect(TokenEstimation.contextTokenBudget("100k tokens") == 90_000)
         #expect(TokenEstimation.contextTokenBudget(nil) ==
-                Int(Double(Constants.Context.defaultContextWindowTokens) * Constants.Context.contextWindowUsageRatio)
-                    - Constants.Context.outputReserveTokens
-                    - Constants.Context.requestOverheadTokens)
+                Int(Double(Constants.Context.defaultContextWindowTokens) * Constants.Context.contextWindowUsageRatio))
     }
 
     @Test func includesAttachmentAndToolCallTokens() {
@@ -87,96 +84,5 @@ struct TokenEstimationTests {
     @Test func emptyMessagesSelectsNothing() {
         #expect(TokenEstimation.findContextStartIndex(messages: [], budgetTokens: 100) == 0)
         #expect(TokenEstimation.selectMessagesWithinBudget([], contextWindow: nil).isEmpty)
-    }
-
-    @Test func fullRequestOverheadReducesHistoryBudget() throws {
-        let older = message(content: String(repeating: "a", count: 3_000))
-        let newest = message(content: String(repeating: "b", count: 800))
-        let selected = try TokenEstimation.selectMessagesForRequest(
-            [older, newest],
-            budget: .init(
-                contextWindows: ["10k tokens"],
-                systemInstructions: String(repeating: "s", count: 16_000),
-                toolDefinitions: "",
-                timeReminder: nil,
-                isMultimodal: false,
-                maxMessages: 100
-            )
-        )
-
-        #expect(selected.map(\.id) == [newest.id])
-    }
-
-    @Test func autoUsesSmallestCandidateContextWindow() {
-        let newest = message(content: String(repeating: "a", count: 4_000))
-
-        #expect(throws: TokenEstimation.RequestBudgetError.newestTurnTooLarge) {
-            try TokenEstimation.selectMessagesForRequest(
-                [newest],
-                budget: .init(
-                    contextWindows: ["100k tokens", "5k tokens"],
-                    systemInstructions: "",
-                    toolDefinitions: "",
-                    timeReminder: nil,
-                    isMultimodal: false,
-                    maxMessages: 100
-                )
-            )
-        }
-    }
-
-    @Test func rejectsOversizedNewestTurn() {
-        let newest = message(content: String(repeating: "a", count: 10_000))
-
-        #expect(throws: TokenEstimation.RequestBudgetError.newestTurnTooLarge) {
-            try TokenEstimation.selectMessagesForRequest(
-                [newest],
-                budget: .init(
-                    contextWindows: ["5k tokens"],
-                    systemInstructions: "",
-                    toolDefinitions: "",
-                    timeReminder: nil,
-                    isMultimodal: false,
-                    maxMessages: 100
-                )
-            )
-        }
-    }
-
-    @Test func distinguishesOversizedFixedRequestContent() {
-        #expect(throws: TokenEstimation.RequestBudgetError.fixedOverheadTooLarge) {
-            try TokenEstimation.selectMessagesForRequest(
-                [],
-                budget: .init(
-                    contextWindows: ["5k tokens"],
-                    systemInstructions: String(repeating: "s", count: 4_000),
-                    toolDefinitions: "",
-                    timeReminder: nil,
-                    isMultimodal: false,
-                    maxMessages: 100
-                )
-            )
-        }
-    }
-
-    @Test func messageLimitKeepsNewestCompleteTurn() throws {
-        let olderUser = message(content: "older question")
-        let olderAssistant = message(role: .assistant, content: "older answer")
-        let newestUser = message(content: "new question")
-        let newestAssistant = message(role: .assistant, content: "new answer")
-
-        let selected = try TokenEstimation.selectMessagesForRequest(
-            [olderUser, olderAssistant, newestUser, newestAssistant],
-            budget: .init(
-                contextWindows: ["64k tokens"],
-                systemInstructions: "",
-                toolDefinitions: "",
-                timeReminder: nil,
-                isMultimodal: false,
-                maxMessages: 2
-            )
-        )
-
-        #expect(selected.map(\.id) == [newestUser.id, newestAssistant.id])
     }
 }

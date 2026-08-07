@@ -17,7 +17,7 @@ struct TimeReminderTests {
 
     @Test @MainActor
     func appendsTimeReminderAsLastMessageWhenRequested() throws {
-        let query = try ChatQueryBuilder.buildQuery(
+        let query = ChatQueryBuilder.buildQuery(
             modelId: "gpt-oss-120b",
             systemPrompt: "be helpful",
             rules: "",
@@ -41,7 +41,7 @@ struct TimeReminderTests {
 
     @Test @MainActor
     func omitsTimeReminderByDefault() throws {
-        let query = try ChatQueryBuilder.buildQuery(
+        let query = ChatQueryBuilder.buildQuery(
             modelId: "gpt-oss-120b",
             systemPrompt: "be helpful",
             rules: "",

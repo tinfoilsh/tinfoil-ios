@@ -358,20 +358,6 @@ class ChatViewModel: ObservableObject {
         currentChat?.messages ?? []
     }
 
-    func contextWindowsForCurrentTurn(pendingAttachments: [Attachment] = []) -> [String] {
-        let hasImages = messages.contains { message in
-            message.attachments.contains { $0.type == .image }
-        } || pendingAttachments.contains { $0.type == .image }
-        let selection = AppConfig.shared.resolveModelSelection(
-            currentModel,
-            preferMultimodal: hasImages,
-            preferToolCalling: (isWebSearchEnabled && SettingsManager.shared.webSearchAvailable)
-                || SettingsManager.shared.genUIEnabled
-        )
-        return selection.autoCandidates?.map(\.contextWindow)
-            ?? [selection.representative.contextWindow]
-    }
-
     var isLoading: Bool {
         guard let chatId = currentChat?.id else { return false }
         return streamState.isStreaming(chatId: chatId)
@@ -1197,7 +1183,6 @@ class ChatViewModel: ObservableObject {
 
             let documents = try await projectStorage.listDocuments(projectId: projectId, includeContent: true)
             guard generation == projectLoadGeneration else { return false }
-
             let syncResult = await cloudSync.smartSync(projectId: projectId)
             let existingProjectChats = chats.filter {
                 $0.projectId == projectId
@@ -2315,7 +2300,7 @@ class ChatViewModel: ObservableObject {
                 )
                 var systemPrompt = resolvedPrompt.systemPrompt
                 let suppressDefaultRules = resolvedPrompt.suppressDefaultRules
-                
+
                 // Replace MODEL_NAME placeholder with current model name
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: representativeModel.fullName)
                 
@@ -2377,7 +2362,7 @@ class ChatViewModel: ObservableObject {
                 }
 
                 // Use ChatQueryBuilder to create query with model-specific system prompt handling
-                let chatQuery = try ChatQueryBuilder.buildQuery(
+                let chatQuery = ChatQueryBuilder.buildQuery(
                     modelId: modelId,
                     systemPrompt: systemPrompt,
                     rules: processedRules,
@@ -2390,8 +2375,7 @@ class ChatViewModel: ObservableObject {
                     thinkingEnabled: streamThinkingEnabled,
                     genUIEnabled: SettingsManager.shared.genUIEnabled,
                     autoCandidates: modelSelection.autoCandidates,
-                    includeTimeReminder: true,
-                    maxMessages: AppConfig.shared.maxMessagesPerRequest
+                    includeTimeReminder: true
                 )
 
                 let hapticEnabled = SettingsManager.shared.hapticFeedbackEnabled
@@ -3067,8 +3051,11 @@ class ChatViewModel: ObservableObject {
             return "Authentication error. Please sign in again."
         }
 
-        if let recoveryError = error as? ChatRecoveryClientError,
-           let statusCode = recoveryError.statusCode {
+        if error is PromptResolutionError {
+            return error.localizedDescription
+        }
+
+        if case ChatRecoveryClientError.httpStatus(let statusCode) = error {
             switch statusCode {
             case 401:
                 return "Authentication error. Please sign in again."
@@ -3077,16 +3064,8 @@ class ChatViewModel: ObservableObject {
             case 500...599:
                 return "The service is having trouble right now. Please try again in a moment, or switch to a different model."
             default:
-                if Self.isContextOverflowError(recoveryError),
-                   let explained = Self.explainRawError(recoveryError.localizedDescription) {
-                    return explained
-                }
                 return "The model couldn't process this request. Please try again, or start a new chat if the problem persists."
             }
-        }
-
-        if error is PromptResolutionError || error is TokenEstimation.RequestBudgetError {
-            return error.localizedDescription
         }
         
         // HTTP status errors from the OpenAI SDK. Handle every code here so
@@ -3176,27 +3155,12 @@ class ChatViewModel: ObservableObject {
 
     /// Checks if an error is a connectivity failure.
     static func isConnectionError(_ error: Error) -> Bool {
-        guard !isContextOverflowError(error) else { return false }
-        return URLErrorClassifier.isConnectivityFailure(error)
-    }
-
-    static func isContextOverflowError(_ error: Error) -> Bool {
-        let lower = error.localizedDescription.lowercased()
-        return lower.contains("context length")
-            || lower.contains("context window")
-            || lower.contains("maximum context")
-            || lower.contains("too many tokens")
-            || lower.contains("token limit")
-            || lower.contains("prompt length")
-            || lower.contains("max_model_len")
-            || lower.contains("input is too long")
-            || error is TokenEstimation.RequestBudgetError
+        URLErrorClassifier.isConnectivityFailure(error)
     }
 
     /// Checks if an error indicates the user has hit their rate limit
     static func isRateLimitError(_ error: Error) -> Bool {
-        if let recoveryError = error as? ChatRecoveryClientError,
-           recoveryError.statusCode == 429 {
+        if case ChatRecoveryClientError.httpStatus(429) = error {
             return true
         }
         if case OpenAIError.statusError(_, let statusCode) = error, statusCode == 429 {
@@ -3214,11 +3178,10 @@ class ChatViewModel: ObservableObject {
 
     /// Checks if an error is a client request error (4xx, excluding 401 which is handled by retry)
     private func isRequestError(_ error: Error) -> Bool {
-        if error is PromptResolutionError || error is TokenEstimation.RequestBudgetError {
+        if error is PromptResolutionError {
             return true
         }
-        if let recoveryError = error as? ChatRecoveryClientError,
-           let statusCode = recoveryError.statusCode,
+        if case ChatRecoveryClientError.httpStatus(let statusCode) = error,
            (400...499).contains(statusCode), statusCode != 401 {
             return true
         }
@@ -3235,8 +3198,7 @@ class ChatViewModel: ObservableObject {
 
     /// Checks if an error is an authentication error (401)
     static func isAuthenticationError(_ error: Error) -> Bool {
-        if let recoveryError = error as? ChatRecoveryClientError,
-           recoveryError.statusCode == 401 {
+        if case ChatRecoveryClientError.httpStatus(401) = error {
             return true
         }
         // Streaming path: the SDK checks the HTTP status code before reading the body

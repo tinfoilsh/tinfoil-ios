@@ -166,7 +166,7 @@ struct ChatQueryBuilderReasoningTests {
 
     @Test @MainActor
     func extraBodyMakesItIntoEncodedChatQuery() throws {
-        let query = try ChatQueryBuilder.buildQuery(
+        let query = ChatQueryBuilder.buildQuery(
             modelId: "deepseek-v4-pro",
             systemPrompt: "you are tin",
             rules: "",
@@ -187,7 +187,7 @@ struct ChatQueryBuilderReasoningTests {
 
     @Test @MainActor
     func emptyPromptDoesNotEmitSystemMessage() throws {
-        let query = try ChatQueryBuilder.buildQuery(
+        let query = ChatQueryBuilder.buildQuery(
             modelId: "gpt-oss-120b",
             systemPrompt: "",
             rules: "",
@@ -206,7 +206,7 @@ struct ChatQueryBuilderReasoningTests {
 
     @Test @MainActor
     func emptyPromptDoesNotEmitSyntheticSystemWrapper() throws {
-        let query = try ChatQueryBuilder.buildQuery(
+        let query = ChatQueryBuilder.buildQuery(
             modelId: "deepseek-v4-pro",
             systemPrompt: "",
             rules: "",

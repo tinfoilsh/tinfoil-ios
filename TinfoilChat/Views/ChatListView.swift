@@ -14,7 +14,6 @@ struct ChatListView: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @Binding var messageText: String
     @ObservedObject private var recoveryDraftStore = ChatRecoveryDraftStore.shared
-    @ObservedObject private var settings = SettingsManager.shared
 
     @State private var isAtBottom = true
     @State private var userHasScrolled = false
@@ -53,14 +52,13 @@ struct ChatListView: View {
     }
 
     /// Token estimation walks every message, so the result is cached and
-    /// refreshed only when the conversation, model, context-selection settings,
-    /// or message count changes
+    /// refreshed only when the conversation, model, or message count changes
     /// instead of on every body evaluation during streaming.
     private func refreshArchivedMessagesStartIndex() {
         let persistedMessages = viewModel.messages
         let persistedStartIndex = TokenEstimation.findContextStartIndex(
             messages: persistedMessages,
-            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.contextWindowsForCurrentTurn())
+            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow)
         )
         guard persistedMessages.indices.contains(persistedStartIndex) else {
             archivedMessagesStartIndex = 0
@@ -179,15 +177,6 @@ struct ChatListView: View {
             viewModel.isScrollInteractionActive = false
         }
         .onChange(of: viewModel.currentModel.id) { _, _ in
-            refreshArchivedMessagesStartIndex()
-        }
-        .onChange(of: viewModel.isWebSearchEnabled) { _, _ in
-            refreshArchivedMessagesStartIndex()
-        }
-        .onChange(of: settings.webSearchAvailable) { _, _ in
-            refreshArchivedMessagesStartIndex()
-        }
-        .onChange(of: settings.genUIEnabled) { _, _ in
             refreshArchivedMessagesStartIndex()
         }
         .onChange(of: messages.count) { oldCount, newCount in
