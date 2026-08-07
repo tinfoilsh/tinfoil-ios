@@ -838,7 +838,13 @@ actor ChatRecoveryCoordinator {
                         return
                     }
                     if !(200..<300).contains(recovered.statusCode) {
-                        for try await _ in recovered.stream {}
+                        do {
+                            for try await _ in recovered.stream {}
+                        } catch let error as ChatRecoveryClientError {
+                            guard error.statusCode == recovered.statusCode else {
+                                throw error
+                            }
+                        }
                         guard scanIsCurrent(
                             accountGeneration: accountGeneration,
                             scanGeneration: scanGeneration,

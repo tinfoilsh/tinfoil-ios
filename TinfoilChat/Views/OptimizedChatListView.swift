@@ -26,7 +26,8 @@ struct OptimizedChatListView: View {
     @State private var archivedMessagesStartIndex = 0
 
     /// Token estimation walks every message, so the result is cached and
-    /// refreshed only when the conversation, context window, or message count changes
+    /// refreshed only when the conversation, model, context-selection settings,
+    /// or message count changes
     /// instead of on every body evaluation during streaming.
     private func refreshArchivedMessagesStartIndex() {
         archivedMessagesStartIndex = TokenEstimation.findContextStartIndex(
@@ -117,7 +118,13 @@ struct OptimizedChatListView: View {
         .onChange(of: viewModel.currentModel.id) { _, _ in
             refreshArchivedMessagesStartIndex()
         }
-        .onChange(of: viewModel.contextWindowsForCurrentTurn()) { _, _ in
+        .onChange(of: viewModel.isWebSearchEnabled) { _, _ in
+            refreshArchivedMessagesStartIndex()
+        }
+        .onChange(of: settings.webSearchAvailable) { _, _ in
+            refreshArchivedMessagesStartIndex()
+        }
+        .onChange(of: settings.genUIEnabled) { _, _ in
             refreshArchivedMessagesStartIndex()
         }
         .onChange(of: messages.count) { oldCount, newCount in
