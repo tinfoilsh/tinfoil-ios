@@ -2150,6 +2150,8 @@ class ChatViewModel: ObservableObject {
         AccessibilityAnnouncer.announce(Constants.Accessibility.generatingResponse)
 
         let turnId = UUID().uuidString.lowercased()
+        let streamModel = currentModel
+        let modelDisplayNamesByName = AppConfig.shared.modelDisplayNamesByName
         var turnChat = initialChat
         turnChat.hasActiveStream = true
         if let userIndex = turnChat.messages.lastIndex(where: { $0.role == .user }) {
@@ -2164,6 +2166,7 @@ class ChatViewModel: ObservableObject {
             role: .assistant,
             turnId: turnId,
             content: "",
+            modelDisplayName: streamModel.responseDisplayName,
             isCollapsed: true
         )
         addMessage(assistantMessage)
@@ -2189,7 +2192,6 @@ class ChatViewModel: ObservableObject {
         }
         streamingTracker.startStreaming(streamChatId)
         ChatRecoveryDraftStore.shared.prune(chatId: streamChatId, retaining: [])
-        let streamModel = currentModel
         let streamProject = activeProject
         let streamProjectDocuments = projectDocuments
         let streamReasoningEffort = reasoningEffort
@@ -2406,6 +2408,8 @@ class ChatViewModel: ObservableObject {
                     isWebSearchEnabled: webSearchEnabled,
                     hapticEnabled: hapticEnabled,
                     responseContent: initialResponseContent,
+                    modelDisplayName: streamModel.responseDisplayName,
+                    modelDisplayNamesByName: modelDisplayNamesByName,
                     currentThoughts: initialThoughts,
                     generationTimeSeconds: initialGenerationTime,
                     isInThinkingMode: initialIsThinking
@@ -2781,6 +2785,7 @@ class ChatViewModel: ObservableObject {
                     // Finalize all message content
                     if !chat.messages.isEmpty, let lastIndex = chat.messages.indices.last {
                         chat.messages[lastIndex].content = finalSnapshot.responseContent
+                        chat.messages[lastIndex].modelDisplayName = finalSnapshot.modelDisplayName
                         chat.messages[lastIndex].thoughts = finalSnapshot.thoughts
                         chat.messages[lastIndex].thinkingChunks = finalSnapshot.thinkingChunks
                         chat.messages[lastIndex].isThinking = false
@@ -3000,6 +3005,7 @@ class ChatViewModel: ObservableObject {
         }
 
         chat.messages[lastIndex].content = snapshot.responseContent
+        chat.messages[lastIndex].modelDisplayName = snapshot.modelDisplayName
         chat.messages[lastIndex].thoughts = snapshot.thoughts
         chat.messages[lastIndex].thinkingChunks = snapshot.thinkingChunks
         chat.messages[lastIndex].isThinking = snapshot.isThinking

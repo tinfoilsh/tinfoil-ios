@@ -703,6 +703,7 @@ struct Message: Identifiable, Codable, Equatable {
     let role: MessageRole
     var turnId: String? = nil
     var content: String
+    var modelDisplayName: String? = nil
     var thoughts: String? = nil
     var isThinking: Bool = false
     var timestamp: Date
@@ -784,6 +785,20 @@ struct Message: Identifiable, Codable, Equatable {
         role == .user && content.count >= Message.longMessageAttachmentThreshold
     }
 
+    var hasVisibleAssistantContent: Bool {
+        role == .assistant && (
+            !content.isEmpty
+                || thoughts?.isEmpty == false
+                || segments?.isEmpty == false
+                || webSearches?.isEmpty == false
+                || webSearchState != nil
+                || !urlFetches.isEmpty
+                || !toolCalls.isEmpty
+                || annotations?.isEmpty == false
+                || timeline?.isEmpty == false
+        )
+    }
+
     private static let iso8601Formatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -796,11 +811,12 @@ struct Message: Identifiable, Codable, Equatable {
         return formatter
     }()
     
-    init(id: String = UUID().uuidString.lowercased(), role: MessageRole, turnId: String? = nil, content: String, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], thinkingChunks: [ThinkingChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = []) {
+    init(id: String = UUID().uuidString.lowercased(), role: MessageRole, turnId: String? = nil, content: String, modelDisplayName: String? = nil, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], thinkingChunks: [ThinkingChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = []) {
         self.id = id
         self.role = role
         self.turnId = turnId
         self.content = content
+        self.modelDisplayName = modelDisplayName
         self.thoughts = thoughts
         self.isThinking = isThinking
         self.timestamp = timestamp
@@ -815,7 +831,7 @@ struct Message: Identifiable, Codable, Equatable {
     // MARK: - Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, role, turnId, content, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, isRateLimitError, isHourlyLimitError, isConnectionError, generationTimeSeconds, webSearchState
+        case id, role, turnId, content, modelDisplayName, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, isRateLimitError, isHourlyLimitError, isConnectionError, generationTimeSeconds, webSearchState
         case webSearch // Alternative key used by React app
         case urlFetches
         case attachments
@@ -834,6 +850,7 @@ struct Message: Identifiable, Codable, Equatable {
         role = try container.decode(MessageRole.self, forKey: .role)
         turnId = try container.decodeIfPresent(String.self, forKey: .turnId)
         content = try container.decode(String.self, forKey: .content)
+        modelDisplayName = try container.decodeIfPresent(String.self, forKey: .modelDisplayName)
         thoughts = try container.decodeIfPresent(String.self, forKey: .thoughts)
         isThinking = try container.decodeIfPresent(Bool.self, forKey: .isThinking) ?? false
         
@@ -1024,6 +1041,7 @@ struct Message: Identifiable, Codable, Equatable {
         try container.encode(role.rawValue, forKey: .role)
         try container.encodeIfPresent(turnId, forKey: .turnId)
         try container.encode(content, forKey: .content)
+        try container.encodeIfPresent(modelDisplayName, forKey: .modelDisplayName)
         try container.encodeIfPresent(thoughts, forKey: .thoughts)
         try container.encode(isThinking, forKey: .isThinking)
         try container.encode(Self.iso8601Formatter.string(from: timestamp), forKey: .timestamp)

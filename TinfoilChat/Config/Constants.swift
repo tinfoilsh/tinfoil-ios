@@ -98,6 +98,11 @@ enum Constants {
         static let maxThinkingChunkCharacters = 8_000
     }
 
+    enum MessageMetadata {
+        static let encryptedFontSize: CGFloat = 10
+        static let iconSize: CGFloat = 10
+    }
+
     enum StreamingBuffer {
         static let initialMultiplier: CGFloat = 50.0
         static let multiplierIncrement: CGFloat = 10.0

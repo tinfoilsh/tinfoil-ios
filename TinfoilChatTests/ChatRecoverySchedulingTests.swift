@@ -7,6 +7,7 @@ struct ChatRecoverySchedulingTests {
         let emptyThinking = Message(
             role: .assistant,
             content: "",
+            modelDisplayName: "GPT-OSS 120B",
             isThinking: true
         )
         let recoveredThought = Message(
@@ -132,6 +133,7 @@ struct ChatRecoverySchedulingTests {
             role: .assistant,
             turnId: "turn-1",
             content: "Recovered response",
+            modelDisplayName: "Model A",
             generationTimeSeconds: 1
         )
         persisted.thinkingDuration = 1
@@ -141,6 +143,7 @@ struct ChatRecoverySchedulingTests {
             role: .assistant,
             turnId: "turn-1",
             content: "Recovered response",
+            modelDisplayName: "Model A",
             generationTimeSeconds: 2
         )
         reconstructed.thinkingDuration = 2
@@ -152,6 +155,11 @@ struct ChatRecoverySchedulingTests {
         #expect(recoveryResponsePayloadMatches(persisted, reconstructed))
         reconstructed.content = "Different response"
         #expect(!recoveryResponsePayloadMatches(persisted, reconstructed))
+        reconstructed.content = persisted.content
+        reconstructed.modelDisplayName = "Different Model"
+        #expect(!recoveryResponsePayloadMatches(persisted, reconstructed))
+        persisted.modelDisplayName = nil
+        #expect(recoveryResponsePayloadMatches(persisted, reconstructed))
     }
 
     @Test func registrationCleanupRequiresADefinitePreCommitFailure() {

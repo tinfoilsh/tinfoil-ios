@@ -99,6 +99,36 @@ private struct PendingResponseRecoveryView: View {
     }
 }
 
+private struct MessageSecurityMetadataView: View {
+    let modelDisplayName: String?
+    let isDarkMode: Bool
+
+    private var trimmedModelDisplayName: String? {
+        guard let name = modelDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty else { return nil }
+        return name
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let trimmedModelDisplayName {
+                Text(trimmedModelDisplayName)
+                    .font(.caption2)
+                Text("·")
+                    .font(.caption2)
+            }
+            HStack(spacing: 3) {
+                Image(systemName: "lock")
+                    .font(.system(size: Constants.MessageMetadata.iconSize))
+                Text("Encrypted")
+                    .font(.system(size: Constants.MessageMetadata.encryptedFontSize))
+            }
+        }
+        .foregroundStyle(isDarkMode ? Color.white.opacity(0.5) : Color.black.opacity(0.5))
+        .accessibilityElement(children: .combine)
+    }
+}
+
 struct MessageView: View {
     let message: Message
     let isDarkMode: Bool
@@ -729,8 +759,7 @@ struct MessageView: View {
                 }
                 
                 // Add action buttons for assistant messages (only when not streaming)
-                if message.role == .assistant &&
-                   (!message.content.isEmpty || message.thoughts != nil) &&
+                if message.hasVisibleAssistantContent &&
                    !isRenderingStream {
                     HStack(spacing: 16) {
                         // Sources button - only show if we have web search sources
@@ -790,6 +819,11 @@ struct MessageView: View {
                         }
 
                         Spacer()
+
+                        MessageSecurityMetadataView(
+                            modelDisplayName: message.modelDisplayName,
+                            isDarkMode: isDarkMode
+                        )
                     }
                     .padding(.vertical, 8)
 
