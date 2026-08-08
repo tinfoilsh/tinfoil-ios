@@ -101,10 +101,6 @@ enum Constants {
     enum MessageMetadata {
         static let encryptedFontSize: CGFloat = 10
         static let iconSize: CGFloat = 10
-        static let userTabCornerRadius: CGFloat = 10
-        static let userTabHorizontalPadding: CGFloat = 10
-        static let userTabVerticalPadding: CGFloat = 5
-        static let userTabHeight: CGFloat = 23
     }
 
     enum StreamingBuffer {

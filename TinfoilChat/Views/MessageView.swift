@@ -129,31 +129,6 @@ private struct MessageSecurityMetadataView: View {
     }
 }
 
-private struct UserMessageSecurityTab: View {
-    let isDarkMode: Bool
-
-    var body: some View {
-        MessageSecurityMetadataView(modelDisplayName: nil, isDarkMode: isDarkMode)
-            .padding(.horizontal, Constants.MessageMetadata.userTabHorizontalPadding)
-            .padding(.vertical, Constants.MessageMetadata.userTabVerticalPadding)
-            .background {
-                if #available(iOS 26, *) {
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: Constants.MessageMetadata.userTabCornerRadius,
-                        topTrailingRadius: Constants.MessageMetadata.userTabCornerRadius
-                    )
-                    .fill(.thickMaterial)
-                } else {
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: Constants.MessageMetadata.userTabCornerRadius,
-                        topTrailingRadius: Constants.MessageMetadata.userTabCornerRadius
-                    )
-                    .fill(Color.userMessageBackground(isDarkMode: isDarkMode))
-                }
-            }
-    }
-}
-
 struct MessageView: View {
     let message: Message
     let isDarkMode: Bool
@@ -874,18 +849,6 @@ struct MessageView: View {
                     }
                 }
                 .cornerRadius(16)
-                .overlay(alignment: .topTrailing) {
-                    if message.role == .user && !message.content.isEmpty {
-                        UserMessageSecurityTab(isDarkMode: isDarkMode)
-                            .offset(y: -Constants.MessageMetadata.userTabHeight)
-                    }
-                }
-                .padding(
-                    .top,
-                    message.role == .user && !message.content.isEmpty
-                        ? Constants.MessageMetadata.userTabHeight
-                        : 0
-                )
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
                 // While a stream is in flight the table reloads its rows
                 // every UI tick, which can deallocate the SwiftUI subgraph
