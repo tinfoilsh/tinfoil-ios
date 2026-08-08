@@ -133,6 +133,7 @@ struct ChatRecoverySchedulingTests {
             role: .assistant,
             turnId: "turn-1",
             content: "Recovered response",
+            modelDisplayName: "Model A",
             generationTimeSeconds: 1
         )
         persisted.thinkingDuration = 1
@@ -142,6 +143,7 @@ struct ChatRecoverySchedulingTests {
             role: .assistant,
             turnId: "turn-1",
             content: "Recovered response",
+            modelDisplayName: "Model A",
             generationTimeSeconds: 2
         )
         reconstructed.thinkingDuration = 2
@@ -156,6 +158,8 @@ struct ChatRecoverySchedulingTests {
         reconstructed.content = persisted.content
         reconstructed.modelDisplayName = "Different Model"
         #expect(!recoveryResponsePayloadMatches(persisted, reconstructed))
+        persisted.modelDisplayName = nil
+        #expect(recoveryResponsePayloadMatches(persisted, reconstructed))
     }
 
     @Test func registrationCleanupRequiresADefinitePreCommitFailure() {

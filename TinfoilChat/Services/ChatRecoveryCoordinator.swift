@@ -118,7 +118,9 @@ func recoveryResponsePayloadMatches(_ lhs: Message, _ rhs: Message) -> Bool {
         && lhs.role == rhs.role
         && lhs.turnId == rhs.turnId
         && lhs.content == rhs.content
-        && lhs.modelDisplayName == rhs.modelDisplayName
+        && (lhs.modelDisplayName == nil
+            || rhs.modelDisplayName == nil
+            || lhs.modelDisplayName == rhs.modelDisplayName)
         && lhs.thoughts == rhs.thoughts
         && lhs.isThinking == rhs.isThinking
         && lhs.webSearchState == rhs.webSearchState
@@ -855,6 +857,7 @@ actor ChatRecoveryCoordinator {
                     }
                     let recoveredResponse = try await reconstructMessage(
                         stream: recovered.stream,
+                        modelDisplayName: persistedCheckpoint?.modelDisplayName,
                         chatId: chatId,
                         turnId: envelope.turnId,
                         sessionId: payload.sessionId,
@@ -1146,6 +1149,7 @@ actor ChatRecoveryCoordinator {
 
     private func reconstructMessage(
         stream: AsyncThrowingStream<ChatStreamResult, Error>,
+        modelDisplayName: String?,
         chatId: String,
         turnId: String,
         sessionId: String,
@@ -1156,15 +1160,12 @@ actor ChatRecoveryCoordinator {
         onProgress: @escaping @Sendable () async -> Void
     ) async throws -> Message {
         let modelDisplayNamesByName = await MainActor.run {
-            Dictionary(
-                uniqueKeysWithValues: AppConfig.shared.availableModels.map {
-                    ($0.modelName, $0.fullName)
-                }
-            )
+            AppConfig.shared.modelDisplayNamesByName
         }
         let processor = StreamingResponseProcessor(
             isWebSearchEnabled: true,
             hapticEnabled: false,
+            modelDisplayName: modelDisplayName,
             modelDisplayNamesByName: modelDisplayNamesByName
         )
         var eventState = RecoveredEventState()

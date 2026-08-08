@@ -2151,11 +2151,7 @@ class ChatViewModel: ObservableObject {
 
         let turnId = UUID().uuidString.lowercased()
         let streamModel = currentModel
-        let modelDisplayNamesByName = Dictionary(
-            uniqueKeysWithValues: AppConfig.shared.availableModels.map {
-                ($0.modelName, $0.fullName)
-            }
-        )
+        let modelDisplayNamesByName = AppConfig.shared.modelDisplayNamesByName
         var turnChat = initialChat
         turnChat.hasActiveStream = true
         if let userIndex = turnChat.messages.lastIndex(where: { $0.role == .user }) {
@@ -3274,10 +3270,9 @@ class ChatViewModel: ObservableObject {
         let recoveryAttempt = recoveryAttempts.removeValue(forKey: chatId)
         let stoppedResponse = recoveryAttempt.flatMap { attempt -> Message? in
             guard let location = findChatLocation(chatId) else { return nil }
-            let response = chat(at: location).messages.last {
+            return chat(at: location).messages.last {
                 $0.role == .assistant && $0.turnId == attempt.turnId
             }
-            return response?.hasVisibleAssistantContent == true ? response : nil
         }
         let recoveryCleanup = recoveryAttempt.map { attempt in
             Task.detached(priority: .userInitiated) {
@@ -3292,10 +3287,6 @@ class ChatViewModel: ObservableObject {
         if let location = findChatLocation(chatId) {
             var chat = chat(at: location)
             chat.hasActiveStream = false
-            if chat.messages.last?.role == .assistant,
-               chat.messages.last?.hasVisibleAssistantContent == false {
-                chat.messages.removeLast()
-            }
             if let recoveryAttempt {
                 chat.pendingRecoveries?.removeAll {
                     $0.turnId == recoveryAttempt.turnId
