@@ -130,6 +130,8 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
     // Full model name
     var fullName: String { appConfig.name }
 
+    var responseDisplayName: String { isAuto ? displayName : fullName }
+
     // Model identifier used for API calls
     var modelName: String { appConfig.modelName }
 

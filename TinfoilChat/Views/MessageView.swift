@@ -99,6 +99,61 @@ private struct PendingResponseRecoveryView: View {
     }
 }
 
+private struct MessageSecurityMetadataView: View {
+    let modelDisplayName: String?
+    let isDarkMode: Bool
+
+    private var trimmedModelDisplayName: String? {
+        guard let name = modelDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty else { return nil }
+        return name
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let trimmedModelDisplayName {
+                Text(trimmedModelDisplayName)
+                    .font(.caption2)
+                Text("·")
+                    .font(.caption2)
+            }
+            HStack(spacing: 3) {
+                Image(systemName: "lock")
+                    .font(.system(size: Constants.MessageMetadata.iconSize))
+                Text("Encrypted")
+                    .font(.system(size: Constants.MessageMetadata.encryptedFontSize))
+            }
+        }
+        .foregroundStyle(isDarkMode ? Color.white.opacity(0.5) : Color.black.opacity(0.5))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct UserMessageSecurityTab: View {
+    let isDarkMode: Bool
+
+    var body: some View {
+        MessageSecurityMetadataView(modelDisplayName: nil, isDarkMode: isDarkMode)
+            .padding(.horizontal, Constants.MessageMetadata.userTabHorizontalPadding)
+            .padding(.vertical, Constants.MessageMetadata.userTabVerticalPadding)
+            .background {
+                if #available(iOS 26, *) {
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: Constants.MessageMetadata.userTabCornerRadius,
+                        topTrailingRadius: Constants.MessageMetadata.userTabCornerRadius
+                    )
+                    .fill(.thickMaterial)
+                } else {
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: Constants.MessageMetadata.userTabCornerRadius,
+                        topTrailingRadius: Constants.MessageMetadata.userTabCornerRadius
+                    )
+                    .fill(Color.userMessageBackground(isDarkMode: isDarkMode))
+                }
+            }
+    }
+}
+
 struct MessageView: View {
     let message: Message
     let isDarkMode: Bool
@@ -729,8 +784,7 @@ struct MessageView: View {
                 }
                 
                 // Add action buttons for assistant messages (only when not streaming)
-                if message.role == .assistant &&
-                   (!message.content.isEmpty || message.thoughts != nil) &&
+                if message.hasVisibleAssistantContent &&
                    !isRenderingStream {
                     HStack(spacing: 16) {
                         // Sources button - only show if we have web search sources
@@ -790,6 +844,11 @@ struct MessageView: View {
                         }
 
                         Spacer()
+
+                        MessageSecurityMetadataView(
+                            modelDisplayName: message.modelDisplayName,
+                            isDarkMode: isDarkMode
+                        )
                     }
                     .padding(.vertical, 8)
 
@@ -815,6 +874,18 @@ struct MessageView: View {
                     }
                 }
                 .cornerRadius(16)
+                .overlay(alignment: .topTrailing) {
+                    if message.role == .user && !message.content.isEmpty {
+                        UserMessageSecurityTab(isDarkMode: isDarkMode)
+                            .offset(y: -Constants.MessageMetadata.userTabHeight)
+                    }
+                }
+                .padding(
+                    .top,
+                    message.role == .user && !message.content.isEmpty
+                        ? Constants.MessageMetadata.userTabHeight
+                        : 0
+                )
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
                 // While a stream is in flight the table reloads its rows
                 // every UI tick, which can deallocate the SwiftUI subgraph

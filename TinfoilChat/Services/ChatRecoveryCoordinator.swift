@@ -63,15 +63,7 @@ final class ChatRecoveryPhaseTracker: ObservableObject {
 }
 
 func recoveryDraftHasVisibleContent(_ message: Message) -> Bool {
-    !message.content.isEmpty
-        || message.thoughts?.isEmpty == false
-        || message.segments?.isEmpty == false
-        || message.webSearches?.isEmpty == false
-        || message.webSearchState != nil
-        || !message.urlFetches.isEmpty
-        || !message.toolCalls.isEmpty
-        || message.annotations?.isEmpty == false
-        || message.timeline?.isEmpty == false
+    message.hasVisibleAssistantContent
 }
 
 func recoveredResponseForPersistence(
@@ -126,6 +118,7 @@ func recoveryResponsePayloadMatches(_ lhs: Message, _ rhs: Message) -> Bool {
         && lhs.role == rhs.role
         && lhs.turnId == rhs.turnId
         && lhs.content == rhs.content
+        && lhs.modelDisplayName == rhs.modelDisplayName
         && lhs.thoughts == rhs.thoughts
         && lhs.isThinking == rhs.isThinking
         && lhs.webSearchState == rhs.webSearchState
@@ -1162,9 +1155,17 @@ actor ChatRecoveryCoordinator {
         storage: ChatRecoveryStorage,
         onProgress: @escaping @Sendable () async -> Void
     ) async throws -> Message {
+        let modelDisplayNamesByName = await MainActor.run {
+            Dictionary(
+                uniqueKeysWithValues: AppConfig.shared.availableModels.map {
+                    ($0.modelName, $0.fullName)
+                }
+            )
+        }
         let processor = StreamingResponseProcessor(
             isWebSearchEnabled: true,
-            hapticEnabled: false
+            hapticEnabled: false,
+            modelDisplayNamesByName: modelDisplayNamesByName
         )
         var eventState = RecoveredEventState()
         var lastProgressDraft: Message?
@@ -1312,6 +1313,7 @@ actor ChatRecoveryCoordinator {
             role: .assistant,
             turnId: turnId,
             content: snapshot.responseContent,
+            modelDisplayName: snapshot.modelDisplayName,
             thoughts: snapshot.thoughts,
             isThinking: snapshot.isThinking,
             timestamp: .distantPast,

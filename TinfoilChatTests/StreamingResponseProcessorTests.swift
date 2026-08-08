@@ -43,6 +43,33 @@ struct StreamingResponseProcessorTests {
         #expect(processor.snapshot().responseContent == "complete")
     }
 
+    @Test("stores the routed model display name")
+    func storesRoutedModelDisplayName() throws {
+        let processor = StreamingResponseProcessor(
+            isWebSearchEnabled: false,
+            hapticEnabled: false,
+            modelDisplayName: "Auto · Smart",
+            modelDisplayNamesByName: ["gpt-oss-120b": "GPT-OSS 120B"]
+        )
+
+        _ = processor.process(processor.parse(try chunk(content: "complete")))
+
+        #expect(processor.snapshot().modelDisplayName == "GPT-OSS 120B")
+    }
+
+    @Test("keeps the selected display name when the routed model is unknown")
+    func keepsSelectedModelDisplayName() throws {
+        let processor = StreamingResponseProcessor(
+            isWebSearchEnabled: false,
+            hapticEnabled: false,
+            modelDisplayName: "Auto · Smart"
+        )
+
+        _ = processor.process(processor.parse(try chunk(content: "complete")))
+
+        #expect(processor.snapshot().modelDisplayName == "Auto · Smart")
+    }
+
     private func chunk(
         content: String,
         finishReason: String? = nil

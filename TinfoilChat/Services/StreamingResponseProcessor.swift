@@ -27,6 +27,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     /// value so the main actor never reads live processor state.
     struct Snapshot {
         var responseContent: String
+        var modelDisplayName: String?
         var thoughts: String?
         var thinkingChunks: [ThinkingChunk]
         var contentChunks: [ContentChunk]
@@ -123,6 +124,8 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     private var didRecordWebSearchBeforeThinking = false
     private var webSearchBeforeThinking: Bool? = nil
     private var responseContent: String
+    private var modelDisplayName: String?
+    private let modelDisplayNamesByName: [String: String]
     private var currentThoughts: String?
     private var generationTimeSeconds: TimeInterval?
     private var receivedFinishReason = false
@@ -138,6 +141,8 @@ final class StreamingResponseProcessor: @unchecked Sendable {
         isWebSearchEnabled: Bool,
         hapticEnabled: Bool,
         responseContent: String = "",
+        modelDisplayName: String? = nil,
+        modelDisplayNamesByName: [String: String] = [:],
         currentThoughts: String? = nil,
         generationTimeSeconds: TimeInterval? = nil,
         isInThinkingMode: Bool = false
@@ -145,6 +150,8 @@ final class StreamingResponseProcessor: @unchecked Sendable {
         self.isWebSearchEnabled = isWebSearchEnabled
         self.hapticEnabled = hapticEnabled
         self.responseContent = responseContent
+        self.modelDisplayName = modelDisplayName
+        self.modelDisplayNamesByName = modelDisplayNamesByName
         self.currentThoughts = currentThoughts
         self.generationTimeSeconds = generationTimeSeconds
         self.isInThinkingMode = isInThinkingMode
@@ -219,6 +226,11 @@ final class StreamingResponseProcessor: @unchecked Sendable {
 
         let chunk = parsed.chunk
         let content = parsed.content
+        if let resolvedModelDisplayName = modelDisplayNamesByName[chunk.model],
+           resolvedModelDisplayName != modelDisplayName {
+            modelDisplayName = resolvedModelDisplayName
+            outcome.didMutateState = true
+        }
         let hasReasoningContent = chunk.choices.first?.delta.reasoning != nil
         let reasoningContent = chunk.choices.first?.delta.reasoning ?? ""
 
@@ -493,6 +505,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     func snapshot() -> Snapshot {
         Snapshot(
             responseContent: responseContent,
+            modelDisplayName: modelDisplayName,
             thoughts: currentThoughts,
             thinkingChunks: thinkingChunker.getAllChunks(),
             contentChunks: chunker.getAllChunks(),

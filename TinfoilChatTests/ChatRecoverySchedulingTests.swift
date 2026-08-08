@@ -7,6 +7,7 @@ struct ChatRecoverySchedulingTests {
         let emptyThinking = Message(
             role: .assistant,
             content: "",
+            modelDisplayName: "GPT-OSS 120B",
             isThinking: true
         )
         let recoveredThought = Message(
@@ -151,6 +152,9 @@ struct ChatRecoverySchedulingTests {
 
         #expect(recoveryResponsePayloadMatches(persisted, reconstructed))
         reconstructed.content = "Different response"
+        #expect(!recoveryResponsePayloadMatches(persisted, reconstructed))
+        reconstructed.content = persisted.content
+        reconstructed.modelDisplayName = "Different Model"
         #expect(!recoveryResponsePayloadMatches(persisted, reconstructed))
     }
 
