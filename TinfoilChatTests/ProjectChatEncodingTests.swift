@@ -48,6 +48,19 @@ struct ProjectChatEncodingTests {
 
         #expect(decoded.projectId == "project-1")
     }
+
+    @Test @MainActor
+    func storedChatRoundTripsPromptPresetId() throws {
+        var chat = Chat.create(id: "chat-1", modelType: testModel)
+        chat.promptPresetId = "user:shared-preset"
+
+        let data = try JSONEncoder().encode(StoredChat(from: chat))
+        let stored = try JSONDecoder().decode(StoredChat.self, from: data)
+        let decoded = try #require(stored.toChat())
+
+        #expect(stored.promptPresetId == "user:shared-preset")
+        #expect(decoded.promptPresetId == "user:shared-preset")
+    }
 }
 
 struct WebSearchChatPreferenceTests {

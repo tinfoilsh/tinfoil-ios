@@ -54,6 +54,58 @@ struct PromptPreset: Identifiable, Equatable {
     }
 }
 
+struct ResolvedSystemPrompt: Equatable {
+    let systemPrompt: String
+    let suppressDefaultRules: Bool
+}
+
+enum PromptResolutionError: LocalizedError, Equatable {
+    case presetUnavailable(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .presetUnavailable:
+            return "This chat's prompt preset is unavailable. It may have been deleted or not finished syncing."
+        }
+    }
+}
+
+enum PromptResolver {
+    static func resolve(
+        presetId: String?,
+        availablePresets: [PromptPreset],
+        profileCustomPrompt: String?,
+        settingsCustomPrompt: String?,
+        defaultPrompt: String
+    ) throws -> ResolvedSystemPrompt {
+        if let presetId {
+            guard let preset = availablePresets.first(where: { $0.id == presetId }) else {
+                throw PromptResolutionError.presetUnavailable(presetId)
+            }
+            return ResolvedSystemPrompt(
+                systemPrompt: preset.systemPrompt,
+                suppressDefaultRules: false
+            )
+        }
+
+        if let profileCustomPrompt {
+            return ResolvedSystemPrompt(
+                systemPrompt: profileCustomPrompt,
+                suppressDefaultRules: !ProfileManager.systemPromptHasContent(profileCustomPrompt)
+            )
+        }
+
+        if let settingsCustomPrompt {
+            return ResolvedSystemPrompt(
+                systemPrompt: settingsCustomPrompt,
+                suppressDefaultRules: !ProfileManager.systemPromptHasContent(settingsCustomPrompt)
+            )
+        }
+
+        return ResolvedSystemPrompt(systemPrompt: defaultPrompt, suppressDefaultRules: false)
+    }
+}
+
 extension PromptPreset {
     /// Wrap a prompt body in the `<system>` tags expected by the inference
     /// layer, matching how custom prompts are stored on iOS.

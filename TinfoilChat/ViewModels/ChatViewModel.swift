@@ -1163,11 +1163,10 @@ class ChatViewModel: ObservableObject {
     /// the shared project context nor report success.
     private var projectLoadGeneration = 0
 
-    /// Loads a project and makes it the active context without touching
-    /// the current chat selection. Returns true when the project became
-    /// active and this load is still the most recent one.
+    /// Loads a project and makes it the active context. A search result is
+    /// published with that context only after all project resources load.
     @discardableResult
-    func loadProject(projectId: String) async -> Bool {
+    func loadProject(projectId: String, searchResultChat: Chat? = nil) async -> Bool {
         guard hasChatAccess else { return false }
 
         projectLoadGeneration += 1
@@ -1175,7 +1174,6 @@ class ChatViewModel: ObservableObject {
 
         isLoadingProject = true
         projectError = nil
-        isViewingProjectChat = false
         var loaded = false
         do {
             let project = try await projectStorage.getProject(projectId)
@@ -1185,14 +1183,35 @@ class ChatViewModel: ObservableObject {
 
             let documents = try await projectStorage.listDocuments(projectId: projectId, includeContent: true)
             guard generation == projectLoadGeneration else { return false }
-            activeProject = project
-            projectDocuments = documents
-
             let syncResult = await cloudSync.smartSync(projectId: projectId)
-            if syncResult.downloaded > 0 || syncResult.uploaded > 0 || activeProjectChats.isEmpty {
-                await loadProjectChatsIntoMemory(projectId: projectId)
+            let existingProjectChats = chats.filter {
+                $0.projectId == projectId
+                    && !$0.isTemporary
+                    && !$0.isBlankChat
+                    && !$0.decryptionFailed
+            }
+            let loadedProjectChats: [Chat]
+            if syncResult.downloaded > 0 || syncResult.uploaded > 0 || existingProjectChats.isEmpty {
+                loadedProjectChats = await loadProjectChatsFromStorage(projectId: projectId)
+            } else {
+                loadedProjectChats = existingProjectChats
             }
             guard generation == projectLoadGeneration else { return false }
+            if let searchResultChat,
+               pendingSearchResultChatId != searchResultChat.id {
+                isLoadingProject = false
+                return false
+            }
+
+            mergeProjectChats(loadedProjectChats)
+            projectDocuments = documents
+            if let searchResultChat {
+                selectChat(searchResultChat)
+                isViewingProjectChat = true
+            } else {
+                isViewingProjectChat = false
+            }
+            activeProject = project
             loaded = true
         } catch {
             guard generation == projectLoadGeneration else { return false }
@@ -1245,7 +1264,8 @@ class ChatViewModel: ObservableObject {
                     // loadProject (not enterProject) so no blank chat is
                     // selected along the way, which would clear the pending
                     // token below before it could be checked.
-                    await loadProject(projectId: projectId)
+                    await loadProject(projectId: projectId, searchResultChat: chat)
+                    return
                 }
                 // A newer selection during the load supersedes this one:
                 // leave it in charge, and drop the just-loaded project
@@ -1473,6 +1493,10 @@ class ChatViewModel: ObservableObject {
 
     private func loadProjectChatsIntoMemory(projectId: String) async {
         let projectChats = await loadProjectChatsFromStorage(projectId: projectId)
+        mergeProjectChats(projectChats)
+    }
+
+    private func mergeProjectChats(_ projectChats: [Chat]) {
         for projectChat in projectChats {
             if let index = chats.firstIndex(where: { $0.id == projectChat.id }) {
                 chats[index] = projectChat
@@ -2259,22 +2283,24 @@ class ChatViewModel: ObservableObject {
                 // Add system message first with language preference
                 let settingsManager = SettingsManager.shared
                 let profileManager = ProfileManager.shared
-                var systemPrompt: String
-                var suppressDefaultRules = false
-                
                 // Precedence: per-chat prompt preset > custom prompt toggle > default
-                if let preset = profileManager.promptPreset(for: streamChat.promptPresetId) {
-                    systemPrompt = preset.systemPrompt
-                } else if let customPrompt = profileManager.getCustomSystemPrompt() {
-                    systemPrompt = customPrompt
-                    suppressDefaultRules = !ProfileManager.systemPromptHasContent(customPrompt)
-                } else if settingsManager.isUsingCustomPrompt {
-                    systemPrompt = ProfileManager.normalizeSystemPromptForSending(settingsManager.customSystemPrompt)
-                    suppressDefaultRules = !ProfileManager.systemPromptHasContent(systemPrompt)
-                } else {
-                    systemPrompt = AppConfig.shared.systemPrompt
+                if let presetId = streamChat.promptPresetId,
+                   profileManager.promptPreset(for: presetId) == nil {
+                    await profileManager.performFullSync()
                 }
-                
+
+                let resolvedPrompt = try PromptResolver.resolve(
+                    presetId: streamChat.promptPresetId,
+                    availablePresets: profileManager.allPromptPresets,
+                    profileCustomPrompt: profileManager.getCustomSystemPrompt(),
+                    settingsCustomPrompt: settingsManager.isUsingCustomPrompt
+                        ? ProfileManager.normalizeSystemPromptForSending(settingsManager.customSystemPrompt)
+                        : nil,
+                    defaultPrompt: AppConfig.shared.systemPrompt
+                )
+                var systemPrompt = resolvedPrompt.systemPrompt
+                let suppressDefaultRules = resolvedPrompt.suppressDefaultRules
+
                 // Replace MODEL_NAME placeholder with current model name
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: representativeModel.fullName)
                 
@@ -3025,6 +3051,10 @@ class ChatViewModel: ObservableObject {
             return "Authentication error. Please sign in again."
         }
 
+        if error is PromptResolutionError {
+            return error.localizedDescription
+        }
+
         if case ChatRecoveryClientError.httpStatus(let statusCode) = error {
             switch statusCode {
             case 401:
@@ -3148,6 +3178,9 @@ class ChatViewModel: ObservableObject {
 
     /// Checks if an error is a client request error (4xx, excluding 401 which is handled by retry)
     private func isRequestError(_ error: Error) -> Bool {
+        if error is PromptResolutionError {
+            return true
+        }
         if case ChatRecoveryClientError.httpStatus(let statusCode) = error,
            (400...499).contains(statusCode), statusCode != 401 {
             return true
