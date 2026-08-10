@@ -34,6 +34,8 @@ struct ReasoningEndpointParams: Codable, Equatable {
 /// - `effortMap` — optional translation from the UI's effort vocabulary to
 ///   the model's actual accepted values (e.g. DeepSeek V4 only accepts
 ///   `high`/`max`).
+/// - `requiresCompleteReasoningHistory` — prior assistant reasoning must be
+///   returned as `reasoning_content` on subsequent requests.
 ///
 /// The presence of a `reasoningConfig` object is itself the capability
 /// flag — there is no separate boolean.
@@ -43,6 +45,7 @@ struct ReasoningConfig: Codable, Equatable {
     let defaultEnabled: Bool?
     let effortMap: [String: String]?
     let params: [String: ReasoningEndpointParams]?
+    let requiresCompleteReasoningHistory: Bool?
 }
 
 /// Synthetic "Auto" model selection that lets the router pick the best
@@ -166,6 +169,10 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
         appConfig.reasoningConfig?.supportsToggle == true
     }
 
+    var requiresCompleteReasoningHistory: Bool {
+        appConfig.reasoningConfig?.requiresCompleteReasoningHistory == true
+    }
+
     // MARK: - Auto routing
 
     /// Capability tags advertised by the controlplane (e.g. `smart`, `fast`).
@@ -201,7 +208,10 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
                 : "Routes to the fastest available model",
             details: "",
             parameters: "",
-            contextWindow: "",
+            contextWindow: members.min {
+                TokenEstimation.parseContextWindowTokens($0.contextWindow)
+                    < TokenEstimation.parseContextWindowTokens($1.contextWindow)
+            }?.contextWindow ?? "",
             type: "chat",
             chat: true,
             paid: true,
@@ -230,6 +240,13 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
 struct ModelSelection {
     let representative: ModelType
     let autoCandidates: [ModelType]?
+
+    var contextWindow: String {
+        autoCandidates?.min {
+            TokenEstimation.parseContextWindowTokens($0.contextWindow)
+                < TokenEstimation.parseContextWindowTokens($1.contextWindow)
+        }?.contextWindow ?? representative.contextWindow
+    }
 }
 
 /// Application-wide configuration settings
@@ -456,6 +473,13 @@ class AppConfig: ObservableObject {
     /// Real chat models advertising the given capability tier.
     func tierModels(_ tier: String) -> [ModelType] {
         availableModels.filter { $0.isChat && $0.attributes.contains(tier) }
+    }
+
+    func requiresCompleteReasoningHistory(for model: ModelType) -> Bool {
+        guard model.isAuto, let tier = model.autoTier else {
+            return model.requiresCompleteReasoningHistory
+        }
+        return tierModels(tier).contains { $0.requiresCompleteReasoningHistory }
     }
 
     /// Synthetic Auto entries for tiers that currently have at least one member.

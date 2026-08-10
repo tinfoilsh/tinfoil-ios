@@ -404,12 +404,20 @@ struct MessageInputView: View {
     /// model's token budget. Mirrors the webapp's calculation.
     private var contextUsage: ContextUsage {
         let limitTokens = TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow)
+        let includesReasoning = AppConfig.shared.requiresCompleteReasoningHistory(for: viewModel.currentModel)
         var usedTokens = TokenEstimation.estimateTokenCount(messageText)
 
         let messages = viewModel.messages
-        let startIndex = TokenEstimation.findContextStartIndex(messages: messages, budgetTokens: limitTokens)
+        let startIndex = TokenEstimation.findContextStartIndex(
+            messages: messages,
+            budgetTokens: limitTokens,
+            includesReasoning: includesReasoning
+        )
         for i in startIndex..<messages.count {
-            usedTokens += TokenEstimation.estimateMessageTokens(messages[i])
+            usedTokens += TokenEstimation.estimateMessageTokens(
+                messages[i],
+                includesReasoning: includesReasoning
+            )
         }
 
         for attachment in viewModel.pendingAttachments {

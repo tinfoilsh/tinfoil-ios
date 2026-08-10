@@ -748,6 +748,23 @@ struct Message: Identifiable, Codable, Equatable {
     /// `segments` representation.
     var timeline: [JSONValue]? = nil
 
+    var reasoningContentForHistory: String? {
+        if let segments {
+            let reasoning = segments.reduce(into: "") { result, segment in
+                if case .thinking(let content, _, _) = segment {
+                    result += content
+                }
+            }
+            if !reasoning.isEmpty {
+                return reasoning
+            }
+        }
+        if let thoughts, !thoughts.isEmpty {
+            return thoughts
+        }
+        return nil
+    }
+
     /// True when this assistant message has at least one tool call whose
     /// widget is not registered on this client. Used to surface the
     /// "interactive component unavailable" notice for forward

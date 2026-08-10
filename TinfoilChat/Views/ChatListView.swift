@@ -56,9 +56,11 @@ struct ChatListView: View {
     /// instead of on every body evaluation during streaming.
     private func refreshArchivedMessagesStartIndex() {
         let persistedMessages = viewModel.messages
+        let includesReasoning = AppConfig.shared.requiresCompleteReasoningHistory(for: viewModel.currentModel)
         let persistedStartIndex = TokenEstimation.findContextStartIndex(
             messages: persistedMessages,
-            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow)
+            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow),
+            includesReasoning: includesReasoning
         )
         guard persistedMessages.indices.contains(persistedStartIndex) else {
             archivedMessagesStartIndex = 0
