@@ -130,6 +130,8 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
     // Full model name
     var fullName: String { appConfig.name }
 
+    var responseDisplayName: String { isAuto ? displayName : fullName }
+
     // Model identifier used for API calls
     var modelName: String { appConfig.modelName }
 
@@ -256,6 +258,13 @@ class AppConfig: ObservableObject {
     
     // Available models from config
     @Published private(set) var availableModels: [ModelType] = []
+
+    var modelDisplayNamesByName: [String: String] {
+        Dictionary(
+            availableModels.map { ($0.modelName, $0.fullName) },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
     
     // Premium API key flag
     @Published private(set) var isPremiumKeyRequired = false

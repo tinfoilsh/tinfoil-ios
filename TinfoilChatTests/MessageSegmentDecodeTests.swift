@@ -55,6 +55,20 @@ struct MessageSegmentDecodeTests {
         #expect(message.segments == nil)
     }
 
+    @Test func roundTripsModelDisplayName() throws {
+        let message = Message(
+            role: .assistant,
+            content: "hello",
+            modelDisplayName: "GPT-OSS 120B"
+        )
+
+        let data = try JSONEncoder().encode(message)
+        let decoded = try JSONDecoder().decode(Message.self, from: data)
+
+        #expect(decoded.modelDisplayName == "GPT-OSS 120B")
+        #expect(String(decoding: data, as: UTF8.self).contains("modelDisplayName"))
+    }
+
     @Test func decodesMessageWhenAllSegmentsAreUnknown() throws {
         let json = """
         {
