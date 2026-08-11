@@ -28,11 +28,11 @@ struct OptimizedChatListView: View {
     /// refreshed only when the conversation, model, or message count changes
     /// instead of on every body evaluation during streaming.
     private func refreshArchivedMessagesStartIndex() {
-        let includesReasoning = AppConfig.shared.requiresCompleteReasoningHistory(for: viewModel.currentModel)
+        let reasoningHistoryPolicy = AppConfig.shared.reasoningHistoryPolicy(for: viewModel.currentModel)
         archivedMessagesStartIndex = TokenEstimation.findContextStartIndex(
             messages: messages,
             budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow),
-            includesReasoning: includesReasoning
+            reasoningHistoryPolicy: reasoningHistoryPolicy
         )
     }
 

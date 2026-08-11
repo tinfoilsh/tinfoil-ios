@@ -362,6 +362,12 @@ enum MessageRole: String, Codable {
     case assistant
 }
 
+extension ReasoningHistoryPolicy {
+    func includesReasoning(for message: Message) -> Bool {
+        self == .all || (self == .toolCallOnly && !message.toolCalls.isEmpty)
+    }
+}
+
 // MARK: - Web Search Types
 
 /// Represents a source from web search results

@@ -34,18 +34,46 @@ struct ReasoningEndpointParams: Codable, Equatable {
 /// - `effortMap` — optional translation from the UI's effort vocabulary to
 ///   the model's actual accepted values (e.g. DeepSeek V4 only accepts
 ///   `high`/`max`).
-/// - `requiresCompleteReasoningHistory` — prior assistant reasoning must be
-///   returned as `reasoning_content` on subsequent requests.
+/// - `reasoningHistoryPolicy` — controls whether prior assistant reasoning is
+///   returned for every assistant message, tool-call messages only, or never.
 ///
 /// The presence of a `reasoningConfig` object is itself the capability
 /// flag — there is no separate boolean.
+enum ReasoningHistoryPolicy: String, Codable, Equatable {
+    case none
+    case toolCallOnly = "tool-call-only"
+    case all
+
+    private var rank: Int {
+        switch self {
+        case .none: return 0
+        case .toolCallOnly: return 1
+        case .all: return 2
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: value) ?? .none
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    static func strongest(_ first: Self, _ second: Self) -> Self {
+        second.rank > first.rank ? second : first
+    }
+}
+
 struct ReasoningConfig: Codable, Equatable {
     let supportsEffort: Bool?
     let supportsToggle: Bool?
     let defaultEnabled: Bool?
     let effortMap: [String: String]?
     let params: [String: ReasoningEndpointParams]?
-    let requiresCompleteReasoningHistory: Bool?
+    let reasoningHistoryPolicy: ReasoningHistoryPolicy?
 }
 
 /// Synthetic "Auto" model selection that lets the router pick the best
@@ -169,8 +197,8 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
         appConfig.reasoningConfig?.supportsToggle == true
     }
 
-    var requiresCompleteReasoningHistory: Bool {
-        appConfig.reasoningConfig?.requiresCompleteReasoningHistory == true
+    var reasoningHistoryPolicy: ReasoningHistoryPolicy {
+        appConfig.reasoningConfig?.reasoningHistoryPolicy ?? .none
     }
 
     // MARK: - Auto routing
@@ -475,11 +503,13 @@ class AppConfig: ObservableObject {
         availableModels.filter { $0.isChat && $0.attributes.contains(tier) }
     }
 
-    func requiresCompleteReasoningHistory(for model: ModelType) -> Bool {
+    func reasoningHistoryPolicy(for model: ModelType) -> ReasoningHistoryPolicy {
         guard model.isAuto, let tier = model.autoTier else {
-            return model.requiresCompleteReasoningHistory
+            return model.reasoningHistoryPolicy
         }
-        return tierModels(tier).contains { $0.requiresCompleteReasoningHistory }
+        return tierModels(tier).reduce(ReasoningHistoryPolicy.none) { policy, candidate in
+            ReasoningHistoryPolicy.strongest(policy, candidate.reasoningHistoryPolicy)
+        }
     }
 
     /// Synthetic Auto entries for tiers that currently have at least one member.

@@ -99,17 +99,24 @@ struct ChatQueryBuilder {
             }
         }
 
-        let includesReasoningHistory = reasoningConfig?.requiresCompleteReasoningHistory == true
-            || autoCandidates?.contains { $0.requiresCompleteReasoningHistory } == true
+        let candidateReasoningHistoryPolicy = autoCandidates?.reduce(ReasoningHistoryPolicy.none) { policy, candidate in
+            ReasoningHistoryPolicy.strongest(policy, candidate.reasoningHistoryPolicy)
+        } ?? .none
+        let reasoningHistoryPolicy = ReasoningHistoryPolicy.strongest(
+            reasoningConfig?.reasoningHistoryPolicy ?? .none,
+            candidateReasoningHistoryPolicy
+        )
         let recentMessages = TokenEstimation.selectMessagesWithinBudget(
             conversationMessages,
             contextWindow: contextWindow,
-            includesReasoning: includesReasoningHistory
+            reasoningHistoryPolicy: reasoningHistoryPolicy
         )
         var hasAddedSystemInstructions = useSystemRole
 
         for msg in recentMessages {
-            let reasoningContent = includesReasoningHistory ? msg.reasoningContentForHistory : nil
+            let reasoningContent = reasoningHistoryPolicy.includesReasoning(for: msg)
+                ? msg.reasoningContentForHistory
+                : nil
             if msg.role == .user {
                 var userContent = msg.content
 

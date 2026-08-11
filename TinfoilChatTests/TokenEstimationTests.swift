@@ -53,7 +53,7 @@ struct TokenEstimationTests {
         msg.thoughts = "abcdefgh"
 
         #expect(TokenEstimation.estimateMessageTokens(msg) == 1)
-        #expect(TokenEstimation.estimateMessageTokens(msg, includesReasoning: true) == 3)
+        #expect(TokenEstimation.estimateMessageTokens(msg, reasoningHistoryPolicy: .all) == 3)
     }
 
     @Test func derivesReasoningFromThinkingSegments() {
@@ -66,7 +66,17 @@ struct TokenEstimationTests {
         ]
 
         #expect(msg.reasoningContentForHistory == "first second")
-        #expect(TokenEstimation.estimateMessageTokens(msg, includesReasoning: true) == 3)
+        #expect(TokenEstimation.estimateMessageTokens(msg, reasoningHistoryPolicy: .all) == 3)
+    }
+
+    @Test func toolCallPolicyCountsOnlyToolCallReasoning() {
+        var ordinary = message(role: .assistant, content: "abcd")
+        ordinary.thoughts = "abcdefgh"
+        var toolCall = ordinary
+        toolCall.toolCalls = [GenUIToolCall(id: "call_1", name: "tool", arguments: "{}")]
+
+        #expect(TokenEstimation.estimateMessageTokens(ordinary, reasoningHistoryPolicy: .toolCallOnly) == 1)
+        #expect(TokenEstimation.estimateMessageTokens(toolCall, reasoningHistoryPolicy: .toolCallOnly) == 5)
     }
 
     @Test func archivesOldestMessagesBeyondBudget() {

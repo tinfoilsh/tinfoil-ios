@@ -49,9 +49,12 @@ enum TokenEstimation {
     /// it yet: the webapp sends it for multi-turn context and counts it, and
     /// matching its estimate keeps the archive boundary identical across
     /// platforms (erring toward a smaller prompt, never an overflow).
-    static func estimateMessageTokens(_ message: Message, includesReasoning: Bool = false) -> Int {
+    static func estimateMessageTokens(
+        _ message: Message,
+        reasoningHistoryPolicy: ReasoningHistoryPolicy = .none
+    ) -> Int {
         var tokens = estimateTokenCount(message.content)
-        if includesReasoning {
+        if reasoningHistoryPolicy.includesReasoning(for: message) {
             tokens += estimateTokenCount(message.reasoningContentForHistory)
         }
         if let searchReasoning = message.searchReasoning {
@@ -78,12 +81,15 @@ enum TokenEstimation {
     static func findContextStartIndex(
         messages: [Message],
         budgetTokens: Int,
-        includesReasoning: Bool = false
+        reasoningHistoryPolicy: ReasoningHistoryPolicy = .none
     ) -> Int {
         var usedTokens = 0
         var hasIncludedSubstantiveMessage = false
         for i in stride(from: messages.count - 1, through: 0, by: -1) {
-            let messageTokens = estimateMessageTokens(messages[i], includesReasoning: includesReasoning)
+            let messageTokens = estimateMessageTokens(
+                messages[i],
+                reasoningHistoryPolicy: reasoningHistoryPolicy
+            )
             usedTokens += messageTokens
             if usedTokens > budgetTokens && hasIncludedSubstantiveMessage {
                 return i + 1
@@ -100,13 +106,13 @@ enum TokenEstimation {
     static func selectMessagesWithinBudget(
         _ messages: [Message],
         contextWindow: String?,
-        includesReasoning: Bool = false
+        reasoningHistoryPolicy: ReasoningHistoryPolicy = .none
     ) -> [Message] {
         let budget = contextTokenBudget(contextWindow)
         return Array(messages[findContextStartIndex(
             messages: messages,
             budgetTokens: budget,
-            includesReasoning: includesReasoning
+            reasoningHistoryPolicy: reasoningHistoryPolicy
         )...])
     }
 }
