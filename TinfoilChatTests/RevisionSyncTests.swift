@@ -184,6 +184,16 @@ struct RevisionSyncTests {
         #expect(missingIds == ["missing"])
     }
 
+    @Test func contentRepairIgnoresPendingDeletes() {
+        let candidates = ChatContentIntegrity.repairCandidates(
+            repairIds: ["missing", "pending-delete", "removed"],
+            indexedIds: ["missing", "pending-delete"],
+            ignoredIds: ["pending-delete"]
+        )
+
+        #expect(candidates == ["missing"])
+    }
+
     @MainActor
     @Test func pendingMetadataSelectionExcludesLocalOnlyAndCleanChats() {
         var pendingChat = ChatSearchServiceTests.makeChat(id: "pending", title: "Pending")
@@ -365,6 +375,35 @@ struct RevisionSyncTests {
         )
 
         #expect(selected == [remote])
+    }
+
+    @MainActor
+    @Test func snapshotRepairsMissingContentBeforeDirtyMetadata() {
+        var dirty = ChatSearchServiceTests.makeChat(id: "missing-file", title: "Missing")
+        dirty.syncedAt = Date()
+        dirty.syncVersion = 2
+        dirty.locallyModified = true
+        dirty.projectLocallyModified = true
+        let entry = ChatIndexEntry(from: dirty)
+        let remote = EnclaveRevisionSnapshotItem(
+            id: dirty.id,
+            etag: "2",
+            keyId: "key",
+            projectId: nil,
+            updatedAt: "2026-08-11T00:00:00.000Z"
+        )
+
+        #expect(SnapshotReconciliation.contentItems(
+            local: [entry],
+            remote: [remote],
+            recentLimit: 1,
+            missingContentIds: [dirty.id]
+        ) == [remote])
+        #expect(RevisionApplyPolicy.contentResult(
+            existing: entry,
+            expectedUpdatedAt: entry.updatedAt,
+            allowLocallyModified: true
+        ) == .applied)
     }
 
     @Test func snapshotRepairsRememberedContentAfterIndexEntryIsRemoved() {

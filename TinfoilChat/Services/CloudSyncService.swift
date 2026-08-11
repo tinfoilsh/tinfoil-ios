@@ -1578,7 +1578,8 @@ class CloudSyncService: ObservableObject {
                 chat,
                 generation: generation,
                 userId: userId,
-                expectedLocalUpdatedAt: localById[item.id]?.updatedAt
+                expectedLocalUpdatedAt: localById[item.id]?.updatedAt,
+                allowLocallyModified: missingContentIds.contains(item.id)
             ) else {
                 throw RevisionSyncError.incompletePull
             }
@@ -1594,13 +1595,15 @@ class CloudSyncService: ObservableObject {
                 projectId: item.projectId,
                 syncVersion: syncVersion
             )
+            if applyResult == .locallyModified { continue }
             guard applyResult == .applied else {
                 throw RevisionSyncError.incompletePull
             }
         }
         guard generation == accountGeneration else { throw CancellationError() }
         guard try await EncryptedFileStorage.cloud.completeContentRepairIfResolved(
-            userId: userId
+            userId: userId,
+            ignoring: pendingDeleteIds
         ) else {
             throw RevisionSyncError.incompletePull
         }

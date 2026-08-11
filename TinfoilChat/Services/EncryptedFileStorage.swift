@@ -278,13 +278,21 @@ actor EncryptedFileStorage {
         return contentRepairIds[userId]?.isEmpty == false
     }
 
-    func completeContentRepairIfResolved(userId: String) async throws -> Bool {
+    func completeContentRepairIfResolved(
+        userId: String,
+        ignoring ignoredIds: Set<String>
+    ) async throws -> Bool {
         await acquireWriteLock()
         defer { releaseWriteLock() }
 
         let indexedIds = Set(try await loadIndex(userId: userId).map(\.id))
         var unresolvedIds: Set<String> = []
-        for chatId in contentRepairIds[userId] ?? [] where indexedIds.contains(chatId) {
+        let repairCandidates = ChatContentIntegrity.repairCandidates(
+            repairIds: contentRepairIds[userId] ?? [],
+            indexedIds: indexedIds,
+            ignoredIds: ignoredIds
+        )
+        for chatId in repairCandidates {
             let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
             let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
             if !fileManager.fileExists(atPath: encPath.path)

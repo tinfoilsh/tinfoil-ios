@@ -156,11 +156,11 @@ enum SnapshotReconciliation {
         }
         return remote.filter { item in
             guard let entry = localById[item.id] else { return true }
+            if missingContentIds.contains(item.id) { return true }
             guard !entry.locallyModified, entry.projectLocallyModified != true else {
                 return false
             }
-            return missingContentIds.contains(item.id)
-                || entry.decryptionFailed
+            return entry.decryptionFailed
                 || entry.projectId != item.projectId
                 || String(entry.syncVersion) != item.etag
         }
@@ -208,6 +208,14 @@ enum ChatContentIntegrity {
         contentExists: (String) -> Bool
     ) -> Set<String> {
         Set(indexIds.filter { !contentExists($0) })
+    }
+
+    static func repairCandidates(
+        repairIds: Set<String>,
+        indexedIds: Set<String>,
+        ignoredIds: Set<String>
+    ) -> Set<String> {
+        repairIds.intersection(indexedIds).subtracting(ignoredIds)
     }
 }
 
