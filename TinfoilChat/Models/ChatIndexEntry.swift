@@ -20,6 +20,7 @@ struct ChatIndexEntry: Codable, Identifiable, Equatable {
     var dataCorrupted: Bool
     var formatVersion: Int?
     var projectId: String?
+    var projectLocallyModified: Bool?
     var syncVersion: Int
     var syncedAt: Date?
     var locallyModified: Bool
@@ -38,6 +39,18 @@ struct ChatIndexEntry: Codable, Identifiable, Equatable {
         isDisplayable && !isLocalOnly
     }
 
+    var needsCloudUpload: Bool {
+        !isLocalOnly
+            && locallyModified
+            && messageCount > 0
+            && !decryptionFailed
+            && !dataCorrupted
+    }
+
+    var requiresCloudDelete: Bool {
+        !isLocalOnly && (syncedAt != nil || syncVersion > 0)
+    }
+
     init(from chat: Chat) {
         self.id = chat.id
         self.title = chat.title
@@ -50,6 +63,7 @@ struct ChatIndexEntry: Codable, Identifiable, Equatable {
         self.dataCorrupted = chat.dataCorrupted
         self.formatVersion = chat.formatVersion
         self.projectId = chat.projectId
+        self.projectLocallyModified = chat.projectLocallyModified
         self.syncVersion = chat.syncVersion
         self.syncedAt = chat.syncedAt
         self.locallyModified = chat.locallyModified

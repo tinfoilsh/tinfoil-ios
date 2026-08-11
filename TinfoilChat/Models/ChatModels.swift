@@ -66,6 +66,7 @@ struct Chat: Identifiable, Codable {
 
     // Project association (used by React, preserved by iOS)
     var projectId: String?
+    var projectLocallyModified: Bool?
 
     // Active prompt-library preset for this chat. Resolves to a built-in or
     // user preset whose system prompt overrides the default for this chat.
@@ -126,6 +127,7 @@ struct Chat: Identifiable, Codable {
         formatVersion: Int? = nil,
         isLocalOnly: Bool = false,
         projectId: String? = nil,
+        projectLocallyModified: Bool? = nil,
         promptPresetId: String? = nil,
         webSearchEnabled: Bool = true)
     {
@@ -149,6 +151,7 @@ struct Chat: Identifiable, Codable {
         self.formatVersion = formatVersion
         self.isLocalOnly = isLocalOnly
         self.projectId = projectId
+        self.projectLocallyModified = projectLocallyModified
         self.promptPresetId = promptPresetId
         self.webSearchEnabled = webSearchEnabled
     }
@@ -204,7 +207,8 @@ struct Chat: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, title, titleState, messages, pendingRecoveries, createdAt, modelType, language, userId
         case syncVersion, syncedAt, locallyModified, updatedAt
-        case decryptionFailed, dataCorrupted, formatVersion, isLocalOnly, projectId, promptPresetId
+        case decryptionFailed, dataCorrupted, formatVersion, isLocalOnly, projectId
+        case projectLocallyModified, promptPresetId
         case webSearchEnabled
         case clock, writer, clockVersion
     }
@@ -236,6 +240,10 @@ struct Chat: Identifiable, Codable {
         formatVersion = try container.decodeIfPresent(Int.self, forKey: .formatVersion)
         isLocalOnly = try container.decodeIfPresent(Bool.self, forKey: .isLocalOnly) ?? false
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
+        projectLocallyModified = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .projectLocallyModified
+        )
         promptPresetId = try container.decodeIfPresent(String.self, forKey: .promptPresetId)
         webSearchEnabled = try container.decodeIfPresent(Bool.self, forKey: .webSearchEnabled) ?? true
         clock = try container.decodeIfPresent(Int.self, forKey: .clock)
@@ -268,6 +276,7 @@ struct Chat: Identifiable, Codable {
         try container.encodeIfPresent(formatVersion, forKey: .formatVersion)
         try container.encode(isLocalOnly, forKey: .isLocalOnly)
         try container.encodeIfPresent(projectId, forKey: .projectId)
+        try container.encodeIfPresent(projectLocallyModified, forKey: .projectLocallyModified)
         try container.encodeIfPresent(promptPresetId, forKey: .promptPresetId)
         try container.encode(webSearchEnabled, forKey: .webSearchEnabled)
         try container.encodeIfPresent(clock, forKey: .clock)

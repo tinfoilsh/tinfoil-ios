@@ -31,6 +31,9 @@ actor EncryptedFileStorage {
     private let subdirectory: String?
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private var indexCache: [String: [ChatIndexEntry]] = [:]
+    private var pendingChatIdsCache: [String: Set<String>] = [:]
+    private var deleteIntentsCache: [String: [PendingChatDelete]] = [:]
 
     // Single-writer lock that serializes mutating operations.
     // Swift actors release isolation at each `await` suspension, so
@@ -120,6 +123,11 @@ actor EncryptedFileStorage {
         return dir.appendingPathComponent("index.enc")
     }
 
+    private func deleteIntentsFilePath(userId: String) throws -> URL {
+        let dir = try chatsDirectory(userId: userId)
+        return dir.appendingPathComponent("delete-intents.enc")
+    }
+
     private func syncMetadataPath(chatId: String, userId: String) throws -> URL {
         let dir = try chatsDirectory(userId: userId)
         return dir.appendingPathComponent("\(sanitizePathComponent(chatId)).sync.enc")
@@ -183,6 +191,9 @@ actor EncryptedFileStorage {
     // MARK: - Index Operations
 
     func loadIndex(userId: String) async throws -> [ChatIndexEntry] {
+        if let cached = indexCache[userId] {
+            return cached
+        }
         let indexPath = try indexFilePath(userId: userId)
 
         guard fileManager.fileExists(atPath: indexPath.path) else {
@@ -193,7 +204,9 @@ actor EncryptedFileStorage {
             let fileData = try Data(contentsOf: indexPath)
             let encrypted = try decoder.decode(EncryptedData.self, from: fileData)
             let decryptedData = try await encryptor.decryptData(encrypted)
-            return try decoder.decode([ChatIndexEntry].self, from: decryptedData)
+            let entries = try decoder.decode([ChatIndexEntry].self, from: decryptedData)
+            updateIndexCaches(entries, userId: userId)
+            return entries
         } catch {
             return try await rebuildIndex(userId: userId)
         }
@@ -205,6 +218,24 @@ actor EncryptedFileStorage {
         let encrypted = try await encryptor.encryptData(jsonData)
         let fileData = try encoder.encode(encrypted)
         try fileData.write(to: indexPath, options: [.atomic, .completeFileProtection])
+        updateIndexCaches(entries, userId: userId)
+    }
+
+    func pendingChatIds(userId: String) async throws -> [String] {
+        _ = try await loadIndex(userId: userId)
+        return Array(pendingChatIdsCache[userId] ?? [])
+    }
+
+    func pendingChatCount(userId: String) async throws -> Int {
+        _ = try await loadIndex(userId: userId)
+        return pendingChatIdsCache[userId]?.count ?? 0
+    }
+
+    private func updateIndexCaches(_ entries: [ChatIndexEntry], userId: String) {
+        indexCache[userId] = entries
+        pendingChatIdsCache[userId] = Set(entries.compactMap { entry in
+            entry.needsCloudUpload ? entry.id : nil
+        })
     }
 
     // MARK: - Chat Operations
@@ -251,7 +282,8 @@ actor EncryptedFileStorage {
             return false
         }
         let editedDuringUpload = existing.updatedAt != expectedUpdatedAt
-        if !attachmentRewrites.isEmpty {
+        if !attachmentRewrites.isEmpty
+            || (!editedDuringUpload && existing.projectLocallyModified == true) {
             let encPath = try chatFilePath(
                 chatId: chatId,
                 userId: userId,
@@ -281,7 +313,7 @@ actor EncryptedFileStorage {
                 },
                 uniquingKeysWith: { first, _ in first }
             )
-            var didRewriteAttachment = false
+            var didChangeChat = false
             for messageIndex in chat.messages.indices {
                 for attachmentIndex in chat.messages[messageIndex].attachments.indices {
                     let clientId = chat.messages[messageIndex].attachments[attachmentIndex].id
@@ -290,10 +322,18 @@ actor EncryptedFileStorage {
                         rewrite.serverId
                     chat.messages[messageIndex].attachments[attachmentIndex].encryptionKey =
                         rewrite.encryptionKey
-                    didRewriteAttachment = true
+                    didChangeChat = true
                 }
             }
-            if didRewriteAttachment {
+            let finalizedProjectFlag = ProjectMetadataUploadPolicy.flagAfterUpload(
+                current: chat.projectLocallyModified,
+                editedDuringUpload: editedDuringUpload
+            )
+            if chat.projectLocallyModified != finalizedProjectFlag {
+                chat.projectLocallyModified = finalizedProjectFlag
+                didChangeChat = true
+            }
+            if didChangeChat {
                 try await performSaveChat(chat, userId: userId)
             }
         }
@@ -467,6 +507,140 @@ actor EncryptedFileStorage {
         try await performDeleteChat(chatId: chatId, userId: userId)
     }
 
+    func deleteCloudChatForRevision(
+        chatId: String,
+        userId: String,
+        preserveNeverSynced: Bool
+    ) async throws -> Bool {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+        var intents = try await loadDeleteIntents(userId: userId)
+        if intents.contains(where: { $0.chatId == chatId }) {
+            intents.removeAll { $0.chatId == chatId }
+            try await saveDeleteIntents(intents, userId: userId)
+        }
+        let entries = try await loadIndex(userId: userId)
+        guard let entry = entries.first(where: { $0.id == chatId }),
+              !entry.isLocalOnly,
+              !(preserveNeverSynced && !entry.requiresCloudDelete) else {
+            return false
+        }
+        try await performDeleteChat(chatId: chatId, userId: userId)
+        return true
+    }
+
+    func stageCloudDelete(
+        chatId: String,
+        userId: String,
+        idempotencyKey: String,
+        mayHaveInFlightUpload: Bool
+    ) async throws -> PendingChatDelete? {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+
+        let entries = try await loadIndex(userId: userId)
+        guard DeleteIntentPlanner.shouldStage(
+            entry: entries.first(where: { $0.id == chatId }),
+            mayHaveInFlightUpload: mayHaveInFlightUpload
+        ) else {
+            return nil
+        }
+        var intents = try await loadDeleteIntents(userId: userId)
+        let intent = DeleteIntentPlanner.intent(
+            for: chatId,
+            existing: intents,
+            newIdempotencyKey: idempotencyKey
+        )
+        if !intents.contains(intent) {
+            intents.append(intent)
+            try await saveDeleteIntents(intents, userId: userId)
+        }
+        if entries.contains(where: { $0.id == chatId }) {
+            try await performDeleteChat(chatId: chatId, userId: userId)
+        }
+        return intent
+    }
+
+    func applyRevisionMetadata(
+        chatId: String,
+        userId: String,
+        projectId: String?,
+        syncVersion: Int
+    ) async throws -> Bool {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+
+        let entries = try await loadIndex(userId: userId)
+        guard let entry = entries.first(where: { $0.id == chatId }), !entry.isLocalOnly else {
+            return false
+        }
+        let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
+        let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
+        let hasEncryptedFile = fileManager.fileExists(atPath: encPath.path)
+        guard var chat = try await loadChatFromFile(
+            hasEncryptedFile ? encPath : rawPath,
+            isRaw: !hasEncryptedFile
+        ) else {
+            return false
+        }
+        await overlaySyncSidecar(&chat, userId: userId)
+        chat.projectId = projectId
+        chat.projectLocallyModified = false
+        chat.syncVersion = syncVersion
+        try await performSaveChat(chat, userId: userId)
+        try await performUpdateSyncMetadata(
+            chatId: chatId,
+            userId: userId,
+            syncVersion: syncVersion,
+            syncedAt: chat.syncedAt ?? Date(),
+            locallyModified: chat.locallyModified
+        )
+        return true
+    }
+
+    func removeDeleteIntent(chatId: String, userId: String) async throws {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+        var intents = try await loadDeleteIntents(userId: userId)
+        intents.removeAll { $0.chatId == chatId }
+        try await saveDeleteIntents(intents, userId: userId)
+    }
+
+    func loadDeleteIntents(userId: String) async throws -> [PendingChatDelete] {
+        if let cached = deleteIntentsCache[userId] { return cached }
+        let path = try deleteIntentsFilePath(userId: userId)
+        guard fileManager.fileExists(atPath: path.path) else {
+            deleteIntentsCache[userId] = []
+            return []
+        }
+        let data = try Data(contentsOf: path)
+        let encrypted = try decoder.decode(EncryptedData.self, from: data)
+        let plaintext = try await encryptor.decryptData(encrypted)
+        let intents = try decoder.decode([PendingChatDelete].self, from: plaintext)
+        deleteIntentsCache[userId] = intents
+        return intents
+    }
+
+    private func saveDeleteIntents(
+        _ intents: [PendingChatDelete],
+        userId: String
+    ) async throws {
+        let path = try deleteIntentsFilePath(userId: userId)
+        if intents.isEmpty {
+            if fileManager.fileExists(atPath: path.path) {
+                try fileManager.removeItem(at: path)
+            }
+        } else {
+            let plaintext = try encoder.encode(intents)
+            let encrypted = try await encryptor.encryptData(plaintext)
+            try encoder.encode(encrypted).write(
+                to: path,
+                options: [.atomic, .completeFileProtection]
+            )
+        }
+        deleteIntentsCache[userId] = intents
+    }
+
     /// Re-read a chat and delete it in one critical section. Holding the
     /// write lock across both the load and the delete means a concurrent
     /// saveChat cannot replace the file between the eviction check and
@@ -547,6 +721,9 @@ actor EncryptedFileStorage {
             if resourceValues.isDirectory == true { continue }
             try fileManager.removeItem(at: item)
         }
+        indexCache[userId] = []
+        pendingChatIdsCache[userId] = []
+        deleteIntentsCache[userId] = []
     }
 
     /// Persist sync metadata for a chat without touching its encrypted
