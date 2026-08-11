@@ -9,6 +9,7 @@ private actor TokenProviderProbe {
     private var refreshCalls = 0
     private var refreshContinuations: [CheckedContinuation<String?, Never>] = []
     private var refreshObservation: CheckedContinuation<Bool, Never>?
+    private var refreshObservationID = 0
     private var refreshReleased = false
     private var releasedRefreshToken: String?
 
@@ -18,6 +19,7 @@ private actor TokenProviderProbe {
             return "cached-token"
         }
         refreshCalls += 1
+        refreshObservationID += 1
         refreshObservation?.resume(returning: true)
         refreshObservation = nil
         if refreshReleased { return releasedRefreshToken }
@@ -34,15 +36,18 @@ private actor TokenProviderProbe {
     func waitForRefresh() async -> Bool {
         if refreshCalls > 0 { return true }
         return await withCheckedContinuation { continuation in
+            refreshObservationID += 1
+            let observationID = refreshObservationID
             refreshObservation = continuation
             Task {
                 try? await Task.sleep(for: Self.observationTimeout)
-                self.finishRefreshObservationIfNeeded()
+                self.finishRefreshObservationIfNeeded(observationID: observationID)
             }
         }
     }
 
-    private func finishRefreshObservationIfNeeded() {
+    private func finishRefreshObservationIfNeeded(observationID: Int) {
+        guard observationID == refreshObservationID else { return }
         refreshObservation?.resume(returning: false)
         refreshObservation = nil
     }
