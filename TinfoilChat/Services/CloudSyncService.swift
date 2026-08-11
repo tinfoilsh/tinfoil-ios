@@ -1288,9 +1288,18 @@ class CloudSyncService: ObservableObject {
                 throw RevisionSyncError.invalidRevision
             }
 
+            let needsContentRepair = try await EncryptedFileStorage.cloud.needsContentRepair(
+                userId: userId
+            )
+            guard generation == accountGeneration else { return SyncResult() }
             let checkpoint = revisionCheckpointStore.load(userId: userId)
             var result: SyncResult
-            if let checkpoint,
+            if needsContentRepair {
+                result = try await reconcileRevisionSnapshot(
+                    generation: generation,
+                    userId: userId
+                )
+            } else if let checkpoint,
                DecimalRevision.compare(checkpoint, summary.oldestReplayableRevision) != .orderedAscending,
                DecimalRevision.compare(checkpoint, summary.currentRevision) != .orderedDescending {
                 result = try await applyRevisionEvents(
@@ -1364,7 +1373,10 @@ class CloudSyncService: ObservableObject {
             throw RevisionSyncError.invalidRevision
         }
         let local = try await EncryptedFileStorage.cloud.loadIndex(userId: userId)
-        let localById = Dictionary(uniqueKeysWithValues: local.map { ($0.id, $0) })
+        var localById: [String: ChatIndexEntry] = [:]
+        for entry in local where localById[entry.id] == nil {
+            localById[entry.id] = entry
+        }
         let pendingDeleteIntents = try await EncryptedFileStorage.cloud.loadDeleteIntents(
             userId: userId
         )
@@ -1415,13 +1427,16 @@ class CloudSyncService: ObservableObject {
                     chat.updatedAt = eventUpdatedAt
                     chat.syncedAt = Date()
                     chat.locallyModified = false
-                    let applied = await applyRemoteChatToStorage(
+                    let applyResult = await applyRemoteChatToStorageResult(
                         chat,
                         generation: generation,
                         userId: userId,
                         expectedLocalUpdatedAt: localById[event.id]?.updatedAt
                     )
-                    guard applied else { throw RevisionSyncError.incompletePull }
+                    if applyResult == .locallyModified { continue }
+                    guard applyResult == .applied else {
+                        throw RevisionSyncError.incompletePull
+                    }
                     result = SyncResult(
                         downloaded: result.downloaded + 1,
                         deleted: result.deleted
@@ -1432,13 +1447,17 @@ class CloudSyncService: ObservableObject {
                             etag: event.etag,
                             projectId: event.projectId
                           ) {
-                    guard let etag = event.etag, let syncVersion = Int(etag), syncVersion > 0,
-                          try await EncryptedFileStorage.cloud.applyRevisionMetadata(
-                            chatId: event.id,
-                            userId: userId,
-                            projectId: event.projectId,
-                            syncVersion: syncVersion
-                          ) else {
+                    guard let etag = event.etag, let syncVersion = Int(etag), syncVersion > 0 else {
+                        throw RevisionSyncError.incompletePull
+                    }
+                    let applyResult = try await EncryptedFileStorage.cloud.applyRevisionMetadata(
+                        chatId: event.id,
+                        userId: userId,
+                        projectId: event.projectId,
+                        syncVersion: syncVersion
+                    )
+                    if applyResult == .locallyModified { continue }
+                    guard applyResult == .applied else {
                         throw RevisionSyncError.incompletePull
                     }
                 }
@@ -1480,7 +1499,10 @@ class CloudSyncService: ObservableObject {
             throw RevisionSyncError.invalidRevision
         }
         let local = try await EncryptedFileStorage.cloud.loadIndex(userId: userId)
-        let localById = Dictionary(uniqueKeysWithValues: local.map { ($0.id, $0) })
+        var localById: [String: ChatIndexEntry] = [:]
+        for entry in local where localById[entry.id] == nil {
+            localById[entry.id] = entry
+        }
         let remoteIds = Set(items.map(\.id))
         let snapshotDeleteIntents = try await EncryptedFileStorage.cloud.loadDeleteIntents(
             userId: userId
@@ -1493,6 +1515,11 @@ class CloudSyncService: ObservableObject {
             snapshotDeleteIntents,
             remoteIds: remoteIds
         ) {
+            guard generation == accountGeneration else { throw CancellationError() }
+            try await EncryptedFileStorage.cloud.removeDeleteIntent(
+                chatId: intent.chatId,
+                userId: userId
+            )
         }
         var deleted = 0
         for id in SnapshotReconciliation.locallyRemovedIds(local: local, remoteIds: remoteIds) {
@@ -1507,6 +1534,10 @@ class CloudSyncService: ObservableObject {
             }
         }
 
+        let missingContentIds = try await EncryptedFileStorage.cloud.missingChatContentIds(
+            chatIds: local.map(\.id),
+            userId: userId
+        )
         let changed = SnapshotReconciliation.contentItems(
             local: local,
             remote: items.filter {
@@ -1515,12 +1546,15 @@ class CloudSyncService: ObservableObject {
                     pendingDeleteIds: pendingDeleteIds
                 )
             },
-            recentLimit: Constants.Pagination.chatsPerPage
+            recentLimit: Constants.Pagination.chatsPerPage,
+            missingContentIds: missingContentIds
         )
         var metadataOnly: [EnclaveRevisionSnapshotItem] = []
         let pullItems = changed.filter { item in
             guard let entry = localById[item.id] else { return true }
-            if String(entry.syncVersion) == item.etag && !entry.decryptionFailed {
+            if String(entry.syncVersion) == item.etag
+                && !entry.decryptionFailed
+                && !missingContentIds.contains(item.id) {
                 metadataOnly.append(item)
                 return false
             }
@@ -1551,15 +1585,24 @@ class CloudSyncService: ObservableObject {
             downloaded += 1
         }
         for item in metadataOnly {
-            guard let syncVersion = Int(item.etag), syncVersion > 0,
-                  try await EncryptedFileStorage.cloud.applyRevisionMetadata(
-                    chatId: item.id,
-                    userId: userId,
-                    projectId: item.projectId,
-                    syncVersion: syncVersion
-                  ) else {
+            guard let syncVersion = Int(item.etag), syncVersion > 0 else {
                 throw RevisionSyncError.incompletePull
             }
+            let applyResult = try await EncryptedFileStorage.cloud.applyRevisionMetadata(
+                chatId: item.id,
+                userId: userId,
+                projectId: item.projectId,
+                syncVersion: syncVersion
+            )
+            guard applyResult == .applied else {
+                throw RevisionSyncError.incompletePull
+            }
+        }
+        guard generation == accountGeneration else { throw CancellationError() }
+        guard try await EncryptedFileStorage.cloud.completeContentRepairIfResolved(
+            userId: userId
+        ) else {
+            throw RevisionSyncError.incompletePull
         }
         guard generation == accountGeneration else { throw CancellationError() }
         revisionCheckpointStore.save(snapshotRevision, userId: userId)
@@ -1728,15 +1771,31 @@ class CloudSyncService: ObservableObject {
         expectedLocalUpdatedAt: Date?,
         allowLocallyModified: Bool = false
     ) async -> Bool {
-        guard generation == accountGeneration else { return false }
-        guard let chat = await convertStoredChat(storedChat) else { return false }
-        guard generation == accountGeneration else { return false }
-        return (try? await EncryptedFileStorage.cloud.applyRemoteChatIfFresh(
+        await applyRemoteChatToStorageResult(
+            storedChat,
+            generation: generation,
+            userId: userId,
+            expectedLocalUpdatedAt: expectedLocalUpdatedAt,
+            allowLocallyModified: allowLocallyModified
+        ) == .applied
+    }
+
+    private func applyRemoteChatToStorageResult(
+        _ storedChat: StoredChat,
+        generation: Int,
+        userId: String,
+        expectedLocalUpdatedAt: Date?,
+        allowLocallyModified: Bool = false
+    ) async -> RevisionApplyResult {
+        guard generation == accountGeneration else { return .refused }
+        guard let chat = await convertStoredChat(storedChat) else { return .refused }
+        guard generation == accountGeneration else { return .refused }
+        return (try? await EncryptedFileStorage.cloud.applyRemoteChatIfFreshResult(
             chat,
             userId: userId,
             expectedLocalUpdatedAt: expectedLocalUpdatedAt,
             allowLocallyModified: allowLocallyModified
-        )) ?? false
+        )) ?? .refused
     }
 
     /// Upload a chat to cloud and mark it as synced with the enclave's

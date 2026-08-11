@@ -127,6 +127,35 @@ struct RevisionSyncTests {
         }
     }
 
+    @Test func plannerClassifiesMalformedEventRevisionSeparatelyFromOrderErrors() {
+        do {
+            _ = try RevisionEventPlanner.orderedLatestEvents(
+                [event(revision: "not-a-revision", operation: .upsert, id: "a")],
+                afterRevision: "10",
+                throughRevision: "13"
+            )
+            Issue.record("Expected malformed revision to be rejected")
+        } catch RevisionSyncError.invalidRevision {
+        } catch {
+            Issue.record("Expected invalidRevision, got \(error)")
+        }
+
+        do {
+            _ = try RevisionEventPlanner.orderedLatestEvents(
+                [
+                    event(revision: "12", operation: .upsert, id: "a"),
+                    event(revision: "11", operation: .upsert, id: "b"),
+                ],
+                afterRevision: "10",
+                throughRevision: "13"
+            )
+            Issue.record("Expected out-of-order revisions to be rejected")
+        } catch RevisionSyncError.outOfOrderEvents {
+        } catch {
+            Issue.record("Expected outOfOrderEvents, got \(error)")
+        }
+    }
+
     @Test func snapshotOnlyHydratesRecentMissingHistory() {
         let remote = (1...5).map { index in
             EnclaveRevisionSnapshotItem(
@@ -143,6 +172,16 @@ struct RevisionSyncTests {
             recentLimit: 2
         )
         #expect(Set(selected.map(\.id)) == ["chat-4", "chat-5"])
+    }
+
+    @Test func contentIntegrityRetainsMissingIndexedIdsForRepair() {
+        let availableIds: Set<String> = ["present"]
+
+        let missingIds = ChatContentIntegrity.missingIds(
+            indexIds: ["present", "missing", "missing"]
+        ) { availableIds.contains($0) }
+
+        #expect(missingIds == ["missing"])
     }
 
     @MainActor
@@ -253,6 +292,19 @@ struct RevisionSyncTests {
             etag: remote.etag,
             projectId: remote.projectId
         ))
+
+        dirtyChat.locallyModified = false
+        dirtyChat.projectLocallyModified = true
+        let projectDirtyEntry = ChatIndexEntry(from: dirtyChat)
+        #expect(SnapshotReconciliation.changedRemoteItems(
+            local: [projectDirtyEntry],
+            remote: [remote]
+        ).isEmpty)
+        #expect(!SnapshotReconciliation.shouldApplyRemoteMetadata(
+            to: projectDirtyEntry,
+            etag: remote.etag,
+            projectId: remote.projectId
+        ))
     }
 
     @MainActor
@@ -291,6 +343,91 @@ struct RevisionSyncTests {
         #expect(Set(selected.map(\.id)) == ["stale", "recent-missing"])
     }
 
+    @MainActor
+    @Test func snapshotRepairsMissingContentEvenWhenIndexMetadataIsClean() {
+        var clean = ChatSearchServiceTests.makeChat(id: "missing-file", title: "Missing")
+        clean.syncedAt = Date()
+        clean.syncVersion = 2
+        clean.locallyModified = false
+        let remote = EnclaveRevisionSnapshotItem(
+            id: clean.id,
+            etag: "2",
+            keyId: "key",
+            projectId: nil,
+            updatedAt: "2026-08-11T00:00:00.000Z"
+        )
+
+        let selected = SnapshotReconciliation.contentItems(
+            local: [ChatIndexEntry(from: clean)],
+            remote: [remote],
+            recentLimit: 1,
+            missingContentIds: [clean.id]
+        )
+
+        #expect(selected == [remote])
+    }
+
+    @Test func snapshotRepairsRememberedContentAfterIndexEntryIsRemoved() {
+        let remote = EnclaveRevisionSnapshotItem(
+            id: "missing-file",
+            etag: "2",
+            keyId: "key",
+            projectId: nil,
+            updatedAt: "2026-01-01T00:00:00.000Z"
+        )
+
+        let selected = SnapshotReconciliation.contentItems(
+            local: [],
+            remote: [remote],
+            recentLimit: 0,
+            missingContentIds: [remote.id]
+        )
+
+        #expect(selected == [remote])
+    }
+
+    @MainActor
+    @Test func reconciliationUsesFirstDuplicateIndexEntryDeterministically() {
+        var dirty = ChatSearchServiceTests.makeChat(id: "duplicate", title: "Dirty")
+        dirty.locallyModified = true
+        var stale = dirty
+        stale.locallyModified = false
+        stale.syncVersion = 1
+        let remote = EnclaveRevisionSnapshotItem(
+            id: dirty.id,
+            etag: "2",
+            keyId: "key",
+            projectId: nil,
+            updatedAt: "2026-08-11T00:00:00.000Z"
+        )
+
+        #expect(SnapshotReconciliation.changedRemoteItems(
+            local: [ChatIndexEntry(from: dirty), ChatIndexEntry(from: stale)],
+            remote: [remote]
+        ).isEmpty)
+    }
+
+    @MainActor
+    @Test func dirtyCASRefusalAllowsUploadLegWhileOtherRefusalsFail() {
+        var original = ChatSearchServiceTests.makeChat(id: "race", title: "Original")
+        original.locallyModified = false
+        let expectedUpdatedAt = original.updatedAt
+        original.updatedAt = expectedUpdatedAt.addingTimeInterval(1)
+        original.locallyModified = true
+        let dirtyEntry = ChatIndexEntry(from: original)
+
+        #expect(RevisionApplyPolicy.contentResult(
+            existing: dirtyEntry,
+            expectedUpdatedAt: expectedUpdatedAt,
+            allowLocallyModified: false
+        ) == .locallyModified)
+        #expect(RevisionApplyPolicy.contentResult(
+            existing: nil,
+            expectedUpdatedAt: expectedUpdatedAt,
+            allowLocallyModified: false
+        ) == .refused)
+    }
+
     @Test func projectMetadataUploadsOnlyForCreatesOrIntentionalMoves() {
         #expect(ProjectMetadataUploadPolicy.shouldInclude(
             syncVersion: 0,
@@ -303,6 +440,11 @@ struct RevisionSyncTests {
         #expect(ProjectMetadataUploadPolicy.shouldInclude(
             syncVersion: 3,
             projectLocallyModified: true
+        ))
+        #expect(ProjectMetadataUploadPolicy.shouldInclude(
+            syncVersion: 3,
+            projectLocallyModified: false,
+            restoreDeleted: true
         ))
         #expect(ProjectMetadataUploadPolicy.flagAfterUpload(
             current: true,
@@ -323,6 +465,11 @@ struct RevisionSyncTests {
         let decoded = try JSONDecoder().decode(Chat.self, from: encoded)
         #expect(decoded.projectLocallyModified == true)
         #expect(ChatIndexEntry(from: decoded).projectLocallyModified == true)
+        let storedData = try JSONEncoder().encode(StoredChat(from: chat))
+        let storedObject = try #require(
+            JSONSerialization.jsonObject(with: storedData) as? [String: Any]
+        )
+        #expect(storedObject["projectLocallyModified"] as? Bool == true)
 
         var object = try #require(
             JSONSerialization.jsonObject(with: encoded) as? [String: Any]

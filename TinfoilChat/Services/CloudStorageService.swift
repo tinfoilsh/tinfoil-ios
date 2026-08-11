@@ -122,7 +122,8 @@ class CloudStorageService: ObservableObject {
 
         let includesProjectIntent = ProjectMetadataUploadPolicy.shouldInclude(
             syncVersion: chatToUpload.syncVersion,
-            projectLocallyModified: chatToUpload.projectLocallyModified == true
+            projectLocallyModified: chatToUpload.projectLocallyModified == true,
+            restoreDeleted: restoreDeleted
         )
         chatToUpload.projectLocallyModified = nil
         let plaintext = try Self.encodeChatPlaintext(chatToUpload)
@@ -324,7 +325,10 @@ class CloudStorageService: ObservableObject {
                     keys: keys
                 )
             )
-            let itemsById = Dictionary(uniqueKeysWithValues: response.items.map { ($0.id, $0) })
+            var itemsById: [String: EnclavePullItem] = [:]
+            for item in response.items where itemsById[item.id] == nil {
+                itemsById[item.id] = item
+            }
             for id in batch {
                 guard let item = itemsById[id],
                       let chat = try Self.decodeDownloadedChat(item, expectedChatId: id) else {
@@ -438,8 +442,9 @@ class CloudStorageService: ObservableObject {
     @discardableResult
     func deleteAllChats() async throws -> Int {
         let key = try CEKEncoding.requirePrimaryKeyB64()
-        var deleted = 0
+        var chatIds: [String] = []
         var cursor: String? = nil
+        var snapshotRevision: String?
         repeat {
             let snapshot = try await SyncEnclaveAPI.revisionSnapshot(
                 EnclaveRevisionSnapshotRequest(
@@ -447,21 +452,29 @@ class CloudStorageService: ObservableObject {
                     limit: Constants.SyncEnclave.listStatusPageLimit
                 )
             )
-            for item in snapshot.items {
-                _ = try await SyncEnclaveAPI.deleteRow(
-                    EnclaveDeleteRequest(
-                        scope: .chat,
-                        id: item.id,
-                        ifMatch: nil,
-                        idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                        key: key
-                    )
-                )
-                deleted += 1
+            guard DecimalRevision.isValid(snapshot.snapshotRevision) else {
+                throw RevisionSyncError.invalidRevision
             }
-            cursor = snapshot.nextCursor
+            if let snapshotRevision, snapshotRevision != snapshot.snapshotRevision {
+                throw RevisionSyncError.snapshotChangedDuringPagination
+            }
+            snapshotRevision = snapshot.snapshotRevision
+            chatIds.append(contentsOf: snapshot.items.map(\.id))
+            cursor = snapshot.nextCursor?.isEmpty == false ? snapshot.nextCursor : nil
         } while hasNextCursor(cursor)
-        return deleted
+
+        for chatId in chatIds {
+            _ = try await SyncEnclaveAPI.deleteRow(
+                EnclaveDeleteRequest(
+                    scope: .chat,
+                    id: chatId,
+                    ifMatch: nil,
+                    idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                    key: key
+                )
+            )
+        }
+        return chatIds.count
     }
 
     // MARK: - Project chat operations

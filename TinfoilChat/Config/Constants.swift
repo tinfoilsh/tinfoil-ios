@@ -530,7 +530,7 @@ enum Constants {
 }
 
 // MARK: - Storage Keys Migration
-// One-time migration from old UserDefaults keys to new `tinfoil-` prefixed keys.
+// Migrate old UserDefaults keys and continuously remove retired sync keys.
 enum StorageKeysMigration {
     private static let migrationCompleteKey = "tinfoil-settings-storage-keys-migrated"
     private static let legacyProjectChatStatusPrefix = "tinfoil-sync-project-chat-status-"

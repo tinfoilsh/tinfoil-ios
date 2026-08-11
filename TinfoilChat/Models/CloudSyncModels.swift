@@ -308,6 +308,7 @@ struct StoredChat: Codable {
         try container.encodeIfPresent(dataCorrupted, forKey: .dataCorrupted)
         try container.encodeIfPresent(formatVersion, forKey: .formatVersion)
         try container.encodeIfPresent(projectId, forKey: .projectId)
+        try container.encodeIfPresent(projectLocallyModified, forKey: .projectLocallyModified)
         try container.encodeIfPresent(promptPresetId, forKey: .promptPresetId)
         try container.encodeIfPresent(webSearchEnabled, forKey: .webSearchEnabled)
         try container.encodeIfPresent(clock, forKey: .clock)

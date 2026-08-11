@@ -116,6 +116,9 @@ enum RevisionEventPlanner {
         var previous = afterRevision
         var latestById: [String: EnclaveRevisionEvent] = [:]
         for event in events {
+            guard DecimalRevision.isValid(event.revision) else {
+                throw RevisionSyncError.invalidRevision
+            }
             guard DecimalRevision.compare(event.revision, previous) == .orderedDescending,
                   DecimalRevision.compare(event.revision, throughRevision) != .orderedDescending else {
                 throw RevisionSyncError.outOfOrderEvents
@@ -144,13 +147,20 @@ enum SnapshotReconciliation {
 
     static func changedRemoteItems(
         local: [ChatIndexEntry],
-        remote: [EnclaveRevisionSnapshotItem]
+        remote: [EnclaveRevisionSnapshotItem],
+        missingContentIds: Set<String> = []
     ) -> [EnclaveRevisionSnapshotItem] {
-        let localById = Dictionary(uniqueKeysWithValues: local.map { ($0.id, $0) })
+        var localById: [String: ChatIndexEntry] = [:]
+        for entry in local where localById[entry.id] == nil {
+            localById[entry.id] = entry
+        }
         return remote.filter { item in
             guard let entry = localById[item.id] else { return true }
-            guard !entry.locallyModified else { return false }
-            return entry.decryptionFailed
+            guard !entry.locallyModified, entry.projectLocallyModified != true else {
+                return false
+            }
+            return missingContentIds.contains(item.id)
+                || entry.decryptionFailed
                 || entry.projectId != item.projectId
                 || String(entry.syncVersion) != item.etag
         }
@@ -161,30 +171,53 @@ enum SnapshotReconciliation {
         etag: String?,
         projectId: String?
     ) -> Bool {
-        !entry.locallyModified
+        !entry.locallyModified && entry.projectLocallyModified != true
             && (entry.projectId != projectId || String(entry.syncVersion) != etag)
     }
 
     static func contentItems(
         local: [ChatIndexEntry],
         remote: [EnclaveRevisionSnapshotItem],
-        recentLimit: Int
+        recentLimit: Int,
+        missingContentIds: Set<String> = []
     ) -> [EnclaveRevisionSnapshotItem] {
-        let localById = Dictionary(uniqueKeysWithValues: local.map { ($0.id, $0) })
+        var localById: [String: ChatIndexEntry] = [:]
+        for entry in local where localById[entry.id] == nil {
+            localById[entry.id] = entry
+        }
         let recentMissingIds = Set(remote
             .filter { localById[$0.id] == nil }
             .sorted { $0.updatedAt > $1.updatedAt }
             .prefix(recentLimit)
             .map(\.id))
-        return changedRemoteItems(local: local, remote: remote).filter { item in
-            localById[item.id] != nil || recentMissingIds.contains(item.id)
+        return changedRemoteItems(
+            local: local,
+            remote: remote,
+            missingContentIds: missingContentIds
+        ).filter { item in
+            localById[item.id] != nil
+                || recentMissingIds.contains(item.id)
+                || missingContentIds.contains(item.id)
         }
     }
 }
 
+enum ChatContentIntegrity {
+    static func missingIds(
+        indexIds: [String],
+        contentExists: (String) -> Bool
+    ) -> Set<String> {
+        Set(indexIds.filter { !contentExists($0) })
+    }
+}
+
 enum ProjectMetadataUploadPolicy {
-    static func shouldInclude(syncVersion: Int, projectLocallyModified: Bool) -> Bool {
-        syncVersion == 0 || projectLocallyModified
+    static func shouldInclude(
+        syncVersion: Int,
+        projectLocallyModified: Bool,
+        restoreDeleted: Bool = false
+    ) -> Bool {
+        syncVersion == 0 || projectLocallyModified || restoreDeleted
     }
 
     static func flagAfterUpload(
@@ -192,6 +225,25 @@ enum ProjectMetadataUploadPolicy {
         editedDuringUpload: Bool
     ) -> Bool? {
         editedDuringUpload ? current : false
+    }
+}
+
+enum RevisionApplyResult: Equatable {
+    case applied
+    case locallyModified
+    case refused
+}
+
+enum RevisionApplyPolicy {
+    static func contentResult(
+        existing: ChatIndexEntry?,
+        expectedUpdatedAt: Date?,
+        allowLocallyModified: Bool
+    ) -> RevisionApplyResult {
+        if existing?.locallyModified == true && !allowLocallyModified {
+            return .locallyModified
+        }
+        return existing?.updatedAt == expectedUpdatedAt ? .applied : .refused
     }
 }
 
