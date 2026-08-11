@@ -41,7 +41,22 @@ private func parseISODate(_ dateString: String) -> Date? {
 /// snapshot and returns this closure; every retry replays it, so the
 /// bytes pushed to the enclave are identical across attempts and the
 /// enclave can de-duplicate them into a single committed effect.
-typealias UploadAttempt = @MainActor @Sendable () async throws -> Void
+enum UploadAttemptOutcome: Equatable {
+    case noUpload
+    case uploaded
+}
+
+typealias UploadAttempt = @MainActor @Sendable () async throws -> UploadAttemptOutcome
+
+enum UploadCoalescerError: Error {
+    case requiredUploadNotPrepared
+}
+
+private enum UploadIterationOutcome {
+    case noWork
+    case uploaded
+    case failed(Error)
+}
 
 /// Coalesces rapid upload requests per chat into single uploads with exponential backoff retry.
 /// Uses a dirty-flag + worker-loop pattern to batch rapid successive writes.
@@ -57,6 +72,7 @@ typealias UploadAttempt = @MainActor @Sendable () async throws -> Void
 actor UploadCoalescer {
     private struct ChatUploadState {
         var dirty: Bool = false
+        var allowWhileStreaming: Bool = false
         var workerRunning: Bool = false
         var failureCount: Int = 0
         var waiters: [CheckedContinuation<Void, Never>] = []
@@ -65,11 +81,11 @@ actor UploadCoalescer {
 
     private var states: [String: ChatUploadState] = [:]
     private var generation = 0
-    private let prepareUpload: @Sendable (String, String) async throws -> UploadAttempt?
+    private let prepareUpload: @Sendable (String, String, Bool) async throws -> UploadAttempt?
     private let waitBeforeRetry: @Sendable (Int) async -> Void
 
     init(
-        prepareUpload: @escaping @Sendable (String, String) async throws -> UploadAttempt?,
+        prepareUpload: @escaping @Sendable (String, String, Bool) async throws -> UploadAttempt?,
         waitBeforeRetry: @escaping @Sendable (Int) async -> Void = { attempt in
             let delay = min(
                 Constants.Sync.uploadBaseDelaySeconds * pow(2.0, Double(attempt)),
@@ -82,9 +98,10 @@ actor UploadCoalescer {
         self.waitBeforeRetry = waitBeforeRetry
     }
 
-    func enqueue(_ chatId: String) {
+    func enqueue(_ chatId: String, allowWhileStreaming: Bool = false) {
         var state = states[chatId] ?? ChatUploadState()
         state.dirty = true
+        state.allowWhileStreaming = state.allowWhileStreaming || allowWhileStreaming
         states[chatId] = state
 
         if !state.workerRunning {
@@ -102,8 +119,11 @@ actor UploadCoalescer {
         }
     }
 
-    func enqueueAndWait(_ chatId: String) async throws {
-        enqueue(chatId)
+    func enqueueAndWait(
+        _ chatId: String,
+        allowWhileStreaming: Bool = false
+    ) async throws {
+        enqueue(chatId, allowWhileStreaming: allowWhileStreaming)
 
         guard let state = states[chatId], state.workerRunning || state.dirty else {
             return
@@ -120,6 +140,8 @@ actor UploadCoalescer {
 
         while states[chatId]?.dirty == true && workerGeneration == generation {
             states[chatId]?.dirty = false
+            let allowWhileStreaming = states[chatId]?.allowWhileStreaming ?? false
+            states[chatId]?.allowWhileStreaming = false
 
             // Mint one idempotency key per logical write. All HTTP
             // retries inside uploadWithRetry replay under the same
@@ -127,11 +149,20 @@ actor UploadCoalescer {
             // committed effect, even when a previous attempt
             // already committed and we lost the response.
             let idempotencyKey = newSyncEnclaveIdempotencyKey()
-            terminalError = await uploadWithRetry(
+            let iterationOutcome = await uploadWithRetry(
                 chatId,
                 idempotencyKey: idempotencyKey,
+                allowWhileStreaming: allowWhileStreaming,
                 generation: workerGeneration
             )
+            switch iterationOutcome {
+            case .noWork:
+                break
+            case .uploaded:
+                terminalError = nil
+            case .failed(let iterationError):
+                terminalError = iterationError
+            }
         }
         guard workerGeneration == generation else { return }
 
@@ -163,8 +194,9 @@ actor UploadCoalescer {
     private func uploadWithRetry(
         _ chatId: String,
         idempotencyKey: String,
+        allowWhileStreaming: Bool,
         generation workerGeneration: Int
-    ) async -> Error? {
+    ) async -> UploadIterationOutcome {
         var lastError: Error?
         // Frozen on the first successful prepare so every retry replays
         // the exact payload the enclave may have already committed. Only
@@ -177,23 +209,28 @@ actor UploadCoalescer {
         for attempt in 0...Constants.Sync.uploadMaxRetries {
             do {
                 if !prepared {
-                    preparedAttempt = try await prepareUpload(chatId, idempotencyKey)
+                    preparedAttempt = try await prepareUpload(
+                        chatId,
+                        idempotencyKey,
+                        allowWhileStreaming
+                    )
                     prepared = true
                     guard workerGeneration == generation else {
-                        return CancellationError()
+                        return .failed(CancellationError())
                     }
                 }
-                if let uploadAttempt = preparedAttempt {
-                    try await uploadAttempt()
+                if allowWhileStreaming && preparedAttempt == nil {
+                    throw UploadCoalescerError.requiredUploadNotPrepared
                 }
+                let attemptOutcome = try await preparedAttempt?()
                 guard workerGeneration == generation else {
-                    return CancellationError()
+                    return .failed(CancellationError())
                 }
                 states[chatId]?.failureCount = 0
-                return nil
+                return attemptOutcome == .uploaded ? .uploaded : .noWork
             } catch {
                 guard workerGeneration == generation else {
-                    return CancellationError()
+                    return .failed(CancellationError())
                 }
                 lastError = error
                 let currentCount = states[chatId]?.failureCount ?? 0
@@ -209,12 +246,12 @@ actor UploadCoalescer {
                     break
                 }
                 guard workerGeneration == generation else {
-                    return CancellationError()
+                    return .failed(CancellationError())
                 }
             }
         }
 
-        return lastError
+        return .failed(lastError ?? UploadCoalescerError.requiredUploadNotPrepared)
     }
 
     func clear() {
@@ -260,8 +297,12 @@ class CloudSyncService: ObservableObject {
     
     // MARK: - Private Properties
     private lazy var uploadCoalescer: UploadCoalescer = {
-        UploadCoalescer { [weak self] chatId, idempotencyKey in
-            try await self?.doBackupChat(chatId, idempotencyKey: idempotencyKey)
+        UploadCoalescer { [weak self] chatId, idempotencyKey, allowWhileStreaming in
+            try await self?.doBackupChat(
+                chatId,
+                idempotencyKey: idempotencyKey,
+                allowWhileStreaming: allowWhileStreaming
+            )
         }
     }()
     private var streamingCallbacks: Set<String> = []
@@ -450,20 +491,18 @@ class CloudSyncService: ObservableObject {
     // MARK: - Single Chat Backup
     
     /// Backup a single chat to the cloud, coalescing rapid successive calls
-    func backupChat(_ chatId: String, ensureLatestUpload: Bool = false) async {
+    func backupChat(
+        _ chatId: String,
+        ensureLatestUpload: Bool = false,
+        allowWhileStreaming: Bool = false
+    ) async {
         let generation = accountGeneration
-        // Don't attempt backup if not authenticated
-        guard await cloudStorage.isAuthenticated() else {
-            return
-        }
-
-        guard await canWriteToCloud() else {
-            return
-        }
-        guard generation == accountGeneration else { return }
 
         beginPendingUpload(chatId)
-        await uploadCoalescer.enqueue(chatId)
+        await uploadCoalescer.enqueue(
+            chatId,
+            allowWhileStreaming: allowWhileStreaming
+        )
         Task { [weak self] in
             await self?.uploadCoalescer.waitForUpload(chatId)
             self?.endPendingUpload(chatId, generation: generation)
@@ -471,6 +510,22 @@ class CloudSyncService: ObservableObject {
 
         if ensureLatestUpload {
             await uploadCoalescer.waitForUpload(chatId)
+        }
+    }
+
+    func backupRecoveryChatAndWait(
+        _ chatId: String,
+        allowWhileStreaming: Bool
+    ) async throws {
+        let generation = accountGeneration
+        beginPendingUpload(chatId)
+        defer { endPendingUpload(chatId, generation: generation) }
+        try await uploadCoalescer.enqueueAndWait(
+            chatId,
+            allowWhileStreaming: allowWhileStreaming
+        )
+        guard generation == accountGeneration else {
+            throw CancellationError()
         }
     }
 
@@ -587,15 +642,38 @@ class CloudSyncService: ObservableObject {
     /// between attempts, turning a committed-but-lost write into a
     /// 409 IDEMPOTENCY_CONFLICT. Returns nil when there is nothing
     /// to upload.
-    private func doBackupChat(_ chatId: String, idempotencyKey: String) async throws -> UploadAttempt? {
+    private func doBackupChat(
+        _ chatId: String,
+        idempotencyKey: String,
+        allowWhileStreaming: Bool
+    ) async throws -> UploadAttempt? {
         let generation = accountGeneration
-        guard let userId = await getCurrentUserId() else { return nil }
+        guard let userId = await getCurrentUserId() else {
+            if allowWhileStreaming {
+                throw SyncEnclaveError(message: "recovery upload is not authenticated")
+            }
+            return nil
+        }
         let account = UploadAccount(generation: generation, userId: userId)
-        guard await canWriteToCloud() else { return nil }
-        guard await isCurrentUploadAccount(account) else { return nil }
+        guard await cloudStorage.isAuthenticated() else {
+            if allowWhileStreaming {
+                throw SyncEnclaveError(message: "recovery upload is not authenticated")
+            }
+            return nil
+        }
+        guard await canWriteToCloud() else {
+            if allowWhileStreaming {
+                throw SyncEnclaveError(message: "recovery upload is not writable")
+            }
+            return nil
+        }
+        guard await isCurrentUploadAccount(account) else {
+            if allowWhileStreaming { throw CancellationError() }
+            return nil
+        }
 
         // Check if chat is currently streaming
-        if streamingTracker.isStreaming(chatId) {
+        if streamingTracker.isStreaming(chatId) && !allowWhileStreaming {
             // Check if we already have a callback registered for this chat
             if streamingCallbacks.contains(chatId) {
                 return nil
@@ -622,24 +700,38 @@ class CloudSyncService: ObservableObject {
         }
         
         // Load chat from storage
-        guard let chat = try? await EncryptedFileStorage.cloud.loadChat(
-            chatId: chatId,
-            userId: userId
-        ) else {
+        let chat: Chat
+        do {
+            guard let loadedChat = try await EncryptedFileStorage.cloud.loadChat(
+                chatId: chatId,
+                userId: userId
+            ) else {
+                throw ChatRecoverySyncError.chatMissing
+            }
+            chat = loadedChat
+        } catch {
+            if allowWhileStreaming { throw error }
             return nil // Chat might have been deleted
         }
-        guard await isCurrentUploadAccount(account) else { return nil }
+        guard await isCurrentUploadAccount(account) else {
+            if allowWhileStreaming { throw CancellationError() }
+            return nil
+        }
         
         
         // Don't sync blank, empty, decryption-failure, or local-only chats.
         // Local-only chats are the user's explicit choice to keep a chat off
         // the cloud, so they must never be uploaded.
-        if chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed || chat.isLocalOnly {
+        if chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed
+            || chat.dataCorrupted || chat.isLocalOnly {
+            if allowWhileStreaming {
+                throw UploadCoalescerError.requiredUploadNotPrepared
+            }
             return nil
         }
 
         // Double-check streaming status right before upload
-        if streamingTracker.isStreaming(chatId) {
+        if streamingTracker.isStreaming(chatId) && !allowWhileStreaming {
             return nil
         }
 
@@ -657,16 +749,22 @@ class CloudSyncService: ObservableObject {
             }
             do {
                 try await self.uploadAndMarkSynced(preparedUpload)
+                return .uploaded
             } catch {
                 guard await self.isCurrentUploadAccount(preparedUpload.account) else {
                     throw CancellationError()
                 }
-                try await self.handleUploadFailure(
+                let reconciledUpload = try await self.handleUploadFailure(
                     chatId: chatId,
                     error: error,
                     generation: preparedUpload.account.generation,
-                    userId: preparedUpload.account.userId
+                    userId: preparedUpload.account.userId,
+                    allowWhileStreaming: allowWhileStreaming
                 )
+                if allowWhileStreaming && !reconciledUpload {
+                    throw error
+                }
+                return reconciledUpload ? .uploaded : .noUpload
             }
         }
     }
@@ -683,8 +781,9 @@ class CloudSyncService: ObservableObject {
         chatId: String,
         error: Error,
         generation: Int,
-        userId: String
-    ) async throws {
+        userId: String,
+        allowWhileStreaming: Bool
+    ) async throws -> Bool {
         let decision = EnclaveErrorRecovery.decide(error)
         switch decision.action {
         case .retry:
@@ -695,26 +794,27 @@ class CloudSyncService: ObservableObject {
             SyncHealthStore.shared.reportKeyActionRequired(.keyMismatch)
             throw error
         case .surfaceConflict:
-            try await resolveConflictByPullingRemote(
+            return try await resolveConflictByPullingRemote(
                 chatId,
                 generation: generation,
-                userId: userId
+                userId: userId,
+                allowWhileStreaming: allowWhileStreaming
             )
         case .surfaceExistingDataUnderOtherKey:
             SyncHealthStore.shared.reportKeyActionRequired(.keyConflict)
-            return
+            return false
         case .surfaceNotFound:
             SyncHealthStore.shared.reportChatSyncFailed(
                 chatId,
                 message: "This chat no longer exists in the cloud"
             )
-            return
+            return false
         case .triggerRecoveryWizard:
             SyncHealthStore.shared.reportKeyActionRequired(.keyRecovery)
-            return
+            return false
         case .blockAllSync:
             SyncHealthStore.shared.reportSyncPaused(.attestation)
-            return
+            return false
         case .migrateLegacyAndRetry:
             // The legacy re-seal runs out of band — on the next launch and right
             // after the key is adopted (see PasskeyManager) — both
@@ -733,7 +833,7 @@ class CloudSyncService: ObservableObject {
                     message: "This chat couldn't be synced"
                 )
             }
-            return
+            return false
         }
     }
 
@@ -760,17 +860,18 @@ class CloudSyncService: ObservableObject {
     private func resolveConflictByPullingRemote(
         _ chatId: String,
         generation: Int,
-        userId: String
-    ) async throws {
+        userId: String,
+        allowWhileStreaming: Bool
+    ) async throws -> Bool {
         do {
             let remoteChat = try await cloudStorage.downloadChat(chatId)
-            guard generation == accountGeneration else { return }
+            guard generation == accountGeneration else { return false }
 
             let localChat = try await EncryptedFileStorage.cloud.loadChat(
                 chatId: chatId,
                 userId: userId
             )
-            guard generation == accountGeneration else { return }
+            guard generation == accountGeneration else { return false }
 
             // The remote row vanished (concurrent delete). A clean local
             // copy is removed by the deletion reconciliation pass. A
@@ -785,8 +886,10 @@ class CloudSyncService: ObservableObject {
                 guard let localChat,
                       localChat.locallyModified,
                       !localChat.isLocalOnly,
+                      !localChat.decryptionFailed,
+                      !localChat.dataCorrupted,
                       !deletedChatsTracker.isDeleted(chatId) else {
-                    return
+                    return false
                 }
                 // The row may have been tombstoned after the last pass
                 // fetched its deletion window, in which case the tracker
@@ -799,19 +902,23 @@ class CloudSyncService: ObservableObject {
                     generation: generation,
                     userId: userId
                 )
-                guard generation == accountGeneration else { return }
+                guard generation == accountGeneration else { return false }
                 guard !deletions.failed,
                       !deletedChatsTracker.isDeleted(chatId) else {
-                    return
+                    return false
                 }
+                let storedChat = StoredChat(
+                    from: localChat,
+                    syncVersion: localChat.syncVersion
+                )
                 try await uploadAndMarkSynced(
-                    localChat,
+                    storedChat,
+                    expectedUpdatedAt: localChat.updatedAt,
                     idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                    generation: generation,
-                    userId: userId,
+                    account: UploadAccount(generation: generation, userId: userId),
                     restoreDeleted: true
                 )
-                return
+                return true
             }
             if downloadedChat.modelType == nil {
                 downloadedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
@@ -850,22 +957,25 @@ class CloudSyncService: ObservableObject {
             )
 
             if !remoteWins {
-                guard generation == accountGeneration else { return }
+                guard generation == accountGeneration else { return false }
                 try await rebaseSyncVersion(
                     chatId,
                     version: downloadedChat.syncVersion,
                     generation: generation,
                     userId: userId
                 )
-                guard generation == accountGeneration else { return }
+                guard generation == accountGeneration else { return false }
                 // Re-enqueue rather than wait: the coalescer worker will
                 // pick up the dirty flag and re-run the upload with the
                 // rebased version.
-                await backupChat(chatId)
-                return
+                await backupChat(
+                    chatId,
+                    allowWhileStreaming: allowWhileStreaming
+                )
+                return false
             }
 
-            guard generation == accountGeneration else { return }
+            guard generation == accountGeneration else { return false }
             downloadedChat.syncedAt = Date()
             downloadedChat.locallyModified = false
             let applied = await applyRemoteChatToStorage(
@@ -878,6 +988,7 @@ class CloudSyncService: ObservableObject {
             if applied {
                 SyncHealthStore.shared.reportChatSynced(downloadedChat.id)
             }
+            return false
         } catch {
             SyncHealthStore.shared.reportChatSyncFailed(
                 chatId,
@@ -929,7 +1040,8 @@ class CloudSyncService: ObservableObject {
         // Filter out blank, empty, decryption failure, and streaming chats
         var chatsToSync: [Chat] = []
         for chat in unsyncedChats {
-            if !chat.isBlankChat && !chat.messages.isEmpty && !chat.decryptionFailed {
+            if !chat.isBlankChat && !chat.messages.isEmpty
+                && !chat.decryptionFailed && !chat.dataCorrupted {
                 let isStreaming = streamingTracker.isStreaming(chat.id)
                 if !isStreaming {
                     chatsToSync.append(chat)
@@ -2103,6 +2215,7 @@ class CloudSyncService: ObservableObject {
             guard !chat.isBlankChat,
                   !chat.messages.isEmpty,
                   !chat.decryptionFailed,
+                  !chat.dataCorrupted,
                   !streamingTracker.isStreaming(chat.id) else {
                 continue
             }

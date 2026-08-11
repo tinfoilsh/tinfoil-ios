@@ -434,6 +434,33 @@ actor EncryptedFileStorage {
         return nil
     }
 
+    func containsPendingRecovery(
+        chatId: String,
+        userId: String,
+        envelope: PendingRecoveryEnvelope
+    ) async throws -> Bool {
+        try await loadChat(chatId: chatId, userId: userId)?
+            .pendingRecoveries?
+            .contains(envelope) == true
+    }
+
+    func containsRecoverySnapshot(
+        chatId: String,
+        userId: String,
+        turnId: String
+    ) async throws -> Bool {
+        guard let chat = try await loadChat(chatId: chatId, userId: userId) else {
+            return false
+        }
+        let hasUserTurn = chat.messages.contains {
+            $0.role == .user && $0.turnId == turnId
+        }
+        let hasAssistantPlaceholder = chat.messages.contains {
+            $0.role == .assistant && $0.turnId == turnId && $0.content.isEmpty
+        }
+        return hasUserTurn && hasAssistantPlaceholder
+    }
+
     func deleteChat(chatId: String, userId: String) async throws {
         await acquireWriteLock()
         defer { releaseWriteLock() }

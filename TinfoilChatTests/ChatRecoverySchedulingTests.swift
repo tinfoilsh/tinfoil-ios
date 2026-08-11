@@ -185,4 +185,129 @@ struct ChatRecoverySchedulingTests {
             )
         ))
     }
+
+    @Test @MainActor
+    func cancellationImmediatelyInvalidatesLiveAttempt() async throws {
+        let coordinator = ChatRecoveryCoordinator()
+        let attempt = try await coordinator.begin(
+            chatId: "chat-1",
+            turnId: "turn-1",
+            userId: "user-1",
+            storage: .cloud
+        )
+
+        await coordinator.markCancelled(attempt: attempt)
+
+        let isCurrent = await coordinator.liveAttemptIsCurrent(attempt)
+        #expect(isCurrent == false)
+    }
+
+    @Test func remoteResolutionRequiresFinalAssistantContent() {
+        let placeholder = Message(
+            role: .assistant,
+            turnId: "turn-1",
+            content: ""
+        )
+        let completed = Message(
+            role: .assistant,
+            turnId: "turn-1",
+            content: "Recovered"
+        )
+        let envelope = PendingRecoveryEnvelope(
+            v: 1,
+            turnId: "turn-1",
+            keyId: "key",
+            createdAt: "2026-08-11T00:00:00Z",
+            expiresAt: "2026-08-12T00:00:00Z",
+            nonce: "nonce",
+            ciphertext: "ciphertext"
+        )
+
+        #expect(!remoteRecoveryTurnIsResolved(
+            messages: [placeholder],
+            pendingRecoveries: nil,
+            turnId: "turn-1"
+        ))
+        #expect(remoteRecoveryTurnIsResolved(
+            messages: [completed],
+            pendingRecoveries: nil,
+            turnId: "turn-1"
+        ))
+        #expect(!remoteRecoveryTurnIsResolved(
+            messages: [completed],
+            pendingRecoveries: [envelope],
+            turnId: "turn-1"
+        ))
+    }
+
+    @Test func locallyModifiedResolutionRequiresRemoteClockWin() {
+        let now = Date()
+
+        #expect(!resolvedRemoteMayReplaceLocal(
+            localModified: true,
+            localClock: nil,
+            remoteClock: EditClock(v: 2, w: "remote"),
+            localUpdatedAt: now,
+            remoteUpdatedAt: now
+        ))
+        #expect(resolvedRemoteMayReplaceLocal(
+            localModified: true,
+            localClock: EditClock(v: 1, w: "local"),
+            remoteClock: EditClock(v: 2, w: "remote"),
+            localUpdatedAt: now,
+            remoteUpdatedAt: now
+        ))
+        #expect(!resolvedRemoteMayReplaceLocal(
+            localModified: true,
+            localClock: EditClock(v: 2, w: "local"),
+            remoteClock: EditClock(v: 1, w: "remote"),
+            localUpdatedAt: now,
+            remoteUpdatedAt: now
+        ))
+    }
+
+    @Test @MainActor
+    func corruptedCloudChatIsRejectedBeforeRecoveryMutation() {
+        var chat = Chat(modelType: recoverySchedulingTestModel)
+        chat.decryptionFailed = true
+        var mutationApplied = false
+
+        #expect(throws: ChatRecoverySyncError.self) {
+            _ = try mutateValidCloudRecoveryChat(chat) { candidate in
+                mutationApplied = true
+                candidate.title = "Mutated"
+            }
+        }
+        #expect(!mutationApplied)
+
+        chat.decryptionFailed = false
+        chat.dataCorrupted = true
+        #expect(throws: ChatRecoverySyncError.self) {
+            _ = try mutateValidCloudRecoveryChat(chat) { candidate in
+                mutationApplied = true
+                candidate.title = "Mutated"
+            }
+        }
+        #expect(!mutationApplied)
+    }
 }
+
+private let recoverySchedulingTestModel = ModelType(
+    from: AppModelConfig(
+        modelName: "gpt-oss-120b",
+        image: "openai.png",
+        name: "GPT OSS 120B",
+        nameShort: "GPT OSS",
+        description: "",
+        details: "",
+        parameters: "",
+        contextWindow: "64k tokens",
+        type: "chat",
+        chat: true,
+        paid: false,
+        multimodal: false,
+        toolCalling: nil,
+        attributes: nil,
+        reasoningConfig: nil
+    )
+)
