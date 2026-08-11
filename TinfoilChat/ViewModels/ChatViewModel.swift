@@ -101,7 +101,8 @@ enum GenUIRetryResultClassifier {
             return .invalidOutput(.refusal)
         }
         guard finishReason == completeFinishReason,
-              let content else {
+              let content,
+              !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return .invalidOutput(.incompleteResponse)
         }
         return .output(content)

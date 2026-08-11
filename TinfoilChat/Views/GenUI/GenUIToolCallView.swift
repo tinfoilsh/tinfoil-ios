@@ -50,7 +50,7 @@ struct GenUIToolCallView: View {
                 return AnyView(resolvedView)
             }
             if case .invalid = parsed, widget != nil {
-                return AnyView(parseFailureCard)
+                return AnyView(parseFailureCard(parsedArgs: parsed))
             }
             return AnyView(EmptyView())
         }
@@ -68,7 +68,7 @@ struct GenUIToolCallView: View {
             return AnyView(EmptyView())
         }
 
-        return AnyView(parseFailureCard)
+        return AnyView(parseFailureCard(parsedArgs: parsed))
     }
 
     private enum ParsedArgs {
@@ -87,13 +87,8 @@ struct GenUIToolCallView: View {
         return .valid(data)
     }
 
-    private var displayedError: GenUIArgumentValidationError {
-        if case .invalidOutput(.invalidArguments(let error)) = retryState {
-            return error
-        }
-        if case .invalid(let error) = parsedArgs(
-            widget: GenUIRegistry.shared.widget(named: toolCall.name)
-        ) {
+    private func displayedError(parsedArgs: ParsedArgs) -> GenUIArgumentValidationError {
+        if case .invalid(let error) = parsedArgs {
             return error
         }
         return .widgetDecoding(codingPath: "$")
@@ -112,7 +107,7 @@ struct GenUIToolCallView: View {
         }
     }
 
-    private var failureDetail: String {
+    private func failureDetail(parsedArgs: ParsedArgs) -> String {
         switch retryState {
         case .requestFailed:
             return "The retry request failed. Try again."
@@ -131,7 +126,7 @@ struct GenUIToolCallView: View {
                     return "The model declined to regenerate this widget. Try again."
                 }
             }
-            return validationDetail(displayedError)
+            return validationDetail(displayedError(parsedArgs: parsedArgs))
         }
     }
 
@@ -166,13 +161,13 @@ struct GenUIToolCallView: View {
     }
 
     @ViewBuilder
-    private var parseFailureCard: some View {
+    private func parseFailureCard(parsedArgs: ParsedArgs) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(failureTitle)
                     .font(.subheadline.weight(.medium))
                     .foregroundColor(GenUIStyle.primaryText(isDarkMode))
-                Text(failureDetail)
+                Text(failureDetail(parsedArgs: parsedArgs))
                     .font(.caption)
                     .foregroundColor(GenUIStyle.mutedText(isDarkMode))
                     .fixedSize(horizontal: false, vertical: true)

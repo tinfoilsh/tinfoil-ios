@@ -393,29 +393,33 @@ struct MessageView: View {
                         }
                     )
                 case .toolCall(let toolCall):
-                    GenUIToolCallView(
-                        toolCall: toolCall,
-                        isStreaming: GenUIToolCallPresentation.showsPlaceholder(
-                            arguments: toolCall.arguments,
-                            isRenderingStream: isRenderingStream
-                        ),
-                        isDarkMode: isDarkMode,
-                        resolution: message.genUIResolution(for: toolCall.id),
-                        retryState: viewModel.genUIRetryState(
-                            messageId: message.id,
-                            toolCallId: toolCall.id
-                        ),
-                        onRetry: {
-                            viewModel.retryGenUIToolCall(
-                                messageId: message.id,
-                                toolCallId: toolCall.id
-                            )
-                        }
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    genUIToolCallView(toolCall)
                 }
             }
         }
+    }
+
+    private func genUIToolCallView(_ toolCall: GenUIToolCall) -> some View {
+        GenUIToolCallView(
+            toolCall: toolCall,
+            isStreaming: GenUIToolCallPresentation.showsPlaceholder(
+                arguments: toolCall.arguments,
+                isRenderingStream: isRenderingStream
+            ),
+            isDarkMode: isDarkMode,
+            resolution: message.genUIResolution(for: toolCall.id),
+            retryState: viewModel.genUIRetryState(
+                messageId: message.id,
+                toolCallId: toolCall.id
+            ),
+            onRetry: isRenderingStream ? nil : {
+                viewModel.retryGenUIToolCall(
+                    messageId: message.id,
+                    toolCallId: toolCall.id
+                )
+            }
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func segmentsCoverEntireAssistantMessage(_ segments: [MessageSegment]) -> Bool {
@@ -707,26 +711,7 @@ struct MessageView: View {
                             // older saved messages or messages synced from
                             // a client that doesn't emit segments).
                             ForEach(message.toolCalls) { toolCall in
-                                GenUIToolCallView(
-                                    toolCall: toolCall,
-                                    isStreaming: GenUIToolCallPresentation.showsPlaceholder(
-                                        arguments: toolCall.arguments,
-                                        isRenderingStream: isRenderingStream
-                                    ),
-                                    isDarkMode: isDarkMode,
-                                    resolution: message.genUIResolution(for: toolCall.id),
-                                    retryState: viewModel.genUIRetryState(
-                                        messageId: message.id,
-                                        toolCallId: toolCall.id
-                                    ),
-                                    onRetry: {
-                                        viewModel.retryGenUIToolCall(
-                                            messageId: message.id,
-                                            toolCallId: toolCall.id
-                                        )
-                                    }
-                                )
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                genUIToolCallView(toolCall)
                             }
                         }
                     }

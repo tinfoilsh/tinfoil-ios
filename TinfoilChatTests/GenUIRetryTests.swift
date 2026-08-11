@@ -96,6 +96,19 @@ struct GenUIRetryTests {
         ) == .invalidOutput(.refusal))
     }
 
+    @Test func classifiesEmptyStructuredCompletionAsIncomplete() throws {
+        #expect(GenUIRetryResultClassifier.classify(
+            finishReason: "stop",
+            refusal: nil,
+            content: ""
+        ) == .invalidOutput(.incompleteResponse))
+        #expect(GenUIRetryResultClassifier.classify(
+            finishReason: "stop",
+            refusal: nil,
+            content: " \n\t"
+        ) == .invalidOutput(.incompleteResponse))
+    }
+
     @Test func streamingPlaceholderOnlyCoversIncompleteJSON() throws {
         #expect(GenUIToolCallPresentation.showsPlaceholder(
             arguments: #"{"source":"#,
