@@ -71,10 +71,15 @@ final class GenUIRegistry {
     /// widgets. Mirrors `buildGenUIPromptHint()` on the webapp side.
     func buildPromptHint() -> String {
         let header =
-            "You have render_* tools that produce rich interactive components instead " +
-            "of markdown. Prefer them whenever the content is structured (tables, " +
-            "charts, timelines, previews, comparisons, lists of sources, etc.). You " +
-            "may call multiple render tools in one response."
+            "You have optional render_* tools available. Default to a normal markdown " +
+            "response. Only call a render_* tool when the user explicitly asks for " +
+            "one of these UI elements, or when the content genuinely cannot be " +
+            "expressed well in markdown (e.g. an interactive HTML page, a chart that " +
+            "requires plotting, an embedded live preview). Do not use render_* tools " +
+            "for ordinary informational answers, lists, tables, or summaries — write " +
+            "those as regular prose and markdown. Prefer at most one render_* call " +
+            "per response, and always pair it with a written answer rather than " +
+            "replacing the answer with a widget."
         let lines = widgets.map { "- \($0.name): \($0.promptHint)" }
         return header + "\n" + lines.joined(separator: "\n")
     }

@@ -202,7 +202,7 @@ struct MessageView: View {
         case thinking(content: String, isThinking: Bool, duration: Double?)
         case webSearches([WebSearchInstance])
         case urlFetches([URLFetchState])
-        case toolCall(GenUIToolCall, isTrailing: Bool)
+        case toolCall(GenUIToolCall)
     }
 
     private struct IdentifiedInlineSegmentRun: Identifiable {
@@ -214,23 +214,6 @@ struct MessageView: View {
         let lastTextIndex: Int? = {
             for i in segments.indices.reversed() {
                 if case .text = segments[i] { return i }
-            }
-            return nil
-        }()
-
-        // Index of the last tool-call segment whose widget hasn't yet
-        // produced fully-parseable arguments. Used to drive the streaming
-        // "Generating component" placeholder on exactly that one widget.
-        let lastStreamingToolCallIndex: Int? = {
-            for i in segments.indices.reversed() {
-                guard case .toolCall(let toolCallId) = segments[i],
-                      let toolCall = message.toolCalls.first(where: { $0.id == toolCallId }) else { continue }
-                if !toolCall.arguments.isEmpty,
-                   let data = toolCall.arguments.data(using: .utf8),
-                   (try? JSONSerialization.jsonObject(with: data)) != nil {
-                    return nil
-                }
-                return i
             }
             return nil
         }()
@@ -304,7 +287,7 @@ struct MessageView: View {
                 if let toolCall = message.toolCalls.first(where: { $0.id == toolCallId }) {
                     runs.append(IdentifiedInlineSegmentRun(
                         id: "toolcall:\(index):\(toolCall.id)",
-                        run: .toolCall(toolCall, isTrailing: index == lastStreamingToolCallIndex)
+                        run: .toolCall(toolCall)
                     ))
                 }
             }
@@ -409,13 +392,25 @@ struct MessageView: View {
                             activeURLFetchGroup = IdentifiedGroup(items: group)
                         }
                     )
-                case .toolCall(let toolCall, let isTrailing):
+                case .toolCall(let toolCall):
                     GenUIToolCallView(
                         toolCall: toolCall,
-                        isStreaming: isTrailing && isRenderingStream,
+                        isStreaming: GenUIToolCallPresentation.showsPlaceholder(
+                            arguments: toolCall.arguments,
+                            isRenderingStream: isRenderingStream
+                        ),
                         isDarkMode: isDarkMode,
                         resolution: message.genUIResolution(for: toolCall.id),
-                        onRetry: nil
+                        retryState: viewModel.genUIRetryState(
+                            messageId: message.id,
+                            toolCallId: toolCall.id
+                        ),
+                        onRetry: {
+                            viewModel.retryGenUIToolCall(
+                                messageId: message.id,
+                                toolCallId: toolCall.id
+                            )
+                        }
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -714,10 +709,22 @@ struct MessageView: View {
                             ForEach(message.toolCalls) { toolCall in
                                 GenUIToolCallView(
                                     toolCall: toolCall,
-                                    isStreaming: false,
+                                    isStreaming: GenUIToolCallPresentation.showsPlaceholder(
+                                        arguments: toolCall.arguments,
+                                        isRenderingStream: isRenderingStream
+                                    ),
                                     isDarkMode: isDarkMode,
                                     resolution: message.genUIResolution(for: toolCall.id),
-                                    onRetry: nil
+                                    retryState: viewModel.genUIRetryState(
+                                        messageId: message.id,
+                                        toolCallId: toolCall.id
+                                    ),
+                                    onRetry: {
+                                        viewModel.retryGenUIToolCall(
+                                            messageId: message.id,
+                                            toolCallId: toolCall.id
+                                        )
+                                    }
                                 )
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
