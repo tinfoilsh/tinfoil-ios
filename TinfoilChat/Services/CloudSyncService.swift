@@ -1574,13 +1574,15 @@ class CloudSyncService: ObservableObject {
             chat.updatedAt = updatedAt
             chat.syncedAt = Date()
             chat.locallyModified = false
-            guard await applyRemoteChatToStorage(
+            let applyResult = await applyRemoteChatToStorageResult(
                 chat,
                 generation: generation,
                 userId: userId,
                 expectedLocalUpdatedAt: localById[item.id]?.updatedAt,
                 allowLocallyModified: missingContentIds.contains(item.id)
-            ) else {
+            )
+            if applyResult == .locallyModified { continue }
+            guard applyResult == .applied else {
                 throw RevisionSyncError.incompletePull
             }
             downloaded += 1
