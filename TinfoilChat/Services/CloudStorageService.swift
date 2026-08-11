@@ -30,10 +30,9 @@ class CloudStorageService: ObservableObject {
     /// actor-isolated client has accepted the getter so callers can't
     /// race the first authenticated request against an empty token
     /// cache.
-    func setTokenGetter(_ tokenGetter: @escaping () async -> String?) async {
-        self.getToken = tokenGetter
-        let captured = tokenGetter
-        await SyncEnclaveClient.shared.setTokenGetter { await captured() }
+    func setTokenGetter(_ tokenGetter: @escaping SyncEnclaveClient.TokenGetter) async {
+        self.getToken = { await tokenGetter(false) }
+        await SyncEnclaveClient.shared.setTokenGetter(tokenGetter)
     }
 
     /// Default token getter using Clerk.
@@ -243,12 +242,10 @@ class CloudStorageService: ObservableObject {
 
     /// Pull a chat from the enclave by id. Returns nil for NOT_FOUND.
     /// The enclave returns plaintext (v2); we JSON-decode it into the
-    /// local `StoredChat` shape. On unexpected decode failure we keep
-    /// the legacy placeholder behavior so the rest of the app can
-    /// still display the chat row.
+    /// local `StoredChat` shape.
     func downloadChat(_ chatId: String) async throws -> StoredChat? {
         guard let keys = CEKEncoding.pullKeysIfAvailable() else {
-            return encryptedPlaceholder(chatId: chatId)
+            throw CloudStorageError.missingDecryptionKey
         }
         let response = try await SyncEnclaveAPI.pull(
             EnclavePullRequest(
@@ -264,39 +261,40 @@ class CloudStorageService: ObservableObject {
             throw CloudStorageError.invalidResponse
         }
 
+        return try Self.decodeDownloadedChat(item, expectedChatId: chatId)
+    }
+
+    static func decodeDownloadedChat(
+        _ item: EnclavePullItem,
+        expectedChatId: String? = nil
+    ) throws -> StoredChat? {
+        if let expectedChatId, item.id != expectedChatId {
+            throw CloudStorageError.invalidChatPayload
+        }
         if !item.ok {
             if item.code == WireCodes.notFound { return nil }
-            return encryptedPlaceholder(chatId: chatId)
+            throw SyncEnclaveError(
+                message: "The cloud chat could not be opened",
+                code: item.code
+            )
         }
-
         guard let plaintextB64 = item.plaintext,
               let plaintext = Data(base64Encoded: plaintextB64) else {
-            return encryptedPlaceholder(chatId: chatId)
+            throw CloudStorageError.invalidChatPayload
         }
-
         do {
             var chat = try JSONDecoder().decode(StoredChat.self, from: plaintext)
+            guard chat.id == (expectedChatId ?? item.id) else {
+                throw CloudStorageError.invalidChatPayload
+            }
             chat.formatVersion = 2
-            if let syncVersion = etagToSyncVersion(item.etag) {
+            if let etag = item.etag, let syncVersion = Int(etag), syncVersion > 0 {
                 chat.syncVersion = syncVersion
             }
             return chat
         } catch {
-            return encryptedPlaceholder(chatId: chatId)
+            throw CloudStorageError.invalidChatPayload
         }
-    }
-
-    private func encryptedPlaceholder(chatId: String) -> StoredChat {
-        let timestamp = chatId.split(separator: "_").first.map(String.init) ?? ""
-        let parsedTimestamp = Int(timestamp) ?? 0
-        let createdAtMs = parsedTimestamp > 0
-            ? Double(Constants.Sync.maxReverseTimestamp - parsedTimestamp)
-            : Date().timeIntervalSince1970 * 1000
-        return StoredChat.encryptedPlaceholder(
-            id: chatId,
-            createdAt: Date(timeIntervalSince1970: createdAtMs / 1000.0),
-            updatedAt: Date()
-        )
     }
 
     // MARK: - Attachments
@@ -713,6 +711,8 @@ enum CloudStorageError: LocalizedError {
     case authenticationRequired
     case invalidResponse
     case downloadFailed
+    case missingDecryptionKey
+    case invalidChatPayload
 
     var errorDescription: String? {
         switch self {
@@ -722,6 +722,10 @@ enum CloudStorageError: LocalizedError {
             return "Invalid response from server"
         case .downloadFailed:
             return "Failed to download chat from cloud"
+        case .missingDecryptionKey:
+            return "The cloud encryption key is unavailable"
+        case .invalidChatPayload:
+            return "The cloud chat data is invalid"
         }
     }
 }

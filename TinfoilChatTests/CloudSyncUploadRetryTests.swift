@@ -3,7 +3,7 @@ import Testing
 @testable import TinfoilChat
 
 private enum UploadRetryTestError: Error {
-    case transient
+    case terminal
 }
 
 private actor RetryBackoffGate {
@@ -53,7 +53,7 @@ private actor UploadRetryProbe {
     func execute(key: String, preparation: Int) throws {
         executedKeys.append(key)
         if preparation == 1 && executedKeys.count == 1 {
-            throw UploadRetryTestError.transient
+            throw SyncEnclaveError(message: "Unavailable", status: 503)
         }
     }
 
@@ -164,6 +164,35 @@ struct CloudSyncUploadRetryTests {
 
         #expect(first == replay)
         #expect(first != newerAttachment)
+    }
+
+    @Test
+    func coalescerDoesNotRetryUnstructuredFailures() async {
+        let probe = UploadRetryProbe()
+        let coalescer = UploadCoalescer(
+            prepareUpload: { _, key in
+                _ = await probe.prepare(key: key)
+                return {
+                    throw UploadRetryTestError.terminal
+                }
+            },
+            waitBeforeRetry: { _ in Issue.record("Terminal error was retried") }
+        )
+
+        do {
+            try await coalescer.enqueueAndWait("terminal-chat")
+            Issue.record("Expected terminal upload failure")
+        } catch UploadRetryTestError.terminal {
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+        let snapshot = await probe.snapshot()
+        #expect(snapshot.preparedKeys.count == 1)
+    }
+
+    @Test func persistentAuthenticationIsTerminal() {
+        let decision = EnclaveErrorRecovery.decide(.authenticationActionRequired)
+        #expect(decision.action == .abort(reason: .authenticationRequired))
     }
 }
 

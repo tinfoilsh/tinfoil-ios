@@ -47,6 +47,7 @@ enum EnclaveErrorCode: String, CaseIterable {
     case legacyBlobNotMigrated     = "LEGACY_BLOB_NOT_MIGRATED"
     case attestationFailed         = "ATTESTATION_FAILED"
     case auth                      = "AUTH"
+    case authActionRequired        = "AUTH_ACTION_REQUIRED"
     case forbidden                 = "FORBIDDEN"
     case network                   = "NETWORK"
     case notFound                  = "NOT_FOUND"
@@ -91,6 +92,7 @@ enum RecoveryAction: Equatable {
         case forbidden            = "FORBIDDEN"
         case preconditionRequired = "PRECONDITION_REQUIRED"
         case unknown              = "UNKNOWN"
+        case authenticationRequired = "AUTHENTICATION_REQUIRED"
     }
 }
 
@@ -159,7 +161,7 @@ enum EnclaveErrorRecovery {
                 return EnclaveErrorClassification(kind: .retryableRefresh, code: code, status: status, message: message)
             case .syncConflict, .staleBlob, .existingDataUnderOtherKey, .notFound:
                 return EnclaveErrorClassification(kind: .userDecision, code: code, status: status, message: message)
-            case .idempotencyConflict, .unknownKey, .forbidden, .attestationFailed, .preconditionRequired:
+            case .idempotencyConflict, .unknownKey, .forbidden, .attestationFailed, .preconditionRequired, .authActionRequired:
                 return EnclaveErrorClassification(kind: .terminal, code: code, status: status, message: message)
             case .auth, .network:
                 return EnclaveErrorClassification(kind: .retryableTransient, code: code, status: status, message: message)
@@ -219,6 +221,8 @@ enum EnclaveErrorRecovery {
             return .blockAllSync(reason: .attestationFailed)
         case .auth:
             return .retry(reason: .authRefresh)
+        case .authActionRequired:
+            return .abort(reason: .authenticationRequired)
         case .forbidden:
             return .abort(reason: .forbidden)
         case .network:

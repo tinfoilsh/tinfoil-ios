@@ -58,6 +58,7 @@ enum WireCodes {
     static let legacyBlobNotMigrated = EnclaveErrorCode.legacyBlobNotMigrated.rawValue
     static let attestationFailed = EnclaveErrorCode.attestationFailed.rawValue
     static let auth = EnclaveErrorCode.auth.rawValue
+    static let authActionRequired = EnclaveErrorCode.authActionRequired.rawValue
     static let forbidden = EnclaveErrorCode.forbidden.rawValue
     static let network = EnclaveErrorCode.network.rawValue
 }

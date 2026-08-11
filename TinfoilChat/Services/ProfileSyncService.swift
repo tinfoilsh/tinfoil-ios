@@ -78,10 +78,9 @@ class ProfileSyncService: ObservableObject {
     /// the actor-isolated client has accepted the getter so callers
     /// can't race the first authenticated request against an empty
     /// token cache.
-    func setTokenGetter(_ tokenGetter: @escaping () async -> String?) async {
-        self.getToken = tokenGetter
-        let captured = tokenGetter
-        await SyncEnclaveClient.shared.setTokenGetter { await captured() }
+    func setTokenGetter(_ tokenGetter: @escaping SyncEnclaveClient.TokenGetter) async {
+        self.getToken = { await tokenGetter(false) }
+        await SyncEnclaveClient.shared.setTokenGetter(tokenGetter)
     }
 
     private func defaultTokenGetter() async -> String? {
@@ -368,5 +367,4 @@ class ProfileSyncService: ObservableObject {
         }
     }
 }
-
 

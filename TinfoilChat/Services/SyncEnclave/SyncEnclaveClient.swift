@@ -51,6 +51,12 @@ struct SyncEnclaveError: LocalizedError, Equatable {
         code: WireCodes.auth
     )
 
+    static let authenticationActionRequired = SyncEnclaveError(
+        message: "Sign in again to resume cloud sync",
+        status: 401,
+        code: WireCodes.authActionRequired
+    )
+
     static let invalidEnclaveURL = SyncEnclaveError(
         message: "Sync enclave URL must be an absolute HTTPS URL",
         code: "INVALID_SYNC_ENCLAVE_URL"
@@ -71,7 +77,11 @@ actor SyncEnclaveClient {
     private let configRepo: String
     private var client: SecureClient?
     private var verificationTask: Task<SecureClient, Error>?
-    private var tokenGetter: (@Sendable () async -> String?)?
+    typealias TokenGetter = @Sendable (_ forceRefresh: Bool) async -> String?
+
+    private var tokenGetter: TokenGetter?
+    private var tokenRefreshTask: (generation: Int, task: Task<String?, Never>)?
+    private var tokenGeneration = 0
 
     init(
         enclaveURL: String = Constants.SyncEnclave.url,
@@ -83,7 +93,10 @@ actor SyncEnclaveClient {
 
     /// Inject the function used to retrieve the user's bearer token.
     /// Called from app startup once the Clerk session is ready.
-    func setTokenGetter(_ getter: @escaping @Sendable () async -> String?) {
+    func setTokenGetter(_ getter: @escaping TokenGetter) {
+        tokenGeneration += 1
+        tokenRefreshTask?.task.cancel()
+        tokenRefreshTask = nil
         self.tokenGetter = getter
     }
 
@@ -92,6 +105,10 @@ actor SyncEnclaveClient {
         client = nil
         verificationTask?.cancel()
         verificationTask = nil
+        tokenGeneration += 1
+        tokenRefreshTask?.task.cancel()
+        tokenRefreshTask = nil
+        tokenGetter = nil
     }
 
     /// Force attestation now. Most callers will reach the client via
@@ -123,10 +140,6 @@ actor SyncEnclaveClient {
         var headers: [String: String] = [
             "Accept": "application/json"
         ]
-        if !skipAuth {
-            headers["Authorization"] = "Bearer \(try await requireToken())"
-        }
-
         let bodyData: Data?
         if let body = body {
             headers["Content-Type"] = "application/json"
@@ -135,13 +148,22 @@ actor SyncEnclaveClient {
             bodyData = nil
         }
 
-        let response: SecureResponse
-        do {
-            response = try await client.post(url: url, headers: headers, body: bodyData)
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            throw Self.wrapTransportError(error)
+        if skipAuth {
+            return try Self.decode(
+                response: try await performPost(client: client, url: url, headers: headers, body: bodyData),
+                path: path
+            )
+        }
+
+        headers["Authorization"] = "Bearer \(try await requireToken(forceRefresh: false))"
+        var response = try await performPost(client: client, url: url, headers: headers, body: bodyData)
+        if response.statusCode == 401 {
+            headers["Authorization"] = "Bearer \(try await requireToken(forceRefresh: true))"
+            response = try await performPost(client: client, url: url, headers: headers, body: bodyData)
+            if response.statusCode == 401 {
+                let error = await persistentAuthenticationError()
+                throw error
+            }
         }
         return try Self.decode(response: response, path: path)
     }
@@ -153,15 +175,16 @@ actor SyncEnclaveClient {
         let url = enclaveURL + path
 
         var headers: [String: String] = ["Accept": "application/json"]
-        headers["Authorization"] = "Bearer \(try await requireToken())"
+        headers["Authorization"] = "Bearer \(try await requireToken(forceRefresh: false))"
 
-        let response: SecureResponse
-        do {
-            response = try await client.get(url: url, headers: headers)
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            throw Self.wrapTransportError(error)
+        var response = try await performGet(client: client, url: url, headers: headers)
+        if response.statusCode == 401 {
+            headers["Authorization"] = "Bearer \(try await requireToken(forceRefresh: true))"
+            response = try await performGet(client: client, url: url, headers: headers)
+            if response.statusCode == 401 {
+                let error = await persistentAuthenticationError()
+                throw error
+            }
         }
         return try Self.decode(response: response, path: path)
     }
@@ -237,9 +260,74 @@ actor SyncEnclaveClient {
         }
     }
 
-    private func requireToken() async throws -> String {
-        guard let token = await tokenGetter?(), !token.isEmpty else {
+    private func performPost(
+        client: SecureClient,
+        url: String,
+        headers: [String: String],
+        body: Data?
+    ) async throws -> SecureResponse {
+        do {
+            return try await client.post(url: url, headers: headers, body: body)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw Self.wrapTransportError(error)
+        }
+    }
+
+    private func performGet(
+        client: SecureClient,
+        url: String,
+        headers: [String: String]
+    ) async throws -> SecureResponse {
+        do {
+            return try await client.get(url: url, headers: headers)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw Self.wrapTransportError(error)
+        }
+    }
+
+    func requireToken(forceRefresh: Bool) async throws -> String {
+        let generation = tokenGeneration
+        let token: String?
+        if forceRefresh {
+            token = await refreshedToken()
+        } else {
+            token = await tokenGetter?(false)
+        }
+        guard generation == tokenGeneration else { throw CancellationError() }
+        guard let token, !token.isEmpty else {
+            if forceRefresh {
+                let error = await persistentAuthenticationError()
+                throw error
+            }
             throw SyncEnclaveError.authenticationRequired
+        }
+        return token
+    }
+
+    private func persistentAuthenticationError() async -> SyncEnclaveError {
+        await MainActor.run {
+            SyncHealthStore.shared.reportKeyActionRequired(.authentication)
+        }
+        return .authenticationActionRequired
+    }
+
+    private func refreshedToken() async -> String? {
+        let generation = tokenGeneration
+        if let tokenRefreshTask {
+            let token = await tokenRefreshTask.task.value
+            return generation == tokenGeneration ? token : nil
+        }
+        guard let tokenGetter else { return nil }
+        let task = Task<String?, Never> { await tokenGetter(true) }
+        tokenRefreshTask = (generation, task)
+        let token = await task.value
+        guard generation == tokenGeneration else { return nil }
+        if tokenRefreshTask?.generation == generation {
+            tokenRefreshTask = nil
         }
         return token
     }
@@ -278,6 +366,9 @@ actor SyncEnclaveClient {
            let parsed = try? JSONDecoder.enclave.decode([String: AnyCodable].self, from: response.body) {
             if let errString = parsed["error"]?.value as? String, !errString.isEmpty {
                 message = errString
+            } else if let messageString = parsed["message"]?.value as? String,
+                      !messageString.isEmpty {
+                message = messageString
             }
             if let codeString = parsed["code"]?.value as? String, !codeString.isEmpty {
                 code = codeString
