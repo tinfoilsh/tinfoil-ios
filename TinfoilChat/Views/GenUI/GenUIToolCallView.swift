@@ -31,7 +31,7 @@ struct GenUIToolCallView: View {
 
     var body: some View {
         let widget = GenUIRegistry.shared.widget(named: toolCall.name)
-        let parsed = parsedArgs(widget: widget)
+        let parsedResult = parsedArgs(widget: widget)
         let context = GenUIRenderContext(isDarkMode: isDarkMode)
 
         if isStreaming || retryState == .generating {
@@ -41,7 +41,7 @@ struct GenUIToolCallView: View {
         // Input-surface widgets only show inline once they've been
         // resolved; the live UI lives in the input area.
         if widget?.surface == .input {
-            if let widget, let resolution, case .valid(let data) = parsed,
+            if let widget, let resolution, case .valid(let data) = parsedResult,
                let resolvedView = widget.renderResolved(
                 rawArgs: data,
                 resolution: resolution,
@@ -49,13 +49,13 @@ struct GenUIToolCallView: View {
                ) {
                 return AnyView(resolvedView)
             }
-            if case .invalid = parsed, widget != nil {
-                return AnyView(parseFailureCard(parsedArgs: parsed))
+            if case .invalid(let validationError) = parsedResult, widget != nil {
+                return AnyView(parseFailureCard(validationError: validationError))
             }
             return AnyView(EmptyView())
         }
 
-        if let widget, case .valid(let data) = parsed,
+        if let widget, case .valid(let data) = parsedResult,
            let rendered = widget.renderInline(rawArgs: data, context: context) {
             return AnyView(rendered)
         }
@@ -68,7 +68,10 @@ struct GenUIToolCallView: View {
             return AnyView(EmptyView())
         }
 
-        return AnyView(parseFailureCard(parsedArgs: parsed))
+        if case .invalid(let validationError) = parsedResult {
+            return AnyView(parseFailureCard(validationError: validationError))
+        }
+        return AnyView(EmptyView())
     }
 
     private enum ParsedArgs {
@@ -87,13 +90,6 @@ struct GenUIToolCallView: View {
         return .valid(data)
     }
 
-    private func displayedError(parsedArgs: ParsedArgs) -> GenUIArgumentValidationError {
-        if case .invalid(let error) = parsedArgs {
-            return error
-        }
-        return .widgetDecoding(codingPath: "$")
-    }
-
     private var failureTitle: String {
         switch retryState {
         case .requestFailed:
@@ -107,7 +103,7 @@ struct GenUIToolCallView: View {
         }
     }
 
-    private func failureDetail(parsedArgs: ParsedArgs) -> String {
+    private func failureDetail(validationError: GenUIArgumentValidationError) -> String {
         switch retryState {
         case .requestFailed:
             return "The retry request failed. Try again."
@@ -118,15 +114,15 @@ struct GenUIToolCallView: View {
         case .invalidOutput, .none:
             if case .invalidOutput(let outputError) = retryState {
                 switch outputError {
-                case .invalidArguments(let validationError):
-                    return validationDetail(validationError)
+                case .invalidArguments(let retryValidationError):
+                    return validationDetail(retryValidationError)
                 case .incompleteResponse:
                     return "The model stopped before returning a complete widget. Try again."
                 case .refusal:
                     return "The model declined to regenerate this widget. Try again."
                 }
             }
-            return validationDetail(displayedError(parsedArgs: parsedArgs))
+            return validationDetail(validationError)
         }
     }
 
@@ -161,13 +157,13 @@ struct GenUIToolCallView: View {
     }
 
     @ViewBuilder
-    private func parseFailureCard(parsedArgs: ParsedArgs) -> some View {
+    private func parseFailureCard(validationError: GenUIArgumentValidationError) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(failureTitle)
                     .font(.subheadline.weight(.medium))
                     .foregroundColor(GenUIStyle.primaryText(isDarkMode))
-                Text(failureDetail(parsedArgs: parsedArgs))
+                Text(failureDetail(validationError: validationError))
                     .font(.caption)
                     .foregroundColor(GenUIStyle.mutedText(isDarkMode))
                     .fixedSize(horizontal: false, vertical: true)
