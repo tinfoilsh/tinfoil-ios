@@ -69,6 +69,8 @@ protocol AnyGenUIWidget {
     /// failure card.
     func canRender(rawArgs: Data) -> Bool
 
+    func argumentValidationError(rawArgs: Data) -> GenUIArgumentValidationError?
+
     /// Inline render. Widgets with `surface == .input` return `nil`.
     @MainActor
     func renderInline(rawArgs: Data, context: GenUIRenderContext) -> AnyView?
@@ -112,7 +114,18 @@ extension GenUIWidget {
     func renderResolved(args: Args, resolution: GenUIResolution, context: GenUIRenderContext) -> AnyView? { nil }
 
     func canRender(rawArgs: Data) -> Bool {
-        return decodeArgs(rawArgs) != nil
+        return argumentValidationError(rawArgs: rawArgs) == nil
+    }
+
+    func argumentValidationError(rawArgs: Data) -> GenUIArgumentValidationError? {
+        do {
+            _ = try JSONDecoder().decode(Args.self, from: rawArgs)
+            return nil
+        } catch let error as DecodingError {
+            return .widgetDecoding(codingPath: GenUIArgumentValidationError.codingPath(from: error))
+        } catch {
+            return .widgetDecoding(codingPath: "$")
+        }
     }
 
     @MainActor
@@ -136,6 +149,63 @@ extension GenUIWidget {
     private func decodeArgs(_ data: Data) -> Args? {
         let decoder = JSONDecoder()
         return try? decoder.decode(Args.self, from: data)
+    }
+}
+
+enum GenUIArgumentValidationError: Equatable {
+    case invalidJSONObject
+    case widgetDecoding(codingPath: String)
+
+    fileprivate static func codingPath(from error: DecodingError) -> String {
+        let codingPath: [CodingKey]
+        switch error {
+        case .dataCorrupted(let context),
+             .typeMismatch(_, let context),
+             .valueNotFound(_, let context):
+            codingPath = context.codingPath
+        case .keyNotFound(let key, let context):
+            codingPath = context.codingPath + [key]
+        @unknown default:
+            codingPath = []
+        }
+
+        return codingPath.reduce(into: "$") { path, key in
+            if let index = key.intValue {
+                path += "[\(index)]"
+            } else if key.stringValue.unicodeScalars.allSatisfy({
+                CharacterSet.alphanumerics.contains($0) || $0 == "_" || $0 == "-"
+            }) {
+                path += ".\(key.stringValue)"
+            } else {
+                path += ".<field>"
+            }
+        }
+    }
+}
+
+enum GenUIRetryState: Equatable {
+    case generating
+    case requestFailed
+    case invalidOutput(GenUIRetryInvalidOutput)
+    case staleOrigin
+}
+
+enum GenUIRetryInvalidOutput: Equatable {
+    case invalidArguments(GenUIArgumentValidationError)
+    case incompleteResponse
+    case refusal
+}
+
+enum GenUIArgumentValidator {
+    static func validationError(
+        rawArgs: Data,
+        widget: any AnyGenUIWidget
+    ) -> GenUIArgumentValidationError? {
+        guard let json = try? JSONSerialization.jsonObject(with: rawArgs),
+              json is [String: Any] else {
+            return .invalidJSONObject
+        }
+        return widget.argumentValidationError(rawArgs: rawArgs)
     }
 }
 

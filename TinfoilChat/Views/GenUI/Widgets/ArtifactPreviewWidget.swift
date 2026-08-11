@@ -19,6 +19,32 @@ struct ArtifactPreviewWidget: GenUIWidget {
         let url: String?
         let html: String?
         let markdown: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case url
+            case html
+            case markdown
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            type = try container.decode(SourceKind.self, forKey: .type)
+            switch type {
+            case .url:
+                url = try container.decode(String.self, forKey: .url)
+                html = nil
+                markdown = nil
+            case .html:
+                url = nil
+                html = try container.decode(String.self, forKey: .html)
+                markdown = nil
+            case .markdown:
+                url = nil
+                html = nil
+                markdown = try container.decode(String.self, forKey: .markdown)
+            }
+        }
     }
 
     struct Args: Decodable {
@@ -30,36 +56,38 @@ struct ArtifactPreviewWidget: GenUIWidget {
 
     let name = "render_artifact_preview"
     let description = "Display a visual artifact in a side panel: a hosted URL, a self-contained HTML snippet, or Markdown. Use for content worth inspecting at full size — interactive demos, long-form documents, or rich HTML mockups. For SVG illustrations and Mermaid diagrams, emit a fenced `svg` or `mermaid` code block in the regular assistant message instead. The chat shows a compact summary card; clicking it opens the full artifact in the right sidebar."
-    let promptHint = "large artifacts (markdown/html/url) opened in a side panel"
+    let promptHint = "large artifacts opened in a side panel; arguments use source with type url, html, or markdown and the matching url, html, or markdown payload field"
 
     var schema: JSONSchema {
         let urlSource = GenUISchema.object(
             properties: [
                 "type": GenUISchema.string(enumValues: ["url"]),
-                "url": GenUISchema.string(),
+                "url": GenUISchema.string(description: "Absolute URL for the hosted artifact"),
             ],
             required: ["type", "url"]
         )
         let htmlSource = GenUISchema.object(
             properties: [
                 "type": GenUISchema.string(enumValues: ["html"]),
-                "html": GenUISchema.string(),
+                "html": GenUISchema.string(description: "Complete self-contained HTML artifact"),
             ],
             required: ["type", "html"]
         )
         let markdownSource = GenUISchema.object(
             properties: [
                 "type": GenUISchema.string(enumValues: ["markdown"]),
-                "markdown": GenUISchema.string(),
+                "markdown": GenUISchema.string(description: "Complete Markdown artifact"),
             ],
             required: ["type", "markdown"]
         )
-        let source = JSONSchema(fields: [.oneOf([urlSource, htmlSource, markdownSource])])
         return GenUISchema.object(
             properties: [
                 "title": GenUISchema.string(),
                 "description": GenUISchema.string(),
-                "source": source,
+                "source": JSONSchema(fields: [
+                    .oneOf([urlSource, htmlSource, markdownSource]),
+                    .description("Complete artifact payload. Choose one source type and include its matching payload field."),
+                ]),
                 "footer": GenUISchema.string(),
             ],
             required: ["source"]

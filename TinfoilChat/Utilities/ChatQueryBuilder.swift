@@ -53,6 +53,8 @@ struct ChatQueryBuilder {
     ///     persisted, keeping the system prompt and history byte-stable so
     ///     prefix caching works. Defaults to `false` so internal utilities
     ///     (title gen, memory) stay unaffected.
+    ///   - responseFormat: Optional structured response format for focused
+    ///     non-streaming requests such as GenUI argument regeneration.
     /// - Returns: A configured ChatQuery
     @MainActor
     static func buildQuery(
@@ -69,7 +71,8 @@ struct ChatQueryBuilder {
         thinkingEnabled: Bool = true,
         genUIEnabled: Bool = true,
         autoCandidates: [ModelType]? = nil,
-        includeTimeReminder: Bool = false
+        includeTimeReminder: Bool = false,
+        responseFormat: ChatQuery.ResponseFormat? = nil
     ) -> ChatQuery {
 
         var messages: [ChatQuery.ChatCompletionMessageParam] = []
@@ -263,6 +266,7 @@ struct ChatQueryBuilder {
             messages: messages,
             model: requestModel,
             parallelToolCalls: parallelToolCalls,
+            responseFormat: responseFormat,
             toolChoice: toolChoice,
             tools: tools,
             webSearchOptions: webSearchEnabled ? .init() : nil,

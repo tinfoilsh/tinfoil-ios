@@ -79,6 +79,50 @@ enum TimelineToolCalls {
         timeline.append(.object(block))
     }
 
+    static func replaceArguments(
+        in message: inout Message,
+        toolCallId: String,
+        name: String,
+        expectedArguments: String,
+        newArguments: String,
+        requiresTimelineBlock: Bool = false
+    ) -> Bool {
+        guard let toolCallIndex = message.toolCalls.firstIndex(where: {
+            $0.id == toolCallId
+                && $0.name == name
+                && $0.arguments == expectedArguments
+        }) else {
+            return false
+        }
+
+        let timelineIndexes = (message.timeline ?? []).indices.filter { index in
+            let object = message.timeline?[index].objectValue
+            return object?["type"]?.stringValue == "tool_call"
+                && object?["toolCallId"]?.stringValue == toolCallId
+        }
+        guard timelineIndexes.count <= 1 else { return false }
+        guard !requiresTimelineBlock || timelineIndexes.count == 1 else { return false }
+        if let timelineIndex = timelineIndexes.first {
+            guard let object = message.timeline?[timelineIndex].objectValue,
+                  object["name"]?.stringValue == name,
+                  object["arguments"]?.stringValue == expectedArguments else {
+                return false
+            }
+        }
+
+        message.toolCalls[toolCallIndex] = GenUIToolCall(
+            id: toolCallId,
+            name: name,
+            arguments: newArguments
+        )
+        if let timelineIndex = timelineIndexes.first,
+           var object = message.timeline?[timelineIndex].objectValue {
+            object["arguments"] = .string(newArguments)
+            message.timeline?[timelineIndex] = .object(object)
+        }
+        return true
+    }
+
     /// Marks the matching tool_call block as resolved by writing the
     /// outer `resolvedAt` and the inner `resolution` object. Mirrors
     /// the webapp's `TimelineBuilder.resolveToolCall` shape exactly.

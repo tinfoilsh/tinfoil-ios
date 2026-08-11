@@ -11,22 +11,37 @@
 
 import SwiftUI
 
+enum GenUIToolCallPresentation {
+    static func showsPlaceholder(arguments: String, isRenderingStream: Bool) -> Bool {
+        guard isRenderingStream,
+              let data = arguments.data(using: .utf8) else {
+            return false
+        }
+        return (try? JSONSerialization.jsonObject(with: data)) == nil
+    }
+}
+
 struct GenUIToolCallView: View {
     let toolCall: GenUIToolCall
     let isStreaming: Bool
     let isDarkMode: Bool
     let resolution: GenUIResolution?
+    let retryState: GenUIRetryState?
     let onRetry: (() -> Void)?
 
     var body: some View {
         let widget = GenUIRegistry.shared.widget(named: toolCall.name)
-        let parsed = parsedArgs()
+        let parsedResult = parsedArgs(widget: widget)
         let context = GenUIRenderContext(isDarkMode: isDarkMode)
+
+        if isStreaming || retryState == .generating {
+            return AnyView(streamingPlaceholder)
+        }
 
         // Input-surface widgets only show inline once they've been
         // resolved; the live UI lives in the input area.
         if widget?.surface == .input {
-            if let widget, let resolution, let data = parsed,
+            if let widget, let resolution, case .valid(let data) = parsedResult,
                let resolvedView = widget.renderResolved(
                 rawArgs: data,
                 resolution: resolution,
@@ -34,14 +49,13 @@ struct GenUIToolCallView: View {
                ) {
                 return AnyView(resolvedView)
             }
+            if case .invalid(let validationError) = parsedResult, widget != nil {
+                return AnyView(parseFailureCard(validationError: validationError))
+            }
             return AnyView(EmptyView())
         }
 
-        if isStreaming {
-            return AnyView(streamingPlaceholder)
-        }
-
-        if let widget, let data = parsed,
+        if let widget, case .valid(let data) = parsedResult,
            let rendered = widget.renderInline(rawArgs: data, context: context) {
             return AnyView(rendered)
         }
@@ -54,16 +68,71 @@ struct GenUIToolCallView: View {
             return AnyView(EmptyView())
         }
 
-        return AnyView(parseFailureCard)
+        if case .invalid(let validationError) = parsedResult {
+            return AnyView(parseFailureCard(validationError: validationError))
+        }
+        return AnyView(EmptyView())
     }
 
-    private func parsedArgs() -> Data? {
-        guard !toolCall.arguments.isEmpty else { return nil }
-        guard let data = toolCall.arguments.data(using: .utf8) else { return nil }
-        // Validate it is at least a JSON object before handing to the widget.
-        guard let json = try? JSONSerialization.jsonObject(with: data),
-              json is [String: Any] else { return nil }
-        return data
+    private enum ParsedArgs {
+        case valid(Data)
+        case invalid(GenUIArgumentValidationError)
+    }
+
+    private func parsedArgs(widget: AnyGenUIWidget?) -> ParsedArgs {
+        guard let data = toolCall.arguments.data(using: .utf8),
+              let widget else {
+            return .invalid(.invalidJSONObject)
+        }
+        if let error = GenUIArgumentValidator.validationError(rawArgs: data, widget: widget) {
+            return .invalid(error)
+        }
+        return .valid(data)
+    }
+
+    private var failureTitle: String {
+        switch retryState {
+        case .requestFailed:
+            return "Couldn't retry this widget"
+        case .invalidOutput:
+            return "The retry didn't return a valid widget"
+        case .staleOrigin:
+            return "This widget changed before retry completed"
+        case .generating, .none:
+            return "Couldn't display this widget"
+        }
+    }
+
+    private func failureDetail(validationError: GenUIArgumentValidationError) -> String {
+        switch retryState {
+        case .requestFailed:
+            return "The retry request failed. Try again."
+        case .staleOrigin:
+            return "Reload the conversation and try again from the latest version."
+        case .generating:
+            return "Generating component"
+        case .invalidOutput, .none:
+            if case .invalidOutput(let outputError) = retryState {
+                switch outputError {
+                case .invalidArguments(let retryValidationError):
+                    return validationDetail(retryValidationError)
+                case .incompleteResponse:
+                    return "The model stopped before returning a complete widget. Try again."
+                case .refusal:
+                    return "The model declined to regenerate this widget. Try again."
+                }
+            }
+            return validationDetail(validationError)
+        }
+    }
+
+    private func validationDetail(_ error: GenUIArgumentValidationError) -> String {
+        switch error {
+        case .invalidJSONObject:
+            return "The response wasn't a valid JSON object."
+        case .widgetDecoding(let codingPath):
+            return "The response didn't match the \(toolCall.name) widget's expected shape at \(codingPath)."
+        }
     }
 
     @ViewBuilder
@@ -88,13 +157,13 @@ struct GenUIToolCallView: View {
     }
 
     @ViewBuilder
-    private var parseFailureCard: some View {
+    private func parseFailureCard(validationError: GenUIArgumentValidationError) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Couldn't display this widget")
+                Text(failureTitle)
                     .font(.subheadline.weight(.medium))
                     .foregroundColor(GenUIStyle.primaryText(isDarkMode))
-                Text("The response didn't match the \(toolCall.name) widget's expected shape.")
+                Text(failureDetail(validationError: validationError))
                     .font(.caption)
                     .foregroundColor(GenUIStyle.mutedText(isDarkMode))
                     .fixedSize(horizontal: false, vertical: true)
