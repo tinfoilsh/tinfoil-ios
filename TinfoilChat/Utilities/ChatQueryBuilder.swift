@@ -99,10 +99,24 @@ struct ChatQueryBuilder {
             }
         }
 
-        let recentMessages = TokenEstimation.selectMessagesWithinBudget(conversationMessages, contextWindow: contextWindow)
+        let candidateReasoningHistoryPolicy = autoCandidates?.reduce(ReasoningHistoryPolicy.none) { policy, candidate in
+            ReasoningHistoryPolicy.strongest(policy, candidate.reasoningHistoryPolicy)
+        } ?? .none
+        let reasoningHistoryPolicy = ReasoningHistoryPolicy.strongest(
+            reasoningConfig?.reasoningHistoryPolicy ?? .none,
+            candidateReasoningHistoryPolicy
+        )
+        let recentMessages = TokenEstimation.selectMessagesWithinBudget(
+            conversationMessages,
+            contextWindow: contextWindow,
+            reasoningHistoryPolicy: reasoningHistoryPolicy
+        )
         var hasAddedSystemInstructions = useSystemRole
 
         for msg in recentMessages {
+            let reasoningContent = reasoningHistoryPolicy.includesReasoning(for: msg)
+                ? msg.reasoningContentForHistory
+                : nil
             if msg.role == .user {
                 var userContent = msg.content
 
@@ -162,7 +176,7 @@ struct ChatQueryBuilder {
                 } else {
                     messages.append(.user(.init(content: .string(userContent))))
                 }
-            } else if !msg.content.isEmpty || !msg.toolCalls.isEmpty {
+            } else if !msg.content.isEmpty || !msg.toolCalls.isEmpty || reasoningContent != nil {
                 // Emit `tool_calls` on the assistant message so the model
                 // sees its previously-rendered widgets, then synthesize
                 // `role: 'tool'` results so the API's tool-call/tool-result
@@ -186,6 +200,7 @@ struct ChatQueryBuilder {
                         : .textContent(msg.content)
                 messages.append(.assistant(.init(
                     content: assistantContent,
+                    reasoningContent: reasoningContent,
                     toolCalls: toolCallParams
                 )))
                 if let toolCallParams {

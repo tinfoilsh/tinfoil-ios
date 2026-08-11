@@ -34,15 +34,46 @@ struct ReasoningEndpointParams: Codable, Equatable {
 /// - `effortMap` — optional translation from the UI's effort vocabulary to
 ///   the model's actual accepted values (e.g. DeepSeek V4 only accepts
 ///   `high`/`max`).
+/// - `reasoningHistoryPolicy` — controls whether prior assistant reasoning is
+///   returned for every assistant message, tool-call messages only, or never.
 ///
 /// The presence of a `reasoningConfig` object is itself the capability
 /// flag — there is no separate boolean.
+enum ReasoningHistoryPolicy: String, Codable, Equatable {
+    case none
+    case toolCallOnly = "tool-call-only"
+    case all
+
+    private var rank: Int {
+        switch self {
+        case .none: return 0
+        case .toolCallOnly: return 1
+        case .all: return 2
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: value) ?? .none
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    static func strongest(_ first: Self, _ second: Self) -> Self {
+        second.rank > first.rank ? second : first
+    }
+}
+
 struct ReasoningConfig: Codable, Equatable {
     let supportsEffort: Bool?
     let supportsToggle: Bool?
     let defaultEnabled: Bool?
     let effortMap: [String: String]?
     let params: [String: ReasoningEndpointParams]?
+    let reasoningHistoryPolicy: ReasoningHistoryPolicy?
 }
 
 /// Synthetic "Auto" model selection that lets the router pick the best
@@ -166,6 +197,10 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
         appConfig.reasoningConfig?.supportsToggle == true
     }
 
+    var reasoningHistoryPolicy: ReasoningHistoryPolicy {
+        appConfig.reasoningConfig?.reasoningHistoryPolicy ?? .none
+    }
+
     // MARK: - Auto routing
 
     /// Capability tags advertised by the controlplane (e.g. `smart`, `fast`).
@@ -201,7 +236,10 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
                 : "Routes to the fastest available model",
             details: "",
             parameters: "",
-            contextWindow: "",
+            contextWindow: members.min {
+                TokenEstimation.parseContextWindowTokens($0.contextWindow)
+                    < TokenEstimation.parseContextWindowTokens($1.contextWindow)
+            }?.contextWindow ?? "",
             type: "chat",
             chat: true,
             paid: true,
@@ -230,6 +268,13 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
 struct ModelSelection {
     let representative: ModelType
     let autoCandidates: [ModelType]?
+
+    var contextWindow: String {
+        autoCandidates?.min {
+            TokenEstimation.parseContextWindowTokens($0.contextWindow)
+                < TokenEstimation.parseContextWindowTokens($1.contextWindow)
+        }?.contextWindow ?? representative.contextWindow
+    }
 }
 
 /// Application-wide configuration settings
@@ -456,6 +501,15 @@ class AppConfig: ObservableObject {
     /// Real chat models advertising the given capability tier.
     func tierModels(_ tier: String) -> [ModelType] {
         availableModels.filter { $0.isChat && $0.attributes.contains(tier) }
+    }
+
+    func reasoningHistoryPolicy(for model: ModelType) -> ReasoningHistoryPolicy {
+        guard model.isAuto, let tier = model.autoTier else {
+            return model.reasoningHistoryPolicy
+        }
+        return tierModels(tier).reduce(ReasoningHistoryPolicy.none) { policy, candidate in
+            ReasoningHistoryPolicy.strongest(policy, candidate.reasoningHistoryPolicy)
+        }
     }
 
     /// Synthetic Auto entries for tiers that currently have at least one member.

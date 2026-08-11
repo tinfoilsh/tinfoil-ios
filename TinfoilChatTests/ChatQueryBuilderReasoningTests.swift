@@ -40,7 +40,8 @@ struct ChatQueryBuilderReasoningTests {
                         ])
                     ])
                 )
-            ]
+            ],
+            reasoningHistoryPolicy: .none
         )
     }
 
@@ -57,7 +58,8 @@ struct ChatQueryBuilderReasoningTests {
                     ]),
                     disable: nil
                 )
-            ]
+            ],
+            reasoningHistoryPolicy: .toolCallOnly
         )
     }
 
@@ -80,8 +82,58 @@ struct ChatQueryBuilderReasoningTests {
                         ])
                     ])
                 )
-            ]
+            ],
+            reasoningHistoryPolicy: .toolCallOnly
         )
+    }
+
+    private func preservedHistoryConfig() -> ReasoningConfig {
+        ReasoningConfig(
+            supportsEffort: nil,
+            supportsToggle: nil,
+            defaultEnabled: nil,
+            effortMap: nil,
+            params: nil,
+            reasoningHistoryPolicy: .all
+        )
+    }
+
+    private func model(
+        id: String,
+        contextWindow: String = "256k tokens",
+        reasoningConfig: ReasoningConfig?
+    ) -> ModelType {
+        ModelType(from: AppModelConfig(
+            modelName: id,
+            image: "",
+            name: id,
+            nameShort: id,
+            description: "",
+            details: "",
+            parameters: "",
+            contextWindow: contextWindow,
+            type: "chat",
+            chat: true,
+            paid: true,
+            multimodal: false,
+            toolCalling: true,
+            attributes: ["smart"],
+            reasoningConfig: reasoningConfig
+        ))
+    }
+
+    @Test func reasoningHistoryPolicyDecodesFromModelConfig() throws {
+        let data = Data(#"{"reasoningHistoryPolicy":"tool-call-only"}"#.utf8)
+        let config = try JSONDecoder().decode(ReasoningConfig.self, from: data)
+
+        #expect(config.reasoningHistoryPolicy == .toolCallOnly)
+    }
+
+    @Test func unknownReasoningHistoryPolicyFallsBackSafely() throws {
+        let data = Data(#"{"reasoningHistoryPolicy":"future-policy"}"#.utf8)
+        let config = try JSONDecoder().decode(ReasoningConfig.self, from: data)
+
+        #expect(config.reasoningHistoryPolicy == .none)
     }
 
     @Test func deepseekLowEffortMapsToHighInsideChatTemplateKwargs() {
@@ -221,6 +273,126 @@ struct ChatQueryBuilderReasoningTests {
         #expect(messages.count == 1)
         #expect(messages.first?["role"] as? String == "user")
         #expect(messages.first?["content"] as? String == "hello")
+    }
+
+    @Test @MainActor
+    func preservedReasoningIsReturnedWithAssistantContentAndToolCalls() throws {
+        var assistant = Message(role: .assistant, content: "answer", thoughts: "reasoning")
+        assistant.toolCalls = [
+            GenUIToolCall(id: "call_1", name: "render_chart", arguments: "{\"value\":1}")
+        ]
+        let query = ChatQueryBuilder.buildQuery(
+            modelId: "kimi-k3",
+            systemPrompt: "",
+            rules: "",
+            conversationMessages: [assistant],
+            stream: false,
+            reasoningConfig: preservedHistoryConfig(),
+            genUIEnabled: false
+        )
+
+        let messages = try encodedMessages(from: query)
+        let encodedAssistant = try #require(messages.first)
+        #expect(encodedAssistant["role"] as? String == "assistant")
+        #expect(encodedAssistant["content"] as? String == "answer")
+        #expect(encodedAssistant["reasoning_content"] as? String == "reasoning")
+        #expect((encodedAssistant["tool_calls"] as? [[String: Any]])?.count == 1)
+        #expect(messages.last?["role"] as? String == "tool")
+    }
+
+    @Test @MainActor
+    func reasoningOnlyAssistantIsKeptWhenHistoryIsRequired() throws {
+        let query = ChatQueryBuilder.buildQuery(
+            modelId: "kimi-k3",
+            systemPrompt: "",
+            rules: "",
+            conversationMessages: [
+                Message(role: .assistant, content: "", thoughts: "reasoning only")
+            ],
+            stream: false,
+            reasoningConfig: preservedHistoryConfig(),
+            genUIEnabled: false
+        )
+
+        let messages = try encodedMessages(from: query)
+        #expect(messages.count == 1)
+        #expect(messages.first?["role"] as? String == "assistant")
+        #expect(messages.first?["reasoning_content"] as? String == "reasoning only")
+    }
+
+    @Test @MainActor
+    func reasoningIsOmittedForNonToolCallAssistantUnderToolCallOnlyPolicy() throws {
+        let query = ChatQueryBuilder.buildQuery(
+            modelId: "gpt-oss-120b",
+            systemPrompt: "",
+            rules: "",
+            conversationMessages: [
+                Message(role: .assistant, content: "answer", thoughts: "reasoning")
+            ],
+            stream: false,
+            reasoningConfig: gptOssConfig(),
+            genUIEnabled: false
+        )
+
+        let messages = try encodedMessages(from: query)
+        #expect(messages.first?["reasoning_content"] == nil)
+    }
+
+    @Test @MainActor
+    func toolCallPolicyPreservesOnlyToolCallReasoning() throws {
+        var toolCallAssistant = Message(role: .assistant, content: "", thoughts: "keep this")
+        toolCallAssistant.toolCalls = [
+            GenUIToolCall(id: "call_1", name: "render_chart", arguments: "{}")
+        ]
+        let query = ChatQueryBuilder.buildQuery(
+            modelId: "gpt-oss-120b",
+            systemPrompt: "",
+            rules: "",
+            conversationMessages: [
+                Message(role: .assistant, content: "ordinary", thoughts: "omit this"),
+                toolCallAssistant,
+            ],
+            stream: false,
+            reasoningConfig: gptOssConfig(),
+            genUIEnabled: false
+        )
+
+        let messages = try encodedMessages(from: query)
+        #expect(messages.first?["reasoning_content"] == nil)
+        #expect(messages[1]["reasoning_content"] as? String == "keep this")
+    }
+
+    @Test @MainActor
+    func autoPreservesReasoningWhenAnyCandidateRequiresIt() throws {
+        let query = ChatQueryBuilder.buildQuery(
+            modelId: "glm-5-2",
+            systemPrompt: "",
+            rules: "",
+            conversationMessages: [
+                Message(role: .assistant, content: "answer", thoughts: "reasoning")
+            ],
+            stream: false,
+            genUIEnabled: false,
+            autoCandidates: [
+                model(id: "glm-5-2", reasoningConfig: nil),
+                model(id: "kimi-k3", reasoningConfig: preservedHistoryConfig()),
+            ]
+        )
+
+        let messages = try encodedMessages(from: query)
+        #expect(messages.first?["reasoning_content"] as? String == "reasoning")
+    }
+
+    @Test func autoSelectionUsesTheSmallestCandidateContextWindow() {
+        let selection = ModelSelection(
+            representative: model(id: "large", contextWindow: "256k tokens", reasoningConfig: nil),
+            autoCandidates: [
+                model(id: "large", contextWindow: "256k tokens", reasoningConfig: nil),
+                model(id: "small", contextWindow: "128k tokens", reasoningConfig: nil),
+            ]
+        )
+
+        #expect(selection.contextWindow == "128k tokens")
     }
 
     private func encodedMessages(from query: ChatQuery) throws -> [[String: Any]] {

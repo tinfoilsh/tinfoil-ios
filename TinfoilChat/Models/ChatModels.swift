@@ -362,6 +362,12 @@ enum MessageRole: String, Codable {
     case assistant
 }
 
+extension ReasoningHistoryPolicy {
+    func includesReasoning(for message: Message) -> Bool {
+        self == .all || (self == .toolCallOnly && !message.toolCalls.isEmpty)
+    }
+}
+
 // MARK: - Web Search Types
 
 /// Represents a source from web search results
@@ -747,6 +753,23 @@ struct Message: Identifiable, Codable, Equatable {
     /// verbatim even though iOS renders the chat off its own
     /// `segments` representation.
     var timeline: [JSONValue]? = nil
+
+    var reasoningContentForHistory: String? {
+        if let segments {
+            let reasoning = segments.reduce(into: "") { result, segment in
+                if case .thinking(let content, _, _) = segment {
+                    result += content
+                }
+            }
+            if !reasoning.isEmpty {
+                return reasoning
+            }
+        }
+        if let thoughts, !thoughts.isEmpty {
+            return thoughts
+        }
+        return nil
+    }
 
     /// True when this assistant message has at least one tool call whose
     /// widget is not registered on this client. Used to surface the

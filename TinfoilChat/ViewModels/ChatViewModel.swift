@@ -2369,7 +2369,7 @@ class ChatViewModel: ObservableObject {
                     systemPrompt: systemPrompt,
                     rules: processedRules,
                     conversationMessages: conversationMessages,
-                    contextWindow: representativeModel.contextWindow,
+                    contextWindow: modelSelection.contextWindow,
                     webSearchEnabled: webSearchEnabled,
                     isMultimodal: representativeModel.isMultimodal,
                     reasoningConfig: representativeModel.reasoningConfig,

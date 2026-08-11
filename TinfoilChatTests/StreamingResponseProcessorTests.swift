@@ -103,6 +103,18 @@ struct StreamingThinkingSegmentTests {
         #expect(snapshot.segments[1] == .text("Answer."))
     }
 
+    @Test("reasoning_content is decoded into thinking state")
+    func reasoningContentIsDecoded() throws {
+        let processor = StreamingResponseProcessor(
+            isWebSearchEnabled: false,
+            hapticEnabled: false
+        )
+        let chunk = try decodeStreamChunk(delta: ["reasoning_content": "K3 thought."])
+        _ = processor.process(processor.parse(chunk))
+
+        #expect(processor.snapshot().thoughts == "K3 thought.")
+    }
+
     @Test("web search closes the open thinking round")
     func webSearchClosesThinking() throws {
         let processor = StreamingResponseProcessor(
@@ -160,6 +172,9 @@ struct StreamingThinkingSegmentTests {
         #expect(second == "Second round.")
         #expect(text == "Answer.")
         #expect(snapshot.thoughts == "First round.\n\nSecond round.")
+        var message = Message(role: .assistant, content: snapshot.responseContent, thoughts: snapshot.thoughts)
+        message.segments = snapshot.segments
+        #expect(message.reasoningContentForHistory == "First round.Second round.")
     }
 
     @Test("tool call deltas close the open thinking round")

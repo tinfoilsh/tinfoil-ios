@@ -43,14 +43,20 @@ enum TokenEstimation {
     }
 
     /// Estimate the prompt tokens contributed by a single message, including
-    /// tool calls and attachment text. Thoughts are excluded because they are
-    /// never sent back in prompts. Search reasoning is counted even though
-    /// this app's query builder doesn't resend it yet: the webapp sends it
-    /// for multi-turn context and counts it, and matching its estimate keeps
-    /// the archive boundary identical across platforms (erring toward a
-    /// smaller prompt, never an overflow).
-    static func estimateMessageTokens(_ message: Message) -> Int {
+    /// tool calls and attachment text. Reasoning is counted when the selected
+    /// model requires it to be returned in subsequent requests. Search
+    /// reasoning is counted even though this app's query builder doesn't resend
+    /// it yet: the webapp sends it for multi-turn context and counts it, and
+    /// matching its estimate keeps the archive boundary identical across
+    /// platforms (erring toward a smaller prompt, never an overflow).
+    static func estimateMessageTokens(
+        _ message: Message,
+        reasoningHistoryPolicy: ReasoningHistoryPolicy = .none
+    ) -> Int {
         var tokens = estimateTokenCount(message.content)
+        if reasoningHistoryPolicy.includesReasoning(for: message) {
+            tokens += estimateTokenCount(message.reasoningContentForHistory)
+        }
         if let searchReasoning = message.searchReasoning {
             tokens += estimateTokenCount(searchReasoning)
         }
@@ -72,11 +78,18 @@ enum TokenEstimation {
     /// (like the empty assistant placeholder appended before streaming) must
     /// not satisfy that guarantee on their own, or the latest user message
     /// could be dropped from the prompt.
-    static func findContextStartIndex(messages: [Message], budgetTokens: Int) -> Int {
+    static func findContextStartIndex(
+        messages: [Message],
+        budgetTokens: Int,
+        reasoningHistoryPolicy: ReasoningHistoryPolicy = .none
+    ) -> Int {
         var usedTokens = 0
         var hasIncludedSubstantiveMessage = false
         for i in stride(from: messages.count - 1, through: 0, by: -1) {
-            let messageTokens = estimateMessageTokens(messages[i])
+            let messageTokens = estimateMessageTokens(
+                messages[i],
+                reasoningHistoryPolicy: reasoningHistoryPolicy
+            )
             usedTokens += messageTokens
             if usedTokens > budgetTokens && hasIncludedSubstantiveMessage {
                 return i + 1
@@ -90,8 +103,16 @@ enum TokenEstimation {
 
     /// The trailing slice of messages that fits within the model's context
     /// token budget.
-    static func selectMessagesWithinBudget(_ messages: [Message], contextWindow: String?) -> [Message] {
+    static func selectMessagesWithinBudget(
+        _ messages: [Message],
+        contextWindow: String?,
+        reasoningHistoryPolicy: ReasoningHistoryPolicy = .none
+    ) -> [Message] {
         let budget = contextTokenBudget(contextWindow)
-        return Array(messages[findContextStartIndex(messages: messages, budgetTokens: budget)...])
+        return Array(messages[findContextStartIndex(
+            messages: messages,
+            budgetTokens: budget,
+            reasoningHistoryPolicy: reasoningHistoryPolicy
+        )...])
     }
 }
