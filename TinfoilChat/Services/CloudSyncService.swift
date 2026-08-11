@@ -453,17 +453,17 @@ class CloudSyncService: ObservableObject {
         let tokenGetter: SyncEnclaveClient.TokenGetter = { forceRefresh in
             do {
                 // Check if Clerk has a publishable key
-                guard !Clerk.shared.publishableKey.isEmpty else {
+                guard await !Clerk.shared.publishableKey.isEmpty else {
                     return nil
                 }
                 
                 // Ensure Clerk is loaded
-                if !Clerk.shared.isLoaded {
+                if await !Clerk.shared.isLoaded {
                     try await Clerk.shared.refreshClient()
                 }
                 
                 // Get fresh token from session
-                if let session = Clerk.shared.session {
+                if let session = await Clerk.shared.session {
                     // Try to get a fresh token first (refresh if needed)
                     if let token = try? await session.getToken(.init(skipCache: forceRefresh)) {
                         return token
