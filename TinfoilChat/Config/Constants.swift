@@ -314,6 +314,9 @@ enum Constants {
     enum Summarizer {
         static let enclaveURL = "https://summarizer.tinfoil.sh"
         static let configRepo = "tinfoilsh/confidential-summarizer"
+        static let maximumConcurrentRequests = 2
+        static let breakerDelays: [TimeInterval] = [15, 30, 60, 120]
+        static let maximumBreakerDelay: TimeInterval = 5 * 60
     }
 
     enum Metadata {
@@ -321,6 +324,10 @@ enum Constants {
         static let configRepo = "tinfoilsh/confidential-website-metadata-fetcher"
         /// Cap on cached metadata and favicon entries.
         static let cacheEntryLimit = 200
+        static let metadataCacheSeconds: TimeInterval = 10 * 60
+        static let faviconCacheSeconds: TimeInterval = 24 * 60 * 60
+        static let transientCooldownSeconds: TimeInterval = 60
+        static let maximumTransientCooldownSeconds: TimeInterval = 5 * 60
     }
 
     enum DocumentProcessing {
