@@ -321,7 +321,7 @@ struct ChatQueryBuilderReasoningTests {
     }
 
     @Test @MainActor
-    func reasoningIsOmittedWithoutPreservedHistoryCapability() throws {
+    func reasoningIsOmittedForNonToolCallAssistantUnderToolCallOnlyPolicy() throws {
         let query = ChatQueryBuilder.buildQuery(
             modelId: "gpt-oss-120b",
             systemPrompt: "",
