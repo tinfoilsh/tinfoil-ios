@@ -185,4 +185,84 @@ struct ChatRecoverySchedulingTests {
             )
         ))
     }
+
+    @Test @MainActor
+    func cancellationImmediatelyInvalidatesLiveAttempt() async throws {
+        let coordinator = ChatRecoveryCoordinator()
+        let attempt = try await coordinator.begin(
+            chatId: "chat-1",
+            turnId: "turn-1",
+            userId: "user-1",
+            storage: .cloud
+        )
+
+        await coordinator.markCancelled(attempt: attempt)
+
+        let isCurrent = await coordinator.liveAttemptIsCurrent(attempt)
+        #expect(isCurrent == false)
+    }
+
+    @Test func remoteResolutionRequiresFinalAssistantContent() {
+        let placeholder = Message(
+            role: .assistant,
+            turnId: "turn-1",
+            content: ""
+        )
+        let completed = Message(
+            role: .assistant,
+            turnId: "turn-1",
+            content: "Recovered"
+        )
+        let envelope = PendingRecoveryEnvelope(
+            v: 1,
+            turnId: "turn-1",
+            keyId: "key",
+            createdAt: "2026-08-11T00:00:00Z",
+            expiresAt: "2026-08-12T00:00:00Z",
+            nonce: "nonce",
+            ciphertext: "ciphertext"
+        )
+
+        #expect(!remoteRecoveryTurnIsResolved(
+            messages: [placeholder],
+            pendingRecoveries: nil,
+            turnId: "turn-1"
+        ))
+        #expect(remoteRecoveryTurnIsResolved(
+            messages: [completed],
+            pendingRecoveries: nil,
+            turnId: "turn-1"
+        ))
+        #expect(!remoteRecoveryTurnIsResolved(
+            messages: [completed],
+            pendingRecoveries: [envelope],
+            turnId: "turn-1"
+        ))
+    }
+
+    @Test func locallyModifiedResolutionRequiresRemoteClockWin() {
+        let now = Date()
+
+        #expect(!resolvedRemoteMayReplaceLocal(
+            localModified: true,
+            localClock: nil,
+            remoteClock: EditClock(v: 2, w: "remote"),
+            localUpdatedAt: now,
+            remoteUpdatedAt: now
+        ))
+        #expect(resolvedRemoteMayReplaceLocal(
+            localModified: true,
+            localClock: EditClock(v: 1, w: "local"),
+            remoteClock: EditClock(v: 2, w: "remote"),
+            localUpdatedAt: now,
+            remoteUpdatedAt: now
+        ))
+        #expect(!resolvedRemoteMayReplaceLocal(
+            localModified: true,
+            localClock: EditClock(v: 2, w: "local"),
+            remoteClock: EditClock(v: 1, w: "remote"),
+            localUpdatedAt: now,
+            remoteUpdatedAt: now
+        ))
+    }
 }

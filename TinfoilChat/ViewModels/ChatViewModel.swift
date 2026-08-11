@@ -300,6 +300,7 @@ class ChatViewModel: ObservableObject {
     private var client: TinfoilAI?
     private var streamTasks: [String: Task<Void, Never>] = [:]
     private var recoveryAttempts: [String: ChatRecoveryAttempt] = [:]
+    private var recoverySessionCleanupTasks: [String: Task<Void, Never>] = [:]
     private var thinkingSummaryServices: [String: ThinkingSummaryService] = [:]
     private var autoSyncTimer: Timer?
     private var recoveryScanTimer: Timer?
@@ -584,6 +585,8 @@ class ChatViewModel: ObservableObject {
         streamUpdateTimers.removeAll()
         streamTasks.values.forEach { $0.cancel() }
         streamTasks.removeAll()
+        recoverySessionCleanupTasks.values.forEach { $0.cancel() }
+        recoverySessionCleanupTasks.removeAll()
 
         // Cancel network status observer
         networkStatusCancellable?.cancel()
@@ -2220,18 +2223,20 @@ class ChatViewModel: ObservableObject {
             
             var hasRetriedWithFreshKey = false
             var recoveryAttempt: ChatRecoveryAttempt?
+            var recoveryRegistered = false
+            var recoveryRegistrationAttempted = false
+            var recoverySessionMayHaveStarted = false
 
             retryLoop: do {
-                if !hasRetriedWithFreshKey {
-                    if let recoveryStorage {
-                        await self.drainPendingSaves()
-                        if recoveryStorage == .cloud {
-                            try await self.cloudSync.backupChatAndWait(
-                                streamChatId,
-                                requiredTurnId: turnId
-                            )
-                        }
-                    }
+                if !hasRetriedWithFreshKey,
+                   let recoveryStorage,
+                   let userId = recoveryUserId {
+                    try await self.persistRecoveryCriticalSnapshot(
+                        streamChat,
+                        userId: userId,
+                        storage: recoveryStorage,
+                        turnId: turnId
+                    )
                 }
 
                 // Wait for client initialization if needed
@@ -2441,24 +2446,40 @@ class ChatViewModel: ObservableObject {
                     )
                     recoveryAttempt = attempt
                     recoveryAttempts[streamChatId] = attempt
+                    recoverySessionMayHaveStarted = true
                     let recoverable = try await ChatRecoveryClient.shared.start(
                         query: chatQuery,
                         sessionId: attempt.sessionId,
                         bearerToken: bearerToken,
                         userId: userId
                     )
-                    let envelope = try await ChatRecoveryCoordinator.shared.register(
+                    recoveryRegistrationAttempted = true
+                    let registration = try await ChatRecoveryCoordinator.shared.registerLocally(
                         attempt: attempt,
                         token: recoverable.token
                     )
+                    let envelope = registration.envelope
+                    recoveryRegistered = true
                     recoveryEnvelope = envelope
+                    if recoveryStorage == .cloud {
+                        // Local registration is durable; cross-device publication is eventual.
+                        await cloudSync.backupChat(
+                            streamChatId,
+                            allowWhileStreaming: true
+                        )
+                    }
                     if let location = findChatLocation(streamChatId) {
                         var chat = self.chat(at: location)
                         var pending = chat.pendingRecoveries ?? []
                         pending.removeAll { $0.turnId == turnId }
                         pending.append(envelope)
                         chat.pendingRecoveries = pending
-                        updateChat(chat)
+                        chat.clock = registration.metadata.clock
+                        chat.writer = registration.metadata.writer
+                        chat.clockVersion = registration.metadata.clockVersion
+                        chat.updatedAt = registration.metadata.updatedAt
+                        chat.locallyModified = registration.metadata.locallyModified
+                        updateChat(chat, persist: false)
                     }
                     stream = recoverable.stream
                 } else {
@@ -2821,7 +2842,7 @@ class ChatViewModel: ObservableObject {
                     // content. Title generation (async) then delays the real updateChat,
                     // and no subsequent updateUIView branch refreshes the wrapper — causing
                     // the first assistant response to appear truncated.
-                    self.updateChat(chat)
+                    self.updateChat(chat, persist: false)
                     if self.currentChat?.id == sid {
                         AccessibilityAnnouncer.announce(Constants.Accessibility.responseComplete)
                         HapticFeedback.trigger(.success)
@@ -2851,27 +2872,33 @@ class ChatViewModel: ObservableObject {
                    let response = finalizedChat?.messages.last(where: {
                        $0.role == .assistant && $0.turnId == turnId
                    }) {
-                    do {
-                        try await ChatRecoveryCoordinator.shared.complete(
-                            attempt: attempt,
-                            envelope: envelope,
-                            response: response,
-                            title: finalizedChat?.title,
-                            titleState: finalizedChat?.titleState
-                        )
-                    } catch {
-                        recoveryAttempts.removeValue(forKey: streamChatId)
-                        recoveryAttempt = nil
-                        throw error
-                    }
+                    let metadata = try await ChatRecoveryCoordinator.shared.completeLocally(
+                        attempt: attempt,
+                        envelope: envelope,
+                        response: response,
+                        title: finalizedChat?.title,
+                        titleState: finalizedChat?.titleState
+                    )
                     if var chat = finalizedChat {
                         chat.pendingRecoveries?.removeAll { $0.turnId == turnId }
                         if chat.pendingRecoveries?.isEmpty == true {
                             chat.pendingRecoveries = nil
                         }
+                        chat.clock = metadata.clock
+                        chat.writer = metadata.writer
+                        chat.clockVersion = metadata.clockVersion
+                        chat.updatedAt = metadata.updatedAt
+                        chat.locallyModified = metadata.locallyModified
                         finalizedChat = chat
                     }
                     recoveryAttempts.removeValue(forKey: streamChatId)
+                    recoveryRegistered = false
+                    if attempt.storage == .cloud {
+                        scheduleRecoverySessionCleanup(
+                            attempt: attempt,
+                            allowWhileStreaming: true
+                        )
+                    }
                 }
 
                 guard !Task.isCancelled else { return }
@@ -2886,6 +2913,11 @@ class ChatViewModel: ObservableObject {
                 }
             } catch {
                 if error is CancellationError || Task.isCancelled {
+                    if recoverySessionMayHaveStarted,
+                       !recoveryRegistrationAttempted,
+                       let attempt = recoveryAttempt {
+                        await ChatRecoveryCoordinator.shared.deleteSession(attempt: attempt)
+                    }
                     return
                 }
 
@@ -2907,24 +2939,57 @@ class ChatViewModel: ObservableObject {
 
                 if shouldRetry {
                     hasRetriedWithFreshKey = true
+                    var recoveryAllowsRetry = true
+                    var cancellationMetadata: ChatRecoveryLocalMutationResult?
                     if let attempt = recoveryAttempt {
-                        await ChatRecoveryCoordinator.shared.cancel(attempt: attempt)
+                        if recoveryRegistered {
+                            cancellationMetadata = await ChatRecoveryCoordinator.shared.cancelLocally(
+                                attempt: attempt,
+                                response: nil
+                            )
+                            recoveryAllowsRetry = cancellationMetadata != nil
+                            if recoveryAllowsRetry, attempt.storage == .cloud {
+                                scheduleRecoverySessionCleanup(
+                                    attempt: attempt,
+                                    allowWhileStreaming: true
+                                )
+                            }
+                        } else if recoverySessionMayHaveStarted {
+                            await ChatRecoveryCoordinator.shared.deleteSession(attempt: attempt)
+                        }
+                        recoveryRegistered = false
+                        recoveryRegistrationAttempted = false
+                        recoverySessionMayHaveStarted = false
                         recoveryAttempt = nil
                         recoveryAttempts.removeValue(forKey: streamChatId)
-                        if let location = findChatLocation(streamChatId) {
+                        if recoveryAllowsRetry,
+                           let location = findChatLocation(streamChatId) {
                             var chat = self.chat(at: location)
                             chat.pendingRecoveries?.removeAll { $0.turnId == turnId }
                             if chat.pendingRecoveries?.isEmpty == true {
                                 chat.pendingRecoveries = nil
                             }
-                            updateChat(chat)
+                            if let cancellationMetadata {
+                                chat.clock = cancellationMetadata.clock
+                                chat.writer = cancellationMetadata.writer
+                                chat.clockVersion = cancellationMetadata.clockVersion
+                                chat.updatedAt = cancellationMetadata.updatedAt
+                                chat.locallyModified = cancellationMetadata.locallyModified
+                            }
+                            updateChat(chat, persist: false)
                         }
                     }
                     // The token is reminted by acquireTokenForSend at the top of
                     // the retry pass (forceRefresh), so no separate refresh here.
-                    if await MainActor.run(body: { self.client != nil }) {
+                    if recoveryAllowsRetry,
+                       await MainActor.run(body: { self.client != nil }) {
                         continue retryLoop
                     }
+                }
+                if recoverySessionMayHaveStarted,
+                   !recoveryRegistrationAttempted,
+                   let attempt = recoveryAttempt {
+                    await ChatRecoveryCoordinator.shared.deleteSession(attempt: attempt)
                 }
                 recoveryAttempts.removeValue(forKey: streamChatId)
 
@@ -3259,6 +3324,27 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    private func scheduleRecoverySessionCleanup(
+        attempt: ChatRecoveryAttempt,
+        allowWhileStreaming: Bool
+    ) {
+        let sessionId = attempt.sessionId
+        let cloudSync = self.cloudSync
+        recoverySessionCleanupTasks[sessionId] = Task { [weak self] in
+            do {
+                try await cloudSync.backupRecoveryChatAndWait(
+                    attempt.chatId,
+                    allowWhileStreaming: allowWhileStreaming
+                )
+                try Task.checkCancellation()
+                await ChatRecoveryCoordinator.shared.deleteSession(attempt: attempt)
+            } catch {
+                // Session retention handles cleanup when publication is unavailable.
+            }
+            self?.recoverySessionCleanupTasks.removeValue(forKey: sessionId)
+        }
+    }
+
     @discardableResult
     private func cancelGeneration(
         chatId: String,
@@ -3268,50 +3354,65 @@ class ChatViewModel: ObservableObject {
 
         let streamTask = streamTasks[chatId]
         let recoveryAttempt = recoveryAttempts.removeValue(forKey: chatId)
-        let stoppedResponse = recoveryAttempt.flatMap { attempt -> Message? in
-            guard let location = findChatLocation(chatId) else { return nil }
-            return chat(at: location).messages.last {
-                $0.role == .assistant && $0.turnId == attempt.turnId
-            }
-        }
-        let recoveryCleanup = recoveryAttempt.map { attempt in
-            Task.detached(priority: .userInitiated) {
-                await ChatRecoveryCoordinator.shared.cancel(
-                    attempt: attempt,
-                    response: stoppedResponse
-                )
-            }
-        }
         streamTask?.cancel()
         flushPendingStreamUpdate(chatId: chatId)
         if let location = findChatLocation(chatId) {
             var chat = chat(at: location)
             chat.hasActiveStream = false
+            updateChat(chat, persist: false)
+            streamingTracker.endStreaming(chat.id)
+        } else {
+            streamingTracker.endStreaming(chatId)
+        }
+
+        if announce {
+            AccessibilityAnnouncer.announce(Constants.Accessibility.generationStopped)
+        }
+        return Task {
             if let recoveryAttempt {
+                await ChatRecoveryCoordinator.shared.markCancelled(
+                    attempt: recoveryAttempt
+                )
+            }
+            await streamTask?.value
+            self.flushPendingStreamUpdate(chatId: chatId)
+            self.finishStreamState(chatId: chatId)
+            let metadata: ChatRecoveryLocalMutationResult?
+            if let recoveryAttempt {
+                let stoppedResponse = self.findChatLocation(chatId).flatMap { location in
+                    self.chat(at: location).messages.last {
+                        $0.role == .assistant && $0.turnId == recoveryAttempt.turnId
+                    }
+                }
+                metadata = await ChatRecoveryCoordinator.shared.cancelLocally(
+                    attempt: recoveryAttempt,
+                    response: stoppedResponse
+                )
+                if metadata != nil, recoveryAttempt.storage == .cloud {
+                    self.scheduleRecoverySessionCleanup(
+                        attempt: recoveryAttempt,
+                        allowWhileStreaming: true
+                    )
+                }
+            } else {
+                metadata = nil
+            }
+            if let metadata,
+               let recoveryAttempt,
+               let location = self.findChatLocation(chatId) {
+                var chat = self.chat(at: location)
                 chat.pendingRecoveries?.removeAll {
                     $0.turnId == recoveryAttempt.turnId
                 }
                 if chat.pendingRecoveries?.isEmpty == true {
                     chat.pendingRecoveries = nil
                 }
-            }
-            updateChat(chat)
-            streamingTracker.endStreaming(chat.id)
-        } else {
-            streamingTracker.endStreaming(chatId)
-        }
-
-        finishStreamState(chatId: chatId)
-        if announce {
-            AccessibilityAnnouncer.announce(Constants.Accessibility.generationStopped)
-        }
-        return Task {
-            await recoveryCleanup?.value
-            await streamTask?.value
-            if let recoveryAttempt {
-                await ChatRecoveryCoordinator.shared.deleteSession(
-                    attempt: recoveryAttempt
-                )
+                chat.clock = metadata.clock
+                chat.writer = metadata.writer
+                chat.clockVersion = metadata.clockVersion
+                chat.updatedAt = metadata.updatedAt
+                chat.locallyModified = metadata.locallyModified
+                self.updateChat(chat)
             }
         }
     }
@@ -3635,7 +3736,11 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Updates a chat in the chats array AND saves
-    private func updateChat(_ chat: Chat, throttleForStreaming: Bool = false) {
+    private func updateChat(
+        _ chat: Chat,
+        throttleForStreaming: Bool = false,
+        persist: Bool = true
+    ) {
         var updatedChat = chat
         
         // If the chat has an active stream or is being actively modified, ensure it's marked as locally modified
@@ -3653,7 +3758,9 @@ class ChatViewModel: ObservableObject {
         }
 
         // During streaming, batch saves to reduce disk I/O
-        if throttleForStreaming {
+        if !persist {
+            return
+        } else if throttleForStreaming {
             let chatId = updatedChat.id
 
             // Store pending update
@@ -3700,6 +3807,30 @@ class ChatViewModel: ObservableObject {
 
     private func drainPendingSaves() async {
         await pendingSaveTask?.value
+    }
+
+    private func persistRecoveryCriticalSnapshot(
+        _ chat: Chat,
+        userId: String,
+        storage: ChatRecoveryStorage,
+        turnId: String
+    ) async throws {
+        await drainPendingSaves()
+        if try await storage.fileStorage.containsRecoverySnapshot(
+            chatId: chat.id,
+            userId: userId,
+            turnId: turnId
+        ) {
+            return
+        }
+        try await storage.fileStorage.saveChat(chat, userId: userId)
+        guard try await storage.fileStorage.containsRecoverySnapshot(
+            chatId: chat.id,
+            userId: userId,
+            turnId: turnId
+        ) else {
+            throw ChatRecoverySyncError.chatMissing
+        }
     }
     
     

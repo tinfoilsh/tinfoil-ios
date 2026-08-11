@@ -8,6 +8,46 @@ enum ChatRecoverySyncError: Error {
     case conflict
 }
 
+struct ChatRecoveryLocalMutationResult: Sendable {
+    let clock: Int?
+    let writer: String?
+    let clockVersion: Int?
+    let updatedAt: Date
+    let locallyModified: Bool
+}
+
+func remoteRecoveryTurnIsResolved(
+    messages: [Message],
+    pendingRecoveries: [PendingRecoveryEnvelope]?,
+    turnId: String
+) -> Bool {
+    guard pendingRecoveries?.contains(where: { $0.turnId == turnId }) != true else {
+        return false
+    }
+    return messages.contains {
+        $0.role == .assistant
+            && $0.turnId == turnId
+            && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+func resolvedRemoteMayReplaceLocal(
+    localModified: Bool,
+    localClock: EditClock?,
+    remoteClock: EditClock?,
+    localUpdatedAt: Date,
+    remoteUpdatedAt: Date
+) -> Bool {
+    guard localModified else { return true }
+    guard let localClock, let remoteClock else { return false }
+    return SyncConflictResolver.remoteWins(
+        localClock: localClock,
+        remoteClock: remoteClock,
+        localUpdatedAt: localUpdatedAt,
+        remoteUpdatedAt: remoteUpdatedAt
+    )
+}
+
 enum ChatRecoveryStorage: String, Sendable {
     case cloud
     case local
@@ -51,7 +91,7 @@ actor ChatRecoverySync {
     ) async throws {
         try Task.checkCancellation()
         if storage == .local {
-            try await mutateLocal(
+            _ = try await mutateLocal(
                 chatId: chatId,
                 userId: userId,
                 mutation: mutation
@@ -124,11 +164,63 @@ actor ChatRecoverySync {
         throw lastError
     }
 
+    func mutateLocally(
+        chatId: String,
+        userId: String,
+        storage: ChatRecoveryStorage,
+        mutation: Mutation
+    ) async throws -> ChatRecoveryLocalMutationResult {
+        if storage == .local {
+            return try await mutateLocal(
+                chatId: chatId,
+                userId: userId,
+                mutation: mutation
+            )
+        }
+
+        for _ in 0..<Constants.ChatRecovery.maxMutationAttempts {
+            try Task.checkCancellation()
+            guard await Clerk.shared.user?.id == userId,
+                  let local = try await EncryptedFileStorage.cloud.loadChat(
+                      chatId: chatId,
+                      userId: userId
+                  ) else {
+                throw ChatRecoverySyncError.chatMissing
+            }
+            var candidate = local
+            try apply(mutation, to: &candidate, authoritativeRemote: local)
+            stampEdit(&candidate, observedRemote: local)
+            candidate.locallyModified = true
+            guard await Clerk.shared.user?.id == userId else {
+                throw ChatRecoverySyncError.chatMissing
+            }
+            if try await EncryptedFileStorage.cloud.applyRemoteChatIfFresh(
+                candidate,
+                userId: userId,
+                expectedLocalUpdatedAt: local.updatedAt,
+                allowLocallyModified: true
+            ) {
+                return localResult(candidate)
+            }
+        }
+        throw ChatRecoverySyncError.conflict
+    }
+
+    private func localResult(_ chat: Chat) -> ChatRecoveryLocalMutationResult {
+        ChatRecoveryLocalMutationResult(
+            clock: chat.clock,
+            writer: chat.writer,
+            clockVersion: chat.clockVersion,
+            updatedAt: chat.updatedAt,
+            locallyModified: chat.locallyModified
+        )
+    }
+
     private func mutateLocal(
         chatId: String,
         userId: String,
         mutation: Mutation
-    ) async throws {
+    ) async throws -> ChatRecoveryLocalMutationResult {
         for _ in 0..<Constants.ChatRecovery.maxMutationAttempts {
             try Task.checkCancellation()
             guard await Clerk.shared.user?.id == userId,
@@ -154,7 +246,7 @@ actor ChatRecoverySync {
                 expectedLocalUpdatedAt: local.updatedAt,
                 allowLocallyModified: true
             ) {
-                return
+                return localResult(candidate)
             }
         }
         throw ChatRecoverySyncError.conflict
@@ -191,6 +283,51 @@ actor ChatRecoverySync {
             }
         }
         throw ChatRecoverySyncError.conflict
+    }
+
+    func reconcileResolvedTurnFromRemote(
+        chatId: String,
+        turnId: String,
+        userId: String,
+        isCurrent: @escaping @Sendable () async -> Bool
+    ) async throws -> Bool {
+        guard await Clerk.shared.user?.id == userId else { return false }
+        guard let remote = try await CloudStorageService.shared.downloadChat(chatId),
+              await isCurrent() else { return false }
+        guard var remoteChat = await MainActor.run(body: { remote.toChat() }),
+              await isCurrent(),
+              remoteRecoveryTurnIsResolved(
+                  messages: remoteChat.messages,
+                  pendingRecoveries: remoteChat.pendingRecoveries,
+                  turnId: turnId
+              ) else {
+            return false
+        }
+        let local = try await EncryptedFileStorage.cloud.loadChat(
+            chatId: chatId,
+            userId: userId
+        )
+        guard await isCurrent() else { return false }
+        if let local,
+           !resolvedRemoteMayReplaceLocal(
+               localModified: local.locallyModified,
+               localClock: trustedClock(local),
+               remoteClock: trustedClock(remoteChat),
+               localUpdatedAt: local.updatedAt,
+               remoteUpdatedAt: remoteChat.updatedAt
+           ) {
+            return false
+        }
+        guard await Clerk.shared.user?.id == userId,
+              await isCurrent() else { return false }
+        remoteChat.syncedAt = Date()
+        remoteChat.locallyModified = false
+        return try await EncryptedFileStorage.cloud.applyRemoteChatIfFresh(
+            remoteChat,
+            userId: userId,
+            expectedLocalUpdatedAt: local?.updatedAt,
+            allowLocallyModified: true
+        )
     }
 
     private func preferredBase(local: Chat?, remote: Chat) -> Chat {

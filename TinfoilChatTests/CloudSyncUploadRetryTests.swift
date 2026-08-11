@@ -40,13 +40,16 @@ private actor UploadRetryProbe {
     struct Snapshot: Sendable {
         let preparedKeys: [String]
         let executedKeys: [String]
+        let allowWhileStreaming: [Bool]
     }
 
     private var preparedKeys: [String] = []
     private var executedKeys: [String] = []
+    private var allowWhileStreaming: [Bool] = []
 
-    func prepare(key: String) -> Int {
+    func prepare(key: String, allowWhileStreaming: Bool) -> Int {
         preparedKeys.append(key)
+        self.allowWhileStreaming.append(allowWhileStreaming)
         return preparedKeys.count
     }
 
@@ -58,7 +61,11 @@ private actor UploadRetryProbe {
     }
 
     func snapshot() -> Snapshot {
-        Snapshot(preparedKeys: preparedKeys, executedKeys: executedKeys)
+        Snapshot(
+            preparedKeys: preparedKeys,
+            executedKeys: executedKeys,
+            allowWhileStreaming: allowWhileStreaming
+        )
     }
 }
 
@@ -68,8 +75,11 @@ struct CloudSyncUploadRetryTests {
         let backoff = RetryBackoffGate()
         let probe = UploadRetryProbe()
         let coalescer = UploadCoalescer(
-            prepareUpload: { _, key in
-                let preparation = await probe.prepare(key: key)
+            prepareUpload: { _, key, allowWhileStreaming in
+                let preparation = await probe.prepare(
+                    key: key,
+                    allowWhileStreaming: allowWhileStreaming
+                )
                 return {
                     try await probe.execute(key: key, preparation: preparation)
                 }
@@ -77,7 +87,7 @@ struct CloudSyncUploadRetryTests {
             waitBeforeRetry: { _ in await backoff.pause() }
         )
 
-        await coalescer.enqueue("chat")
+        await coalescer.enqueue("chat", allowWhileStreaming: true)
         await backoff.waitUntilEntered()
         await coalescer.enqueue("chat")
         await backoff.release()
@@ -90,6 +100,7 @@ struct CloudSyncUploadRetryTests {
         #expect(snapshot.executedKeys[1] == snapshot.preparedKeys[0])
         #expect(snapshot.executedKeys[2] == snapshot.preparedKeys[1])
         #expect(snapshot.preparedKeys[0] != snapshot.preparedKeys[1])
+        #expect(snapshot.allowWhileStreaming == [true, false])
     }
 
     @Test
@@ -97,8 +108,11 @@ struct CloudSyncUploadRetryTests {
         let backoff = RetryBackoffGate()
         let probe = UploadRetryProbe()
         let coalescer = UploadCoalescer(
-            prepareUpload: { _, key in
-                let preparation = await probe.prepare(key: key)
+            prepareUpload: { _, key, allowWhileStreaming in
+                let preparation = await probe.prepare(
+                    key: key,
+                    allowWhileStreaming: allowWhileStreaming
+                )
                 return {
                     try await probe.execute(key: key, preparation: preparation)
                 }
@@ -127,6 +141,53 @@ struct CloudSyncUploadRetryTests {
         #expect(waiterCancelled)
         #expect(snapshot.preparedKeys.count == 1)
         #expect(snapshot.executedKeys.count == 1)
+        #expect(snapshot.allowWhileStreaming == [false])
+    }
+
+    @Test func requiredUploadCannotSucceedWithoutPreparedWork() async {
+        let coalescer = UploadCoalescer(
+            prepareUpload: { _, _, _ in nil },
+            waitBeforeRetry: { _ in }
+        )
+
+        do {
+            try await coalescer.enqueueAndWait(
+                "chat",
+                allowWhileStreaming: true
+            )
+            Issue.record("Expected required upload preparation to fail")
+        } catch UploadCoalescerError.requiredUploadNotPrepared {
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test func laterNoOpDoesNotClearRequiredUploadFailure() async {
+        let backoff = RetryBackoffGate()
+        let coalescer = UploadCoalescer(
+            prepareUpload: { _, _, allowWhileStreaming in
+                guard allowWhileStreaming else { return nil }
+                return { throw UploadRetryTestError.transient }
+            },
+            waitBeforeRetry: { _ in await backoff.pause() }
+        )
+        let waiter = Task {
+            try await coalescer.enqueueAndWait(
+                "chat",
+                allowWhileStreaming: true
+            )
+        }
+        await backoff.waitUntilEntered()
+        await coalescer.enqueue("chat")
+        await backoff.release()
+
+        do {
+            try await waiter.value
+            Issue.record("Expected the earlier required upload failure")
+        } catch UploadRetryTestError.transient {
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
     }
 
     @Test @MainActor
