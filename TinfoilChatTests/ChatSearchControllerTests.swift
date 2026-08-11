@@ -169,21 +169,24 @@ struct ChatSearchControllerTests {
 
     @Test
     func searchResultFilterKeepsProjectChatsButDropsTemporaryAndEncrypted() {
-        let root = ChatSearchServiceTests.makeChat(id: "root", title: "Root")
+        var root = ChatSearchServiceTests.makeChat(id: "root", title: "Root")
+        root.messages = [Message(role: .user, content: "Hello")]
         var project = ChatSearchServiceTests.makeChat(id: "project", title: "Project")
         project.projectId = "project-1"
+        project.messages = [Message(role: .user, content: "Project question")]
+        let blank = ChatSearchServiceTests.makeChat(id: "blank", title: "New Chat")
         var temporary = ChatSearchServiceTests.makeChat(id: "temp", title: "Temp")
         temporary.isTemporary = true
         var encrypted = ChatSearchServiceTests.makeChat(id: "encrypted", title: "Encrypted")
         encrypted.decryptionFailed = true
 
-        let visible = [root, project, temporary, encrypted]
+        let visible = [root, project, blank, temporary, encrypted]
             .filter(isSearchResultSidebarChat)
             .map(\.id)
         #expect(visible == ["root", "project"])
 
-        // The root chat list itself still excludes project chats.
-        #expect([root, project].filter(isRootSidebarChat).map(\.id) == ["root"])
+        // The root chat list itself still excludes project and blank chats.
+        #expect([root, project, blank].filter(isRootSidebarChat).map(\.id) == ["root"])
     }
 
     @Test

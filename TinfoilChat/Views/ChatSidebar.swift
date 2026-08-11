@@ -13,11 +13,11 @@ import SafariServices
 /// index covers every synced chat and the webapp shows them too); only
 /// temporary and undecryptable chats are excluded.
 func isSearchResultSidebarChat(_ chat: Chat) -> Bool {
-    !chat.isTemporary && !chat.decryptionFailed
+    !chat.isTemporary && !chat.decryptionFailed && !chat.isBlankChat
 }
 
 func isRootSidebarChat(_ chat: Chat) -> Bool {
-    isSearchResultSidebarChat(chat) && chat.projectId == nil
+    isSearchResultSidebarChat(chat) && chat.projectId == nil && !chat.isBlankChat
 }
 
 func isSidebarChatSearchEnabled(
