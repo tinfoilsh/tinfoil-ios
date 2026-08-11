@@ -203,7 +203,11 @@ actor UploadCoalescer {
                     break
                 }
 
-                await waitBeforeRetry(attempt)
+                if case .retry = EnclaveErrorRecovery.decide(error).action {
+                    await waitBeforeRetry(attempt)
+                } else {
+                    break
+                }
                 guard workerGeneration == generation else {
                     return CancellationError()
                 }
@@ -405,7 +409,7 @@ class CloudSyncService: ObservableObject {
         _ = try? await encryptionService.initialize()
         
         // Set up custom token getter for R2 storage that ensures Clerk is loaded
-        let tokenGetter: () async -> String? = {
+        let tokenGetter: SyncEnclaveClient.TokenGetter = { forceRefresh in
             do {
                 // Check if Clerk has a publishable key
                 guard !Clerk.shared.publishableKey.isEmpty else {
@@ -420,9 +424,10 @@ class CloudSyncService: ObservableObject {
                 // Get fresh token from session
                 if let session = Clerk.shared.session {
                     // Try to get a fresh token first (refresh if needed)
-                    if let token = try? await session.getToken() {
+                    if let token = try? await session.getToken(.init(skipCache: forceRefresh)) {
                         return token
                     }
+                    if forceRefresh { return nil }
                     // Fallback to last active token if refresh fails
                     if let tokenResource = session.lastActiveToken {
                         return tokenResource.jwt
@@ -667,9 +672,9 @@ class CloudSyncService: ObservableObject {
     }
 
     /// Dispatch a sync-enclave error to the matching recovery
-    /// surface. Re-throws for retryable cases so the coalescer can
-    /// retry under the same idempotency key; swallows for
-    /// non-retryable cases after reporting into the sync-health
+    /// surface. Re-throws transient cases so the coalescer can retry
+    /// under the same idempotency key; reports non-transient cases
+    /// into the sync-health
     /// store (which the settings status row and the sidebar badge
     /// render) so the chat stays locallyModified and is picked up
     /// on the next natural sync cycle without burning the retry
@@ -681,47 +686,45 @@ class CloudSyncService: ObservableObject {
         userId: String
     ) async throws {
         let decision = EnclaveErrorRecovery.decide(error)
-        #if DEBUG
-        print("[CloudSync] upload recovery decision chat=\(chatId) action=\(decision.action) code=\(decision.classification.code?.rawValue ?? "nil")")
-        #endif
         switch decision.action {
         case .retry:
             throw error
         case .refreshCurrentKeyAndRetry:
-            // Surface the stale key, then re-throw so the coalescer
-            // retries under the same idempotency key. If a key
-            // refresh lands before retries exhaust, the retry
-            // succeeds and the healthy write gate clears the state;
-            // otherwise the chat stays locallyModified for the next
-            // sync cycle.
+            // Surface the stale key and leave the chat locallyModified
+            // for a later sync pass after key recovery.
             SyncHealthStore.shared.reportKeyActionRequired(.keyMismatch)
             throw error
         case .surfaceConflict:
-            await resolveConflictByPullingRemote(
+            try await resolveConflictByPullingRemote(
                 chatId,
                 generation: generation,
                 userId: userId
             )
         case .surfaceExistingDataUnderOtherKey:
             SyncHealthStore.shared.reportKeyActionRequired(.keyConflict)
+            return
         case .surfaceNotFound:
             SyncHealthStore.shared.reportChatSyncFailed(
                 chatId,
                 message: "This chat no longer exists in the cloud"
             )
+            return
         case .triggerRecoveryWizard:
             SyncHealthStore.shared.reportKeyActionRequired(.keyRecovery)
+            return
         case .blockAllSync:
             SyncHealthStore.shared.reportSyncPaused(.attestation)
+            return
         case .migrateLegacyAndRetry:
-            // Re-throw so the coalescer retries the write. The legacy
-            // re-seal runs out of band — on the next launch and right
+            // The legacy re-seal runs out of band — on the next launch and right
             // after the key is adopted (see PasskeyManager) — both
-            // gated on the key being the registered current key. If
-            // that completes before retries exhaust the upload
-            // succeeds; otherwise the chat waits for the next cycle.
+            // gated on the key being the registered current key. The
+            // upload remains dirty for a later sync cycle.
             throw error
         case .abort(let reason):
+            if reason == .authenticationRequired {
+                throw error
+            }
             if reason == .forbidden {
                 SyncHealthStore.shared.reportKeyActionRequired(.accountBlocked)
             } else {
@@ -730,6 +733,7 @@ class CloudSyncService: ObservableObject {
                     message: "This chat couldn't be synced"
                 )
             }
+            return
         }
     }
 
@@ -757,12 +761,12 @@ class CloudSyncService: ObservableObject {
         _ chatId: String,
         generation: Int,
         userId: String
-    ) async {
+    ) async throws {
         do {
             let remoteChat = try await cloudStorage.downloadChat(chatId)
             guard generation == accountGeneration else { return }
 
-            let localChat = try? await EncryptedFileStorage.cloud.loadChat(
+            let localChat = try await EncryptedFileStorage.cloud.loadChat(
                 chatId: chatId,
                 userId: userId
             )
@@ -847,7 +851,7 @@ class CloudSyncService: ObservableObject {
 
             if !remoteWins {
                 guard generation == accountGeneration else { return }
-                await rebaseSyncVersion(
+                try await rebaseSyncVersion(
                     chatId,
                     version: downloadedChat.syncVersion,
                     generation: generation,
@@ -875,9 +879,11 @@ class CloudSyncService: ObservableObject {
                 SyncHealthStore.shared.reportChatSynced(downloadedChat.id)
             }
         } catch {
-            #if DEBUG
-            print("[CloudSync] resolveConflictByPullingRemote failed for \(chatId): \(error)")
-            #endif
+            SyncHealthStore.shared.reportChatSyncFailed(
+                chatId,
+                message: "This chat couldn't be synced"
+            )
+            throw error
         }
     }
 
@@ -1251,6 +1257,8 @@ class CloudSyncService: ObservableObject {
 
     private static let uploadsSkippedUnreconciledDeletionsError =
         "Skipped uploading local changes: remote deletions could not be reconciled"
+    private static let deletionReconciliationError =
+        "Remote deletions could not be reconciled"
 
     /// Upload leg shared by the full and delta sync paths. Uploading
     /// dirty chats before deletions reconcile can resurrect chats
@@ -1742,6 +1750,13 @@ class CloudSyncService: ObservableObject {
                 generation: generation,
                 userId: userId
             )
+            guard generation == accountGeneration else { return SyncResult() }
+            guard deletions.reconciled, !deletions.failed else {
+                let errors = [Self.deletionReconciliationError]
+                syncErrors = errors
+                return SyncResult(errors: errors)
+            }
+            syncErrors = []
             if deletions.removed > 0 {
                 return SyncResult(deleted: deletions.removed)
             }
@@ -2139,6 +2154,7 @@ class CloudSyncService: ObservableObject {
         // never awaits a task started under the previous user's key.
         emptyRemoteRegistration?.cancel()
         emptyRemoteRegistration = nil
+        await SyncEnclaveClient.shared.reset()
     }
 
     // MARK: - Sync Status Cache Helpers
@@ -2510,19 +2526,18 @@ class CloudSyncService: ObservableObject {
         version: Int,
         generation: Int,
         userId: String
-    ) async {
+    ) async throws {
         guard generation == accountGeneration else { return }
-        let existing = try? await EncryptedFileStorage.cloud.loadChat(
+        guard let existing = try await EncryptedFileStorage.cloud.loadChat(
             chatId: chatId,
             userId: userId
-        )
+        ) else { return }
         guard generation == accountGeneration else { return }
-        let existingSyncedAt = existing?.syncedAt
-        try? await EncryptedFileStorage.cloud.updateSyncMetadata(
+        try await EncryptedFileStorage.cloud.updateSyncMetadata(
             chatId: chatId,
             userId: userId,
             syncVersion: version,
-            syncedAt: existingSyncedAt ?? Date(),
+            syncedAt: existing.syncedAt ?? Date(),
             locallyModified: true
         )
     }

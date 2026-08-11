@@ -34,6 +34,7 @@ let codedErrorExpectations: [CodedErrorExpectation] = [
     .init(code: .legacyBlobNotMigrated, status: 410, action: .migrateLegacyAndRetry, kind: .retryableRefresh),
     .init(code: .attestationFailed, status: nil, action: .blockAllSync(reason: .attestationFailed), kind: .terminal),
     .init(code: .auth, status: 401, action: .retry(reason: .authRefresh), kind: .retryableTransient),
+    .init(code: .authActionRequired, status: 401, action: .abort(reason: .authenticationRequired), kind: .terminal),
     .init(code: .forbidden, status: 403, action: .abort(reason: .forbidden), kind: .terminal),
     .init(code: .network, status: nil, action: .retry(reason: .network), kind: .retryableTransient),
     .init(code: .notFound, status: 404, action: .surfaceNotFound, kind: .userDecision),
