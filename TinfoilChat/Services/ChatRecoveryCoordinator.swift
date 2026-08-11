@@ -1120,14 +1120,6 @@ actor ChatRecoveryCoordinator {
                         chatId,
                         allowWhileStreaming: true
                     )
-                    guard recoveryScanCompletionIsCurrent(
-                        chatId: chatId,
-                        turnId: envelope.turnId,
-                        storage: storage,
-                        accountGeneration: accountGeneration,
-                        scanGeneration: scanGeneration,
-                        userId: userId
-                    ) else { return }
                     await deleteSessionAfterMutation(payload.sessionId)
                     guard recoveryScanCompletionIsCurrent(
                         chatId: chatId,

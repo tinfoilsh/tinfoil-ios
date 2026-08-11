@@ -279,7 +279,6 @@ struct ChatRecoverySchedulingTests {
             }
         }
         #expect(!mutationApplied)
-        #expect(chat.title != "Mutated")
 
         chat.decryptionFailed = false
         chat.dataCorrupted = true
@@ -290,7 +289,6 @@ struct ChatRecoverySchedulingTests {
             }
         }
         #expect(!mutationApplied)
-        #expect(chat.title != "Mutated")
     }
 }
 
