@@ -6,6 +6,7 @@ enum ChatRecoverySyncError: Error {
     case envelopeMissing
     case pendingLimitReached
     case conflict
+    case titleAlreadyResolved
 }
 
 enum ChatRecoveryStorage: String, Sendable {
@@ -41,6 +42,7 @@ actor ChatRecoverySync {
             title: String?,
             titleState: Chat.TitleState?
         )
+        case generatedTitle(String)
     }
 
     func mutate(
@@ -310,6 +312,13 @@ actor ChatRecoverySync {
                     chat.titleState = titleState
                 }
             }
+        case .generatedTitle(let title):
+            guard authoritativeRemote.titleState == .placeholder,
+                  chat.titleState == .placeholder else {
+                throw ChatRecoverySyncError.titleAlreadyResolved
+            }
+            chat.title = title
+            chat.titleState = .generated
         }
         chat.pendingRecoveries = pending.isEmpty ? nil : pending
     }

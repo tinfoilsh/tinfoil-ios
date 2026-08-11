@@ -152,7 +152,8 @@ func recoveryRetryDeadlineReached(
 func registrationFailureDefinitelyDidNotPersist(_ error: Error) -> Bool {
     if let syncError = error as? ChatRecoverySyncError {
         switch syncError {
-        case .chatMissing, .envelopeMissing, .pendingLimitReached, .conflict:
+        case .chatMissing, .envelopeMissing, .pendingLimitReached, .conflict,
+                .titleAlreadyResolved:
             return true
         }
     }
@@ -989,24 +990,6 @@ actor ChatRecoveryCoordinator {
             else {
                 return
             }
-            let storedChat = try? await storage.fileStorage.loadChat(
-                chatId: chatId,
-                userId: userId
-            )
-            let titleMessages = storedChat.flatMap {
-                recoveredTitleMessages(
-                    titleState: $0.titleState,
-                    messages: $0.messages,
-                    response: persistedResponse,
-                    turnId: envelope.turnId
-                )
-            }
-            var generatedTitle: String?
-            if let titleMessages {
-                generatedTitle = await SummarizerService.shared.generateChatTitle(
-                    from: titleMessages
-                )
-            }
             guard scanIsCurrent(
                 accountGeneration: accountGeneration,
                 scanGeneration: scanGeneration,
@@ -1024,10 +1007,37 @@ actor ChatRecoveryCoordinator {
                 mutation: .complete(
                     envelope: envelope,
                     response: persistedResponse,
-                    title: generatedTitle,
-                    titleState: generatedTitle == nil ? nil : .generated
+                    title: nil,
+                    titleState: nil
                 )
             )
+            Task { [weak self] in
+                guard let self,
+                      let storedChat = try? await storage.fileStorage.loadChat(
+                        chatId: chatId,
+                        userId: userId
+                      ),
+                      let titleMessages = recoveredTitleMessages(
+                        titleState: storedChat.titleState,
+                        messages: storedChat.messages,
+                        response: persistedResponse,
+                        turnId: envelope.turnId
+                      ),
+                      let generatedTitle = await SummarizerService.shared.generateChatTitle(
+                        from: titleMessages
+                      ),
+                      self.scanIsCurrent(
+                        accountGeneration: accountGeneration,
+                        scanGeneration: scanGeneration,
+                        userId: userId
+                      ) else { return }
+                try? await ChatRecoverySync.shared.mutate(
+                    chatId: chatId,
+                    userId: userId,
+                    storage: storage,
+                    mutation: .generatedTitle(generatedTitle)
+                )
+            }
             if accountIsCurrent(
                 accountGeneration: accountGeneration,
                 userId: userId
