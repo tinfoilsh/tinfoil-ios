@@ -726,6 +726,7 @@ actor ChatRecoveryCoordinator {
             return
         }
         var locallyRecoveredResponse: Message?
+        var generatedTitle: String?
         do {
             let initialStatus = try await ChatRecoveryClient.shared.status(
                 sessionId: payload.sessionId
@@ -993,7 +994,6 @@ actor ChatRecoveryCoordinator {
                     turnId: envelope.turnId
                 )
             }
-            var generatedTitle: String?
             if let titleMessages {
                 generatedTitle = await SummarizerService.shared.generateChatTitle(
                     from: titleMessages
@@ -1104,11 +1104,11 @@ actor ChatRecoveryCoordinator {
                         mutation: .complete(
                             envelope: envelope,
                             response: response,
-                            title: nil,
-                            titleState: nil
+                            title: generatedTitle,
+                            titleState: generatedTitle == nil ? nil : .generated
                         )
                     )
-                    guard await recoveryScanCanMutate(
+                    guard recoveryScanCompletionIsCurrent(
                         chatId: chatId,
                         turnId: envelope.turnId,
                         storage: storage,
@@ -1116,7 +1116,27 @@ actor ChatRecoveryCoordinator {
                         scanGeneration: scanGeneration,
                         userId: userId
                     ) else { return }
-                    await CloudSyncService.shared.backupChat(chatId)
+                    try await CloudSyncService.shared.backupRecoveryChatAndWait(
+                        chatId,
+                        allowWhileStreaming: true
+                    )
+                    guard recoveryScanCompletionIsCurrent(
+                        chatId: chatId,
+                        turnId: envelope.turnId,
+                        storage: storage,
+                        accountGeneration: accountGeneration,
+                        scanGeneration: scanGeneration,
+                        userId: userId
+                    ) else { return }
+                    await deleteSessionAfterMutation(payload.sessionId)
+                    guard recoveryScanCompletionIsCurrent(
+                        chatId: chatId,
+                        turnId: envelope.turnId,
+                        storage: storage,
+                        accountGeneration: accountGeneration,
+                        scanGeneration: scanGeneration,
+                        userId: userId
+                    ) else { return }
                     postRecoveryUpdate(
                         chatId: chatId,
                         userId: userId,
@@ -1454,6 +1474,22 @@ actor ChatRecoveryCoordinator {
               !(await isChatStreaming(chatId)) else {
             return false
         }
+        return scanIsCurrent(
+            accountGeneration: accountGeneration,
+            scanGeneration: scanGeneration,
+            userId: userId
+        ) && !cancelledTurns.contains(key)
+    }
+
+    private func recoveryScanCompletionIsCurrent(
+        chatId: String,
+        turnId: String,
+        storage: ChatRecoveryStorage,
+        accountGeneration: Int,
+        scanGeneration: Int,
+        userId: String
+    ) -> Bool {
+        let key = turnKey(chatId: chatId, turnId: turnId, storage: storage)
         return scanIsCurrent(
             accountGeneration: accountGeneration,
             scanGeneration: scanGeneration,

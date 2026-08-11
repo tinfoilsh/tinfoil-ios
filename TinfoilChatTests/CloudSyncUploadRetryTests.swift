@@ -82,6 +82,7 @@ struct CloudSyncUploadRetryTests {
                 )
                 return {
                     try await probe.execute(key: key, preparation: preparation)
+                    return .uploaded
                 }
             },
             waitBeforeRetry: { _ in await backoff.pause() }
@@ -115,6 +116,7 @@ struct CloudSyncUploadRetryTests {
                 )
                 return {
                     try await probe.execute(key: key, preparation: preparation)
+                    return .uploaded
                 }
             },
             waitBeforeRetry: { _ in await backoff.pause() }
@@ -167,7 +169,7 @@ struct CloudSyncUploadRetryTests {
         let coalescer = UploadCoalescer(
             prepareUpload: { _, _, allowWhileStreaming in
                 guard allowWhileStreaming else { return nil }
-                return { throw UploadRetryTestError.transient }
+                return { throw SyncEnclaveError(message: "Unavailable", status: 503) }
             },
             waitBeforeRetry: { _ in await backoff.pause() }
         )
@@ -184,9 +186,38 @@ struct CloudSyncUploadRetryTests {
         do {
             try await waiter.value
             Issue.record("Expected the earlier required upload failure")
-        } catch UploadRetryTestError.transient {
+        } catch let error as SyncEnclaveError {
+            #expect(error.status == 503)
         } catch {
             Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test func laterActualUploadClearsRequiredUploadFailure() async {
+        let backoff = RetryBackoffGate()
+        let coalescer = UploadCoalescer(
+            prepareUpload: { _, _, allowWhileStreaming in
+                if allowWhileStreaming {
+                    return { throw SyncEnclaveError(message: "Unavailable", status: 503) }
+                }
+                return { .uploaded }
+            },
+            waitBeforeRetry: { _ in await backoff.pause() }
+        )
+        let waiter = Task {
+            try await coalescer.enqueueAndWait(
+                "chat",
+                allowWhileStreaming: true
+            )
+        }
+        await backoff.waitUntilEntered()
+        await coalescer.enqueue("chat")
+        await backoff.release()
+
+        do {
+            try await waiter.value
+        } catch {
+            Issue.record("Expected the later upload to clear the failure: \(error)")
         }
     }
 
@@ -231,8 +262,11 @@ struct CloudSyncUploadRetryTests {
     func coalescerDoesNotRetryUnstructuredFailures() async {
         let probe = UploadRetryProbe()
         let coalescer = UploadCoalescer(
-            prepareUpload: { _, key in
-                _ = await probe.prepare(key: key)
+            prepareUpload: { _, key, allowWhileStreaming in
+                _ = await probe.prepare(
+                    key: key,
+                    allowWhileStreaming: allowWhileStreaming
+                )
                 return {
                     throw UploadRetryTestError.terminal
                 }

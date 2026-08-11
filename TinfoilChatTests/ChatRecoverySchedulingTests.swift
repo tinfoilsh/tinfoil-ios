@@ -265,4 +265,51 @@ struct ChatRecoverySchedulingTests {
             remoteUpdatedAt: now
         ))
     }
+
+    @Test @MainActor
+    func corruptedCloudChatIsRejectedBeforeRecoveryMutation() {
+        var chat = Chat(modelType: recoverySchedulingTestModel)
+        chat.decryptionFailed = true
+        var mutationApplied = false
+
+        #expect(throws: ChatRecoverySyncError.self) {
+            _ = try mutateValidCloudRecoveryChat(chat) { candidate in
+                mutationApplied = true
+                candidate.title = "Mutated"
+            }
+        }
+        #expect(!mutationApplied)
+        #expect(chat.title != "Mutated")
+
+        chat.decryptionFailed = false
+        chat.dataCorrupted = true
+        #expect(throws: ChatRecoverySyncError.self) {
+            _ = try mutateValidCloudRecoveryChat(chat) { candidate in
+                mutationApplied = true
+                candidate.title = "Mutated"
+            }
+        }
+        #expect(!mutationApplied)
+        #expect(chat.title != "Mutated")
+    }
 }
+
+private let recoverySchedulingTestModel = ModelType(
+    from: AppModelConfig(
+        modelName: "gpt-oss-120b",
+        image: "openai.png",
+        name: "GPT OSS 120B",
+        nameShort: "GPT OSS",
+        description: "",
+        details: "",
+        parameters: "",
+        contextWindow: "64k tokens",
+        type: "chat",
+        chat: true,
+        paid: false,
+        multimodal: false,
+        toolCalling: nil,
+        attributes: nil,
+        reasoningConfig: nil
+    )
+)

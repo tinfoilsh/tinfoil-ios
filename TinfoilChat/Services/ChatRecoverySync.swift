@@ -48,6 +48,18 @@ func resolvedRemoteMayReplaceLocal(
     )
 }
 
+func mutateValidCloudRecoveryChat(
+    _ chat: Chat,
+    mutation: (inout Chat) throws -> Void
+) throws -> Chat {
+    guard !chat.decryptionFailed, !chat.dataCorrupted else {
+        throw ChatRecoverySyncError.chatMissing
+    }
+    var candidate = chat
+    try mutation(&candidate)
+    return candidate
+}
+
 enum ChatRecoveryStorage: String, Sendable {
     case cloud
     case local
@@ -187,8 +199,9 @@ actor ChatRecoverySync {
                   ) else {
                 throw ChatRecoverySyncError.chatMissing
             }
-            var candidate = local
-            try apply(mutation, to: &candidate, authoritativeRemote: local)
+            var candidate = try mutateValidCloudRecoveryChat(local) {
+                try apply(mutation, to: &$0, authoritativeRemote: local)
+            }
             stampEdit(&candidate, observedRemote: local)
             candidate.locallyModified = true
             guard await Clerk.shared.user?.id == userId else {
@@ -295,6 +308,8 @@ actor ChatRecoverySync {
         guard let remote = try await CloudStorageService.shared.downloadChat(chatId),
               await isCurrent() else { return false }
         guard var remoteChat = await MainActor.run(body: { remote.toChat() }),
+              !remoteChat.decryptionFailed,
+              !remoteChat.dataCorrupted,
               await isCurrent(),
               remoteRecoveryTurnIsResolved(
                   messages: remoteChat.messages,
@@ -474,6 +489,10 @@ actor ChatRecoverySync {
                 chatId: uploaded.id,
                 userId: userId
             )
+            guard loaded?.decryptionFailed != true,
+                  loaded?.dataCorrupted != true else {
+                return
+            }
             let expectedUpdatedAt = loaded?.updatedAt
             var candidate: Chat
             if loaded?.updatedAt == expectedBaselineUpdatedAt {

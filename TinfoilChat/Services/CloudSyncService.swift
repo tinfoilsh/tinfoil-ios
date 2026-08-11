@@ -41,10 +41,21 @@ private func parseISODate(_ dateString: String) -> Date? {
 /// snapshot and returns this closure; every retry replays it, so the
 /// bytes pushed to the enclave are identical across attempts and the
 /// enclave can de-duplicate them into a single committed effect.
-typealias UploadAttempt = @MainActor @Sendable () async throws -> Void
+enum UploadAttemptOutcome: Equatable {
+    case noUpload
+    case uploaded
+}
+
+typealias UploadAttempt = @MainActor @Sendable () async throws -> UploadAttemptOutcome
 
 enum UploadCoalescerError: Error {
     case requiredUploadNotPrepared
+}
+
+private enum UploadIterationOutcome {
+    case noWork
+    case uploaded
+    case failed(Error)
 }
 
 /// Coalesces rapid upload requests per chat into single uploads with exponential backoff retry.
@@ -138,13 +149,18 @@ actor UploadCoalescer {
             // committed effect, even when a previous attempt
             // already committed and we lost the response.
             let idempotencyKey = newSyncEnclaveIdempotencyKey()
-            let iterationError = await uploadWithRetry(
+            let iterationOutcome = await uploadWithRetry(
                 chatId,
                 idempotencyKey: idempotencyKey,
                 allowWhileStreaming: allowWhileStreaming,
                 generation: workerGeneration
             )
-            if let iterationError {
+            switch iterationOutcome {
+            case .noWork:
+                break
+            case .uploaded:
+                terminalError = nil
+            case .failed(let iterationError):
                 terminalError = iterationError
             }
         }
@@ -180,7 +196,7 @@ actor UploadCoalescer {
         idempotencyKey: String,
         allowWhileStreaming: Bool,
         generation workerGeneration: Int
-    ) async -> Error? {
+    ) async -> UploadIterationOutcome {
         var lastError: Error?
         // Frozen on the first successful prepare so every retry replays
         // the exact payload the enclave may have already committed. Only
@@ -200,23 +216,21 @@ actor UploadCoalescer {
                     )
                     prepared = true
                     guard workerGeneration == generation else {
-                        return CancellationError()
+                        return .failed(CancellationError())
                     }
                 }
                 if allowWhileStreaming && preparedAttempt == nil {
                     throw UploadCoalescerError.requiredUploadNotPrepared
                 }
-                if let uploadAttempt = preparedAttempt {
-                    try await uploadAttempt()
-                }
+                let attemptOutcome = try await preparedAttempt?()
                 guard workerGeneration == generation else {
-                    return CancellationError()
+                    return .failed(CancellationError())
                 }
                 states[chatId]?.failureCount = 0
-                return nil
+                return attemptOutcome == .uploaded ? .uploaded : .noWork
             } catch {
                 guard workerGeneration == generation else {
-                    return CancellationError()
+                    return .failed(CancellationError())
                 }
                 lastError = error
                 let currentCount = states[chatId]?.failureCount ?? 0
@@ -232,12 +246,12 @@ actor UploadCoalescer {
                     break
                 }
                 guard workerGeneration == generation else {
-                    return CancellationError()
+                    return .failed(CancellationError())
                 }
             }
         }
 
-        return lastError
+        return .failed(lastError ?? UploadCoalescerError.requiredUploadNotPrepared)
     }
 
     func clear() {
@@ -708,7 +722,8 @@ class CloudSyncService: ObservableObject {
         // Don't sync blank, empty, decryption-failure, or local-only chats.
         // Local-only chats are the user's explicit choice to keep a chat off
         // the cloud, so they must never be uploaded.
-        if chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed || chat.isLocalOnly {
+        if chat.isBlankChat || chat.messages.isEmpty || chat.decryptionFailed
+            || chat.dataCorrupted || chat.isLocalOnly {
             if allowWhileStreaming {
                 throw UploadCoalescerError.requiredUploadNotPrepared
             }
@@ -734,19 +749,22 @@ class CloudSyncService: ObservableObject {
             }
             do {
                 try await self.uploadAndMarkSynced(preparedUpload)
+                return .uploaded
             } catch {
                 guard await self.isCurrentUploadAccount(preparedUpload.account) else {
                     throw CancellationError()
                 }
-                if allowWhileStreaming {
-                    throw error
-                }
-                try await self.handleUploadFailure(
+                let reconciledUpload = try await self.handleUploadFailure(
                     chatId: chatId,
                     error: error,
                     generation: preparedUpload.account.generation,
-                    userId: preparedUpload.account.userId
+                    userId: preparedUpload.account.userId,
+                    allowWhileStreaming: allowWhileStreaming
                 )
+                if allowWhileStreaming && !reconciledUpload {
+                    throw error
+                }
+                return reconciledUpload ? .uploaded : .noUpload
             }
         }
     }
@@ -763,8 +781,9 @@ class CloudSyncService: ObservableObject {
         chatId: String,
         error: Error,
         generation: Int,
-        userId: String
-    ) async throws {
+        userId: String,
+        allowWhileStreaming: Bool
+    ) async throws -> Bool {
         let decision = EnclaveErrorRecovery.decide(error)
         switch decision.action {
         case .retry:
@@ -775,26 +794,27 @@ class CloudSyncService: ObservableObject {
             SyncHealthStore.shared.reportKeyActionRequired(.keyMismatch)
             throw error
         case .surfaceConflict:
-            try await resolveConflictByPullingRemote(
+            return try await resolveConflictByPullingRemote(
                 chatId,
                 generation: generation,
-                userId: userId
+                userId: userId,
+                allowWhileStreaming: allowWhileStreaming
             )
         case .surfaceExistingDataUnderOtherKey:
             SyncHealthStore.shared.reportKeyActionRequired(.keyConflict)
-            return
+            return false
         case .surfaceNotFound:
             SyncHealthStore.shared.reportChatSyncFailed(
                 chatId,
                 message: "This chat no longer exists in the cloud"
             )
-            return
+            return false
         case .triggerRecoveryWizard:
             SyncHealthStore.shared.reportKeyActionRequired(.keyRecovery)
-            return
+            return false
         case .blockAllSync:
             SyncHealthStore.shared.reportSyncPaused(.attestation)
-            return
+            return false
         case .migrateLegacyAndRetry:
             // The legacy re-seal runs out of band — on the next launch and right
             // after the key is adopted (see PasskeyManager) — both
@@ -813,7 +833,7 @@ class CloudSyncService: ObservableObject {
                     message: "This chat couldn't be synced"
                 )
             }
-            return
+            return false
         }
     }
 
@@ -840,17 +860,18 @@ class CloudSyncService: ObservableObject {
     private func resolveConflictByPullingRemote(
         _ chatId: String,
         generation: Int,
-        userId: String
-    ) async throws {
+        userId: String,
+        allowWhileStreaming: Bool
+    ) async throws -> Bool {
         do {
             let remoteChat = try await cloudStorage.downloadChat(chatId)
-            guard generation == accountGeneration else { return }
+            guard generation == accountGeneration else { return false }
 
             let localChat = try await EncryptedFileStorage.cloud.loadChat(
                 chatId: chatId,
                 userId: userId
             )
-            guard generation == accountGeneration else { return }
+            guard generation == accountGeneration else { return false }
 
             // The remote row vanished (concurrent delete). A clean local
             // copy is removed by the deletion reconciliation pass. A
@@ -865,8 +886,10 @@ class CloudSyncService: ObservableObject {
                 guard let localChat,
                       localChat.locallyModified,
                       !localChat.isLocalOnly,
+                      !localChat.decryptionFailed,
+                      !localChat.dataCorrupted,
                       !deletedChatsTracker.isDeleted(chatId) else {
-                    return
+                    return false
                 }
                 // The row may have been tombstoned after the last pass
                 // fetched its deletion window, in which case the tracker
@@ -879,19 +902,23 @@ class CloudSyncService: ObservableObject {
                     generation: generation,
                     userId: userId
                 )
-                guard generation == accountGeneration else { return }
+                guard generation == accountGeneration else { return false }
                 guard !deletions.failed,
                       !deletedChatsTracker.isDeleted(chatId) else {
-                    return
+                    return false
                 }
+                let storedChat = StoredChat(
+                    from: localChat,
+                    syncVersion: localChat.syncVersion
+                )
                 try await uploadAndMarkSynced(
-                    localChat,
+                    storedChat,
+                    expectedUpdatedAt: localChat.updatedAt,
                     idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                    generation: generation,
-                    userId: userId,
+                    account: UploadAccount(generation: generation, userId: userId),
                     restoreDeleted: true
                 )
-                return
+                return true
             }
             if downloadedChat.modelType == nil {
                 downloadedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
@@ -930,22 +957,25 @@ class CloudSyncService: ObservableObject {
             )
 
             if !remoteWins {
-                guard generation == accountGeneration else { return }
+                guard generation == accountGeneration else { return false }
                 try await rebaseSyncVersion(
                     chatId,
                     version: downloadedChat.syncVersion,
                     generation: generation,
                     userId: userId
                 )
-                guard generation == accountGeneration else { return }
+                guard generation == accountGeneration else { return false }
                 // Re-enqueue rather than wait: the coalescer worker will
                 // pick up the dirty flag and re-run the upload with the
                 // rebased version.
-                await backupChat(chatId)
-                return
+                await backupChat(
+                    chatId,
+                    allowWhileStreaming: allowWhileStreaming
+                )
+                return false
             }
 
-            guard generation == accountGeneration else { return }
+            guard generation == accountGeneration else { return false }
             downloadedChat.syncedAt = Date()
             downloadedChat.locallyModified = false
             let applied = await applyRemoteChatToStorage(
@@ -958,6 +988,7 @@ class CloudSyncService: ObservableObject {
             if applied {
                 SyncHealthStore.shared.reportChatSynced(downloadedChat.id)
             }
+            return false
         } catch {
             SyncHealthStore.shared.reportChatSyncFailed(
                 chatId,
