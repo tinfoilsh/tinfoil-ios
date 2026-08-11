@@ -203,11 +203,11 @@ actor UploadCoalescer {
                     break
                 }
 
-                guard case .retry = EnclaveErrorRecovery.decide(error).action else {
+                if case .retry = EnclaveErrorRecovery.decide(error).action {
+                    await waitBeforeRetry(attempt)
+                } else {
                     break
                 }
-
-                await waitBeforeRetry(attempt)
                 guard workerGeneration == generation else {
                     return CancellationError()
                 }
@@ -702,30 +702,30 @@ class CloudSyncService: ObservableObject {
             )
         case .surfaceExistingDataUnderOtherKey:
             SyncHealthStore.shared.reportKeyActionRequired(.keyConflict)
-            throw error
+            return
         case .surfaceNotFound:
             SyncHealthStore.shared.reportChatSyncFailed(
                 chatId,
                 message: "This chat no longer exists in the cloud"
             )
-            throw error
+            return
         case .triggerRecoveryWizard:
             SyncHealthStore.shared.reportKeyActionRequired(.keyRecovery)
-            throw error
+            return
         case .blockAllSync:
             SyncHealthStore.shared.reportSyncPaused(.attestation)
-            throw error
+            return
         case .migrateLegacyAndRetry:
             // The legacy re-seal runs out of band — on the next launch and right
             // after the key is adopted (see PasskeyManager) — both
-            // gated on the key being the registered current key. If
-            // that completes before retries exhaust the upload
-            // succeeds on a later sync cycle.
+            // gated on the key being the registered current key. The
+            // upload remains dirty for a later sync cycle.
             throw error
         case .abort(let reason):
             if reason == .authenticationRequired {
-                SyncHealthStore.shared.reportKeyActionRequired(.authentication)
-            } else if reason == .forbidden {
+                throw error
+            }
+            if reason == .forbidden {
                 SyncHealthStore.shared.reportKeyActionRequired(.accountBlocked)
             } else {
                 SyncHealthStore.shared.reportChatSyncFailed(
@@ -733,7 +733,7 @@ class CloudSyncService: ObservableObject {
                     message: "This chat couldn't be synced"
                 )
             }
-            throw error
+            return
         }
     }
 
@@ -1241,19 +1241,17 @@ class CloudSyncService: ObservableObject {
 
         isSyncing = true
         syncStatus = "Syncing..."
-        var passSucceeded = false
         defer {
             if generation == accountGeneration {
                 isSyncing = false
                 syncStatus = ""
-                if passSucceeded { lastSyncDate = Date() }
+                lastSyncDate = Date()
             }
         }
 
         let result = await doSyncAllChats()
         guard generation == accountGeneration else { return SyncResult() }
         syncErrors = result.errors
-        passSucceeded = result.errors.isEmpty
         return result
     }
 
@@ -1754,10 +1752,11 @@ class CloudSyncService: ObservableObject {
             )
             guard generation == accountGeneration else { return SyncResult() }
             guard deletions.reconciled, !deletions.failed else {
-                return SyncResult(errors: [Self.deletionReconciliationError])
+                let errors = [Self.deletionReconciliationError]
+                syncErrors = errors
+                return SyncResult(errors: errors)
             }
             syncErrors = []
-            lastSyncDate = Date()
             if deletions.removed > 0 {
                 return SyncResult(deleted: deletions.removed)
             }
@@ -1766,12 +1765,11 @@ class CloudSyncService: ObservableObject {
 
         isSyncing = true
         syncStatus = "Syncing..."
-        var passSucceeded = false
         defer {
             if generation == accountGeneration {
                 isSyncing = false
                 syncStatus = ""
-                if passSucceeded { lastSyncDate = Date() }
+                lastSyncDate = Date()
             }
         }
 
@@ -1812,7 +1810,6 @@ class CloudSyncService: ObservableObject {
 
         guard generation == accountGeneration else { return SyncResult() }
         syncErrors = result.errors
-        passSucceeded = result.errors.isEmpty
         return result
     }
 
@@ -1836,19 +1833,17 @@ class CloudSyncService: ObservableObject {
 
         isSyncing = true
         syncStatus = "Syncing project..."
-        var passSucceeded = false
         defer {
             if generation == accountGeneration {
                 isSyncing = false
                 syncStatus = ""
-                if passSucceeded { lastSyncDate = Date() }
+                lastSyncDate = Date()
             }
         }
 
         let result = await doSyncProjectChats(projectId)
         guard generation == accountGeneration else { return SyncResult() }
         syncErrors = result.errors
-        passSucceeded = result.errors.isEmpty
         return result
     }
 
@@ -1883,12 +1878,11 @@ class CloudSyncService: ObservableObject {
 
             isSyncing = true
             syncStatus = "Syncing project..."
-            var passSucceeded = false
             defer {
                 if generation == accountGeneration {
                     isSyncing = false
                     syncStatus = ""
-                    if passSucceeded { lastSyncDate = Date() }
+                    lastSyncDate = Date()
                 }
             }
 
@@ -1899,7 +1893,6 @@ class CloudSyncService: ObservableObject {
                 guard generation == accountGeneration else { return SyncResult() }
                 if result.errors.isEmpty {
                     saveProjectChatSyncStatus(projectId, remoteStatus)
-                    passSucceeded = true
                     return result
                 }
             }
@@ -1907,7 +1900,6 @@ class CloudSyncService: ObservableObject {
             let result = await doSyncProjectChats(projectId)
             guard generation == accountGeneration else { return SyncResult() }
             syncErrors = result.errors
-            passSucceeded = result.errors.isEmpty
             return result
         } catch {
             guard generation == accountGeneration else { return SyncResult() }
@@ -2163,8 +2155,6 @@ class CloudSyncService: ObservableObject {
         emptyRemoteRegistration?.cancel()
         emptyRemoteRegistration = nil
         await SyncEnclaveClient.shared.reset()
-        await LinkMetadataService.shared.reset()
-        await SummarizerService.shared.reset()
     }
 
     // MARK: - Sync Status Cache Helpers

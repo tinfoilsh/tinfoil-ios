@@ -97,6 +97,11 @@ struct ChatContainer: View {
                 dragOffset = 0
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .cloudSyncAuthenticationRequired)) { _ in
+            if !showAuthView {
+                showAuthView = true
+            }
+        }
         .sheet(isPresented: $viewModel.showVerifierSheet) {
             if let verifierView = viewModel.verifierView {
                 verifierView

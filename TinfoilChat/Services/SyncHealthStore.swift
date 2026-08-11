@@ -35,7 +35,6 @@ final class SyncHealthStore: ObservableObject {
         case keyMismatch
         case keyConflict
         case accountBlocked
-        case authentication
     }
 
     enum Gate: Equatable {

@@ -722,7 +722,7 @@ class ChatViewModel: ObservableObject {
                 let syncResult = await self.cloudSync.smartSync()
 
                 // Update last sync date after successful sync
-                self.lastSyncDate = self.cloudSync.lastSyncDate
+                self.lastSyncDate = Date()
 
                 // If chats were downloaded or deleted remotely, reload the chat list
                 if syncResult.downloaded > 0 || syncResult.deleted > 0 {
@@ -808,7 +808,8 @@ class ChatViewModel: ObservableObject {
 
                 // Perform immediate sync when returning from background
                 let syncResult = await self.cloudSync.syncAllChats()
-                self.lastSyncDate = self.cloudSync.lastSyncDate
+                // Update last sync date
+                self.lastSyncDate = Date()
 
                 // Update chats if needed
                 if syncResult.downloaded > 0 || syncResult.deleted > 0 {
@@ -835,7 +836,7 @@ class ChatViewModel: ObservableObject {
                 if self?.authManager?.isAuthenticated == true && SettingsManager.shared.isCloudSyncEnabled {
                     if let _ = await self?.cloudSync.syncAllChats() {
                         // Update last sync date
-                        self?.lastSyncDate = self?.cloudSync.lastSyncDate
+                        self?.lastSyncDate = Date()
                     }
                 }
             }
@@ -2829,6 +2830,22 @@ class ChatViewModel: ObservableObject {
                     return chat
                 }
 
+                // Generate title before save to avoid uploading placeholder title
+                if var chat = finalizedChat, chat.needsGeneratedTitle && chat.messages.count >= 2 {
+                    if let generated = await SummarizerService.shared.generateChatTitle(
+                        from: chat.messages
+                    ) {
+                        chat.title = generated
+                        chat.titleState = .generated
+                        chat.locallyModified = true
+                        chat.updatedAt = Date()
+                        finalizedChat = chat
+                        await MainActor.run {
+                            Chat.triggerSuccessFeedback()
+                        }
+                    }
+                }
+
                 if let attempt = recoveryAttempt,
                    let envelope = recoveryEnvelope,
                    let response = finalizedChat?.messages.last(where: {
@@ -2864,26 +2881,6 @@ class ChatViewModel: ObservableObject {
                     if let chat = finalizedChat {
                         self.updateChat(chat)
                         self.endStreamingAndBackup(chatId: chat.id)
-                        if chat.needsGeneratedTitle && chat.messages.count >= 2 {
-                            let messages = chat.messages
-                            let expectedUpdatedAt = chat.updatedAt
-                            Task { [weak self] in
-                                guard let generated = await SummarizerService.shared.generateChatTitle(
-                                    from: messages
-                                ) else { return }
-                                guard let self,
-                                      let location = self.findChatLocation(chat.id) else { return }
-                                var current = self.chat(at: location)
-                                guard current.needsGeneratedTitle,
-                                      current.updatedAt == expectedUpdatedAt else { return }
-                                current.title = generated
-                                current.titleState = .generated
-                                current.locallyModified = true
-                                current.updatedAt = Date()
-                                self.updateChat(current)
-                                Chat.triggerSuccessFeedback()
-                            }
-                        }
                     }
                     self.finishStreamState(chatId: streamChatId)
                 }
@@ -4120,7 +4117,7 @@ class ChatViewModel: ObservableObject {
                     
                     // Update last sync date
                     await MainActor.run {
-                        self.lastSyncDate = self.cloudSync.lastSyncDate
+                        self.lastSyncDate = Date()
                     }
                     
                     // After sync completes, ensure we have proper chat setup
@@ -4275,7 +4272,7 @@ class ChatViewModel: ObservableObject {
             await ProfileManager.shared.performFullSync()
             
             await MainActor.run {
-                self.lastSyncDate = self.cloudSync.lastSyncDate
+                self.lastSyncDate = Date()
                 // After sync completes, ensure we have proper chat setup
                 if self.chats.isEmpty {
                     self.createNewChat()
@@ -4333,11 +4330,11 @@ class ChatViewModel: ObservableObject {
             try await cloudSync.initialize()
             
             // Perform immediate sync
-            _ = await cloudSync.syncAllChats()
+            let _ = await cloudSync.syncAllChats()
             
             // Update last sync date
             await MainActor.run {
-                self.lastSyncDate = self.cloudSync.lastSyncDate
+                self.lastSyncDate = Date()
             }
             
             // Setup pagination after sync
@@ -4621,7 +4618,7 @@ class ChatViewModel: ObservableObject {
         await MainActor.run {
             self.localChats = freshLocal
             self.isSyncing = false
-            self.lastSyncDate = self.cloudSync.lastSyncDate
+            self.lastSyncDate = Date()
             self.ensureBlankChatAtTop()
             
             if !result.errors.isEmpty {

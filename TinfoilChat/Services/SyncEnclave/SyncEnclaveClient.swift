@@ -17,6 +17,12 @@ import ClerkKit
 import Foundation
 import TinfoilAI
 
+extension Notification.Name {
+    static let cloudSyncAuthenticationRequired = Notification.Name(
+        "com.tinfoil.chat.cloud-sync-authentication-required"
+    )
+}
+
 /// Error envelope returned by the sync enclave, parsed from `{error, code, ...details}`.
 struct SyncEnclaveError: LocalizedError, Equatable {
     let message: String
@@ -82,6 +88,7 @@ actor SyncEnclaveClient {
     private var tokenGetter: TokenGetter?
     private var tokenRefreshTask: (generation: Int, task: Task<String?, Never>)?
     private var tokenGeneration = 0
+    private var authenticationNotificationGeneration: Int?
 
     init(
         enclaveURL: String = Constants.SyncEnclave.url,
@@ -97,6 +104,7 @@ actor SyncEnclaveClient {
         tokenGeneration += 1
         tokenRefreshTask?.task.cancel()
         tokenRefreshTask = nil
+        authenticationNotificationGeneration = nil
         self.tokenGetter = getter
     }
 
@@ -108,6 +116,7 @@ actor SyncEnclaveClient {
         tokenGeneration += 1
         tokenRefreshTask?.task.cancel()
         tokenRefreshTask = nil
+        authenticationNotificationGeneration = nil
         tokenGetter = nil
     }
 
@@ -134,6 +143,7 @@ actor SyncEnclaveClient {
         skipAuth: Bool = false
     ) async throws -> Response {
         try Self.assertRelativePath(path)
+        let requestGeneration = tokenGeneration
         let client = try await getClient()
         let url = enclaveURL + path
 
@@ -155,37 +165,60 @@ actor SyncEnclaveClient {
             )
         }
 
-        headers["Authorization"] = "Bearer \(try await requireToken(forceRefresh: false))"
+        let token = try await requireToken(
+            forceRefresh: false,
+            generation: requestGeneration
+        )
+        headers["Authorization"] = "Bearer \(token)"
         var response = try await performPost(client: client, url: url, headers: headers, body: bodyData)
         if response.statusCode == 401 {
-            headers["Authorization"] = "Bearer \(try await requireToken(forceRefresh: true))"
+            guard requestGeneration == tokenGeneration else { throw CancellationError() }
+            let refreshedToken = try await requireToken(
+                forceRefresh: true,
+                generation: requestGeneration
+            )
+            headers["Authorization"] = "Bearer \(refreshedToken)"
             response = try await performPost(client: client, url: url, headers: headers, body: bodyData)
             if response.statusCode == 401 {
-                let error = await persistentAuthenticationError()
+                let error = try await persistentAuthenticationError(generation: requestGeneration)
                 throw error
             }
         }
+        guard requestGeneration == tokenGeneration else { throw CancellationError() }
+        authenticationNotificationGeneration = nil
         return try Self.decode(response: response, path: path)
     }
 
     /// Issue an attested GET against the sync enclave. Used by `/v1/health`.
     func get<Response: Decodable>(path: String) async throws -> Response {
         try Self.assertRelativePath(path)
+        let requestGeneration = tokenGeneration
         let client = try await getClient()
         let url = enclaveURL + path
 
         var headers: [String: String] = ["Accept": "application/json"]
-        headers["Authorization"] = "Bearer \(try await requireToken(forceRefresh: false))"
+        let token = try await requireToken(
+            forceRefresh: false,
+            generation: requestGeneration
+        )
+        headers["Authorization"] = "Bearer \(token)"
 
         var response = try await performGet(client: client, url: url, headers: headers)
         if response.statusCode == 401 {
-            headers["Authorization"] = "Bearer \(try await requireToken(forceRefresh: true))"
+            guard requestGeneration == tokenGeneration else { throw CancellationError() }
+            let refreshedToken = try await requireToken(
+                forceRefresh: true,
+                generation: requestGeneration
+            )
+            headers["Authorization"] = "Bearer \(refreshedToken)"
             response = try await performGet(client: client, url: url, headers: headers)
             if response.statusCode == 401 {
-                let error = await persistentAuthenticationError()
+                let error = try await persistentAuthenticationError(generation: requestGeneration)
                 throw error
             }
         }
+        guard requestGeneration == tokenGeneration else { throw CancellationError() }
+        authenticationNotificationGeneration = nil
         return try Self.decode(response: response, path: path)
     }
 
@@ -290,7 +323,11 @@ actor SyncEnclaveClient {
     }
 
     func requireToken(forceRefresh: Bool) async throws -> String {
-        let generation = tokenGeneration
+        try await requireToken(forceRefresh: forceRefresh, generation: tokenGeneration)
+    }
+
+    private func requireToken(forceRefresh: Bool, generation: Int) async throws -> String {
+        guard generation == tokenGeneration else { throw CancellationError() }
         let token: String?
         if forceRefresh {
             token = await refreshedToken()
@@ -300,7 +337,7 @@ actor SyncEnclaveClient {
         guard generation == tokenGeneration else { throw CancellationError() }
         guard let token, !token.isEmpty else {
             if forceRefresh {
-                let error = await persistentAuthenticationError()
+                let error = try await persistentAuthenticationError(generation: generation)
                 throw error
             }
             throw SyncEnclaveError.authenticationRequired
@@ -308,9 +345,14 @@ actor SyncEnclaveClient {
         return token
     }
 
-    private func persistentAuthenticationError() async -> SyncEnclaveError {
+    private func persistentAuthenticationError(generation: Int) async throws -> SyncEnclaveError {
+        guard generation == tokenGeneration else { throw CancellationError() }
+        guard authenticationNotificationGeneration != generation else {
+            return .authenticationActionRequired
+        }
+        authenticationNotificationGeneration = generation
         await MainActor.run {
-            SyncHealthStore.shared.reportKeyActionRequired(.authentication)
+            NotificationCenter.default.post(name: .cloudSyncAuthenticationRequired, object: nil)
         }
         return .authenticationActionRequired
     }
@@ -366,9 +408,6 @@ actor SyncEnclaveClient {
            let parsed = try? JSONDecoder.enclave.decode([String: AnyCodable].self, from: response.body) {
             if let errString = parsed["error"]?.value as? String, !errString.isEmpty {
                 message = errString
-            } else if let messageString = parsed["message"]?.value as? String,
-                      !messageString.isEmpty {
-                message = messageString
             }
             if let codeString = parsed["code"]?.value as? String, !codeString.isEmpty {
                 code = codeString
