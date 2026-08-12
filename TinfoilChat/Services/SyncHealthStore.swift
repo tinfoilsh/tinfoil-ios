@@ -55,10 +55,14 @@ final class SyncHealthStore: ObservableObject {
     /// The local key cannot write (stale after a rotation, unknown to
     /// the enclave, or colliding with data under another key) or the
     /// account is blocked. Requires a user-driven fix, so it sticks
-    /// until `reportKeyHealthy` confirms the key validates again.
+    /// until `reportKeyHealthy` confirms the key validates again. An
+    /// upgradeRequired gate outranks every other reason: no key fix can
+    /// resume sync against a server that refuses this protocol version,
+    /// so only `reset()` (sign-out / account change) clears it.
     func reportKeyActionRequired(_ reason: ActionReason) {
-        if case .actionRequired(let current, _) = gate, current == reason {
-            return
+        if case .actionRequired(let current, _) = gate {
+            if current == reason { return }
+            if current == .upgradeRequired { return }
         }
         gate = .actionRequired(reason: reason, since: Date())
     }
