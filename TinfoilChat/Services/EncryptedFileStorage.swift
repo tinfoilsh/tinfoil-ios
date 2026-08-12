@@ -762,11 +762,27 @@ actor EncryptedFileStorage {
             return []
         }
         let data = try Data(contentsOf: path)
-        let encrypted = try decoder.decode(EncryptedData.self, from: data)
-        let plaintext = try await encryptor.decryptData(encrypted)
-        let intents = try decoder.decode([PendingChatDelete].self, from: plaintext)
-        deleteIntentsCache[userId] = intents
-        return intents
+        // Mirror the index's rebuild-on-failure behavior: an unreadable
+        // intents file (corrupt bytes, or sealed under a key that no
+        // longer exists) must reset to empty instead of throwing on
+        // every sync cycle forever. Losing intents is bounded damage —
+        // the remote rows resurrect locally and can be re-deleted —
+        // whereas a bricked drain blocks deletes AND uploads unbounded.
+        // A missing key is the one exception: it is transient (the key
+        // loads later in the session), so rethrow and keep the file.
+        do {
+            let encrypted = try decoder.decode(EncryptedData.self, from: data)
+            let plaintext = try await encryptor.decryptData(encrypted)
+            let intents = try decoder.decode([PendingChatDelete].self, from: plaintext)
+            deleteIntentsCache[userId] = intents
+            return intents
+        } catch EncryptionError.keyNotInitialized {
+            throw EncryptionError.keyNotInitialized
+        } catch {
+            try? fileManager.removeItem(at: path)
+            deleteIntentsCache[userId] = []
+            return []
+        }
     }
 
     private func saveDeleteIntents(
