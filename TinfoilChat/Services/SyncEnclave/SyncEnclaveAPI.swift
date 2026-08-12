@@ -233,6 +233,137 @@ struct EnclaveListStatusResponse: Decodable {
     }
 }
 
+// MARK: - Revision sync v2
+
+struct EnclaveRevisionSummaryResponse: Decodable, Equatable {
+    let currentRevision: String
+    let oldestReplayableRevision: String
+
+    enum CodingKeys: String, CodingKey {
+        case currentRevision = "current_revision"
+        case oldestReplayableRevision = "oldest_replayable_revision"
+    }
+}
+
+struct EnclaveRevisionEventsRequest: Encodable, Equatable {
+    let afterRevision: String
+    let throughRevision: String
+    let cursor: String?
+    let limit: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case cursor, limit
+        case afterRevision = "after_revision"
+        case throughRevision = "through_revision"
+    }
+}
+
+enum EnclaveRevisionOperation: String, Codable, Equatable {
+    case upsert
+    case delete
+}
+
+struct EnclaveRevisionEvent: Decodable, Equatable {
+    let revision: String
+    let kind: EnclaveRevisionOperation
+    let id: String
+    let etag: String?
+    let keyId: String?
+    let projectId: String?
+    let updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case revision, kind, id, etag
+        case keyId = "key_id"
+        case projectId = "project_id"
+        case updatedAt = "updated_at"
+    }
+
+    init(
+        revision: String,
+        kind: EnclaveRevisionOperation,
+        id: String,
+        etag: String?,
+        keyId: String?,
+        projectId: String?,
+        updatedAt: String
+    ) {
+        self.revision = revision
+        self.kind = kind
+        self.id = id
+        self.etag = etag
+        self.keyId = keyId
+        self.projectId = projectId
+        self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        revision = try container.decode(String.self, forKey: .revision)
+        id = try container.decode(String.self, forKey: .id)
+        etag = try container.decodeIfPresent(String.self, forKey: .etag)
+        keyId = try container.decodeIfPresent(String.self, forKey: .keyId)
+        projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
+        updatedAt = try container.decode(String.self, forKey: .updatedAt)
+        kind = try container.decode(EnclaveRevisionOperation.self, forKey: .kind)
+    }
+}
+
+struct EnclaveRevisionEventsResponse: Decodable, Equatable {
+    let events: [EnclaveRevisionEvent]
+    let nextCursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case events
+        case nextCursor = "next_cursor"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        events = try container.decodeIfPresent([EnclaveRevisionEvent].self, forKey: .events) ?? []
+        nextCursor = try container.decodeIfPresent(String.self, forKey: .nextCursor)
+    }
+}
+
+struct EnclaveRevisionSnapshotRequest: Encodable, Equatable {
+    let cursor: String?
+    let limit: Int?
+}
+
+struct EnclaveRevisionSnapshotItem: Decodable, Equatable {
+    let id: String
+    let etag: String
+    let keyId: String?
+    let projectId: String?
+    let updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, etag
+        case keyId = "key_id"
+        case projectId = "project_id"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct EnclaveRevisionSnapshotResponse: Decodable, Equatable {
+    let items: [EnclaveRevisionSnapshotItem]
+    let snapshotRevision: String
+    let nextCursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case snapshotRevision = "snapshot_revision"
+        case nextCursor = "next_cursor"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        items = try container.decodeIfPresent([EnclaveRevisionSnapshotItem].self, forKey: .items) ?? []
+        snapshotRevision = try container.decode(String.self, forKey: .snapshotRevision)
+        nextCursor = try container.decodeIfPresent(String.self, forKey: .nextCursor)
+    }
+}
+
 struct EnclaveDeleteRequest: Encodable {
     let scope: SyncScope
     let id: String
@@ -694,6 +825,25 @@ enum SyncEnclaveAPI {
 
     static func listStatus(_ request: EnclaveListStatusRequest) async throws -> EnclaveListStatusResponse {
         try await SyncEnclaveClient.shared.post(path: "/v1/sync/list-status", body: request)
+    }
+
+    static func revisionSummary() async throws -> EnclaveRevisionSummaryResponse {
+        try await SyncEnclaveClient.shared.post(
+            path: "/v1/sync/revision-summary",
+            body: EnclaveEmptyRequest()
+        )
+    }
+
+    static func revisionEvents(
+        _ request: EnclaveRevisionEventsRequest
+    ) async throws -> EnclaveRevisionEventsResponse {
+        try await SyncEnclaveClient.shared.post(path: "/v1/sync/revision-events", body: request)
+    }
+
+    static func revisionSnapshot(
+        _ request: EnclaveRevisionSnapshotRequest
+    ) async throws -> EnclaveRevisionSnapshotResponse {
+        try await SyncEnclaveClient.shared.post(path: "/v1/sync/revision-snapshot", body: request)
     }
 
     @discardableResult

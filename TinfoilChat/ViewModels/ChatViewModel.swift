@@ -1492,6 +1492,7 @@ class ChatViewModel: ObservableObject {
         }
 
         chat.projectId = projectId
+        chat.projectLocallyModified = true
         chat.isLocalOnly = false
         chat.locallyModified = true
         chat.updatedAt = Date()

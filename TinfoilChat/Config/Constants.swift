@@ -280,6 +280,7 @@ enum Constants {
     }
 
     enum Sync {
+        static let protocolVersion = 2
         static let chatSyncIntervalSeconds: TimeInterval = 20.0
         static let profileSyncIntervalSeconds: TimeInterval = 60.0  // 1 minute
         static let profileSyncProtocolVersion = 2
@@ -426,18 +427,8 @@ enum Constants {
 
         // MARK: - Sync / Data State
         enum Sync {
-            static let chatStatus = "tinfoil-sync-chat-status"
-            static let allChatsStatus = "tinfoil-sync-all-chats-status"
-            /// Server timestamp up to which chat delete tombstones have been
-            /// fetched AND applied locally. Kept separate from `chatStatus`:
-            /// the status cache is a disposable freshness snapshot, while
-            /// this watermark encodes durable reconciliation progress and
-            /// must never advance past an unapplied tombstone.
-            static let chatDeletesWatermark = "tinfoil-sync-chat-deletes-watermark"
-            static let projectChatStatusPrefix = "tinfoil-sync-project-chat-status-"
-
-            static func projectChatStatus(projectId: String) -> String {
-                "\(projectChatStatusPrefix)\(projectId)"
+            static func revisionCheckpoint(userId: String) -> String {
+                "tinfoil-sync-revision-checkpoint-v2-\(userId)"
             }
             static func lastSyncDate(userId: String) -> String {
                 "tinfoil-sync-last-sync-date-\(userId)"
@@ -497,6 +488,11 @@ enum Constants {
             "tinfoil-secret-passkey-bundle-version",
             "tinfoil-passkey-backed-up",
             "tinfoil-passkey-sync-version",
+            "tinfoil-sync-chat-status",
+            "tinfoil-sync-all-chats-status",
+            "tinfoil-sync-chat-deletes-watermark",
+            "tinfoil-chat-sync-status",
+            "tinfoil-all-chats-sync-status",
         ]
     }
 
@@ -534,9 +530,10 @@ enum Constants {
 }
 
 // MARK: - Storage Keys Migration
-// One-time migration from old UserDefaults keys to new `tinfoil-` prefixed keys.
+// Migrate old UserDefaults keys and continuously remove retired sync keys.
 enum StorageKeysMigration {
     private static let migrationCompleteKey = "tinfoil-settings-storage-keys-migrated"
+    private static let legacyProjectChatStatusPrefix = "tinfoil-sync-project-chat-status-"
 
     static func migrateIfNeeded() {
         // Purge outside the one-shot guard: users who completed the
@@ -544,6 +541,10 @@ enum StorageKeysMigration {
         // otherwise keep the stale v1 entries forever. Removing an
         // absent key is a no-op, so re-running every launch is cheap.
         for key in Constants.StorageKeys.legacyKeysToRemove {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        for key in UserDefaults.standard.dictionaryRepresentation().keys
+            where key.hasPrefix(legacyProjectChatStatusPrefix) {
             UserDefaults.standard.removeObject(forKey: key)
         }
 
@@ -571,9 +572,6 @@ enum StorageKeysMigration {
             ("userAdditionalContext", Constants.StorageKeys.UserPrefs.additionalContext),
             ("isUsingCustomPrompt", Constants.StorageKeys.UserPrefs.customPromptEnabled),
             ("customSystemPrompt", Constants.StorageKeys.UserPrefs.customSystemPrompt),
-            // Sync
-            ("tinfoil-chat-sync-status", Constants.StorageKeys.Sync.chatStatus),
-            ("tinfoil-all-chats-sync-status", Constants.StorageKeys.Sync.allChatsStatus),
             // Secret / Passkey
             ("encryptionKeyWasSetUp", Constants.StorageKeys.Secret.encryptionKeySetUp),
             ("has_seen_passkey_intro", Constants.StorageKeys.Settings.hasSeenPasskeyIntro),

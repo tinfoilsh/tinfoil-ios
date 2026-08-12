@@ -45,7 +45,7 @@ final class CloudKeyPreflightValidator {
     private init() {}
 
     /// Inspect the remote state by combining a profile-sync-status
-    /// check with a chat-sync-status fallback. This does NOT require
+    /// check with a one-row chat snapshot fallback. This does NOT require
     /// the user's CEK and is safe to call before any key is loaded.
     func inspectRemoteState() async -> CloudRemoteState {
         guard let profileStatus = await profileSync.getSyncStatus() else {
@@ -57,8 +57,7 @@ final class CloudKeyPreflightValidator {
         }
 
         do {
-            let chatStatus = try await cloudStorage.getChatSyncStatus()
-            return chatStatus.count > 0 ? .exists : .empty
+            return try await cloudStorage.hasAnyChats() ? .exists : .empty
         } catch {
             return .unknown
         }

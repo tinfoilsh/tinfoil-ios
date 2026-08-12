@@ -311,9 +311,7 @@ class CloudSyncService: ObservableObject {
     private let encryptionService = EncryptionService.shared
     private let deletedChatsTracker = DeletedChatsTracker.shared
     private let streamingTracker = StreamingTracker.shared
-    // UserDefaults keys for sync status caches
-    private let syncStatusKey = Constants.StorageKeys.Sync.chatStatus
-    private let allChatsSyncStatusKey = Constants.StorageKeys.Sync.allChatsStatus
+    private let revisionCheckpointStore = RevisionCheckpointStore()
 
     private init() {}
 
@@ -553,6 +551,9 @@ class CloudSyncService: ObservableObject {
                 throw SyncEnclaveError(message: "required chat turn is not ready for backup")
             }
             do {
+                guard !deletedChatsTracker.isDeleted(chat.id) else {
+                    throw CancellationError()
+                }
                 let result = try await cloudStorage.uploadChat(
                     StoredChat(from: chat, syncVersion: chat.syncVersion),
                     idempotencyKey: newSyncEnclaveIdempotencyKey()
@@ -873,52 +874,17 @@ class CloudSyncService: ObservableObject {
             )
             guard generation == accountGeneration else { return false }
 
-            // The remote row vanished (concurrent delete). A clean local
-            // copy is removed by the deletion reconciliation pass. A
-            // locally modified copy carries writes the server never saw;
-            // there is no etag left to CAS against, so a plain re-upload
-            // would loop on STALE_BLOB forever. The newer local content
-            // wins by re-creating the row through the explicit restore
-            // path — unless the reconciliation pass has already recorded
-            // the tombstone, in which case the deletion is being applied
-            // right now and wins.
+            // A remote delete that races the revision window still wins.
+            // Remove the cloud-backed local row and let the next revision
+            // drain replay the same tombstone idempotently.
             guard var downloadedChat = remoteChat else {
-                guard let localChat,
-                      localChat.locallyModified,
-                      !localChat.isLocalOnly,
-                      !localChat.decryptionFailed,
-                      !localChat.dataCorrupted,
-                      !deletedChatsTracker.isDeleted(chatId) else {
-                    return false
-                }
-                // The row may have been tombstoned after the last pass
-                // fetched its deletion window, in which case the tracker
-                // doesn't know about it yet. Reconcile deletions now so a
-                // fresh tombstone is applied and recorded rather than
-                // overwritten by the restore below; a failed pass skips
-                // the restore and the next sync retries the upload (and
-                // this arbitration) from scratch.
-                let deletions = await reconcileRemoteDeletions(
-                    generation: generation,
-                    userId: userId
+                _ = try await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
+                    chatId: chatId,
+                    userId: userId,
+                    preserveNeverSynced: false
                 )
-                guard generation == accountGeneration else { return false }
-                guard !deletions.failed,
-                      !deletedChatsTracker.isDeleted(chatId) else {
-                    return false
-                }
-                let storedChat = StoredChat(
-                    from: localChat,
-                    syncVersion: localChat.syncVersion
-                )
-                try await uploadAndMarkSynced(
-                    storedChat,
-                    expectedUpdatedAt: localChat.updatedAt,
-                    idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                    account: UploadAccount(generation: generation, userId: userId),
-                    restoreDeleted: true
-                )
-                return true
+                deletedChatsTracker.markAsDeleted(chatId)
+                return false
             }
             if downloadedChat.modelType == nil {
                 downloadedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
@@ -978,6 +944,7 @@ class CloudSyncService: ObservableObject {
             guard generation == accountGeneration else { return false }
             downloadedChat.syncedAt = Date()
             downloadedChat.locallyModified = false
+            downloadedChat.projectLocallyModified = false
             let applied = await applyRemoteChatToStorage(
                 downloadedChat,
                 generation: generation,
@@ -1004,13 +971,10 @@ class CloudSyncService: ObservableObject {
     /// non-local-only chat. Returns nil when the account generation moved
     /// on while loading.
     private func loadUnsyncedChats(userId: String, generation: Int) async -> [Chat]? {
-        let index = (try? await EncryptedFileStorage.cloud.loadIndex(
+        let unsyncedIds = (try? await EncryptedFileStorage.cloud.pendingChatIds(
             userId: userId
         )) ?? []
         guard generation == accountGeneration else { return nil }
-        let unsyncedIds = index.filter {
-            ($0.locallyModified || $0.syncedAt == nil) && !$0.isLocalOnly
-        }.map(\.id)
         let unsyncedChats = (try? await EncryptedFileStorage.cloud.loadChats(
             chatIds: unsyncedIds,
             userId: userId
@@ -1020,7 +984,7 @@ class CloudSyncService: ObservableObject {
     }
 
     /// Backup all unsynced chats
-    func backupUnsyncedChats() async -> SyncResult {
+    private func backupUnsyncedChats() async -> SyncResult {
         let generation = accountGeneration
         var result = SyncResult()
 
@@ -1253,9 +1217,8 @@ class CloudSyncService: ObservableObject {
         do {
             var decryptedChat = try JSONDecoder().decode(StoredChat.self, from: plaintextData)
             decryptedChat.formatVersion = 2
-            if let remoteProjectId = remoteChat.projectId {
-                decryptedChat.projectId = remoteProjectId
-            }
+            decryptedChat.projectId = remoteChat.projectId
+            decryptedChat.projectLocallyModified = false
 
             // Prefer the blob's createdAt over the remote metadata.
             // StoredChat falls back to `Date()` on parse failure — when
@@ -1290,60 +1253,6 @@ class CloudSyncService: ObservableObject {
         )
     }
     
-    /// Download a remote chat by ID, apply metadata dates, and save locally.
-    /// Returns `true` if the chat was downloaded and saved, `false` on failure.
-    private func downloadAndSaveRemoteChat(
-        _ remoteChat: RemoteChat,
-        projectId: String? = nil,
-        generation: Int,
-        userId: String,
-        expectedLocalUpdatedAt: Date?
-    ) async throws {
-        guard var downloadedChat = try await cloudStorage.downloadChat(remoteChat.id) else {
-            return
-        }
-        guard generation == accountGeneration else { return }
-        if let projectId = projectId ?? remoteChat.projectId {
-            downloadedChat.projectId = projectId
-        }
-
-        // If decryption failed, don't overwrite a valid local copy.
-        if downloadedChat.decryptionFailed == true {
-            if let localChat = try? await EncryptedFileStorage.cloud.loadChat(
-                chatId: remoteChat.id,
-                userId: userId
-            ),
-               !localChat.messages.isEmpty,
-               !localChat.decryptionFailed {
-                return
-            }
-        }
-
-        // Prefer blob's createdAt; only fall back to server metadata when
-        // the blob value looks like a decoder fallback (Date()).
-        let blobCreatedAt = downloadedChat.createdAt
-        let blobLooksLikeFallback = abs(blobCreatedAt.timeIntervalSinceNow) < Constants.Sync.createdAtFallbackThresholdSeconds
-        if blobLooksLikeFallback, let createdDate = parseISODate(remoteChat.createdAt) {
-            downloadedChat.createdAt = createdDate
-        }
-        if let updatedDate = parseISODate(remoteChat.updatedAt) {
-            downloadedChat.updatedAt = updatedDate
-        }
-
-        if downloadedChat.modelType == nil {
-            downloadedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
-        }
-
-        downloadedChat.syncedAt = Date()
-        downloadedChat.locallyModified = false
-        _ = await applyRemoteChatToStorage(
-            downloadedChat,
-            generation: generation,
-            userId: userId,
-            expectedLocalUpdatedAt: expectedLocalUpdatedAt
-        )
-    }
-
     /// Sync all chats (upload local changes, download remote changes)
     func syncAllChats() async -> SyncResult {
         let generation = accountGeneration
@@ -1361,890 +1270,397 @@ class CloudSyncService: ObservableObject {
             }
         }
 
-        let result = await doSyncAllChats()
+        let result = await doRevisionSync()
         guard generation == accountGeneration else { return SyncResult() }
         syncErrors = result.errors
         return result
     }
 
-    private static let uploadsSkippedUnreconciledDeletionsError =
-        "Skipped uploading local changes: remote deletions could not be reconciled"
-    private static let deletionReconciliationError =
-        "Remote deletions could not be reconciled"
-
-    /// Upload leg shared by the full and delta sync paths. Uploading
-    /// dirty chats before deletions reconcile can resurrect chats
-    /// deleted on another device, so a failed pass keeps local changes
-    /// queued until a pass succeeds.
-    private func backupUnsyncedChatsAfterDeletions(
-        _ deletions: RemoteDeletionsOutcome,
-        generation: Int
-    ) async -> SyncResult {
-        if deletions.failed {
-            return SyncResult(
-                uploaded: 0,
-                downloaded: 0,
-                deleted: deletions.removed,
-                errors: [Self.uploadsSkippedUnreconciledDeletionsError]
-            )
-        }
-        let backupResult = await backupUnsyncedChats()
-        guard generation == accountGeneration else { return SyncResult() }
-        return SyncResult(
-            uploaded: backupResult.uploaded,
-            downloaded: 0,
-            deleted: deletions.removed,
-            errors: backupResult.errors
-        )
-    }
-
-    private func doSyncAllChats() async -> SyncResult {
+    private func doRevisionSync() async -> SyncResult {
         let generation = accountGeneration
-        guard let userId = await getCurrentUserId() else { return SyncResult() }
-        var result = SyncResult()
-
-        // Delete local chats that were deleted on another device
-        let deletions = await reconcileRemoteDeletions(
-            generation: generation,
-            userId: userId
-        )
-        guard generation == accountGeneration else { return SyncResult() }
-
-        result = await backupUnsyncedChatsAfterDeletions(
-            deletions,
-            generation: generation
-        )
-        guard generation == accountGeneration else { return SyncResult() }
-
-        // Then, get list of remote chats with content
+        guard await cloudStorage.isAuthenticated(),
+              let userId = await getCurrentUserId() else { return SyncResult() }
         do {
-            let localChats = (try? await EncryptedFileStorage.cloud.loadAllChats(
-                userId: userId
-            )) ?? []
-
-            // Initialize encryption if available; continue even without a key so we can at least
-            // fetch metadata and store encrypted placeholders. Decryption will be attempted per-chat.
-            _ = try? await encryptionService.initialize()
-
-            // Create maps for easy lookup
-            let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
-
-            // Every entry point (pull-to-refresh, Sync Now, periodic and
-            // launch syncs) syncs the first page only, like the webapp.
-            // Older history is reachable through chat-list pagination, so
-            // refresh work stays bounded regardless of account size. The
-            // page carries metadata only; content is pulled afterwards for
-            // just the chats that need processing.
-            let remoteList = try await cloudStorage.listChats(
-                limit: Constants.Pagination.chatsPerPage,
-                continuationToken: nil,
-                includeContent: false
-            )
-            guard generation == accountGeneration else { return result }
-            let remoteConversations = remoteList.conversations
-
-            // First pass: decide which chats need processing.
-            var chatsToProcess: [RemoteChat] = []
-            for remoteChat in remoteConversations {
-                // First validate if this remote chat should be processed
-                if !(await shouldProcessRemoteChat(remoteChat)) {
-                    // Clean up invalid chats from cloud
-                    cleanupInvalidRemoteChat(remoteChat)
-                    continue
-                }
-
-                let localChat = localChatMap[remoteChat.id]
-
-                // Process if:
-                // 1. Chat doesn't exist locally
-                // 2. Remote is newer (based on updatedAt > syncedAt) AND chat is not locally modified
-                // 3. Chat failed decryption (to retry with new key)
-                // 4. Never overwrite if chat has active stream or is locally modified
-                let remoteTimestamp = parseISODate(remoteChat.updatedAt)?.timeIntervalSince1970 ?? 0
-
-                // Skip if chat is locally modified or has active stream
-                if let localChat = localChat {
-                    if localChat.locallyModified || localChat.hasActiveStream {
-                        continue
-                    }
-
-                    // Also check if chat is currently streaming using the tracker
-                    if streamingTracker.isStreaming(localChat.id) {
-                        continue
-                    }
-                }
-
-                let shouldProcess = localChat == nil ||
-                    (!remoteTimestamp.isNaN && remoteTimestamp > (localChat?.syncedAt?.timeIntervalSince1970 ?? 0)) ||
-                    (localChat?.decryptionFailed == true)
-
-                if shouldProcess {
-                    chatsToProcess.append(remoteChat)
-                }
+            let summary = try await SyncEnclaveAPI.revisionSummary()
+            guard generation == accountGeneration else { return SyncResult() }
+            guard DecimalRevision.isValid(summary.currentRevision),
+                  DecimalRevision.isValid(summary.oldestReplayableRevision) else {
+                throw RevisionSyncError.invalidRevision
             }
 
-            // Fetch content only for the chats that passed the checks.
-            await cloudStorage.attachInlineContent(&chatsToProcess)
-
-            // Process sequentially to avoid connection exhaustion
-            for remoteChat in chatsToProcess {
-                guard generation == accountGeneration else { return result }
-                let localChat = localChatMap[remoteChat.id]
-
-                if let content = remoteChat.content {
-                    if let decrypted = await decryptRemoteChat(remoteChat, content: content) {
-                        // Validate the content
-                        if decrypted.chat.messages.isEmpty {
-                            cleanupInvalidRemoteChat(remoteChat)
-                            continue
-                        }
-
-                        var remoteChatToApply = decrypted.chat
-                        remoteChatToApply.syncedAt = Date()
-                        remoteChatToApply.locallyModified = false
-                        let applied = await applyRemoteChatToStorage(
-                            remoteChatToApply,
-                            generation: generation,
-                            userId: userId,
-                            expectedLocalUpdatedAt: localChat?.updatedAt
-                        )
-                        guard applied else { continue }
-                        result = SyncResult(
-                            uploaded: result.uploaded,
-                            downloaded: result.downloaded + 1,
-                            deleted: result.deleted,
-                            errors: result.errors
-                        )
-                    } else {
-                        // Only save a placeholder if there is no valid local copy.
-                        // When a good local version exists (non-empty messages, not
-                        // already failed), preserve it to avoid replacing decrypted
-                        // content with an empty encrypted placeholder (e.g. after
-                        // the remote was re-encrypted with a key we don't have yet).
-                        let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
-                        if !hasValidLocal {
-                            var placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
-                            placeholder.syncedAt = Date()
-                            placeholder.locallyModified = false
-                            let applied = await applyRemoteChatToStorage(
-                                placeholder,
-                                generation: generation,
-                                userId: userId,
-                                expectedLocalUpdatedAt: localChat?.updatedAt
-                            )
-                            guard applied else { continue }
-                            result = SyncResult(
-                                uploaded: result.uploaded,
-                                downloaded: result.downloaded + 1,
-                                deleted: result.deleted,
-                                errors: result.errors
-                            )
-                        }
-                    }
-                } else {
-                    // No inline content - fetch via downloadChat (handles its own decryption)
-                    do {
-                        try await downloadAndSaveRemoteChat(
-                            remoteChat,
-                            generation: generation,
-                            userId: userId,
-                            expectedLocalUpdatedAt: localChat?.updatedAt
-                        )
-                        result = SyncResult(
-                            uploaded: result.uploaded,
-                            downloaded: result.downloaded + 1,
-                            deleted: result.deleted,
-                            errors: result.errors
-                        )
-                    } catch {
-                        result = SyncResult(
-                            uploaded: result.uploaded,
-                            downloaded: result.downloaded,
-                            deleted: result.deleted,
-                            errors: result.errors + ["Failed to download chat \(remoteChat.id): \(error.localizedDescription)"]
-                        )
-                    }
-                }
-            }
-
-            // Refresh cached sync status so subsequent smart-syncs have up-to-date info
-            await refreshSyncStatusCache(generation: generation, userId: userId)
-
-            // Detect cross-scope moves (chats moving between projects)
-            await syncCrossScope(generation: generation, userId: userId)
-
-        } catch {
-            result = SyncResult(
-                uploaded: result.uploaded,
-                downloaded: result.downloaded,
-                deleted: result.deleted,
-                errors: result.errors + ["Sync failed: \(error.localizedDescription)"]
-            )
-        }
-
-        return result
-    }
-
-    // MARK: - Smart Sync Operations
-
-    /// Check if sync is needed by comparing with cached status
-    func checkSyncStatus() async -> SyncStatusResult {
-        // Check for local unsynced changes first
-        let unsyncedChats = await getUnsyncedChats()
-        let hasLocalChanges = !unsyncedChats.filter { !$0.isBlankChat && !$0.messages.isEmpty }.isEmpty
-
-        if hasLocalChanges {
-            return SyncStatusResult(
-                needsSync: true,
-                reason: .localChanges,
-                remoteCount: nil,
-                remoteLastUpdated: nil
-            )
-        }
-
-        // Get remote sync status
-        do {
-            let remoteStatus = try await cloudStorage.getChatSyncStatus()
-
-            // Get cached status
-            let cachedStatus = getCachedSyncStatus()
-
-            // Compare with cached status
-            if let cached = cachedStatus {
-                if remoteStatus.count != cached.count {
-                    return SyncStatusResult(
-                        needsSync: true,
-                        reason: .countChanged,
-                        remoteCount: remoteStatus.count,
-                        remoteLastUpdated: remoteStatus.lastUpdated
-                    )
-                }
-
-                if let remoteUpdated = remoteStatus.lastUpdated,
-                   let cachedUpdated = cached.lastUpdated,
-                   remoteUpdated != cachedUpdated {
-                    return SyncStatusResult(
-                        needsSync: true,
-                        reason: .updated,
-                        remoteCount: remoteStatus.count,
-                        remoteLastUpdated: remoteStatus.lastUpdated
-                    )
-                }
-
-                // Detect the disk-lost-rows case after the more
-                // precise remote-side signals above. The cached
-                // count tracks the server, not what is actually on
-                // disk — so a chat that 404s during decrypt, an
-                // eviction sweep, or any other path that silently
-                // drops rows can leave the watermark intact even
-                // though the user can no longer see those chats.
-                // When the live local count drops below the
-                // snapshot we last persisted, force a full pull.
-                // Older cached entries (no `localCount`) keep the
-                // legacy behaviour to avoid spurious sync storms on
-                // first upgrade.
-                if let cachedLocal = cached.localCount {
-                    let liveLocal = await safeReadLocalChatCount() ?? cachedLocal
-                    if liveLocal < cachedLocal {
-                        return SyncStatusResult(
-                            needsSync: true,
-                            reason: .countChanged,
-                            remoteCount: remoteStatus.count,
-                            remoteLastUpdated: remoteStatus.lastUpdated
-                        )
-                    }
-                }
-
-                return SyncStatusResult(
-                    needsSync: false,
-                    reason: .noChanges,
-                    remoteCount: remoteStatus.count,
-                    remoteLastUpdated: remoteStatus.lastUpdated
-                )
-            }
-
-            // No cached status - need full sync
-            return SyncStatusResult(
-                needsSync: true,
-                reason: .countChanged,
-                remoteCount: remoteStatus.count,
-                remoteLastUpdated: remoteStatus.lastUpdated
-            )
-        } catch {
-            return SyncStatusResult(
-                needsSync: true,
-                reason: .error,
-                remoteCount: nil,
-                remoteLastUpdated: nil
-            )
-        }
-    }
-
-    /// Sync only chats that changed since last sync
-    private func syncChangedChats(since: String) async -> SyncResult {
-        let generation = accountGeneration
-        guard let userId = await getCurrentUserId() else { return SyncResult() }
-        var result = SyncResult()
-
-        // Delete local chats that were deleted on another device
-        let deletions = await reconcileRemoteDeletions(
-            generation: generation,
-            userId: userId
-        )
-        guard generation == accountGeneration else { return SyncResult() }
-
-        result = await backupUnsyncedChatsAfterDeletions(
-            deletions,
-            generation: generation
-        )
-        guard generation == accountGeneration else { return SyncResult() }
-
-        do {
-            _ = try? await encryptionService.initialize()
-
-            let localChats = (try? await EncryptedFileStorage.cloud.loadAllChats(
-                userId: userId
-            )) ?? []
-            let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
-
-            // Paginate through all changed chats
-            var hasMore = true
-            var continuationToken: String? = nil
-
-            while hasMore {
-                let changedChats = try await cloudStorage.getChatsUpdatedSince(
-                    since: since,
-                    includeContent: true,
-                    continuationToken: continuationToken
-                )
-                guard generation == accountGeneration else { return result }
-
-                for remoteChat in changedChats.conversations {
-                    if deletedChatsTracker.isDeleted(remoteChat.id) {
-                        continue
-                    }
-
-                    if !(await shouldProcessRemoteChat(remoteChat)) {
-                        continue
-                    }
-
-                    // Skip if chat is locally modified or has active stream
-                    if let localChat = localChatMap[remoteChat.id] {
-                        if localChat.locallyModified || localChat.hasActiveStream {
-                            continue
-                        }
-
-                        if streamingTracker.isStreaming(localChat.id) {
-                            continue
-                        }
-                    }
-
-                    if let content = remoteChat.content {
-                        if let decrypted = await decryptRemoteChat(remoteChat, content: content) {
-                            let localChat = localChatMap[remoteChat.id]
-                            var remoteChatToApply = decrypted.chat
-                            remoteChatToApply.syncedAt = Date()
-                            remoteChatToApply.locallyModified = false
-                            let applied = await applyRemoteChatToStorage(
-                                remoteChatToApply,
-                                generation: generation,
-                                userId: userId,
-                                expectedLocalUpdatedAt: localChat?.updatedAt
-                            )
-                            guard applied else { continue }
-                            result = SyncResult(
-                                uploaded: result.uploaded,
-                                downloaded: result.downloaded + 1,
-                                deleted: result.deleted,
-                                errors: result.errors
-                            )
-                        } else {
-                            // Only save a placeholder when no valid local copy exists.
-                            let localChat = localChatMap[remoteChat.id]
-                            let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
-                            if !hasValidLocal {
-                                var placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
-                                placeholder.syncedAt = Date()
-                                placeholder.locallyModified = false
-                                let applied = await applyRemoteChatToStorage(
-                                    placeholder,
-                                    generation: generation,
-                                    userId: userId,
-                                    expectedLocalUpdatedAt: localChat?.updatedAt
-                                )
-                                guard applied else { continue }
-                                result = SyncResult(
-                                    uploaded: result.uploaded,
-                                    downloaded: result.downloaded + 1,
-                                    deleted: result.deleted,
-                                    errors: result.errors
-                                )
-                            }
-                        }
-                    } else {
-                        // No inline content - fetch via downloadChat (handles its own decryption)
-                        do {
-                            try await downloadAndSaveRemoteChat(
-                                remoteChat,
-                                generation: generation,
-                                userId: userId,
-                                expectedLocalUpdatedAt: localChatMap[remoteChat.id]?.updatedAt
-                            )
-                            result = SyncResult(
-                                uploaded: result.uploaded,
-                                downloaded: result.downloaded + 1,
-                                deleted: result.deleted,
-                                errors: result.errors
-                            )
-                        } catch {
-                            result = SyncResult(
-                                uploaded: result.uploaded,
-                                downloaded: result.downloaded,
-                                deleted: result.deleted,
-                                errors: result.errors + ["Failed to download chat \(remoteChat.id): \(error.localizedDescription)"]
-                            )
-                        }
-                    }
-                }
-
-                let nextToken = changedChats.nextContinuationToken?.isEmpty == false ? changedChats.nextContinuationToken : nil
-                hasMore = changedChats.hasMore && nextToken != nil
-                continuationToken = nextToken
-            }
-
-            // Refresh cached sync status so subsequent smart-syncs have up-to-date info
-            await refreshSyncStatusCache(generation: generation, userId: userId)
-
-            // Detect cross-scope moves (chats moving between projects)
-            await syncCrossScope(generation: generation, userId: userId)
-        } catch {
-            result = SyncResult(
-                uploaded: result.uploaded,
-                downloaded: result.downloaded,
-                deleted: result.deleted,
-                errors: result.errors + ["Delta sync failed: \(error.localizedDescription)"]
-            )
-        }
-
-        return result
-    }
-
-    /// Smart sync - only sync if changes detected
-    func smartSync() async -> SyncResult {
-        let generation = accountGeneration
-        guard !isSyncing else {
-            return SyncResult()
-        }
-
-        guard await cloudStorage.isAuthenticated() else {
-            return SyncResult()
-        }
-        guard let userId = await getCurrentUserId(),
-              generation == accountGeneration else {
-            return SyncResult()
-        }
-
-        let statusCheck = await checkSyncStatus()
-        guard generation == accountGeneration else {
-            return SyncResult()
-        }
-
-        if !statusCheck.needsSync {
-            // A deletion from another device can be absorbed into the status
-            // cache (the count matches again) on the same tick its tombstone
-            // was missed locally, after which the count gate never reopens and
-            // the orphan lingers until a full reload. Re-run the tombstone
-            // reconciliation here so a missed deletion self-heals on the next
-            // tick. The pass resumes from its own durable watermark, is
-            // idempotent, and only reports chats actually removed locally,
-            // so it triggers a UI reload only when needed.
-            let deletions = await reconcileRemoteDeletions(
-                generation: generation,
+            let needsContentRepair = try await EncryptedFileStorage.cloud.needsContentRepair(
                 userId: userId
             )
             guard generation == accountGeneration else { return SyncResult() }
-            guard deletions.reconciled, !deletions.failed else {
-                let errors = [Self.deletionReconciliationError]
-                syncErrors = errors
-                return SyncResult(errors: errors)
-            }
-            syncErrors = []
-            if deletions.removed > 0 {
-                return SyncResult(deleted: deletions.removed)
-            }
-            return SyncResult()
-        }
-
-        isSyncing = true
-        syncStatus = "Syncing..."
-        defer {
-            if generation == accountGeneration {
-                isSyncing = false
-                syncStatus = ""
-                lastSyncDate = Date()
-            }
-        }
-
-        var result = SyncResult()
-
-        // If only timestamp changed (not count), try delta sync
-        if statusCheck.reason == .updated,
-           let cachedStatus = getCachedSyncStatus(),
-           let lastUpdated = cachedStatus.lastUpdated {
-            let deltaResult = await syncChangedChats(since: lastUpdated)
-            result = SyncResult(
-                uploaded: result.uploaded + deltaResult.uploaded,
-                downloaded: result.downloaded + deltaResult.downloaded,
-                deleted: result.deleted + deltaResult.deleted,
-                errors: result.errors + deltaResult.errors
-            )
-
-            if !deltaResult.errors.isEmpty {
-                // Delta sync failed, fall back to full sync
-                let fullResult = await doSyncAllChats()
-                result = SyncResult(
-                    uploaded: result.uploaded + fullResult.uploaded,
-                    downloaded: result.downloaded + fullResult.downloaded,
-                    deleted: result.deleted + fullResult.deleted,
-                    errors: fullResult.errors
+            let checkpoint = revisionCheckpointStore.load(userId: userId)
+            var result: SyncResult
+            if needsContentRepair {
+                result = try await reconcileRevisionSnapshot(
+                    generation: generation,
+                    userId: userId
+                )
+            } else if let checkpoint,
+               DecimalRevision.compare(checkpoint, summary.oldestReplayableRevision) != .orderedAscending,
+               DecimalRevision.compare(checkpoint, summary.currentRevision) != .orderedDescending {
+                result = try await applyRevisionEvents(
+                    afterRevision: checkpoint,
+                    throughRevision: summary.currentRevision,
+                    generation: generation,
+                    userId: userId
+                )
+                guard generation == accountGeneration else { return SyncResult() }
+                revisionCheckpointStore.save(summary.currentRevision, userId: userId)
+            } else {
+                result = try await reconcileRevisionSnapshot(
+                    generation: generation,
+                    userId: userId
                 )
             }
-        } else {
-            // Count changed, local changes, or no cached status - need full sync
-            let fullResult = await doSyncAllChats()
-            result = SyncResult(
-                uploaded: result.uploaded + fullResult.uploaded,
-                downloaded: result.downloaded + fullResult.downloaded,
-                deleted: result.deleted + fullResult.deleted,
-                errors: result.errors + fullResult.errors
+            guard generation == accountGeneration else { return SyncResult() }
+
+            let deleted = try await drainDeleteIntents(userId: userId, generation: generation)
+            guard generation == accountGeneration else { return SyncResult() }
+            let uploads = await backupUnsyncedChats()
+            return SyncResult(
+                uploaded: uploads.uploaded,
+                downloaded: result.downloaded,
+                deleted: result.deleted + deleted,
+                errors: result.errors + uploads.errors
+            )
+        } catch {
+            return SyncResult(errors: ["Revision sync failed: \(error.localizedDescription)"])
+        }
+    }
+
+    private func applyRevisionEvents(
+        afterRevision: String,
+        throughRevision: String,
+        generation: Int,
+        userId: String
+    ) async throws -> SyncResult {
+        if DecimalRevision.compare(afterRevision, throughRevision) == .orderedSame {
+            return SyncResult()
+        }
+        var events: [EnclaveRevisionEvent] = []
+        var cursor: String?
+        repeat {
+            let response = try await SyncEnclaveAPI.revisionEvents(
+                EnclaveRevisionEventsRequest(
+                    afterRevision: afterRevision,
+                    throughRevision: throughRevision,
+                    cursor: cursor,
+                    limit: Constants.SyncEnclave.listStatusPageLimit
+                )
+            )
+            guard generation == accountGeneration else { throw CancellationError() }
+            events.append(contentsOf: response.events)
+            cursor = response.nextCursor?.isEmpty == false ? response.nextCursor : nil
+        } while cursor != nil
+
+        let planned = try RevisionEventPlanner.orderedLatestEvents(
+            events,
+            afterRevision: afterRevision,
+            throughRevision: throughRevision
+        )
+        guard planned.allSatisfy({ event in
+            guard !event.id.isEmpty, parseISODate(event.updatedAt) != nil else { return false }
+            if event.kind == .upsert {
+                guard let etag = event.etag,
+                      Int(etag).map({ $0 > 0 }) == true else { return false }
+            }
+            return true
+        }) else {
+            throw RevisionSyncError.invalidRevision
+        }
+        let local = try await EncryptedFileStorage.cloud.loadIndex(userId: userId)
+        var localById: [String: ChatIndexEntry] = [:]
+        for entry in local where localById[entry.id] == nil {
+            localById[entry.id] = entry
+        }
+        let pendingDeleteIntents = try await EncryptedFileStorage.cloud.loadDeleteIntents(
+            userId: userId
+        )
+        let pendingDeleteIds = Set(pendingDeleteIntents.map(\.chatId))
+        let pullIds = planned.compactMap { event -> String? in
+            guard event.kind == .upsert else { return nil }
+            guard DeleteIntentPlanner.shouldApplyRemoteUpsert(
+                chatId: event.id,
+                pendingDeleteIds: pendingDeleteIds
+            ) else { return nil }
+            guard let entry = localById[event.id] else { return event.id }
+            guard !entry.locallyModified else { return nil }
+            return entry.decryptionFailed || String(entry.syncVersion) != event.etag
+                ? event.id : nil
+        }
+        let pulled = try await cloudStorage.downloadChats(pullIds)
+        var result = SyncResult()
+
+        for event in planned {
+            guard generation == accountGeneration else { throw CancellationError() }
+            guard let eventUpdatedAt = parseISODate(event.updatedAt) else {
+                throw RevisionSyncError.invalidRevision
+            }
+            switch event.kind {
+            case .delete:
+                let removed = try await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
+                    chatId: event.id,
+                    userId: userId,
+                    preserveNeverSynced: false
+                )
+                if removed {
+                    deletedChatsTracker.markAsDeleted(event.id)
+                    result = SyncResult(
+                        downloaded: result.downloaded,
+                        deleted: result.deleted + 1
+                    )
+                }
+            case .upsert:
+                guard DeleteIntentPlanner.shouldApplyRemoteUpsert(
+                    chatId: event.id,
+                    pendingDeleteIds: pendingDeleteIds
+                ) else { continue }
+                deletedChatsTracker.removeFromDeleted(event.id)
+                if let remote = pulled[event.id] {
+                    var chat = remote
+                    chat.projectId = event.projectId
+                    chat.projectLocallyModified = false
+                    chat.updatedAt = eventUpdatedAt
+                    chat.syncedAt = Date()
+                    chat.locallyModified = false
+                    let applyResult = await applyRemoteChatToStorageResult(
+                        chat,
+                        generation: generation,
+                        userId: userId,
+                        expectedLocalUpdatedAt: localById[event.id]?.updatedAt
+                    )
+                    if applyResult == .locallyModified { continue }
+                    guard applyResult == .applied else {
+                        throw RevisionSyncError.incompletePull
+                    }
+                    result = SyncResult(
+                        downloaded: result.downloaded + 1,
+                        deleted: result.deleted
+                    )
+                } else if let entry = localById[event.id],
+                          SnapshotReconciliation.shouldApplyRemoteMetadata(
+                            to: entry,
+                            etag: event.etag,
+                            projectId: event.projectId
+                          ) {
+                    guard let etag = event.etag, let syncVersion = Int(etag), syncVersion > 0 else {
+                        throw RevisionSyncError.incompletePull
+                    }
+                    let applyResult = try await EncryptedFileStorage.cloud.applyRevisionMetadata(
+                        chatId: event.id,
+                        userId: userId,
+                        projectId: event.projectId,
+                        syncVersion: syncVersion
+                    )
+                    if applyResult == .locallyModified { continue }
+                    guard applyResult == .applied else {
+                        throw RevisionSyncError.incompletePull
+                    }
+                }
+            }
+        }
+        return result
+    }
+
+    private func reconcileRevisionSnapshot(
+        generation: Int,
+        userId: String
+    ) async throws -> SyncResult {
+        var items: [EnclaveRevisionSnapshotItem] = []
+        var cursor: String?
+        var snapshotRevision: String?
+        repeat {
+            let response = try await SyncEnclaveAPI.revisionSnapshot(
+                EnclaveRevisionSnapshotRequest(
+                    cursor: cursor,
+                    limit: Constants.SyncEnclave.listStatusPageLimit
+                )
+            )
+            guard generation == accountGeneration else { throw CancellationError() }
+            if let snapshotRevision, snapshotRevision != response.snapshotRevision {
+                throw RevisionSyncError.snapshotChangedDuringPagination
+            }
+            snapshotRevision = response.snapshotRevision
+            items.append(contentsOf: response.items)
+            cursor = response.nextCursor?.isEmpty == false ? response.nextCursor : nil
+        } while cursor != nil
+
+        guard let snapshotRevision, DecimalRevision.isValid(snapshotRevision) else {
+            throw RevisionSyncError.invalidRevision
+        }
+        guard items.allSatisfy({ item in
+            !item.id.isEmpty && Int(item.etag).map({ $0 > 0 }) == true
+                && parseISODate(item.updatedAt) != nil
+        }) else {
+            throw RevisionSyncError.invalidRevision
+        }
+        let local = try await EncryptedFileStorage.cloud.loadIndex(userId: userId)
+        var localById: [String: ChatIndexEntry] = [:]
+        for entry in local where localById[entry.id] == nil {
+            localById[entry.id] = entry
+        }
+        let remoteIds = Set(items.map(\.id))
+        let snapshotDeleteIntents = try await EncryptedFileStorage.cloud.loadDeleteIntents(
+            userId: userId
+        )
+        let pendingDeleteIds = Set(snapshotDeleteIntents.map(\.chatId))
+        for id in remoteIds where !pendingDeleteIds.contains(id) {
+            deletedChatsTracker.removeFromDeleted(id)
+        }
+        for intent in DeleteIntentPlanner.confirmedAbsent(
+            snapshotDeleteIntents,
+            remoteIds: remoteIds
+        ) {
+            guard generation == accountGeneration else { throw CancellationError() }
+            try await EncryptedFileStorage.cloud.removeDeleteIntent(
+                chatId: intent.chatId,
+                userId: userId
             )
         }
+        var deleted = 0
+        for id in SnapshotReconciliation.locallyRemovedIds(local: local, remoteIds: remoteIds) {
+            guard generation == accountGeneration else { throw CancellationError() }
+            if try await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
+                chatId: id,
+                userId: userId,
+                preserveNeverSynced: true
+            ) {
+                deletedChatsTracker.markAsDeleted(id)
+                deleted += 1
+            }
+        }
 
-        guard generation == accountGeneration else { return SyncResult() }
-        syncErrors = result.errors
-        return result
+        let missingContentIds = try await EncryptedFileStorage.cloud.missingChatContentIds(
+            chatIds: local.map(\.id),
+            userId: userId
+        )
+        let changed = SnapshotReconciliation.contentItems(
+            local: local,
+            remote: items.filter {
+                DeleteIntentPlanner.shouldApplyRemoteUpsert(
+                    chatId: $0.id,
+                    pendingDeleteIds: pendingDeleteIds
+                )
+            },
+            recentLimit: Constants.Pagination.chatsPerPage,
+            missingContentIds: missingContentIds
+        )
+        var metadataOnly: [EnclaveRevisionSnapshotItem] = []
+        let pullItems = changed.filter { item in
+            guard let entry = localById[item.id] else { return true }
+            if String(entry.syncVersion) == item.etag
+                && !entry.decryptionFailed
+                && !missingContentIds.contains(item.id) {
+                metadataOnly.append(item)
+                return false
+            }
+            return true
+        }
+        let pulled = try await cloudStorage.downloadChats(pullItems.map(\.id))
+        var downloaded = 0
+        for item in pullItems {
+            guard generation == accountGeneration, var chat = pulled[item.id] else {
+                throw RevisionSyncError.incompletePull
+            }
+            chat.projectId = item.projectId
+            chat.projectLocallyModified = false
+            guard let updatedAt = parseISODate(item.updatedAt) else {
+                throw RevisionSyncError.invalidRevision
+            }
+            chat.updatedAt = updatedAt
+            chat.syncedAt = Date()
+            chat.locallyModified = false
+            let applyResult = await applyRemoteChatToStorageResult(
+                chat,
+                generation: generation,
+                userId: userId,
+                expectedLocalUpdatedAt: localById[item.id]?.updatedAt,
+                allowLocallyModified: missingContentIds.contains(item.id)
+            )
+            if applyResult == .locallyModified { continue }
+            guard applyResult == .applied else {
+                throw RevisionSyncError.incompletePull
+            }
+            downloaded += 1
+        }
+        for item in metadataOnly {
+            guard let syncVersion = Int(item.etag), syncVersion > 0 else {
+                throw RevisionSyncError.incompletePull
+            }
+            let applyResult = try await EncryptedFileStorage.cloud.applyRevisionMetadata(
+                chatId: item.id,
+                userId: userId,
+                projectId: item.projectId,
+                syncVersion: syncVersion
+            )
+            if applyResult == .locallyModified { continue }
+            guard applyResult == .applied else {
+                throw RevisionSyncError.incompletePull
+            }
+        }
+        guard generation == accountGeneration else { throw CancellationError() }
+        guard try await EncryptedFileStorage.cloud.completeContentRepairIfResolved(
+            userId: userId,
+            ignoring: pendingDeleteIds
+        ) else {
+            throw RevisionSyncError.incompletePull
+        }
+        guard generation == accountGeneration else { throw CancellationError() }
+        revisionCheckpointStore.save(snapshotRevision, userId: userId)
+        return SyncResult(downloaded: downloaded, deleted: deleted)
+    }
+
+    private func drainDeleteIntents(userId: String, generation: Int) async throws -> Int {
+        let intents = try await EncryptedFileStorage.cloud.loadDeleteIntents(userId: userId)
+        var deleted = 0
+        for intent in intents.sorted(by: { $0.chatId < $1.chatId }) {
+            guard generation == accountGeneration else { throw CancellationError() }
+            if pendingUploadChatIds.contains(intent.chatId) {
+                await uploadCoalescer.waitForUpload(intent.chatId)
+                guard generation == accountGeneration else { throw CancellationError() }
+            }
+            try await cloudStorage.deleteChat(
+                intent.chatId,
+                idempotencyKey: intent.idempotencyKey
+            )
+            guard generation == accountGeneration,
+                  await getCurrentUserId() == userId else {
+                throw CancellationError()
+            }
+            _ = try await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
+                chatId: intent.chatId,
+                userId: userId,
+                preserveNeverSynced: false
+            )
+            try await EncryptedFileStorage.cloud.removeDeleteIntent(
+                chatId: intent.chatId,
+                userId: userId
+            )
+            deletedChatsTracker.markAsDeleted(intent.chatId)
+            deleted += 1
+        }
+        return deleted
+    }
+
+    func smartSync() async -> SyncResult {
+        await syncAllChats()
     }
 
     func smartSync(projectId: String?) async -> SyncResult {
-        guard let projectId else {
-            return await smartSync()
-        }
-        return await smartSyncProjectChats(projectId)
+        await syncAllChats()
     }
 
     func syncProjectChats(_ projectId: String) async -> SyncResult {
-        let generation = accountGeneration
-        guard !isSyncing else {
-            return SyncResult()
-        }
-
-        guard await cloudStorage.isAuthenticated() else {
-            return SyncResult()
-        }
-        guard generation == accountGeneration else { return SyncResult() }
-
-        isSyncing = true
-        syncStatus = "Syncing project..."
-        defer {
-            if generation == accountGeneration {
-                isSyncing = false
-                syncStatus = ""
-                lastSyncDate = Date()
-            }
-        }
-
-        let result = await doSyncProjectChats(projectId)
-        guard generation == accountGeneration else { return SyncResult() }
-        syncErrors = result.errors
-        return result
-    }
-
-    private func smartSyncProjectChats(_ projectId: String) async -> SyncResult {
-        let generation = accountGeneration
-        guard !isSyncing else {
-            return SyncResult()
-        }
-
-        guard await cloudStorage.isAuthenticated() else {
-            return SyncResult()
-        }
-        guard generation == accountGeneration else { return SyncResult() }
-
-        let unsyncedChats = await getUnsyncedChats()
-        guard generation == accountGeneration else { return SyncResult() }
-        let localProjectChanges = unsyncedChats.contains {
-            $0.projectId == projectId && !$0.isBlankChat && !$0.messages.isEmpty
-        }
-
-        do {
-            let remoteStatus = try await cloudStorage.getProjectChatsSyncStatus(projectId: projectId)
-            guard generation == accountGeneration else { return SyncResult() }
-            let cachedStatus = getCachedProjectChatSyncStatus(projectId)
-
-            if !localProjectChanges,
-               let cachedStatus,
-               remoteStatus.count == cachedStatus.count,
-               remoteStatus.lastUpdated == cachedStatus.lastUpdated {
-                return SyncResult()
-            }
-
-            isSyncing = true
-            syncStatus = "Syncing project..."
-            defer {
-                if generation == accountGeneration {
-                    isSyncing = false
-                    syncStatus = ""
-                    lastSyncDate = Date()
-                }
-            }
-
-            if !localProjectChanges,
-               let cachedLastUpdated = cachedStatus?.lastUpdated,
-               remoteStatus.count == cachedStatus?.count {
-                let result = await syncProjectChatsChanged(projectId, since: cachedLastUpdated)
-                guard generation == accountGeneration else { return SyncResult() }
-                if result.errors.isEmpty {
-                    saveProjectChatSyncStatus(projectId, remoteStatus)
-                    return result
-                }
-            }
-
-            let result = await doSyncProjectChats(projectId)
-            guard generation == accountGeneration else { return SyncResult() }
-            syncErrors = result.errors
-            return result
-        } catch {
-            guard generation == accountGeneration else { return SyncResult() }
-            return await syncProjectChats(projectId)
-        }
-    }
-
-    private func doSyncProjectChats(_ projectId: String) async -> SyncResult {
-        await syncProjectChatsRemote(
-            projectId: projectId,
-            errorPrefix: "Project sync failed",
-            applyShouldProcessFilter: true,
-            fetchPage: { [cloudStorage] continuationToken in
-                let page = try await cloudStorage.listProjectChats(
-                    projectId: projectId,
-                    includeContent: true,
-                    continuationToken: continuationToken
-                )
-                return (page.chats, page.nextContinuationToken, page.hasMore == true)
-            }
-        )
-    }
-
-    private func syncProjectChatsChanged(_ projectId: String, since: String) async -> SyncResult {
-        await syncProjectChatsRemote(
-            projectId: projectId,
-            errorPrefix: "Project delta sync failed",
-            applyShouldProcessFilter: false,
-            fetchPage: { [cloudStorage] continuationToken in
-                let page = try await cloudStorage.getProjectChatsUpdatedSince(
-                    projectId: projectId,
-                    since: since,
-                    continuationToken: continuationToken
-                )
-                return (page.chats, page.nextContinuationToken, page.hasMore == true)
-            }
-        )
-    }
-
-    private func syncProjectChatsRemote(
-        projectId: String,
-        errorPrefix: String,
-        applyShouldProcessFilter: Bool,
-        fetchPage: (String?) async throws -> (chats: [RemoteChat], nextToken: String?, hasMore: Bool)
-    ) async -> SyncResult {
-        let generation = accountGeneration
-        guard let userId = await getCurrentUserId() else { return SyncResult() }
-        var result = SyncResult()
-
-        let backupResult = await backupUnsyncedProjectChats(
-            projectId,
-            generation: generation,
-            userId: userId
-        )
-        guard generation == accountGeneration else { return SyncResult() }
-        result = SyncResult(
-            uploaded: backupResult.uploaded,
-            downloaded: 0,
-            deleted: 0,
-            errors: backupResult.errors
-        )
-
-        do {
-            _ = try? await encryptionService.initialize()
-
-            let localChats = (try? await EncryptedFileStorage.cloud.loadAllChats(
-                userId: userId
-            )) ?? []
-            let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
-            var continuationToken: String? = nil
-
-            repeat {
-                let page = try await fetchPage(continuationToken)
-                guard generation == accountGeneration else { return result }
-
-                for remoteChat in page.chats {
-                    if deletedChatsTracker.isDeleted(remoteChat.id) {
-                        continue
-                    }
-
-                    if applyShouldProcessFilter, !(await shouldProcessRemoteChat(remoteChat)) {
-                        continue
-                    }
-
-                    if let localChat = localChatMap[remoteChat.id],
-                       localChat.locallyModified || localChat.hasActiveStream || streamingTracker.isStreaming(localChat.id) {
-                        continue
-                    }
-
-                    let processed = await processRemoteProjectChat(
-                        remoteChat,
-                        projectId: projectId,
-                        localChatMap: localChatMap,
-                        errorPrefix: errorPrefix,
-                        generation: generation,
-                        userId: userId
-                    )
-                    result = SyncResult(
-                        uploaded: result.uploaded,
-                        downloaded: result.downloaded + processed.downloaded,
-                        deleted: result.deleted,
-                        errors: result.errors + processed.errors
-                    )
-                }
-
-                let nextToken = page.nextToken?.isEmpty == false ? page.nextToken : nil
-                continuationToken = page.hasMore ? nextToken : nil
-            } while continuationToken != nil
-
-            let status = try await cloudStorage.getProjectChatsSyncStatus(projectId: projectId)
-            if generation == accountGeneration {
-                saveProjectChatSyncStatus(projectId, status)
-                await syncCrossScope(generation: generation, userId: userId)
-            }
-        } catch {
-            result = SyncResult(
-                uploaded: result.uploaded,
-                downloaded: result.downloaded,
-                deleted: result.deleted,
-                errors: result.errors + ["\(errorPrefix): \(error.localizedDescription)"]
-            )
-        }
-
-        return result
-    }
-
-    private func processRemoteProjectChat(
-        _ remoteChat: RemoteChat,
-        projectId: String,
-        localChatMap: [String: Chat],
-        errorPrefix: String,
-        generation: Int,
-        userId: String
-    ) async -> (downloaded: Int, errors: [String]) {
-        guard generation == accountGeneration else { return (0, []) }
-        let localChat = localChatMap[remoteChat.id]
-        if let content = remoteChat.content {
-            if var decrypted = await decryptRemoteChat(remoteChat, content: content) {
-                decrypted.chat.projectId = projectId
-                decrypted.chat.syncedAt = Date()
-                decrypted.chat.locallyModified = false
-                let applied = await applyRemoteChatToStorage(
-                    decrypted.chat,
-                    generation: generation,
-                    userId: userId,
-                    expectedLocalUpdatedAt: localChat?.updatedAt
-                )
-                return (applied ? 1 : 0, [])
-            } else {
-                let hasValidLocal = localChat.map { !$0.messages.isEmpty && !$0.decryptionFailed } ?? false
-                if !hasValidLocal {
-                    var placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
-                    placeholder.projectId = projectId
-                    placeholder.syncedAt = Date()
-                    placeholder.locallyModified = false
-                    let applied = await applyRemoteChatToStorage(
-                        placeholder,
-                        generation: generation,
-                        userId: userId,
-                        expectedLocalUpdatedAt: localChat?.updatedAt
-                    )
-                    return (applied ? 1 : 0, [])
-                }
-                return (0, [])
-            }
-        }
-
-        do {
-            try await downloadAndSaveRemoteChat(
-                remoteChat,
-                projectId: projectId,
-                generation: generation,
-                userId: userId,
-                expectedLocalUpdatedAt: localChat?.updatedAt
-            )
-            return (1, [])
-        } catch {
-            return (0, ["\(errorPrefix) (\(remoteChat.id)): \(error.localizedDescription)"])
-        }
-    }
-
-    private func backupUnsyncedProjectChats(
-        _ projectId: String,
-        generation: Int,
-        userId: String
-    ) async -> SyncResult {
-        var result = SyncResult()
-
-        guard await canWriteToCloud() else {
-            return result
-        }
-        guard generation == accountGeneration else { return result }
-
-        guard let unsyncedChats = await loadUnsyncedChats(
-            userId: userId, generation: generation
-        ) else { return result }
-        let unsyncedProjectChats = unsyncedChats.filter { $0.projectId == projectId }
-
-        for chat in unsyncedProjectChats {
-            guard generation == accountGeneration else { return result }
-            guard !chat.isBlankChat,
-                  !chat.messages.isEmpty,
-                  !chat.decryptionFailed,
-                  !chat.dataCorrupted,
-                  !streamingTracker.isStreaming(chat.id) else {
-                continue
-            }
-
-            do {
-                try await uploadCoalescer.enqueueAndWait(chat.id)
-                guard generation == accountGeneration else { return result }
-                result = SyncResult(
-                    uploaded: result.uploaded + 1,
-                    downloaded: result.downloaded,
-                    deleted: result.deleted,
-                    errors: result.errors
-                )
-            } catch {
-                guard generation == accountGeneration else { return result }
-                result = SyncResult(
-                    uploaded: result.uploaded,
-                    downloaded: result.downloaded,
-                    deleted: result.deleted,
-                    errors: result.errors + ["Failed to backup project chat \(chat.id): \(error.localizedDescription)"]
-                )
-            }
-        }
-
-        return result
+        await syncAllChats()
     }
 
     /// Clear cached sync status (call on logout)
     func clearSyncStatus() async {
+        let userId = await getCurrentUserId()
         accountGeneration += 1
         isSyncing = false
         syncStatus = ""
@@ -2253,208 +1669,14 @@ class CloudSyncService: ObservableObject {
         pendingUploadCounts.removeAll()
         pendingUploadChatIds.removeAll()
         await uploadCoalescer.clear()
-        UserDefaults.standard.removeObject(forKey: syncStatusKey)
-        UserDefaults.standard.removeObject(forKey: allChatsSyncStatusKey)
-        for key in UserDefaults.standard.dictionaryRepresentation().keys
-            where key.hasPrefix(Constants.StorageKeys.Sync.projectChatStatusPrefix) {
-            UserDefaults.standard.removeObject(forKey: key)
+        if let userId {
+            revisionCheckpointStore.clear(userId: userId)
         }
-        // The deletes watermark is scoped to the account's tombstone
-        // history, so the next account (or re-login) must replay from
-        // epoch rather than resume at the previous account's position.
-        ChatDeletesWatermark.clear()
         // Drop any in-flight key registration so the next signed-in user
         // never awaits a task started under the previous user's key.
         emptyRemoteRegistration?.cancel()
         emptyRemoteRegistration = nil
         await SyncEnclaveClient.shared.reset()
-    }
-
-    // MARK: - Sync Status Cache Helpers
-
-    private func getCachedSyncStatus() -> ChatSyncStatus? {
-        guard let data = UserDefaults.standard.data(forKey: syncStatusKey) else {
-            return nil
-        }
-        return try? JSONDecoder().decode(ChatSyncStatus.self, from: data)
-    }
-
-    private func saveSyncStatus(count: Int, lastUpdated: String, localCount: Int?) {
-        let status = ChatSyncStatus(
-            count: count,
-            lastUpdated: lastUpdated,
-            localCount: localCount
-        )
-        if let data = try? JSONEncoder().encode(status) {
-            UserDefaults.standard.set(data, forKey: syncStatusKey)
-        }
-    }
-
-    /// Count cloud-eligible chats currently on disk. Used to detect
-    /// post-eviction drift in checkSyncStatus and recorded alongside
-    /// the cached remote watermark so a future check can spot rows
-    /// disappearing from local storage. Returns nil when the storage
-    /// read fails so save sites can omit the field rather than
-    /// poisoning the cache with a misleading zero.
-    private func safeReadLocalChatCount() async -> Int? {
-        guard let userId = await getCurrentUserId() else { return nil }
-        // The index alone answers the count; loading and decrypting
-        // every chat file would make each status check O(n) in disk
-        // and crypto work.
-        guard let index = try? await EncryptedFileStorage.cloud.loadIndex(userId: userId) else {
-            return nil
-        }
-        return index.filter { !$0.isLocalOnly }.count
-    }
-
-    private func getCachedProjectChatSyncStatus(_ projectId: String) -> ChatSyncStatus? {
-        let key = Constants.StorageKeys.Sync.projectChatStatus(projectId: projectId)
-        guard let data = UserDefaults.standard.data(forKey: key) else {
-            return nil
-        }
-        return try? JSONDecoder().decode(ChatSyncStatus.self, from: data)
-    }
-
-    private func saveProjectChatSyncStatus(_ projectId: String, _ status: ChatSyncStatus) {
-        let key = Constants.StorageKeys.Sync.projectChatStatus(projectId: projectId)
-        if let data = try? JSONEncoder().encode(status) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
-    }
-
-    private func refreshSyncStatusCache(generation: Int, userId: String) async {
-        if let remoteStatus = try? await cloudStorage.getChatSyncStatus(),
-           let lastUpdated = remoteStatus.lastUpdated,
-           generation == accountGeneration {
-            let index = try? await EncryptedFileStorage.cloud.loadIndex(userId: userId)
-            let localCount = index?.filter { !$0.isLocalOnly }.count
-            guard generation == accountGeneration else { return }
-            saveSyncStatus(
-                count: remoteStatus.count,
-                lastUpdated: lastUpdated,
-                localCount: localCount
-            )
-        }
-    }
-
-    // MARK: - Cross-Scope Sync
-
-    private func getCachedAllChatsSyncStatus() -> ChatSyncStatus? {
-        guard let data = UserDefaults.standard.data(forKey: allChatsSyncStatusKey) else {
-            return nil
-        }
-        return try? JSONDecoder().decode(ChatSyncStatus.self, from: data)
-    }
-
-    private func saveAllChatsSyncStatus(_ status: ChatSyncStatus) {
-        if let data = try? JSONEncoder().encode(status) {
-            UserDefaults.standard.set(data, forKey: allChatsSyncStatusKey)
-        }
-    }
-
-    /// Detect and apply cross-scope changes (chats moving between projects or becoming unassigned).
-    /// Uses the unscoped all-updated-since endpoint to find chats whose projectId changed.
-    private func syncCrossScope(generation: Int, userId: String) async {
-        do {
-            let cachedAllStatus = getCachedAllChatsSyncStatus()
-
-            let remoteAllStatus = try await cloudStorage.getAllChatsSyncStatus()
-            guard generation == accountGeneration else { return }
-
-            // If nothing changed globally, skip
-            if let cached = cachedAllStatus,
-               remoteAllStatus.count == cached.count,
-               remoteAllStatus.lastUpdated == cached.lastUpdated {
-                saveAllChatsSyncStatus(remoteAllStatus)
-                return
-            }
-
-            // If we have no cached status, save current and return (first run baseline)
-            guard let cachedLastUpdated = cachedAllStatus?.lastUpdated else {
-                saveAllChatsSyncStatus(remoteAllStatus)
-                return
-            }
-
-            let localChats = (try? await EncryptedFileStorage.cloud.loadAllChats(
-                userId: userId
-            )) ?? []
-            let localChatMap = Dictionary(uniqueKeysWithValues: localChats.map { ($0.id, $0) })
-
-            var continuationToken: String? = nil
-            var totalProcessed = 0
-
-            repeat {
-                let allUpdated = try await cloudStorage.getAllChatsUpdatedSince(
-                    since: cachedLastUpdated,
-                    continuationToken: continuationToken
-                )
-                guard generation == accountGeneration else { return }
-
-                let remoteChats = allUpdated.conversations
-                if remoteChats.isEmpty { break }
-
-                totalProcessed += remoteChats.count
-
-                for remoteChat in remoteChats {
-                    guard generation == accountGeneration else { return }
-                    let localChat = localChatMap[remoteChat.id]
-                    let remoteProjectId = remoteChat.projectId
-                    let localProjectId = localChat?.projectId
-
-                    if var localChat, remoteProjectId != localProjectId {
-                        // Project assignment changed — update local cloud state
-                        let expectedUpdatedAt = localChat.updatedAt
-                        localChat.projectId = remoteProjectId
-                        _ = try? await EncryptedFileStorage.cloud.applyRemoteChatIfFresh(
-                            localChat,
-                            userId: userId,
-                            expectedLocalUpdatedAt: expectedUpdatedAt
-                        )
-                    } else if localChat == nil, !deletedChatsTracker.isDeleted(remoteChat.id), let content = remoteChat.content {
-                        // New chat we don't have locally — decrypt and save it
-                        if var decrypted = await decryptRemoteChat(remoteChat, content: content) {
-                            decrypted.chat.projectId = remoteProjectId
-                            decrypted.chat.syncedAt = Date()
-                            decrypted.chat.locallyModified = false
-                            _ = await applyRemoteChatToStorage(
-                                decrypted.chat,
-                                generation: generation,
-                                userId: userId,
-                                expectedLocalUpdatedAt: nil
-                            )
-                        } else {
-                            var placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
-                            placeholder.projectId = remoteProjectId
-                            placeholder.syncedAt = Date()
-                            placeholder.locallyModified = false
-                            _ = await applyRemoteChatToStorage(
-                                placeholder,
-                                generation: generation,
-                                userId: userId,
-                                expectedLocalUpdatedAt: nil
-                            )
-                        }
-                    }
-                }
-
-                let nextToken = allUpdated.nextContinuationToken?.isEmpty == false ? allUpdated.nextContinuationToken : nil
-                continuationToken = allUpdated.hasMore ? nextToken : nil
-            } while continuationToken != nil
-
-            #if DEBUG
-            if totalProcessed > 0 {
-                print("[CloudSync] Cross-scope sync: processed \(totalProcessed) changed chats")
-            }
-            #endif
-
-            if generation == accountGeneration {
-                saveAllChatsSyncStatus(remoteAllStatus)
-            }
-        } catch {
-            #if DEBUG
-            print("[CloudSync] Failed to sync cross-scope changes: \(error)")
-            #endif
-        }
     }
 
     // MARK: - Delete Operations
@@ -2472,25 +1694,51 @@ class CloudSyncService: ObservableObject {
     }
 
     func deleteFromCloud(_ chatId: String) async throws {
-        // Mark as deleted locally first
+        let generation = accountGeneration
+        guard let userId = await getCurrentUserId() else {
+            throw CloudStorageError.authenticationRequired
+        }
         deletedChatsTracker.markAsDeleted(chatId)
+        let hasPendingUpload = pendingUploadChatIds.contains(chatId)
+        guard let intent = try await EncryptedFileStorage.cloud.stageCloudDelete(
+            chatId: chatId,
+            userId: userId,
+            idempotencyKey: newSyncEnclaveIdempotencyKey(),
+            mayHaveInFlightUpload: hasPendingUpload
+        ) else {
+            return
+        }
+        if hasPendingUpload {
+            await uploadCoalescer.waitForUpload(chatId)
+        }
+        guard generation == accountGeneration,
+              await getCurrentUserId() == userId else {
+            throw CancellationError()
+        }
         
         // Don't attempt deletion if not authenticated
         guard await cloudStorage.isAuthenticated() else {
-            deletedChatsTracker.removeFromDeleted(chatId)
-            throw CloudStorageError.authenticationRequired
+            return
         }
         
         do {
-            try await cloudStorage.deleteChat(chatId)
+            try await cloudStorage.deleteChat(
+                chatId,
+                idempotencyKey: intent.idempotencyKey
+            )
+            guard generation == accountGeneration,
+                  await getCurrentUserId() == userId else {
+                throw CancellationError()
+            }
+            try await EncryptedFileStorage.cloud.removeDeleteIntent(
+                chatId: chatId,
+                userId: userId
+            )
             
-            // Successfully deleted from cloud, can remove from tracker
-            deletedChatsTracker.removeFromDeleted(chatId)
             SyncHealthStore.shared.reportChatSynced(chatId)
             
         } catch {
-            deletedChatsTracker.removeFromDeleted(chatId)
-            throw error
+            syncErrors.append("This chat will be deleted from the cloud when sync resumes.")
         }
     }
     
@@ -2500,16 +1748,6 @@ class CloudSyncService: ObservableObject {
         let userId = await getCurrentUserId()
         guard let userId = userId else { return [] }
         return (try? await EncryptedFileStorage.cloud.loadAllChats(userId: userId)) ?? []
-    }
-
-    private func getUnsyncedChats() async -> [Chat] {
-        let userId = await getCurrentUserId()
-        guard let userId = userId else { return [] }
-        let index = (try? await EncryptedFileStorage.cloud.loadIndex(userId: userId)) ?? []
-        let unsyncedIds = index.filter {
-            ($0.locallyModified || $0.syncedAt == nil) && !$0.isLocalOnly
-        }.map(\.id)
-        return (try? await EncryptedFileStorage.cloud.loadChats(chatIds: unsyncedIds, userId: userId)) ?? []
     }
 
     private func convertStoredChat(_ storedChat: StoredChat) async -> Chat? {
@@ -2538,15 +1776,31 @@ class CloudSyncService: ObservableObject {
         expectedLocalUpdatedAt: Date?,
         allowLocallyModified: Bool = false
     ) async -> Bool {
-        guard generation == accountGeneration else { return false }
-        guard let chat = await convertStoredChat(storedChat) else { return false }
-        guard generation == accountGeneration else { return false }
-        return (try? await EncryptedFileStorage.cloud.applyRemoteChatIfFresh(
+        await applyRemoteChatToStorageResult(
+            storedChat,
+            generation: generation,
+            userId: userId,
+            expectedLocalUpdatedAt: expectedLocalUpdatedAt,
+            allowLocallyModified: allowLocallyModified
+        ) == .applied
+    }
+
+    private func applyRemoteChatToStorageResult(
+        _ storedChat: StoredChat,
+        generation: Int,
+        userId: String,
+        expectedLocalUpdatedAt: Date?,
+        allowLocallyModified: Bool = false
+    ) async -> RevisionApplyResult {
+        guard generation == accountGeneration else { return .refused }
+        guard let chat = await convertStoredChat(storedChat) else { return .refused }
+        guard generation == accountGeneration else { return .refused }
+        return (try? await EncryptedFileStorage.cloud.applyRemoteChatIfFreshResult(
             chat,
             userId: userId,
             expectedLocalUpdatedAt: expectedLocalUpdatedAt,
             allowLocallyModified: allowLocallyModified
-        )) ?? false
+        )) ?? .refused
     }
 
     /// Upload a chat to cloud and mark it as synced with the enclave's
@@ -2591,6 +1845,9 @@ class CloudSyncService: ObservableObject {
         restoreDeleted: Bool = false
     ) async throws {
         guard await isCurrentUploadAccount(account) else {
+            throw CancellationError()
+        }
+        guard !deletedChatsTracker.isDeleted(chat.id) else {
             throw CancellationError()
         }
         let result = try await cloudStorage.uploadChat(
@@ -2655,148 +1912,6 @@ class CloudSyncService: ObservableObject {
         )
     }
 
-    /// Outcome of one remote-deletion reconciliation pass.
-    struct RemoteDeletionsOutcome {
-        /// Chats removed locally by this pass.
-        var removed: Int = 0
-        /// Every tombstone in the fetched window was resolved: applied
-        /// locally, already absent, or superseded by a newer remote
-        /// write. Only a reconciled pass advances the durable watermark.
-        var reconciled: Bool = false
-        /// The tombstone fetch errored. Local state cannot yet be
-        /// trusted against remote deletions, so callers must not upload
-        /// dirty chats (a re-upload would resurrect a chat deleted
-        /// elsewhere).
-        var failed: Bool = false
-    }
-
-    /// Delete local chats whose remote rows carry deletion tombstones,
-    /// resuming from the durable deletes watermark. The watermark only
-    /// advances after a fully reconciled pass so a failed or interrupted
-    /// pass replays the same window next time.
-    private func reconcileRemoteDeletions(
-        generation: Int,
-        userId: String
-    ) async -> RemoteDeletionsOutcome {
-        var outcome = RemoteDeletionsOutcome()
-        do {
-            let since = ChatDeletesWatermark.load()
-            let events = try await cloudStorage.listChatEventsSince(since: since)
-            guard generation == accountGeneration else {
-                outcome.failed = true
-                return outcome
-            }
-
-            // Newest server-side write per chat in this window. A
-            // tombstone is only authoritative when no later write exists:
-            // a row re-created after its tombstone (restore, or an upload
-            // that raced the delete) must survive.
-            var latestUpdateAt: [String: Date] = [:]
-            var latestEventAt: Date?
-            for update in events.updates {
-                guard let at = parseISODate(update.updatedAt) else { continue }
-                latestEventAt = max(latestEventAt ?? at, at)
-                latestUpdateAt[update.id] = max(latestUpdateAt[update.id] ?? .distantPast, at)
-            }
-            var allResolved = true
-            var latestDeleteAt: [String: Date] = [:]
-            for tombstone in events.deletes {
-                guard let at = parseISODate(tombstone.deletedAt) else {
-                    // A tombstone whose timestamp cannot be parsed cannot
-                    // be arbitrated or applied. Hold the watermark behind
-                    // it so the next pass replays it, instead of advancing
-                    // past the deletion and skipping it forever. Record it
-                    // in the tracker too, so ingestion and the gone-row
-                    // restore path won't resurrect a dirty local copy
-                    // while arbitration is impossible.
-                    deletedChatsTracker.markAsDeleted(tombstone.id)
-                    allResolved = false
-                    continue
-                }
-                latestEventAt = max(latestEventAt ?? at, at)
-                latestDeleteAt[tombstone.id] = max(latestDeleteAt[tombstone.id] ?? .distantPast, at)
-            }
-
-            for (id, deletedAt) in latestDeleteAt {
-                guard generation == accountGeneration else {
-                    outcome.failed = true
-                    return outcome
-                }
-                if let updatedAt = latestUpdateAt[id], updatedAt > deletedAt {
-                    // The row was re-created after the tombstone; the live
-                    // row wins. Unblock ingestion in case an earlier pass
-                    // recorded the tombstone. On a same-timestamp tie
-                    // deletion wins instead: a live row wrongly deleted
-                    // locally is re-downloaded once the tracker entry
-                    // expires with the session, while a dead row wrongly
-                    // kept local would never be cleaned up.
-                    deletedChatsTracker.removeFromDeleted(id)
-                    continue
-                }
-                // Skip chats already absent locally (a prior reconciliation
-                // pass handled them, or they were never stored here). This
-                // keeps repeated passes idempotent so they never report a
-                // phantom deletion and trigger a needless UI reload. A
-                // local-only chat lives outside cloud storage, so loadChat
-                // returns nil and it is preserved.
-                let existing: Chat?
-                do {
-                    existing = try await EncryptedFileStorage.cloud.loadChat(
-                        chatId: id,
-                        userId: userId
-                    )
-                } catch {
-                    // A transient read/decryption failure is not proof of
-                    // absence: treating it as absent would advance the
-                    // watermark past a tombstone that was never applied.
-                    // Hold the watermark so the next pass re-checks it.
-                    // Not `failed`: an unreadable row cannot be uploaded,
-                    // so it carries no resurrection risk.
-                    allResolved = false
-                    continue
-                }
-                guard generation == accountGeneration else {
-                    outcome.failed = true
-                    return outcome
-                }
-                guard let expectedUpdatedAt = existing?.updatedAt else { continue }
-                let removed = (try? await EncryptedFileStorage.cloud.deleteChatIfEvictable(
-                    chatId: id,
-                    userId: userId,
-                    shouldEvict: { $0.updatedAt == expectedUpdatedAt },
-                    shouldEvictOnLoadError: { _ in false }
-                )) ?? false
-                guard generation == accountGeneration else {
-                    outcome.failed = true
-                    return outcome
-                }
-                if removed {
-                    deletedChatsTracker.markAsDeleted(id)
-                    outcome.removed += 1
-                } else {
-                    // The row changed under us (an in-flight local edit) or
-                    // could not be verified. Leave it for the conflict path
-                    // to arbitrate and hold the watermark behind this
-                    // tombstone so the next pass re-checks it. Not `failed`:
-                    // a row that cannot be loaded cannot be uploaded either,
-                    // so it carries no resurrection risk.
-                    allResolved = false
-                }
-            }
-
-            outcome.reconciled = allResolved
-            if allResolved, let latestEventAt, generation == accountGeneration {
-                ChatDeletesWatermark.advance(latestEventAt: latestEventAt)
-            }
-            return outcome
-        } catch {
-            // Without the tombstone window we cannot know which local
-            // chats are stale; report failed so upload legs hold off.
-            outcome.failed = true
-            return outcome
-        }
-    }
-
     private func getCurrentUserId() async -> String? {
         // Get from Clerk
         if let user = Clerk.shared.user {
@@ -2822,16 +1937,6 @@ class CloudSyncService: ObservableObject {
         // Let decryption determine if the chat is valid.
 
         return true
-    }
-    
-    /// Previously: deleted remotely for chats deemed "invalid" (e.g., 0 messages or temp IDs).
-    /// Now: no-op to avoid unintended data loss. We never auto-delete based on metadata.
-    private func cleanupInvalidRemoteChat(_ remoteChat: RemoteChat) {
-        // Intentionally left blank. We keep server state unchanged.
-        // If needed in future, handle via explicit tombstones or a confirmed delete flow.
-        #if DEBUG
-        print("[CloudSync] Skipping auto-delete of remote chat \(remoteChat.id) flagged as invalid.")
-        #endif
     }
     
     // MARK: - Retry Decryption Methods

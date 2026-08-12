@@ -17,6 +17,7 @@
 import Foundation
 
 enum SyncHeaders {
+    static let protocolVersion = "X-Sync-Protocol"
     static let idempotency = "X-Idempotency-Key"
     static let keyID = "X-Key-Id"
     static let ifMatch = "If-Match"

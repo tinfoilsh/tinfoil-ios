@@ -291,6 +291,7 @@ func decodeSearchPulledChat(_ item: EnclavePullItem) -> StoredChat? {
     if item.projectIdSet == true {
         stored.projectId = item.projectId
     }
+    stored.projectLocallyModified = false
     stored.formatVersion = Constants.SyncEnclave.plaintextChatFormatVersion
     return stored
 }

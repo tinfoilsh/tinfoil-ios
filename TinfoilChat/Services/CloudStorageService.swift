@@ -120,20 +120,24 @@ class CloudStorageService: ObservableObject {
         let rewrites = try await encryptAndUploadAttachments(&chatToUpload)
         stripBase64FromMessages(&chatToUpload.messages)
 
+        let includesProjectIntent = ProjectMetadataUploadPolicy.shouldInclude(
+            syncVersion: chatToUpload.syncVersion,
+            projectLocallyModified: chatToUpload.projectLocallyModified == true,
+            restoreDeleted: restoreDeleted
+        )
+        chatToUpload.projectLocallyModified = nil
         let plaintext = try Self.encodeChatPlaintext(chatToUpload)
         let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
 
         var metadata: [String: AnyCodable] = [
             "messageCount": AnyCodable(chatToUpload.messages.count)
         ]
-        // Always emit projectId so the enclave→controlplane path
-        // mirrors what the local chat row says. nil clears the
-        // server's project_id column; omitting the field would leave
-        // a stale assignment behind on cross-project moves.
-        if let projectId = chatToUpload.projectId {
-            metadata["projectId"] = AnyCodable(projectId)
-        } else {
-            metadata["projectId"] = AnyCodable(NSNull())
+        if includesProjectIntent {
+            if let projectId = chatToUpload.projectId {
+                metadata["projectId"] = AnyCodable(projectId)
+            } else {
+                metadata["projectId"] = AnyCodable(NSNull())
+            }
         }
         if restoreDeleted {
             metadata["restoreDeleted"] = AnyCodable(true)
@@ -291,10 +295,49 @@ class CloudStorageService: ObservableObject {
             if let etag = item.etag, let syncVersion = Int(etag), syncVersion > 0 {
                 chat.syncVersion = syncVersion
             }
+            if item.projectIdSet == true {
+                chat.projectId = item.projectId
+            }
+            chat.projectLocallyModified = false
             return chat
         } catch {
             throw CloudStorageError.invalidChatPayload
         }
+    }
+
+    func downloadChats(_ ids: [String]) async throws -> [String: StoredChat] {
+        guard !ids.isEmpty else { return [:] }
+        guard let keys = CEKEncoding.pullKeysIfAvailable() else {
+            throw CloudStorageError.missingDecryptionKey
+        }
+        var chats: [String: StoredChat] = [:]
+        for batchStart in stride(from: 0, to: ids.count, by: Constants.SyncEnclave.pullBatchSize) {
+            let batch = Array(
+                ids[batchStart..<min(batchStart + Constants.SyncEnclave.pullBatchSize, ids.count)]
+            )
+            let response = try await SyncEnclaveAPI.pull(
+                EnclavePullRequest(
+                    scope: .chat,
+                    ids: batch,
+                    all: nil,
+                    cursor: nil,
+                    limit: nil,
+                    keys: keys
+                )
+            )
+            var itemsById: [String: EnclavePullItem] = [:]
+            for item in response.items where itemsById[item.id] == nil {
+                itemsById[item.id] = item
+            }
+            for id in batch {
+                guard let item = itemsById[id],
+                      let chat = try Self.decodeDownloadedChat(item, expectedChatId: id) else {
+                    throw RevisionSyncError.incompletePull
+                }
+                chats[id] = chat
+            }
+        }
+        return chats
     }
 
     // MARK: - Attachments
@@ -346,7 +389,10 @@ class CloudStorageService: ObservableObject {
         continuationToken: String? = nil,
         includeContent: Bool = false
     ) async throws -> ChatListResponse {
-        let effectiveLimit = min(limit ?? chatListLimit, Constants.SyncEnclave.listStatusPageLimit)
+        let effectiveLimit = min(
+            limit ?? chatListLimit,
+            Constants.SyncEnclave.listStatusPageLimit
+        )
         let status = try await SyncEnclaveAPI.listStatus(
             EnclaveListStatusRequest(
                 scope: .chat,
@@ -367,134 +413,68 @@ class CloudStorageService: ObservableObject {
         )
     }
 
-    func getChatsUpdatedSince(
-        since: String,
-        includeContent: Bool = false,
-        continuationToken: String? = nil
-    ) async throws -> ChatListResponse {
-        let status = try await SyncEnclaveAPI.listStatus(
-            EnclaveListStatusRequest(
-                scope: .chat,
-                cursor: continuationToken ?? since,
-                limit: chatListLimit,
-                projectId: nil
-            )
+    func hasAnyChats() async throws -> Bool {
+        let snapshot = try await SyncEnclaveAPI.revisionSnapshot(
+            EnclaveRevisionSnapshotRequest(cursor: nil, limit: 1)
         )
-        var conversations = status.updates.map(remoteChatFromStatus)
-        if includeContent && !conversations.isEmpty {
-            await attachInlineContent(&conversations)
-        }
-        return ChatListResponse(
-            conversations: conversations,
-            nextContinuationToken: status.nextCursor,
-            hasMore: hasNextCursor(status.nextCursor)
-        )
-    }
-
-    func getAllChatsSyncStatus() async throws -> ChatSyncStatus {
-        try await getChatSyncStatus()
-    }
-
-    func getAllChatsUpdatedSince(
-        since: String,
-        continuationToken: String? = nil
-    ) async throws -> ChatListResponse {
-        try await getChatsUpdatedSince(
-            since: since,
-            includeContent: true,
-            continuationToken: continuationToken
-        )
-    }
-
-    // MARK: - Sync status
-
-    /// Walk the enclave list-status pages and return the aggregate
-    /// count + most-recent updated_at.
-    func getChatSyncStatus() async throws -> ChatSyncStatus {
-        var count = 0
-        var lastUpdated: String? = nil
-        var cursor: String? = nil
-        repeat {
-            let status = try await SyncEnclaveAPI.listStatus(
-                EnclaveListStatusRequest(scope: .chat, cursor: cursor, limit: Constants.SyncEnclave.listStatusPageLimit, projectId: nil)
-            )
-            count += status.updates.count
-            for update in status.updates {
-                if let prev = lastUpdated {
-                    if update.updatedAt > prev { lastUpdated = update.updatedAt }
-                } else {
-                    lastUpdated = update.updatedAt
-                }
-            }
-            cursor = status.nextCursor
-        } while hasNextCursor(cursor)
-        return ChatSyncStatus(count: count, lastUpdated: lastUpdated)
-    }
-
-    /// Walk the list-status pages once and return both event streams
-    /// since `since`: row updates and delete tombstones.
-    func listChatEventsSince(since: String) async throws -> ChatEventsSinceResponse {
-        var updates: [ChatEventsSinceResponse.Update] = []
-        var deletes: [ChatEventsSinceResponse.Delete] = []
-        var cursor: String? = since
-        repeat {
-            let status = try await SyncEnclaveAPI.listStatus(
-                EnclaveListStatusRequest(scope: .chat, cursor: cursor, limit: Constants.SyncEnclave.listStatusPageLimit, projectId: nil)
-            )
-            for entry in status.updates {
-                updates.append(.init(id: entry.id, updatedAt: entry.updatedAt))
-            }
-            for entry in status.deletes {
-                deletes.append(.init(id: entry.id, deletedAt: entry.deletedAt))
-            }
-            cursor = status.nextCursor
-        } while hasNextCursor(cursor)
-        return ChatEventsSinceResponse(updates: updates, deletes: deletes)
+        return !snapshot.items.isEmpty
     }
 
     // MARK: - Delete
 
     /// Delete a single chat. Uses an unconditional `if_match=null` so
     /// the enclave handles stale-etag retries internally.
-    func deleteChat(_ chatId: String) async throws {
+    func deleteChat(_ chatId: String, idempotencyKey: String) async throws {
         let key = try CEKEncoding.requirePrimaryKeyB64()
         _ = try await SyncEnclaveAPI.deleteRow(
             EnclaveDeleteRequest(
                 scope: .chat,
                 id: chatId,
                 ifMatch: nil,
-                idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                idempotencyKey: idempotencyKey,
                 key: key
             )
         )
     }
 
-    /// Delete every chat for the current user. Paginates list-status
+    /// Delete every chat for the current user. Paginates a stable v2 snapshot
     /// and issues one delete per row.
     @discardableResult
     func deleteAllChats() async throws -> Int {
         let key = try CEKEncoding.requirePrimaryKeyB64()
-        var deleted = 0
+        var chatIds: [String] = []
         var cursor: String? = nil
+        var snapshotRevision: String?
         repeat {
-            let status = try await SyncEnclaveAPI.listStatus(
-                EnclaveListStatusRequest(scope: .chat, cursor: cursor, limit: Constants.SyncEnclave.listStatusPageLimit, projectId: nil)
-            )
-            for update in status.updates {
-                _ = try await SyncEnclaveAPI.deleteRow(
-                    EnclaveDeleteRequest(
-                        scope: .chat,
-                        id: update.id,
-                        ifMatch: nil,
-                        idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                        key: key
-                    )
+            let snapshot = try await SyncEnclaveAPI.revisionSnapshot(
+                EnclaveRevisionSnapshotRequest(
+                    cursor: cursor,
+                    limit: Constants.SyncEnclave.listStatusPageLimit
                 )
-                deleted += 1
+            )
+            guard DecimalRevision.isValid(snapshot.snapshotRevision) else {
+                throw RevisionSyncError.invalidRevision
             }
-            cursor = status.nextCursor
+            if let snapshotRevision, snapshotRevision != snapshot.snapshotRevision {
+                throw RevisionSyncError.snapshotChangedDuringPagination
+            }
+            snapshotRevision = snapshot.snapshotRevision
+            chatIds.append(contentsOf: snapshot.items.map(\.id))
+            cursor = snapshot.nextCursor?.isEmpty == false ? snapshot.nextCursor : nil
         } while hasNextCursor(cursor)
-        return deleted
+
+        for chatId in chatIds {
+            _ = try await SyncEnclaveAPI.deleteRow(
+                EnclaveDeleteRequest(
+                    scope: .chat,
+                    id: chatId,
+                    ifMatch: nil,
+                    idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                    key: key
+                )
+            )
+        }
+        return chatIds.count
     }
 
     // MARK: - Project chat operations
@@ -525,72 +505,6 @@ class CloudStorageService: ObservableObject {
         } while hasNextCursor(cursor)
 
         if includeContent && !chats.isEmpty {
-            await attachInlineContent(&chats)
-        }
-
-        return ProjectChatListResponse(
-            chats: chats,
-            hasMore: hasNextCursor(nextContinuationToken),
-            nextContinuationToken: nextContinuationToken
-        )
-    }
-
-    func getProjectChatsSyncStatus(projectId: String) async throws -> ChatSyncStatus {
-        var count = 0
-        var lastUpdated: String? = nil
-        var cursor: String? = nil
-        repeat {
-            let status = try await SyncEnclaveAPI.listStatus(
-                EnclaveListStatusRequest(
-                    scope: .chat,
-                    cursor: cursor,
-                    limit: Constants.SyncEnclave.listStatusPageLimit,
-                    projectId: projectId
-                )
-            )
-            for update in status.updates {
-                guard update.projectId == projectId else { continue }
-                count += 1
-                if let prev = lastUpdated {
-                    if update.updatedAt > prev { lastUpdated = update.updatedAt }
-                } else {
-                    lastUpdated = update.updatedAt
-                }
-            }
-            cursor = status.nextCursor
-        } while hasNextCursor(cursor)
-        return ChatSyncStatus(count: count, lastUpdated: lastUpdated)
-    }
-
-    func getProjectChatsUpdatedSince(
-        projectId: String,
-        since: String,
-        continuationToken: String? = nil
-    ) async throws -> ProjectChatListResponse {
-        var chats: [RemoteChat] = []
-        var cursor: String? = continuationToken ?? since
-        var nextContinuationToken: String? = nil
-        repeat {
-            let status = try await SyncEnclaveAPI.listStatus(
-                EnclaveListStatusRequest(
-                    scope: .chat,
-                    cursor: cursor,
-                    limit: projectChatListLimit,
-                    projectId: projectId
-                )
-            )
-            chats.append(contentsOf: status.updates
-                .filter { $0.projectId == projectId && $0.updatedAt > since }
-                .map(remoteChatFromStatus))
-            cursor = status.nextCursor
-            nextContinuationToken = status.nextCursor
-            if chats.count >= projectChatListLimit { break }
-        } while hasNextCursor(cursor)
-
-        // Hydrate inline content for the whole page in one pull;
-        // without it every changed chat falls back to an individual
-        // download in the delta-sync loop.
-        if !chats.isEmpty {
             await attachInlineContent(&chats)
         }
 

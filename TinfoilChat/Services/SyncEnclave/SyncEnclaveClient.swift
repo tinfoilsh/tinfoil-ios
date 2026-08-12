@@ -148,7 +148,8 @@ actor SyncEnclaveClient {
         let url = enclaveURL + path
 
         var headers: [String: String] = [
-            "Accept": "application/json"
+            "Accept": "application/json",
+            SyncHeaders.protocolVersion: String(Constants.Sync.protocolVersion)
         ]
         let bodyData: Data?
         if let body = body {
@@ -196,7 +197,10 @@ actor SyncEnclaveClient {
         let client = try await getClient()
         let url = enclaveURL + path
 
-        var headers: [String: String] = ["Accept": "application/json"]
+        var headers: [String: String] = [
+            "Accept": "application/json",
+            SyncHeaders.protocolVersion: String(Constants.Sync.protocolVersion)
+        ]
         let token = try await requireToken(
             forceRefresh: false,
             generation: requestGeneration

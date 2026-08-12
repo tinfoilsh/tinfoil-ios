@@ -126,6 +126,7 @@ struct StoredChat: Codable {
     
     // Project association (used by React, preserved by iOS)
     var projectId: String?
+    var projectLocallyModified: Bool?
 
     // Active prompt-library preset for this chat (shared with React via presetId)
     var promptPresetId: String?
@@ -189,6 +190,7 @@ struct StoredChat: Codable {
         self.syncVersion = syncVersion
         self.syncedAt = nil
         self.locallyModified = locallyModified
+        self.projectLocallyModified = nil
     }
 
     init(from chat: Chat, syncVersion: Int = 0) {
@@ -208,6 +210,7 @@ struct StoredChat: Codable {
         self.dataCorrupted = chat.dataCorrupted
         self.formatVersion = chat.formatVersion
         self.projectId = chat.projectId
+        self.projectLocallyModified = chat.projectLocallyModified
         self.promptPresetId = chat.promptPresetId
         self.webSearchEnabled = chat.webSearchEnabled
         self.hasActiveStream = chat.hasActiveStream
@@ -248,6 +251,7 @@ struct StoredChat: Codable {
             dataCorrupted: dataCorrupted ?? false,
             formatVersion: formatVersion,
             projectId: projectId,
+            projectLocallyModified: projectLocallyModified,
             promptPresetId: promptPresetId,
             webSearchEnabled: webSearchEnabled ?? true
         )
@@ -268,7 +272,7 @@ struct StoredChat: Codable {
         case id, title, titleState, messages, pendingRecoveries, createdAt, updatedAt
         case language, userId
         case syncVersion, syncedAt, locallyModified
-        case decryptionFailed, dataCorrupted, formatVersion, projectId
+        case decryptionFailed, dataCorrupted, formatVersion, projectId, projectLocallyModified
         case promptPresetId = "presetId"
         case webSearchEnabled
         case clock, writer, clockVersion
@@ -304,6 +308,7 @@ struct StoredChat: Codable {
         try container.encodeIfPresent(dataCorrupted, forKey: .dataCorrupted)
         try container.encodeIfPresent(formatVersion, forKey: .formatVersion)
         try container.encodeIfPresent(projectId, forKey: .projectId)
+        try container.encodeIfPresent(projectLocallyModified, forKey: .projectLocallyModified)
         try container.encodeIfPresent(promptPresetId, forKey: .promptPresetId)
         try container.encodeIfPresent(webSearchEnabled, forKey: .webSearchEnabled)
         try container.encodeIfPresent(clock, forKey: .clock)
@@ -372,6 +377,10 @@ struct StoredChat: Codable {
         dataCorrupted = try container.decodeIfPresent(Bool.self, forKey: .dataCorrupted)
         formatVersion = try container.decodeIfPresent(Int.self, forKey: .formatVersion)
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
+        projectLocallyModified = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .projectLocallyModified
+        )
         promptPresetId = try container.decodeIfPresent(String.self, forKey: .promptPresetId)
         webSearchEnabled = try container.decodeIfPresent(Bool.self, forKey: .webSearchEnabled)
         clock = try container.decodeIfPresent(Int.self, forKey: .clock)
@@ -434,23 +443,6 @@ struct ChatListResponse: Codable {
         self.nextContinuationToken = try container.decodeIfPresent(String.self, forKey: .nextContinuationToken)
         self.hasMore = (try? container.decode(Bool.self, forKey: .hasMore)) ?? false
     }
-}
-
-/// Row-update and delete-tombstone event streams collected from one
-/// list-status walk. The deletion reconciliation pass needs both from
-/// the same walk so it can arbitrate a tombstone against a later
-/// re-create of the same row.
-struct ChatEventsSinceResponse {
-    struct Update {
-        let id: String
-        let updatedAt: String
-    }
-    struct Delete {
-        let id: String
-        let deletedAt: String
-    }
-    let updates: [Update]
-    let deletes: [Delete]
 }
 
 /// Remote chat metadata from API
@@ -538,50 +530,11 @@ struct ProfileData: Codable {
     var clockVersion: Int?
 }
 
-// MARK: - Sync Status Models
-
-/// Chat sync status from server (for efficient sync checking)
-struct ChatSyncStatus: Codable {
-    let count: Int
-    let lastUpdated: String?
-    /// Snapshot of how many cloud-eligible chats were actually on
-    /// disk when this status was cached. smartSync compares it to a
-    /// live count on every check so that an eviction sweep or any
-    /// other path that silently drops rows triggers a fresh pull
-    /// instead of being masked by a stale watermark. Optional for
-    /// backwards compatibility with snapshots written before the
-    /// field was introduced.
-    let localCount: Int?
-
-    init(count: Int, lastUpdated: String?, localCount: Int? = nil) {
-        self.count = count
-        self.lastUpdated = lastUpdated
-        self.localCount = localCount
-    }
-}
-
 /// Profile sync status from server (for efficient sync checking)
 struct ProfileSyncStatus: Codable {
     let exists: Bool
     let version: Int?
     let lastUpdated: String?
-}
-
-/// Result of sync status check
-struct SyncStatusResult {
-    let needsSync: Bool
-    let reason: SyncStatusReason
-    let remoteCount: Int?
-    let remoteLastUpdated: String?
-}
-
-/// Reason for needing or not needing sync
-enum SyncStatusReason {
-    case noChanges
-    case countChanged
-    case updated
-    case localChanges
-    case error
 }
 
 // MARK: - Sync State Models

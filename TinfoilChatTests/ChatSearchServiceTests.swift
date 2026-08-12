@@ -506,6 +506,7 @@ struct ChatSearchServiceTests {
         let stored = try #require(decodeSearchPulledChat(item))
         #expect(stored.syncVersion == 12)
         #expect(stored.projectId == "project-new")
+        #expect(stored.projectLocallyModified == false)
         #expect(stored.formatVersion == Constants.SyncEnclave.plaintextChatFormatVersion)
     }
 

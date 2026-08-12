@@ -31,6 +31,11 @@ actor EncryptedFileStorage {
     private let subdirectory: String?
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private var indexCache: [String: [ChatIndexEntry]] = [:]
+    private var pendingChatIdsCache: [String: Set<String>] = [:]
+    private var deleteIntentsCache: [String: [PendingChatDelete]] = [:]
+    private var contentIntegrityCheckedUserIds: Set<String> = []
+    private var contentRepairIds: [String: Set<String>] = [:]
 
     // Single-writer lock that serializes mutating operations.
     // Swift actors release isolation at each `await` suspension, so
@@ -120,6 +125,11 @@ actor EncryptedFileStorage {
         return dir.appendingPathComponent("index.enc")
     }
 
+    private func deleteIntentsFilePath(userId: String) throws -> URL {
+        let dir = try chatsDirectory(userId: userId)
+        return dir.appendingPathComponent("delete-intents.enc")
+    }
+
     private func syncMetadataPath(chatId: String, userId: String) throws -> URL {
         let dir = try chatsDirectory(userId: userId)
         return dir.appendingPathComponent("\(sanitizePathComponent(chatId)).sync.enc")
@@ -183,20 +193,30 @@ actor EncryptedFileStorage {
     // MARK: - Index Operations
 
     func loadIndex(userId: String) async throws -> [ChatIndexEntry] {
+        if let cached = indexCache[userId] {
+            if !contentIntegrityCheckedUserIds.contains(userId) {
+                try detectMissingChatContent(in: cached, userId: userId)
+            }
+            return cached
+        }
         let indexPath = try indexFilePath(userId: userId)
 
         guard fileManager.fileExists(atPath: indexPath.path) else {
             return try await rebuildIndex(userId: userId)
         }
 
+        let entries: [ChatIndexEntry]
         do {
             let fileData = try Data(contentsOf: indexPath)
             let encrypted = try decoder.decode(EncryptedData.self, from: fileData)
             let decryptedData = try await encryptor.decryptData(encrypted)
-            return try decoder.decode([ChatIndexEntry].self, from: decryptedData)
+            entries = try decoder.decode([ChatIndexEntry].self, from: decryptedData)
         } catch {
             return try await rebuildIndex(userId: userId)
         }
+        updateIndexCaches(entries, userId: userId)
+        try detectMissingChatContent(in: entries, userId: userId)
+        return entries
     }
 
     func saveIndex(_ entries: [ChatIndexEntry], userId: String) async throws {
@@ -205,6 +225,83 @@ actor EncryptedFileStorage {
         let encrypted = try await encryptor.encryptData(jsonData)
         let fileData = try encoder.encode(encrypted)
         try fileData.write(to: indexPath, options: [.atomic, .completeFileProtection])
+        updateIndexCaches(entries, userId: userId)
+    }
+
+    func pendingChatIds(userId: String) async throws -> [String] {
+        _ = try await loadIndex(userId: userId)
+        return Array(pendingChatIdsCache[userId] ?? [])
+    }
+
+    func pendingChatCount(userId: String) async throws -> Int {
+        _ = try await loadIndex(userId: userId)
+        return pendingChatIdsCache[userId]?.count ?? 0
+    }
+
+    private func updateIndexCaches(_ entries: [ChatIndexEntry], userId: String) {
+        indexCache[userId] = entries
+        pendingChatIdsCache[userId] = Set(entries.compactMap { entry in
+            entry.needsCloudUpload ? entry.id : nil
+        })
+    }
+
+    private func detectMissingChatContent(
+        in entries: [ChatIndexEntry],
+        userId: String
+    ) throws {
+        var availableIds: Set<String> = []
+        for entry in entries {
+            let encPath = try chatFilePath(
+                chatId: entry.id,
+                userId: userId,
+                isCorrupted: false
+            )
+            let rawPath = try chatFilePath(
+                chatId: entry.id,
+                userId: userId,
+                isCorrupted: true
+            )
+            if fileManager.fileExists(atPath: encPath.path)
+                || fileManager.fileExists(atPath: rawPath.path) {
+                availableIds.insert(entry.id)
+            }
+        }
+        let missingIds = ChatContentIntegrity.missingIds(
+            indexIds: entries.map(\.id)
+        ) { availableIds.contains($0) }
+        contentRepairIds[userId] = missingIds
+        contentIntegrityCheckedUserIds.insert(userId)
+    }
+
+    func needsContentRepair(userId: String) async throws -> Bool {
+        _ = try await loadIndex(userId: userId)
+        return contentRepairIds[userId]?.isEmpty == false
+    }
+
+    func completeContentRepairIfResolved(
+        userId: String,
+        ignoring ignoredIds: Set<String>
+    ) async throws -> Bool {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+
+        let indexedIds = Set(try await loadIndex(userId: userId).map(\.id))
+        var unresolvedIds: Set<String> = []
+        let repairCandidates = ChatContentIntegrity.repairCandidates(
+            repairIds: contentRepairIds[userId] ?? [],
+            indexedIds: indexedIds,
+            ignoredIds: ignoredIds
+        )
+        for chatId in repairCandidates {
+            let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
+            let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
+            if !fileManager.fileExists(atPath: encPath.path)
+                && !fileManager.fileExists(atPath: rawPath.path) {
+                unresolvedIds.insert(chatId)
+            }
+        }
+        contentRepairIds[userId] = unresolvedIds
+        return unresolvedIds.isEmpty
     }
 
     // MARK: - Chat Operations
@@ -221,17 +318,35 @@ actor EncryptedFileStorage {
         expectedLocalUpdatedAt: Date?,
         allowLocallyModified: Bool = false
     ) async throws -> Bool {
+        try await applyRemoteChatIfFreshResult(
+            chat,
+            userId: userId,
+            expectedLocalUpdatedAt: expectedLocalUpdatedAt,
+            allowLocallyModified: allowLocallyModified
+        ) == .applied
+    }
+
+    func applyRemoteChatIfFreshResult(
+        _ chat: Chat,
+        userId: String,
+        expectedLocalUpdatedAt: Date?,
+        allowLocallyModified: Bool = false
+    ) async throws -> RevisionApplyResult {
         await acquireWriteLock()
         defer { releaseWriteLock() }
 
         let entries = (try? await loadIndex(userId: userId)) ?? []
         let existing = entries.first { $0.id == chat.id }
-        guard existing?.updatedAt == expectedLocalUpdatedAt else { return false }
-        if existing?.locallyModified == true && !allowLocallyModified {
-            return false
+        let decision = RevisionApplyPolicy.contentResult(
+            existing: existing,
+            expectedUpdatedAt: expectedLocalUpdatedAt,
+            allowLocallyModified: allowLocallyModified
+        )
+        guard decision == .applied else {
+            return decision
         }
         try await performSaveChat(chat, userId: userId)
-        return true
+        return .applied
     }
 
     func finalizeUploadIfFresh(
@@ -251,7 +366,8 @@ actor EncryptedFileStorage {
             return false
         }
         let editedDuringUpload = existing.updatedAt != expectedUpdatedAt
-        if !attachmentRewrites.isEmpty {
+        if !attachmentRewrites.isEmpty
+            || (!editedDuringUpload && existing.projectLocallyModified == true) {
             let encPath = try chatFilePath(
                 chatId: chatId,
                 userId: userId,
@@ -281,7 +397,7 @@ actor EncryptedFileStorage {
                 },
                 uniquingKeysWith: { first, _ in first }
             )
-            var didRewriteAttachment = false
+            var didChangeChat = false
             for messageIndex in chat.messages.indices {
                 for attachmentIndex in chat.messages[messageIndex].attachments.indices {
                     let clientId = chat.messages[messageIndex].attachments[attachmentIndex].id
@@ -290,10 +406,18 @@ actor EncryptedFileStorage {
                         rewrite.serverId
                     chat.messages[messageIndex].attachments[attachmentIndex].encryptionKey =
                         rewrite.encryptionKey
-                    didRewriteAttachment = true
+                    didChangeChat = true
                 }
             }
-            if didRewriteAttachment {
+            let finalizedProjectFlag = ProjectMetadataUploadPolicy.flagAfterUpload(
+                current: chat.projectLocallyModified,
+                editedDuringUpload: editedDuringUpload
+            )
+            if chat.projectLocallyModified != finalizedProjectFlag {
+                chat.projectLocallyModified = finalizedProjectFlag
+                didChangeChat = true
+            }
+            if didChangeChat {
                 try await performSaveChat(chat, userId: userId)
             }
         }
@@ -467,6 +591,168 @@ actor EncryptedFileStorage {
         try await performDeleteChat(chatId: chatId, userId: userId)
     }
 
+    func deleteCloudChatForRevision(
+        chatId: String,
+        userId: String,
+        preserveNeverSynced: Bool
+    ) async throws -> Bool {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+        var intents = try await loadDeleteIntents(userId: userId)
+        if intents.contains(where: { $0.chatId == chatId }) {
+            intents.removeAll { $0.chatId == chatId }
+            try await saveDeleteIntents(intents, userId: userId)
+        }
+        let entries = try await loadIndex(userId: userId)
+        guard let entry = entries.first(where: { $0.id == chatId }),
+              !entry.isLocalOnly,
+              !(preserveNeverSynced && !entry.requiresCloudDelete) else {
+            return false
+        }
+        try await performDeleteChat(chatId: chatId, userId: userId)
+        return true
+    }
+
+    func stageCloudDelete(
+        chatId: String,
+        userId: String,
+        idempotencyKey: String,
+        mayHaveInFlightUpload: Bool
+    ) async throws -> PendingChatDelete? {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+
+        let entries = try await loadIndex(userId: userId)
+        guard DeleteIntentPlanner.shouldStage(
+            entry: entries.first(where: { $0.id == chatId }),
+            mayHaveInFlightUpload: mayHaveInFlightUpload
+        ) else {
+            return nil
+        }
+        var intents = try await loadDeleteIntents(userId: userId)
+        let intent = DeleteIntentPlanner.intent(
+            for: chatId,
+            existing: intents,
+            newIdempotencyKey: idempotencyKey
+        )
+        if !intents.contains(intent) {
+            intents.append(intent)
+            try await saveDeleteIntents(intents, userId: userId)
+        }
+        if entries.contains(where: { $0.id == chatId }) {
+            try await performDeleteChat(chatId: chatId, userId: userId)
+        }
+        return intent
+    }
+
+    func applyRevisionMetadata(
+        chatId: String,
+        userId: String,
+        projectId: String?,
+        syncVersion: Int
+    ) async throws -> RevisionApplyResult {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+
+        let entries = try await loadIndex(userId: userId)
+        guard let entry = entries.first(where: { $0.id == chatId }), !entry.isLocalOnly else {
+            return .refused
+        }
+        guard !entry.locallyModified, entry.projectLocallyModified != true else {
+            return .locallyModified
+        }
+        let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
+        let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
+        let hasEncryptedFile = fileManager.fileExists(atPath: encPath.path)
+        guard hasEncryptedFile || fileManager.fileExists(atPath: rawPath.path) else {
+            return .refused
+        }
+        guard var chat = try await loadChatFromFile(
+            hasEncryptedFile ? encPath : rawPath,
+            isRaw: !hasEncryptedFile
+        ) else {
+            return .refused
+        }
+        await overlaySyncSidecar(&chat, userId: userId)
+        let currentEntries = try await loadIndex(userId: userId)
+        guard let currentEntry = currentEntries.first(where: { $0.id == chatId }),
+              !currentEntry.isLocalOnly else {
+            return .refused
+        }
+        guard !currentEntry.locallyModified,
+              currentEntry.projectLocallyModified != true,
+              !chat.locallyModified,
+              chat.projectLocallyModified != true else {
+            return .locallyModified
+        }
+        chat.projectId = projectId
+        chat.projectLocallyModified = false
+        chat.syncVersion = syncVersion
+        chat.syncedAt = chat.syncedAt ?? Date()
+        try await performSaveChat(chat, userId: userId)
+        return .applied
+    }
+
+    func missingChatContentIds(chatIds: [String], userId: String) async throws -> Set<String> {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+
+        var missingIds = contentRepairIds[userId] ?? []
+        for chatId in chatIds {
+            let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
+            let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
+            if !fileManager.fileExists(atPath: encPath.path)
+                && !fileManager.fileExists(atPath: rawPath.path) {
+                missingIds.insert(chatId)
+            }
+        }
+        contentRepairIds[userId] = missingIds
+        return missingIds
+    }
+
+    func removeDeleteIntent(chatId: String, userId: String) async throws {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+        var intents = try await loadDeleteIntents(userId: userId)
+        intents.removeAll { $0.chatId == chatId }
+        try await saveDeleteIntents(intents, userId: userId)
+    }
+
+    func loadDeleteIntents(userId: String) async throws -> [PendingChatDelete] {
+        if let cached = deleteIntentsCache[userId] { return cached }
+        let path = try deleteIntentsFilePath(userId: userId)
+        guard fileManager.fileExists(atPath: path.path) else {
+            deleteIntentsCache[userId] = []
+            return []
+        }
+        let data = try Data(contentsOf: path)
+        let encrypted = try decoder.decode(EncryptedData.self, from: data)
+        let plaintext = try await encryptor.decryptData(encrypted)
+        let intents = try decoder.decode([PendingChatDelete].self, from: plaintext)
+        deleteIntentsCache[userId] = intents
+        return intents
+    }
+
+    private func saveDeleteIntents(
+        _ intents: [PendingChatDelete],
+        userId: String
+    ) async throws {
+        let path = try deleteIntentsFilePath(userId: userId)
+        if intents.isEmpty {
+            if fileManager.fileExists(atPath: path.path) {
+                try fileManager.removeItem(at: path)
+            }
+        } else {
+            let plaintext = try encoder.encode(intents)
+            let encrypted = try await encryptor.encryptData(plaintext)
+            try encoder.encode(encrypted).write(
+                to: path,
+                options: [.atomic, .completeFileProtection]
+            )
+        }
+        deleteIntentsCache[userId] = intents
+    }
+
     /// Re-read a chat and delete it in one critical section. Holding the
     /// write lock across both the load and the delete means a concurrent
     /// saveChat cannot replace the file between the eviction check and
@@ -547,6 +833,11 @@ actor EncryptedFileStorage {
             if resourceValues.isDirectory == true { continue }
             try fileManager.removeItem(at: item)
         }
+        indexCache[userId] = []
+        pendingChatIdsCache[userId] = []
+        deleteIntentsCache[userId] = []
+        contentIntegrityCheckedUserIds.insert(userId)
+        contentRepairIds[userId] = []
     }
 
     /// Persist sync metadata for a chat without touching its encrypted
@@ -647,6 +938,8 @@ actor EncryptedFileStorage {
         }
 
         try await saveIndex(entries, userId: userId)
+        contentIntegrityCheckedUserIds.insert(userId)
+        contentRepairIds[userId] = []
         return entries
     }
 
