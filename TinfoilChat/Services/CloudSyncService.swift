@@ -1658,9 +1658,13 @@ class CloudSyncService: ObservableObject {
         await syncAllChats()
     }
 
-    /// Clear cached sync status (call on logout)
-    func clearSyncStatus() async {
-        let userId = await getCurrentUserId()
+    /// Clear cached sync status (call on logout / account switch).
+    /// `userId` must be the signing-out user's id, resolved by the
+    /// caller BEFORE the sign-out began: by the time this runs Clerk
+    /// reports no user (sign-out) or already the next user (account
+    /// switch), so resolving it here would clear the wrong user's
+    /// revision checkpoint — or none at all.
+    func clearSyncStatus(forUser userId: String?) async {
         accountGeneration += 1
         isSyncing = false
         syncStatus = ""
@@ -1669,14 +1673,22 @@ class CloudSyncService: ObservableObject {
         pendingUploadCounts.removeAll()
         pendingUploadChatIds.removeAll()
         await uploadCoalescer.clear()
-        if let userId {
-            revisionCheckpointStore.clear(userId: userId)
-        }
+        invalidateRevisionCheckpoint(forUser: userId)
         // Drop any in-flight key registration so the next signed-in user
         // never awaits a task started under the previous user's key.
         emptyRemoteRegistration?.cancel()
         emptyRemoteRegistration = nil
         await SyncEnclaveClient.shared.reset()
+    }
+
+    /// Drop the revision checkpoint for a user whose local cloud chat
+    /// store was wiped. Every wipe path must call this: a surviving
+    /// checkpoint makes the next sync take the incremental event-replay
+    /// path against an empty local store, so chats older than the
+    /// checkpoint would never be rehydrated (bootstrap never runs).
+    func invalidateRevisionCheckpoint(forUser userId: String?) {
+        guard let userId else { return }
+        revisionCheckpointStore.clear(userId: userId)
     }
 
     // MARK: - Delete Operations

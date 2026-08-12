@@ -4208,6 +4208,11 @@ class ChatViewModel: ObservableObject {
     
     /// Handle sign-out by clearing current chats but preserving them in storage
     func handleSignOut() async {
+        // Capture the signing-out user's id up front. Later steps (and
+        // the auth manager's cleanup) clear the authenticated state, after
+        // which currentUserId no longer resolves this user.
+        let signingOutUserId = currentUserId
+
         // Allow a new sign-in flow after sign-out
         isSignInInProgress = false
         hasPerformedInitialSync = false
@@ -4234,7 +4239,7 @@ class ChatViewModel: ObservableObject {
         }
 
         // Clear sync caches so stale state doesn't leak into the next session
-        await cloudSync.clearSyncStatus()
+        await cloudSync.clearSyncStatus(forUser: signingOutUserId)
         DeletedChatsTracker.shared.clear()
         CloudKeyAuthorizationStore.shared.clearAuthorization(userId: currentUserId)
 
@@ -4283,6 +4288,10 @@ class ChatViewModel: ObservableObject {
         await drainStreamTasks(canceledStreamTasks)
         await drainPendingSaves()
         await Chat.deleteAllChatsFromStorage(userId: userId)
+        // The local cloud store is gone; a surviving checkpoint would make
+        // the next sync replay events instead of bootstrapping a snapshot,
+        // permanently skipping chats older than the checkpoint.
+        cloudSync.invalidateRevisionCheckpoint(forUser: userId)
         
         // Reset sync state
         lastSyncDate = nil
@@ -4619,6 +4628,10 @@ class ChatViewModel: ObservableObject {
         // Delete all cloud chats from storage (the cloud store only has cloud chats)
         if let userId = currentUserId {
             try? await EncryptedFileStorage.cloud.deleteAllChats(userId: userId)
+            // The local cloud store is gone; a surviving checkpoint would
+            // make the next sync replay events instead of bootstrapping a
+            // snapshot, permanently skipping older chats.
+            cloudSync.invalidateRevisionCheckpoint(forUser: userId)
         }
         chats = []
         hasMoreChats = false

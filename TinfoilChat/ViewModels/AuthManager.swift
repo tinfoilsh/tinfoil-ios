@@ -256,8 +256,11 @@ class AuthManager: ObservableObject {
         } else {
             // No chat view model is attached (e.g. sign-out resolved before
             // the UI wired one up); wipe directly so chat files never
-            // outlive the account on a shared device.
+            // outlive the account on a shared device. The checkpoint must
+            // go with the wiped store — handleSignOut normally does this
+            // via clearSyncStatus, which didn't run on this branch.
             await Chat.deleteAllChatsFromStorage(userId: localUserId)
+            CloudSyncService.shared.invalidateRevisionCheckpoint(forUser: localUserId)
         }
         EncryptionService.shared.clearKey()
         await DeviceEncryptionService.shared.clearKey()
