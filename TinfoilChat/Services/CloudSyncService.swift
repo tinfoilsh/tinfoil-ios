@@ -662,6 +662,20 @@ class CloudSyncService: ObservableObject {
         allowWhileStreaming: Bool
     ) async throws -> UploadAttempt? {
         let generation = accountGeneration
+        // Direct backupChat calls reach here without going through
+        // syncAllChats, so the upgrade gate must be enforced in this
+        // path too — pushing against a server that refuses this
+        // protocol version can never succeed.
+        if case .actionRequired(.upgradeRequired, _) = SyncHealthStore.shared.gate {
+            if allowWhileStreaming {
+                throw SyncEnclaveError(
+                    message: "cloud sync requires an app update",
+                    status: 426,
+                    code: WireCodes.syncProtocolUpgradeRequired
+                )
+            }
+            return nil
+        }
         guard let userId = await getCurrentUserId() else {
             if allowWhileStreaming {
                 throw SyncEnclaveError(message: "recovery upload is not authenticated")
@@ -1280,9 +1294,6 @@ class CloudSyncService: ObservableObject {
         guard !isSyncing else {
             return SyncResult()
         }
-        // A 426 gate can only be lifted by updating the app; re-running
-        // the cycle just burns requests against a server that already
-        // refused this protocol version.
         if case .actionRequired(.upgradeRequired, _) = SyncHealthStore.shared.gate {
             return SyncResult()
         }
