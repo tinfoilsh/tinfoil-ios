@@ -12,6 +12,7 @@ private let testModel = ModelType(
         details: "",
         parameters: "",
         contextWindow: "64k tokens",
+        contextWindowTokens: 64_000,
         type: "chat",
         chat: true,
         paid: false,

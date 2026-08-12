@@ -27,13 +27,16 @@ struct TokenEstimationTests {
     @Test func parsesContextWindowStrings() {
         #expect(TokenEstimation.parseContextWindowTokens("64k tokens") == 64_000)
         #expect(TokenEstimation.parseContextWindowTokens("256K tokens") == 256_000)
+        #expect(TokenEstimation.parseContextWindowTokens("1M tokens") == 1_000_000)
+        #expect(TokenEstimation.parseContextWindowTokens("1.5m tokens") == 1_500_000)
         #expect(TokenEstimation.parseContextWindowTokens("32000") == 32_000)
+        #expect(TokenEstimation.parseContextWindowTokens("1") == Constants.Context.defaultContextWindowTokens)
         #expect(TokenEstimation.parseContextWindowTokens(nil) == Constants.Context.defaultContextWindowTokens)
         #expect(TokenEstimation.parseContextWindowTokens("unknown") == Constants.Context.defaultContextWindowTokens)
     }
 
     @Test func budgetIsUsageRatioOfWindow() {
-        #expect(TokenEstimation.contextTokenBudget("100k tokens") == 90_000)
+        #expect(TokenEstimation.contextTokenBudget(100_000) == 90_000)
         #expect(TokenEstimation.contextTokenBudget(nil) ==
                 Int(Double(Constants.Context.defaultContextWindowTokens) * Constants.Context.contextWindowUsageRatio))
     }
@@ -96,7 +99,7 @@ struct TokenEstimationTests {
         ]
         // Budget smaller than even the newest message alone
         #expect(TokenEstimation.findContextStartIndex(messages: messages, budgetTokens: 10) == 1)
-        let selected = TokenEstimation.selectMessagesWithinBudget(messages, contextWindow: "1")
+        let selected = TokenEstimation.selectMessagesWithinBudget(messages, contextWindowTokens: 1)
         #expect(selected.count == 1)
         #expect(selected[0].id == messages[1].id)
     }
@@ -114,6 +117,6 @@ struct TokenEstimationTests {
 
     @Test func emptyMessagesSelectsNothing() {
         #expect(TokenEstimation.findContextStartIndex(messages: [], budgetTokens: 100) == 0)
-        #expect(TokenEstimation.selectMessagesWithinBudget([], contextWindow: nil).isEmpty)
+        #expect(TokenEstimation.selectMessagesWithinBudget([], contextWindowTokens: nil).isEmpty)
     }
 }

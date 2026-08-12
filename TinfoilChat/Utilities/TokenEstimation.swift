@@ -28,18 +28,37 @@ enum TokenEstimation {
         guard let contextWindow, !contextWindow.isEmpty else {
             return Constants.Context.defaultContextWindowTokens
         }
-        guard let match = contextWindow.firstMatch(of: /(\d+)([kK])?/),
-              let value = Int(match.1) else {
+        guard let match = contextWindow.firstMatch(
+            of: /^\s*(\d+(?:\.\d+)?)\s*([kKmM])?(?:\s*tokens?)?\s*$/
+        ), let value = Double(match.1) else {
             return Constants.Context.defaultContextWindowTokens
         }
-        return match.2 != nil ? value * 1000 : value
+
+        let multiplier: Double
+        switch match.2?.lowercased() {
+        case "k":
+            multiplier = 1_000
+        case "m":
+            multiplier = 1_000_000
+        default:
+            multiplier = 1
+        }
+
+        let tokens = value * multiplier
+        guard tokens.isFinite,
+              tokens >= Double(Constants.Context.minimumContextWindowTokens),
+              tokens < Double(Int.max) else {
+            return Constants.Context.defaultContextWindowTokens
+        }
+        return Int(tokens.rounded(.down))
     }
 
-    /// Applies the usage ratio to the parsed window size, keeping the
+    /// Applies the usage ratio to the configured window size, keeping the
     /// remainder of the window reserved for the model's reply, the system
     /// prompt, and the slack in our character-based estimates.
-    static func contextTokenBudget(_ contextWindow: String?) -> Int {
-        Int(floor(Double(parseContextWindowTokens(contextWindow)) * Constants.Context.contextWindowUsageRatio))
+    static func contextTokenBudget(_ contextWindowTokens: Int?) -> Int {
+        let tokens = contextWindowTokens ?? Constants.Context.defaultContextWindowTokens
+        return Int(floor(Double(tokens) * Constants.Context.contextWindowUsageRatio))
     }
 
     /// Estimate the prompt tokens contributed by a single message, including
@@ -105,10 +124,10 @@ enum TokenEstimation {
     /// token budget.
     static func selectMessagesWithinBudget(
         _ messages: [Message],
-        contextWindow: String?,
+        contextWindowTokens: Int?,
         reasoningHistoryPolicy: ReasoningHistoryPolicy = .none
     ) -> [Message] {
-        let budget = contextTokenBudget(contextWindow)
+        let budget = contextTokenBudget(contextWindowTokens)
         return Array(messages[findContextStartIndex(
             messages: messages,
             budgetTokens: budget,
