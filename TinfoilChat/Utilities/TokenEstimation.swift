@@ -50,7 +50,7 @@ enum TokenEstimation {
               tokens < Double(Int.max) else {
             return Constants.Context.defaultContextWindowTokens
         }
-        return Int(tokens.rounded(.down))
+        return Int(tokens)
     }
 
     /// Applies the usage ratio to the configured window size, keeping the

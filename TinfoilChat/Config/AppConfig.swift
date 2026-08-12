@@ -234,6 +234,9 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
     /// message builder behave sensibly before resolution.
     static func auto(tier: String, members: [ModelType]) -> ModelType {
         let isSmart = tier == AutoModel.smartTier
+        let minimumContextMember = members.min {
+            $0.contextWindowTokens < $1.contextWindowTokens
+        }
         let config = AppModelConfig(
             modelName: isSmart ? AutoModel.smartId : AutoModel.fastId,
             image: "",
@@ -244,10 +247,8 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
                 : "Routes to the fastest available model",
             details: "",
             parameters: "",
-            contextWindow: members.min {
-                $0.contextWindowTokens < $1.contextWindowTokens
-            }?.contextWindow ?? "",
-            contextWindowTokens: members.map(\.contextWindowTokens).min(),
+            contextWindow: minimumContextMember?.contextWindow ?? "",
+            contextWindowTokens: minimumContextMember?.contextWindowTokens,
             type: "chat",
             chat: true,
             paid: true,
