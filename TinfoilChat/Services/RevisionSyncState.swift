@@ -236,6 +236,20 @@ enum ChatContentIntegrity {
     ) -> Set<String> {
         repairIds.intersection(indexedIds).subtracting(ignoredIds)
     }
+
+    /// Ids whose missing content cannot be repaired from anywhere: the
+    /// local file is gone and the remote snapshot has no row to pull
+    /// from. Left in place they would keep `needsContentRepair` true and
+    /// fail every snapshot reconcile, so the repair prunes their index
+    /// entries instead. Pending deletes are excluded — their local
+    /// absence is intentional and their intents resolve separately.
+    static func unrecoverableIds(
+        repairIds: Set<String>,
+        remoteIds: Set<String>,
+        pendingDeleteIds: Set<String>
+    ) -> Set<String> {
+        repairIds.subtracting(remoteIds).subtracting(pendingDeleteIds)
+    }
 }
 
 enum ProjectMetadataUploadPolicy {

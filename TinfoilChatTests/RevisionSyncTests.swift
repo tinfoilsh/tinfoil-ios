@@ -194,6 +194,16 @@ struct RevisionSyncTests {
         #expect(candidates == ["missing"])
     }
 
+    @Test func contentRepairPrunesOnlyIdsAbsentEverywhere() {
+        let unrecoverable = ChatContentIntegrity.unrecoverableIds(
+            repairIds: ["orphaned", "pullable", "pending-delete"],
+            remoteIds: ["pullable"],
+            pendingDeleteIds: ["pending-delete"]
+        )
+
+        #expect(unrecoverable == ["orphaned"])
+    }
+
     @MainActor
     @Test func pendingMetadataSelectionExcludesLocalOnlyAndCleanChats() {
         var pendingChat = ChatSearchServiceTests.makeChat(id: "pending", title: "Pending")

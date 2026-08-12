@@ -1557,6 +1557,24 @@ class CloudSyncService: ObservableObject {
             chatIds: local.map(\.id),
             userId: userId
         )
+        // A chat with no content file and no remote row can never be
+        // repaired: the snapshot has nothing to pull and the local file
+        // is gone (e.g. a crash between file removal and the index
+        // save). Prune its index entry, otherwise `needsContentRepair`
+        // stays true and every reconcile fails with incompletePull —
+        // which also starves delete intents and uploads forever.
+        let unrecoverableIds = ChatContentIntegrity.unrecoverableIds(
+            repairIds: missingContentIds,
+            remoteIds: remoteIds,
+            pendingDeleteIds: pendingDeleteIds
+        )
+        if !unrecoverableIds.isEmpty {
+            guard generation == accountGeneration else { throw CancellationError() }
+            _ = try await EncryptedFileStorage.cloud.pruneUnrecoverableIndexEntries(
+                chatIds: unrecoverableIds,
+                userId: userId
+            )
+        }
         let changed = SnapshotReconciliation.contentItems(
             local: local,
             remote: items.filter {

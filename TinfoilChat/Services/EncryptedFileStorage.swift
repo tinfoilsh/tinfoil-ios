@@ -693,6 +693,42 @@ actor EncryptedFileStorage {
         return .applied
     }
 
+    /// Remove index entries (and their repair bookkeeping) for chats
+    /// whose content file no longer exists anywhere. Called by snapshot
+    /// repair for rows that are also absent remotely: with no local file
+    /// and no remote row there is nothing left to recover, and keeping
+    /// the entry would hold `needsContentRepair` true and fail every
+    /// reconcile. The file check re-runs under the write lock so an
+    /// entry whose content just reappeared (concurrent save) survives.
+    func pruneUnrecoverableIndexEntries(
+        chatIds: Set<String>,
+        userId: String
+    ) async throws -> Int {
+        guard !chatIds.isEmpty else { return 0 }
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+
+        var entries = try await loadIndex(userId: userId)
+        var pruned = 0
+        for chatId in chatIds {
+            let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
+            let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
+            guard !fileManager.fileExists(atPath: encPath.path),
+                  !fileManager.fileExists(atPath: rawPath.path) else {
+                continue
+            }
+            contentRepairIds[userId]?.remove(chatId)
+            if entries.contains(where: { $0.id == chatId }) {
+                entries.removeAll { $0.id == chatId }
+                pruned += 1
+            }
+        }
+        if pruned > 0 {
+            try await saveIndex(entries, userId: userId)
+        }
+        return pruned
+    }
+
     func missingChatContentIds(chatIds: [String], userId: String) async throws -> Set<String> {
         await acquireWriteLock()
         defer { releaseWriteLock() }
