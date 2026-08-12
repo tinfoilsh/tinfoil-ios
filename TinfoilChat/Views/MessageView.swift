@@ -753,69 +753,71 @@ struct MessageView: View {
                 // Add action buttons for assistant messages (only when not streaming)
                 if message.hasVisibleAssistantContent &&
                    !isRenderingStream {
-                    HStack(spacing: 16) {
-                        // Sources button - only show if we have web search sources
-                        if let webSearchState = message.webSearchState,
-                           !webSearchState.sources.isEmpty {
-                            SourcesButton(
-                                sources: webSearchState.sources,
-                                isDarkMode: isDarkMode
-                            ) {
-                                showSourcesSheet = true
-                            }
-                        }
-
-                        Button {
-                            showRawContentModal = true
-                        } label: {
-                            Image(systemName: "doc.on.doc")
-                                .font(.system(size: 16))
-                                .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
-                                .frame(width: 32, height: 32)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .accessibilityLabel("Copy")
-                        .accessibleHitTarget()
-
-                        // Regenerate button - only on the last assistant message
-                        if isLastMessage && !viewModel.isLoading && messageIndex > 0 {
-                            Button {
-                                viewModel.regenerateMessage(at: messageIndex - 1)
-                            } label: {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
-                                    .frame(width: 32, height: 32)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            .accessibilityLabel("Regenerate response")
-                            .accessibleHitTarget()
-                        }
-
-                        // Share button - only on the last assistant message
-                        if isLastMessage && !viewModel.isLoading {
-                            Button {
-                                showShareSheet = true
-                            } label: {
-                                Image(systemName: "square.and.arrow.up")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
-                                    .frame(width: 32, height: 32)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            .accessibilityLabel("Share")
-                            .accessibleHitTarget()
-                        }
-
-                        Spacer()
-
+                    VStack(alignment: .leading) {
                         MessageSecurityMetadataView(
                             modelDisplayName: message.modelDisplayName,
                             isDarkMode: isDarkMode
                         )
+
+                        HStack(spacing: 16) {
+                            // Sources button - only show if we have web search sources
+                            if let webSearchState = message.webSearchState,
+                               !webSearchState.sources.isEmpty {
+                                SourcesButton(
+                                    sources: webSearchState.sources,
+                                    isDarkMode: isDarkMode
+                                ) {
+                                    showSourcesSheet = true
+                                }
+                            }
+
+                            Button {
+                                showRawContentModal = true
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .accessibilityLabel("Copy")
+                            .accessibleHitTarget()
+
+                            // Regenerate button - only on the last assistant message
+                            if isLastMessage && !viewModel.isLoading && messageIndex > 0 {
+                                Button {
+                                    viewModel.regenerateMessage(at: messageIndex - 1)
+                                } label: {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                                        .frame(width: 32, height: 32)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .accessibilityLabel("Regenerate response")
+                                .accessibleHitTarget()
+                            }
+
+                            // Share button - only on the last assistant message
+                            if isLastMessage && !viewModel.isLoading {
+                                Button {
+                                    showShareSheet = true
+                                } label: {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                                        .frame(width: 32, height: 32)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .accessibilityLabel("Share")
+                                .accessibleHitTarget()
+                            }
+
+                            Spacer()
+                        }
                     }
                     .padding(.vertical, 8)
 
