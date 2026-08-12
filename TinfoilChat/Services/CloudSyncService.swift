@@ -306,6 +306,9 @@ class CloudSyncService: ObservableObject {
         }
     }()
     private var streamingCallbacks: Set<String> = []
+    /// Chats whose remote delete arrived while they were streaming
+    /// locally; the local removal is deferred to stream end.
+    private var deferredRemoteDeleteChatIds: Set<String> = []
     private var accountGeneration = 0
     private let cloudStorage = CloudStorageService.shared
     private let encryptionService = EncryptionService.shared
@@ -885,12 +888,12 @@ class CloudSyncService: ObservableObject {
             // Remove the cloud-backed local row and let the next revision
             // drain replay the same tombstone idempotently.
             guard var downloadedChat = remoteChat else {
-                _ = try await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
+                _ = try await applyRemoteChatDelete(
                     chatId: chatId,
                     userId: userId,
+                    generation: generation,
                     preserveNeverSynced: false
                 )
-                deletedChatsTracker.markAsDeleted(chatId)
                 return false
             }
             if downloadedChat.modelType == nil {
@@ -1421,13 +1424,13 @@ class CloudSyncService: ObservableObject {
             }
             switch event.kind {
             case .delete:
-                let removed = try await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
+                let removed = try await applyRemoteChatDelete(
                     chatId: event.id,
                     userId: userId,
+                    generation: generation,
                     preserveNeverSynced: false
                 )
                 if removed {
-                    deletedChatsTracker.markAsDeleted(event.id)
                     result = SyncResult(
                         downloaded: result.downloaded,
                         deleted: result.deleted + 1
@@ -1483,6 +1486,53 @@ class CloudSyncService: ObservableObject {
             }
         }
         return result
+    }
+
+    /// Apply a remote deletion locally, unless the chat is actively
+    /// streaming — deleting the files mid-stream would race the stream's
+    /// throttled saves, which recreate the chat with a stale sync
+    /// version that later uploads as a zombie against a tombstoned row.
+    /// Mirrors the upload path's deferral: tombstone immediately (so a
+    /// racing upload can't resurrect the row) and remove the local files
+    /// once the stream ends. Returns true when the chat was removed now.
+    private func applyRemoteChatDelete(
+        chatId: String,
+        userId: String,
+        generation: Int,
+        preserveNeverSynced: Bool
+    ) async throws -> Bool {
+        guard streamingTracker.isStreaming(chatId) else {
+            let removed = try await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
+                chatId: chatId,
+                userId: userId,
+                preserveNeverSynced: preserveNeverSynced
+            )
+            if removed {
+                deletedChatsTracker.markAsDeleted(chatId)
+            }
+            return removed
+        }
+
+        deletedChatsTracker.markAsDeleted(chatId)
+        guard !deferredRemoteDeleteChatIds.contains(chatId) else { return false }
+        deferredRemoteDeleteChatIds.insert(chatId)
+        streamingTracker.onStreamEnd(chatId) { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.deferredRemoteDeleteChatIds.remove(chatId)
+                guard self.accountGeneration == generation else { return }
+                // A later upsert event (the chat was recreated remotely)
+                // clears the tombstone; the deferred delete must then
+                // stand down instead of removing the recreated chat.
+                guard self.deletedChatsTracker.isDeleted(chatId) else { return }
+                _ = try? await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
+                    chatId: chatId,
+                    userId: userId,
+                    preserveNeverSynced: preserveNeverSynced
+                )
+            }
+        }
+        return false
     }
 
     private func reconcileRevisionSnapshot(
@@ -1543,12 +1593,12 @@ class CloudSyncService: ObservableObject {
         var deleted = 0
         for id in SnapshotReconciliation.locallyRemovedIds(local: local, remoteIds: remoteIds) {
             guard generation == accountGeneration else { throw CancellationError() }
-            if try await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
+            if try await applyRemoteChatDelete(
                 chatId: id,
                 userId: userId,
+                generation: generation,
                 preserveNeverSynced: true
             ) {
-                deletedChatsTracker.markAsDeleted(id)
                 deleted += 1
             }
         }
@@ -1737,6 +1787,7 @@ class CloudSyncService: ObservableObject {
         syncStatus = ""
         lastSyncDate = nil
         streamingCallbacks.removeAll()
+        deferredRemoteDeleteChatIds.removeAll()
         pendingUploadCounts.removeAll()
         pendingUploadChatIds.removeAll()
         await uploadCoalescer.clear()
