@@ -305,10 +305,20 @@ class CloudSyncService: ObservableObject {
             )
         }
     }()
+    private struct DeferredRemoteDelete {
+        let userId: String
+        let generation: Int
+        let preserveNeverSynced: Bool
+        /// Whether an onStreamEnd callback is currently registered.
+        var callbackRegistered: Bool
+    }
+
     private var streamingCallbacks: Set<String> = []
     /// Chats whose remote delete arrived while they were streaming
-    /// locally; the local removal is deferred to stream end.
-    private var deferredRemoteDeleteChatIds: Set<String> = []
+    /// locally; the local removal is deferred to stream end. An entry
+    /// stays until the removal succeeds (or the account changes), so a
+    /// failed removal is retried on the next sync cycle.
+    private var deferredRemoteDeletes: [String: DeferredRemoteDelete] = [:]
     private var accountGeneration = 0
     private let cloudStorage = CloudStorageService.shared
     private let encryptionService = EncryptionService.shared
@@ -1335,6 +1345,8 @@ class CloudSyncService: ObservableObject {
             }
             guard generation == accountGeneration else { return SyncResult() }
 
+            await retryDeferredRemoteDeletes(generation: generation)
+            guard generation == accountGeneration else { return SyncResult() }
             let drained = try await drainDeleteIntents(userId: userId, generation: generation)
             guard generation == accountGeneration else { return SyncResult() }
             let uploads = await backupUnsyncedChats()
@@ -1515,25 +1527,104 @@ class CloudSyncService: ObservableObject {
         }
 
         deletedChatsTracker.markAsDeleted(chatId)
-        guard !deferredRemoteDeleteChatIds.contains(chatId) else { return false }
-        deferredRemoteDeleteChatIds.insert(chatId)
+        deferRemoteChatDelete(
+            chatId: chatId,
+            deferral: DeferredRemoteDelete(
+                userId: userId,
+                generation: generation,
+                preserveNeverSynced: preserveNeverSynced,
+                callbackRegistered: false
+            )
+        )
+        return false
+    }
+
+    /// Register (or refresh) the stream-end callback for a deferred
+    /// remote delete. The deferral entry outlives the callback: it is
+    /// removed only when the removal succeeds or the account changes,
+    /// so a removal that fails — or fires while a NEW stream for the
+    /// same chat is already running — re-registers and tries again at
+    /// the next stream end instead of being dropped (or worse, deleting
+    /// the new stream's files out from under it).
+    private func deferRemoteChatDelete(chatId: String, deferral: DeferredRemoteDelete) {
+        if let existing = deferredRemoteDeletes[chatId], existing.callbackRegistered {
+            return
+        }
+        var registered = deferral
+        registered.callbackRegistered = true
+        deferredRemoteDeletes[chatId] = registered
+
         streamingTracker.onStreamEnd(chatId) { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                self.deferredRemoteDeleteChatIds.remove(chatId)
-                guard self.accountGeneration == generation else { return }
+                guard var pending = self.deferredRemoteDeletes[chatId] else { return }
+                pending.callbackRegistered = false
+                self.deferredRemoteDeletes[chatId] = pending
+                guard self.accountGeneration == pending.generation else {
+                    self.deferredRemoteDeletes.removeValue(forKey: chatId)
+                    return
+                }
                 // A later upsert event (the chat was recreated remotely)
                 // clears the tombstone; the deferred delete must then
                 // stand down instead of removing the recreated chat.
-                guard self.deletedChatsTracker.isDeleted(chatId) else { return }
-                _ = try? await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
-                    chatId: chatId,
-                    userId: userId,
-                    preserveNeverSynced: preserveNeverSynced
-                )
+                guard self.deletedChatsTracker.isDeleted(chatId) else {
+                    self.deferredRemoteDeletes.removeValue(forKey: chatId)
+                    return
+                }
+                // A new stream for the same chat may have started before
+                // this callback ran; deleting its files now would race
+                // it exactly like the original stream. Wait it out.
+                guard !self.streamingTracker.isStreaming(chatId) else {
+                    self.deferRemoteChatDelete(chatId: chatId, deferral: pending)
+                    return
+                }
+                do {
+                    _ = try await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
+                        chatId: chatId,
+                        userId: pending.userId,
+                        preserveNeverSynced: pending.preserveNeverSynced
+                    )
+                    self.deferredRemoteDeletes.removeValue(forKey: chatId)
+                } catch {
+                    // Keep the entry; retryDeferredRemoteDeletes picks it
+                    // up on the next sync cycle. The delete event will not
+                    // replay again (the checkpoint already advanced past
+                    // it), so dropping the entry here would leave the
+                    // files behind for the rest of the session.
+                }
             }
         }
-        return false
+    }
+
+    /// Retry deferred remote deletes whose stream-end removal failed.
+    /// Runs once per sync cycle; entries whose chat is streaming again
+    /// wait for the next stream end via their registered callback.
+    private func retryDeferredRemoteDeletes(generation: Int) async {
+        for (chatId, pending) in deferredRemoteDeletes {
+            guard generation == accountGeneration else { return }
+            guard pending.generation == accountGeneration else {
+                deferredRemoteDeletes.removeValue(forKey: chatId)
+                continue
+            }
+            guard deletedChatsTracker.isDeleted(chatId) else {
+                deferredRemoteDeletes.removeValue(forKey: chatId)
+                continue
+            }
+            guard !pending.callbackRegistered, !streamingTracker.isStreaming(chatId) else {
+                continue
+            }
+            do {
+                _ = try await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
+                    chatId: chatId,
+                    userId: pending.userId,
+                    preserveNeverSynced: pending.preserveNeverSynced
+                )
+                guard generation == accountGeneration else { return }
+                deferredRemoteDeletes.removeValue(forKey: chatId)
+            } catch {
+                // Still failing; keep the entry for the next cycle.
+            }
+        }
     }
 
     private func reconcileRevisionSnapshot(
@@ -1810,7 +1901,7 @@ class CloudSyncService: ObservableObject {
         isSyncing = false
         syncStatus = ""
         streamingCallbacks.removeAll()
-        deferredRemoteDeleteChatIds.removeAll()
+        deferredRemoteDeletes.removeAll()
         pendingUploadCounts.removeAll()
         pendingUploadChatIds.removeAll()
         await uploadCoalescer.clear()
