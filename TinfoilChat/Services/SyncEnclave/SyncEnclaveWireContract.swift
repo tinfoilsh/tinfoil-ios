@@ -62,4 +62,5 @@ enum WireCodes {
     static let authActionRequired = EnclaveErrorCode.authActionRequired.rawValue
     static let forbidden = EnclaveErrorCode.forbidden.rawValue
     static let network = EnclaveErrorCode.network.rawValue
+    static let syncProtocolUpgradeRequired = EnclaveErrorCode.syncProtocolUpgradeRequired.rawValue
 }

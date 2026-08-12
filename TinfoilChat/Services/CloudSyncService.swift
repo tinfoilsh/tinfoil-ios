@@ -813,8 +813,15 @@ class CloudSyncService: ObservableObject {
         case .triggerRecoveryWizard:
             SyncHealthStore.shared.reportKeyActionRequired(.keyRecovery)
             return false
-        case .blockAllSync:
-            SyncHealthStore.shared.reportSyncPaused(.attestation)
+        case .blockAllSync(let reason):
+            switch reason {
+            case .attestationFailed:
+                SyncHealthStore.shared.reportSyncPaused(.attestation)
+            case .upgradeRequired:
+                // 426: only an app update fixes this, so it gates as
+                // actionRequired (sticky) rather than paused (self-healing).
+                SyncHealthStore.shared.reportKeyActionRequired(.upgradeRequired)
+            }
             return false
         case .migrateLegacyAndRetry:
             // The legacy re-seal runs out of band — on the next launch and right
@@ -1259,6 +1266,12 @@ class CloudSyncService: ObservableObject {
         guard !isSyncing else {
             return SyncResult()
         }
+        // A 426 gate can only be lifted by updating the app; re-running
+        // the cycle just burns requests against a server that already
+        // refused this protocol version.
+        if case .actionRequired(.upgradeRequired, _) = SyncHealthStore.shared.gate {
+            return SyncResult()
+        }
 
         isSyncing = true
         syncStatus = "Syncing..."
@@ -1328,6 +1341,12 @@ class CloudSyncService: ObservableObject {
                 errors: result.errors + uploads.errors
             )
         } catch {
+            // Surface a force-upgrade refusal (HTTP 426) from any call in
+            // the cycle so the gate check in syncAllChats stops the
+            // periodic retries and the UI can prompt for an update.
+            if case .blockAllSync(.upgradeRequired) = EnclaveErrorRecovery.decide(error).action {
+                SyncHealthStore.shared.reportKeyActionRequired(.upgradeRequired)
+            }
             return SyncResult(errors: ["Revision sync failed: \(error.localizedDescription)"])
         }
     }

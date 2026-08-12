@@ -35,6 +35,9 @@ final class SyncHealthStore: ObservableObject {
         case keyMismatch
         case keyConflict
         case accountBlocked
+        /// The server answered 426: it no longer speaks this client's
+        /// sync protocol version. Only an app update fixes it.
+        case upgradeRequired
     }
 
     enum Gate: Equatable {
@@ -73,8 +76,12 @@ final class SyncHealthStore: ObservableObject {
 
     /// The enclave confirmed the local key is the registered current
     /// key. Clears any gate — reaching that verdict required a healthy
-    /// enclave round trip, so a paused gate is stale too.
+    /// enclave round trip, so a paused gate is stale too. The upgrade
+    /// gate is the one exception: a healthy key round trip says nothing
+    /// about the sync protocol version, and only an app update (hence a
+    /// fresh launch) can lift a 426 refusal.
     func reportKeyHealthy() {
+        if case .actionRequired(.upgradeRequired, _) = gate { return }
         if gate != .ok {
             gate = .ok
         }

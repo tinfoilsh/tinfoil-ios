@@ -272,7 +272,7 @@ struct CloudSyncSettingsView: View {
                 Label(actionRequiredMessage(for: reason), systemImage: "exclamationmark.circle")
                     .font(.caption)
                     .foregroundColor(reason == .accountBlocked ? .red : .orange)
-                if reason != .accountBlocked {
+                if reason != .accountBlocked && reason != .upgradeRequired {
                     Button {
                         viewModel.cloudSyncOnboardingMode = .recovery
                         viewModel.showCloudSyncOnboarding = true
@@ -323,6 +323,8 @@ struct CloudSyncSettingsView: View {
             return "Your cloud data is protected by a different key than this device's."
         case .accountBlocked:
             return "Sync is unavailable for this account. Please contact support if this persists."
+        case .upgradeRequired:
+            return "Sync is paused because this version of the app is out of date. Update the app to resume syncing."
         }
     }
 

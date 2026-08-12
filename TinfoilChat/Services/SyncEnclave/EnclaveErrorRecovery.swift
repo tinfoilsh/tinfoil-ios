@@ -52,6 +52,7 @@ enum EnclaveErrorCode: String, CaseIterable {
     case network                   = "NETWORK"
     case notFound                  = "NOT_FOUND"
     case preconditionRequired      = "PRECONDITION_REQUIRED"
+    case syncProtocolUpgradeRequired = "SYNC_PROTOCOL_UPGRADE_REQUIRED"
 }
 
 struct EnclaveErrorClassification: Equatable {
@@ -86,6 +87,7 @@ enum RecoveryAction: Equatable {
     }
     enum BlockReason: String, Equatable {
         case attestationFailed = "ATTESTATION_FAILED"
+        case upgradeRequired   = "SYNC_PROTOCOL_UPGRADE_REQUIRED"
     }
     enum AbortReason: String, Equatable {
         case idempotencyConflict  = "IDEMPOTENCY_CONFLICT"
@@ -161,7 +163,7 @@ enum EnclaveErrorRecovery {
                 return EnclaveErrorClassification(kind: .retryableRefresh, code: code, status: status, message: message)
             case .syncConflict, .staleBlob, .existingDataUnderOtherKey, .notFound:
                 return EnclaveErrorClassification(kind: .userDecision, code: code, status: status, message: message)
-            case .idempotencyConflict, .unknownKey, .forbidden, .attestationFailed, .preconditionRequired, .authActionRequired:
+            case .idempotencyConflict, .unknownKey, .forbidden, .attestationFailed, .preconditionRequired, .authActionRequired, .syncProtocolUpgradeRequired:
                 return EnclaveErrorClassification(kind: .terminal, code: code, status: status, message: message)
             case .auth, .network:
                 return EnclaveErrorClassification(kind: .retryableTransient, code: code, status: status, message: message)
@@ -180,6 +182,12 @@ enum EnclaveErrorRecovery {
             }
             if status == 404 {
                 return EnclaveErrorClassification(kind: .userDecision, code: .notFound, status: status, message: message)
+            }
+            if status == 426 {
+                // 426 Upgrade Required: the server no longer speaks this
+                // client's X-Sync-Protocol version. Terminal until the app
+                // is updated; retrying can never heal it.
+                return EnclaveErrorClassification(kind: .terminal, code: .syncProtocolUpgradeRequired, status: status, message: message)
             }
         }
         return EnclaveErrorClassification(kind: .terminal, code: nil, status: status, message: message)
@@ -219,6 +227,8 @@ enum EnclaveErrorRecovery {
             return .migrateLegacyAndRetry
         case .attestationFailed:
             return .blockAllSync(reason: .attestationFailed)
+        case .syncProtocolUpgradeRequired:
+            return .blockAllSync(reason: .upgradeRequired)
         case .auth:
             return .retry(reason: .authRefresh)
         case .authActionRequired:
