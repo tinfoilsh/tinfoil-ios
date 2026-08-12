@@ -403,7 +403,7 @@ struct MessageInputView: View {
     /// plus the draft input and pending attachments, against the current
     /// model's token budget. Mirrors the webapp's calculation.
     private var contextUsage: ContextUsage {
-        let limitTokens = TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow)
+        let limitTokens = TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindowTokens)
         let reasoningHistoryPolicy = AppConfig.shared.reasoningHistoryPolicy(for: viewModel.currentModel)
         var usedTokens = TokenEstimation.estimateTokenCount(messageText)
 

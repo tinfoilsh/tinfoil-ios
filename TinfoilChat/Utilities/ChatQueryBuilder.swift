@@ -30,7 +30,7 @@ struct ChatQueryBuilder {
     ///   - systemPrompt: The base system prompt with placeholders already replaced
     ///   - rules: Additional rules to include (will be combined with system prompt based on model)
     ///   - conversationMessages: The message history from the chat
-    ///   - contextWindow: The model's context window (e.g. "64k tokens") used
+    ///   - contextWindowTokens: The model's numeric context-window size used
     ///     to budget how much history is included
     ///   - stream: Whether to stream the response (default: true)
     ///   - webSearchEnabled: Whether to enable web search for this query (default: false)
@@ -62,7 +62,7 @@ struct ChatQueryBuilder {
         systemPrompt: String,
         rules: String,
         conversationMessages: [Message],
-        contextWindow: String? = nil,
+        contextWindowTokens: Int? = nil,
         stream: Bool = true,
         webSearchEnabled: Bool = false,
         isMultimodal: Bool = false,
@@ -111,7 +111,7 @@ struct ChatQueryBuilder {
         )
         let recentMessages = TokenEstimation.selectMessagesWithinBudget(
             conversationMessages,
-            contextWindow: contextWindow,
+            contextWindowTokens: contextWindowTokens,
             reasoningHistoryPolicy: reasoningHistoryPolicy
         )
         var hasAddedSystemInstructions = useSystemRole

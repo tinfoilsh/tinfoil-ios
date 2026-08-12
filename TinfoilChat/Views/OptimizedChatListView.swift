@@ -31,7 +31,7 @@ struct OptimizedChatListView: View {
         let reasoningHistoryPolicy = AppConfig.shared.reasoningHistoryPolicy(for: viewModel.currentModel)
         archivedMessagesStartIndex = TokenEstimation.findContextStartIndex(
             messages: messages,
-            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow),
+            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindowTokens),
             reasoningHistoryPolicy: reasoningHistoryPolicy
         )
     }

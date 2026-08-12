@@ -99,6 +99,7 @@ struct AppModelConfig: Codable {
     let details: String
     let parameters: String
     let contextWindow: String
+    let contextWindowTokens: Int?
     let type: String
     let chat: Bool?
     let paid: Bool
@@ -173,6 +174,13 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
     var details: String { appConfig.details }
     var parameters: String { appConfig.parameters }
     var contextWindow: String { appConfig.contextWindow }
+    var contextWindowTokens: Int {
+        if let contextWindowTokens = appConfig.contextWindowTokens,
+           contextWindowTokens >= Constants.Context.minimumContextWindowTokens {
+            return contextWindowTokens
+        }
+        return TokenEstimation.parseContextWindowTokens(appConfig.contextWindow)
+    }
     var type: String { appConfig.type }
     var isMultimodal: Bool { appConfig.multimodal }
     var isChat: Bool { appConfig.chat ?? (appConfig.type == "chat") }
@@ -226,6 +234,9 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
     /// message builder behave sensibly before resolution.
     static func auto(tier: String, members: [ModelType]) -> ModelType {
         let isSmart = tier == AutoModel.smartTier
+        let minimumContextMember = members.min {
+            $0.contextWindowTokens < $1.contextWindowTokens
+        }
         let config = AppModelConfig(
             modelName: isSmart ? AutoModel.smartId : AutoModel.fastId,
             image: "",
@@ -236,10 +247,8 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
                 : "Routes to the fastest available model",
             details: "",
             parameters: "",
-            contextWindow: members.min {
-                TokenEstimation.parseContextWindowTokens($0.contextWindow)
-                    < TokenEstimation.parseContextWindowTokens($1.contextWindow)
-            }?.contextWindow ?? "",
+            contextWindow: minimumContextMember?.contextWindow ?? "",
+            contextWindowTokens: minimumContextMember?.contextWindowTokens,
             type: "chat",
             chat: true,
             paid: true,
@@ -269,11 +278,9 @@ struct ModelSelection {
     let representative: ModelType
     let autoCandidates: [ModelType]?
 
-    var contextWindow: String {
-        autoCandidates?.min {
-            TokenEstimation.parseContextWindowTokens($0.contextWindow)
-                < TokenEstimation.parseContextWindowTokens($1.contextWindow)
-        }?.contextWindow ?? representative.contextWindow
+    var contextWindowTokens: Int {
+        autoCandidates?.map(\.contextWindowTokens).min()
+            ?? representative.contextWindowTokens
     }
 }
 

@@ -59,7 +59,7 @@ struct ChatListView: View {
         let reasoningHistoryPolicy = AppConfig.shared.reasoningHistoryPolicy(for: viewModel.currentModel)
         let persistedStartIndex = TokenEstimation.findContextStartIndex(
             messages: persistedMessages,
-            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindow),
+            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindowTokens),
             reasoningHistoryPolicy: reasoningHistoryPolicy
         )
         guard persistedMessages.indices.contains(persistedStartIndex) else {
