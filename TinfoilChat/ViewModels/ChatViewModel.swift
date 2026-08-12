@@ -4288,10 +4288,10 @@ class ChatViewModel: ObservableObject {
         await drainStreamTasks(canceledStreamTasks)
         await drainPendingSaves()
         await Chat.deleteAllChatsFromStorage(userId: userId)
-        // The local cloud store is gone; a surviving checkpoint would make
-        // the next sync replay events instead of bootstrapping a snapshot,
-        // permanently skipping chats older than the checkpoint.
-        cloudSync.invalidateRevisionCheckpoint(forUser: userId)
+        // Fence in-flight sync (generation bump) and drop the checkpoint,
+        // in that order, so a pass racing the wipe can never persist a
+        // checkpoint that outlives the wiped store.
+        await cloudSync.handleLocalStoreWipe(forUser: userId)
         
         // Reset sync state
         lastSyncDate = nil
@@ -4628,10 +4628,10 @@ class ChatViewModel: ObservableObject {
         // Delete all cloud chats from storage (the cloud store only has cloud chats)
         if let userId = currentUserId {
             try? await EncryptedFileStorage.cloud.deleteAllChats(userId: userId)
-            // The local cloud store is gone; a surviving checkpoint would
-            // make the next sync replay events instead of bootstrapping a
-            // snapshot, permanently skipping older chats.
-            cloudSync.invalidateRevisionCheckpoint(forUser: userId)
+            // Fence in-flight sync (generation bump) and drop the
+            // checkpoint, in that order, so a pass racing the wipe can
+            // never persist a checkpoint that outlives the wiped store.
+            await cloudSync.handleLocalStoreWipe(forUser: userId)
         }
         chats = []
         hasMoreChats = false

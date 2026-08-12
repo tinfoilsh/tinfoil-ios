@@ -1783,16 +1783,8 @@ class CloudSyncService: ObservableObject {
     /// switch), so resolving it here would clear the wrong user's
     /// revision checkpoint — or none at all.
     func clearSyncStatus(forUser userId: String?) async {
-        accountGeneration += 1
-        isSyncing = false
-        syncStatus = ""
+        await handleLocalStoreWipe(forUser: userId)
         lastSyncDate = nil
-        streamingCallbacks.removeAll()
-        deferredRemoteDeleteChatIds.removeAll()
-        pendingUploadCounts.removeAll()
-        pendingUploadChatIds.removeAll()
-        await uploadCoalescer.clear()
-        invalidateRevisionCheckpoint(forUser: userId)
         // Drop any in-flight key registration so the next signed-in user
         // never awaits a task started under the previous user's key.
         emptyRemoteRegistration?.cancel()
@@ -1800,14 +1792,31 @@ class CloudSyncService: ObservableObject {
         await SyncEnclaveClient.shared.reset()
     }
 
-    /// Drop the revision checkpoint for a user whose local cloud chat
+    /// Fence and invalidate sync state after the user's local cloud chat
     /// store was wiped. Every wipe path must call this: a surviving
     /// checkpoint makes the next sync take the incremental event-replay
     /// path against an empty local store, so chats older than the
     /// checkpoint would never be rehydrated (bootstrap never runs).
-    func invalidateRevisionCheckpoint(forUser userId: String?) {
-        guard let userId else { return }
-        revisionCheckpointStore.clear(userId: userId)
+    ///
+    /// The account generation advances BEFORE the checkpoint is cleared:
+    /// an in-flight sync pass re-checks the generation right before
+    /// every checkpoint save, so the bump guarantees it can never
+    /// rewrite the checkpoint after the wipe. Unlike clearSyncStatus
+    /// this keeps the attested client and token wiring intact — the
+    /// same account keeps syncing and the next pass bootstraps a
+    /// fresh snapshot.
+    func handleLocalStoreWipe(forUser userId: String?) async {
+        accountGeneration += 1
+        isSyncing = false
+        syncStatus = ""
+        streamingCallbacks.removeAll()
+        deferredRemoteDeleteChatIds.removeAll()
+        pendingUploadCounts.removeAll()
+        pendingUploadChatIds.removeAll()
+        await uploadCoalescer.clear()
+        if let userId {
+            revisionCheckpointStore.clear(userId: userId)
+        }
     }
 
     // MARK: - Delete Operations
