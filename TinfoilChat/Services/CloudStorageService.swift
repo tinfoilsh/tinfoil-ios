@@ -113,8 +113,7 @@ class CloudStorageService: ObservableObject {
     @discardableResult
     func uploadChat(
         _ chat: StoredChat,
-        idempotencyKey: String,
-        restoreDeleted: Bool = false
+        idempotencyKey: String
     ) async throws -> UploadChatResult {
         var chatToUpload = chat
         let rewrites = try await encryptAndUploadAttachments(&chatToUpload)
@@ -122,8 +121,7 @@ class CloudStorageService: ObservableObject {
 
         let includesProjectIntent = ProjectMetadataUploadPolicy.shouldInclude(
             syncVersion: chatToUpload.syncVersion,
-            projectLocallyModified: chatToUpload.projectLocallyModified == true,
-            restoreDeleted: restoreDeleted
+            projectLocallyModified: chatToUpload.projectLocallyModified == true
         )
         chatToUpload.projectLocallyModified = nil
         let plaintext = try Self.encodeChatPlaintext(chatToUpload)
@@ -139,21 +137,10 @@ class CloudStorageService: ObservableObject {
                 metadata["projectId"] = AnyCodable(NSNull())
             }
         }
-        if restoreDeleted {
-            metadata["restoreDeleted"] = AnyCodable(true)
-        }
 
-        // A restore re-creates a row whose server copy is gone, so there
-        // is no etag to CAS against; `if_match=null` is the enclave's
-        // create-new sentinel.
-        let ifMatch: String?
-        if restoreDeleted {
-            ifMatch = nil
-        } else {
-            ifMatch = chatToUpload.syncVersion > 0
-                ? String(chatToUpload.syncVersion)
-                : "0"
-        }
+        let ifMatch = chatToUpload.syncVersion > 0
+            ? String(chatToUpload.syncVersion)
+            : "0"
         let response = try await SyncEnclaveAPI.push(
             EnclavePushRequest(
                 scope: .chat,

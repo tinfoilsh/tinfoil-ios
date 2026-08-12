@@ -862,9 +862,10 @@ class CloudSyncService: ObservableObject {
     ///   snapshot. Rebase the local row onto the server's current
     ///   version (so the next upload's CAS base matches) and re-upload,
     ///   letting local win instead of looping on STALE_BLOB forever.
-    /// - Remote row is gone entirely (deleted on another device): a
-    ///   locally modified copy wins by re-creating the row through the
-    ///   restore path, unless its tombstone is already being applied.
+    /// - Remote row is gone entirely (deleted on another device): the
+    ///   remote deletion wins even over a dirty local copy — the local
+    ///   row is removed and tombstoned so a racing upload can't
+    ///   resurrect it, matching the revision drain's delete-wins policy.
     ///
     /// If the pull itself fails the chat stays locallyModified and the
     /// next sync cycle retries.
@@ -1933,29 +1934,6 @@ class CloudSyncService: ObservableObject {
         )) ?? .refused
     }
 
-    /// Upload a chat to cloud and mark it as synced with the enclave's
-    /// authoritative version (the new etag), or `chat.syncVersion + 1`
-    /// when the enclave didn't return a parseable etag.
-    private func uploadAndMarkSynced(
-        _ chat: Chat,
-        idempotencyKey: String,
-        generation: Int,
-        userId: String,
-        restoreDeleted: Bool = false
-    ) async throws {
-        guard !streamingTracker.isStreaming(chat.id) else { return }
-
-        let storedChat = StoredChat(from: chat, syncVersion: chat.syncVersion)
-        let account = UploadAccount(generation: generation, userId: userId)
-        try await uploadAndMarkSynced(
-            storedChat,
-            expectedUpdatedAt: chat.updatedAt,
-            idempotencyKey: idempotencyKey,
-            account: account,
-            restoreDeleted: restoreDeleted
-        )
-    }
-
     private func uploadAndMarkSynced(_ upload: PreparedChatUpload) async throws {
         // Streaming is an eligibility check only while preparing. Once frozen,
         // this operation must finish while newer streaming edits stay dirty.
@@ -1967,12 +1945,14 @@ class CloudSyncService: ObservableObject {
         )
     }
 
+    /// Upload a chat to cloud and mark it as synced with the enclave's
+    /// authoritative version (the new etag), or `chat.syncVersion + 1`
+    /// when the enclave didn't return a parseable etag.
     private func uploadAndMarkSynced(
         _ chat: StoredChat,
         expectedUpdatedAt: Date,
         idempotencyKey: String,
-        account: UploadAccount,
-        restoreDeleted: Bool = false
+        account: UploadAccount
     ) async throws {
         guard await isCurrentUploadAccount(account) else {
             throw CancellationError()
@@ -1982,8 +1962,7 @@ class CloudSyncService: ObservableObject {
         }
         let result = try await cloudStorage.uploadChat(
             chat,
-            idempotencyKey: idempotencyKey,
-            restoreDeleted: restoreDeleted
+            idempotencyKey: idempotencyKey
         )
         guard await isCurrentUploadAccount(account) else {
             throw CancellationError()

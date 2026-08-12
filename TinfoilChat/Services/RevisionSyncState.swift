@@ -255,10 +255,9 @@ enum ChatContentIntegrity {
 enum ProjectMetadataUploadPolicy {
     static func shouldInclude(
         syncVersion: Int,
-        projectLocallyModified: Bool,
-        restoreDeleted: Bool = false
+        projectLocallyModified: Bool
     ) -> Bool {
-        syncVersion == 0 || projectLocallyModified || restoreDeleted
+        syncVersion == 0 || projectLocallyModified
     }
 
     static func flagAfterUpload(

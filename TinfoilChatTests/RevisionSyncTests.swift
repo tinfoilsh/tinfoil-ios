@@ -490,11 +490,6 @@ struct RevisionSyncTests {
             syncVersion: 3,
             projectLocallyModified: true
         ))
-        #expect(ProjectMetadataUploadPolicy.shouldInclude(
-            syncVersion: 3,
-            projectLocallyModified: false,
-            restoreDeleted: true
-        ))
         #expect(ProjectMetadataUploadPolicy.flagAfterUpload(
             current: true,
             editedDuringUpload: false
