@@ -1357,11 +1357,18 @@ class CloudSyncService: ObservableObject {
                 errors: result.errors + drained.errors + uploads.errors
             )
         } catch {
-            // Surface a force-upgrade refusal (HTTP 426) from any call in
-            // the cycle so the gate check in syncAllChats stops the
-            // periodic retries and the UI can prompt for an update.
-            if case .blockAllSync(.upgradeRequired) = EnclaveErrorRecovery.decide(error).action {
-                SyncHealthStore.shared.reportKeyActionRequired(.upgradeRequired)
+            // Surface sync-blocking failures from any call in the cycle
+            // so the gate check in syncAllChats stops the periodic
+            // retries (426) or the settings row explains the pause
+            // (attestation), instead of the error dissolving into the
+            // generic error string.
+            if case .blockAllSync(let reason) = EnclaveErrorRecovery.decide(error).action {
+                switch reason {
+                case .attestationFailed:
+                    SyncHealthStore.shared.reportSyncPaused(.attestation)
+                case .upgradeRequired:
+                    SyncHealthStore.shared.reportKeyActionRequired(.upgradeRequired)
+                }
             }
             return SyncResult(errors: ["Revision sync failed: \(error.localizedDescription)"])
         }
