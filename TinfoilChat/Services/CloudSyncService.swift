@@ -1331,14 +1331,14 @@ class CloudSyncService: ObservableObject {
             }
             guard generation == accountGeneration else { return SyncResult() }
 
-            let deleted = try await drainDeleteIntents(userId: userId, generation: generation)
+            let drained = try await drainDeleteIntents(userId: userId, generation: generation)
             guard generation == accountGeneration else { return SyncResult() }
             let uploads = await backupUnsyncedChats()
             return SyncResult(
                 uploaded: uploads.uploaded,
                 downloaded: result.downloaded,
-                deleted: result.deleted + deleted,
-                errors: result.errors + uploads.errors
+                deleted: result.deleted + drained.deleted,
+                errors: result.errors + drained.errors + uploads.errors
             )
         } catch {
             // Surface a force-upgrade refusal (HTTP 426) from any call in
@@ -1633,19 +1633,49 @@ class CloudSyncService: ObservableObject {
         return SyncResult(downloaded: downloaded, deleted: deleted)
     }
 
-    private func drainDeleteIntents(userId: String, generation: Int) async throws -> Int {
-        let intents = try await EncryptedFileStorage.cloud.loadDeleteIntents(userId: userId)
+    private struct DrainDeleteIntentsResult {
         var deleted = 0
+        var errors: [String] = []
+    }
+
+    /// Push every staged delete intent to the enclave. A row-specific
+    /// failure (conflict, malformed row, ...) is recorded and skipped so
+    /// one poison intent never aborts the drain — the intent stays
+    /// queued and is retried next cycle, and the cycle still reaches
+    /// `backupUnsyncedChats`. Only failures that would hit every intent
+    /// identically (network, auth, key problems, forced upgrade) stop
+    /// the drain early.
+    private func drainDeleteIntents(
+        userId: String,
+        generation: Int
+    ) async throws -> DrainDeleteIntentsResult {
+        let intents = try await EncryptedFileStorage.cloud.loadDeleteIntents(userId: userId)
+        var result = DrainDeleteIntentsResult()
         for intent in intents.sorted(by: { $0.chatId < $1.chatId }) {
             guard generation == accountGeneration else { throw CancellationError() }
             if pendingUploadChatIds.contains(intent.chatId) {
                 await uploadCoalescer.waitForUpload(intent.chatId)
                 guard generation == accountGeneration else { throw CancellationError() }
             }
-            try await cloudStorage.deleteChat(
-                intent.chatId,
-                idempotencyKey: intent.idempotencyKey
-            )
+            do {
+                try await cloudStorage.deleteChat(
+                    intent.chatId,
+                    idempotencyKey: intent.idempotencyKey
+                )
+            } catch {
+                let decision = EnclaveErrorRecovery.decide(error)
+                if case .surfaceNotFound = decision.action {
+                    // The row is already gone remotely; the intent is
+                    // satisfied, so fall through to the local cleanup.
+                } else if DeleteIntentPlanner.isAccountWideFailure(decision.action) {
+                    throw error
+                } else {
+                    result.errors.append(
+                        "Failed to delete chat \(intent.chatId): \(error.localizedDescription)"
+                    )
+                    continue
+                }
+            }
             guard generation == accountGeneration,
                   await getCurrentUserId() == userId else {
                 throw CancellationError()
@@ -1660,9 +1690,9 @@ class CloudSyncService: ObservableObject {
                 userId: userId
             )
             deletedChatsTracker.markAsDeleted(intent.chatId)
-            deleted += 1
+            result.deleted += 1
         }
-        return deleted
+        return result
     }
 
     func smartSync() async -> SyncResult {

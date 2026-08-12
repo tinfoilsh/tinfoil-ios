@@ -44,6 +44,25 @@ enum DeleteIntentPlanner {
     ) -> Bool {
         !pendingDeleteIds.contains(chatId)
     }
+
+    /// True when a failed delete indicates a condition that would fail
+    /// every remaining intent identically (network trouble, auth, key
+    /// problems, attestation, forced upgrade), so the drain should stop
+    /// early instead of failing each row in turn. Row-specific outcomes
+    /// (conflicts, not-found, idempotency) keep the drain going so one
+    /// poison intent can never starve the rest of the cycle.
+    static func isAccountWideFailure(_ action: RecoveryAction) -> Bool {
+        switch action {
+        case .retry, .refreshCurrentKeyAndRetry, .migrateLegacyAndRetry,
+             .triggerRecoveryWizard, .surfaceExistingDataUnderOtherKey,
+             .blockAllSync:
+            return true
+        case .abort(let reason):
+            return reason == .authenticationRequired || reason == .forbidden
+        case .surfaceConflict, .surfaceNotFound:
+            return false
+        }
+    }
 }
 
 enum DecimalRevision {
