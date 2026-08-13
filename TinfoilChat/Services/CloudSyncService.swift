@@ -339,6 +339,10 @@ class CloudSyncService: ObservableObject {
     /// device may have rotated or reset the key, leaving this device's
     /// hint stale.
     private func canWriteToCloud() async -> Bool {
+        // Guards the reportKeyHealthy calls below: a stale confirmation
+        // from an old account's in-flight request must not clear a gate
+        // the next account's session has since set.
+        let generation = accountGeneration
         let cek: Data
         do {
             cek = try EncryptionService.shared.getKeyBytesOrThrow()
@@ -388,7 +392,7 @@ class CloudSyncService: ObservableObject {
                 // kick.
                 let adopted = await LegacyBlobMigration.adoptLocalKeyForMigration(
                     keyB64: persistedB64)
-                if adopted {
+                if adopted, generation == accountGeneration {
                     SyncHealthStore.shared.reportKeyHealthy()
                 }
                 return adopted
@@ -406,7 +410,9 @@ class CloudSyncService: ObservableObject {
         if localKeyId == remoteKeyId {
             // The enclave just confirmed the local key is authoritative,
             // so any surfaced key problem is stale.
-            SyncHealthStore.shared.reportKeyHealthy()
+            if generation == accountGeneration {
+                SyncHealthStore.shared.reportKeyHealthy()
+            }
             return true
         }
         return false
@@ -423,6 +429,7 @@ class CloudSyncService: ObservableObject {
     /// only succeeds while no key is registered, and a loss just defers
     /// the push until the next validation pass sees the winner's key.
     private func registerKeyForEmptyRemote(keyB64: String) async -> Bool {
+        let generation = accountGeneration
         if let inFlight = emptyRemoteRegistration {
             return await inFlight.value
         }
@@ -445,7 +452,7 @@ class CloudSyncService: ObservableObject {
         emptyRemoteRegistration = task
         let result = await task.value
         emptyRemoteRegistration = nil
-        if result {
+        if result, generation == accountGeneration {
             // The local key just became the enclave's registered key, so
             // any surfaced key problem is stale.
             SyncHealthStore.shared.reportKeyHealthy()
@@ -992,10 +999,15 @@ class CloudSyncService: ObservableObject {
             }
             return false
         } catch {
-            SyncHealthStore.shared.reportChatSyncFailed(
-                chatId,
-                message: "This chat couldn't be synced"
-            )
+            // Generation-guarded: a failure from an old account's
+            // in-flight request must not repopulate the health store
+            // after sign-out reset it.
+            if generation == accountGeneration {
+                SyncHealthStore.shared.reportChatSyncFailed(
+                    chatId,
+                    message: "This chat couldn't be synced"
+                )
+            }
             throw error
         }
     }
@@ -1372,8 +1384,11 @@ class CloudSyncService: ObservableObject {
             // so the gate check in syncAllChats stops the periodic
             // retries (426) or the settings row explains the pause
             // (attestation), instead of the error dissolving into the
-            // generic error string.
-            if case .blockAllSync(let reason) = EnclaveErrorRecovery.decide(error).action {
+            // generic error string. Generation-guarded: a failure from
+            // an old account's in-flight request must not repopulate
+            // the health store after sign-out reset it.
+            if generation == accountGeneration,
+               case .blockAllSync(let reason) = EnclaveErrorRecovery.decide(error).action {
                 switch reason {
                 case .attestationFailed:
                     SyncHealthStore.shared.reportSyncPaused(.attestation)
