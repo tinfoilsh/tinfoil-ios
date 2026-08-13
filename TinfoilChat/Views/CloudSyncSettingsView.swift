@@ -272,7 +272,7 @@ struct CloudSyncSettingsView: View {
                 Label(actionRequiredMessage(for: reason), systemImage: "exclamationmark.circle")
                     .font(.caption)
                     .foregroundColor(reason == .accountBlocked ? .red : .orange)
-                if reason != .accountBlocked {
+                if keyRecoveryApplies(to: reason) {
                     Button {
                         viewModel.cloudSyncOnboardingMode = .recovery
                         viewModel.showCloudSyncOnboarding = true
@@ -313,6 +313,18 @@ struct CloudSyncSettingsView: View {
         }
     }
 
+    /// Reasons the recovery wizard can actually fix. An explicit
+    /// allow-list so a future reason defaults to NOT offering key
+    /// recovery until someone decides it applies.
+    private func keyRecoveryApplies(to reason: SyncHealthStore.ActionReason) -> Bool {
+        switch reason {
+        case .keyRecovery, .keyMismatch, .keyConflict:
+            return true
+        case .accountBlocked, .upgradeRequired:
+            return false
+        }
+    }
+
     private func actionRequiredMessage(for reason: SyncHealthStore.ActionReason) -> String {
         switch reason {
         case .keyRecovery:
@@ -323,6 +335,8 @@ struct CloudSyncSettingsView: View {
             return "Your cloud data is protected by a different key than this device's."
         case .accountBlocked:
             return "Sync is unavailable for this account. Please contact support if this persists."
+        case .upgradeRequired:
+            return "Sync is paused because this version of the app is out of date. Update the app to resume syncing."
         }
     }
 

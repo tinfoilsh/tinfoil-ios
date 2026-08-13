@@ -4208,6 +4208,11 @@ class ChatViewModel: ObservableObject {
     
     /// Handle sign-out by clearing current chats but preserving them in storage
     func handleSignOut() async {
+        // Capture the signing-out user's id up front. Later steps (and
+        // the auth manager's cleanup) clear the authenticated state, after
+        // which currentUserId no longer resolves this user.
+        let signingOutUserId = currentUserId
+
         // Allow a new sign-in flow after sign-out
         isSignInInProgress = false
         hasPerformedInitialSync = false
@@ -4234,7 +4239,7 @@ class ChatViewModel: ObservableObject {
         }
 
         // Clear sync caches so stale state doesn't leak into the next session
-        await cloudSync.clearSyncStatus()
+        await cloudSync.clearSyncStatus(forUser: signingOutUserId)
         DeletedChatsTracker.shared.clear()
         CloudKeyAuthorizationStore.shared.clearAuthorization(userId: currentUserId)
 
@@ -4278,10 +4283,12 @@ class ChatViewModel: ObservableObject {
         localChats.removeAll()
         currentChat = nil
         
-        // Clear from file storage (both local and cloud stores)
+        // Clear from file storage (both local and cloud stores),
+        // fencing in-flight sync before the deletion.
         let userId = currentUserId
         await drainStreamTasks(canceledStreamTasks)
         await drainPendingSaves()
+        await cloudSync.handleLocalStoreWipe(forUser: userId)
         await Chat.deleteAllChatsFromStorage(userId: userId)
         
         // Reset sync state
@@ -4616,8 +4623,10 @@ class ChatViewModel: ObservableObject {
     /// Removes all cloud (non-local) chats from the device
     @MainActor
     func deleteNonLocalChats() async {
-        // Delete all cloud chats from storage (the cloud store only has cloud chats)
+        // Delete all cloud chats from storage (the cloud store only has
+        // cloud chats), fencing in-flight sync before the deletion.
         if let userId = currentUserId {
+            await cloudSync.handleLocalStoreWipe(forUser: userId)
             try? await EncryptedFileStorage.cloud.deleteAllChats(userId: userId)
         }
         chats = []

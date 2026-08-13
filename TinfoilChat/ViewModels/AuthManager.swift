@@ -255,8 +255,12 @@ class AuthManager: ObservableObject {
             await chatViewModel.wipeLocalChatsForSignOut()
         } else {
             // No chat view model is attached (e.g. sign-out resolved before
-            // the UI wired one up); wipe directly so chat files never
-            // outlive the account on a shared device.
+            // the UI wired one up); run the same sync teardown handleSignOut
+            // performs via clearSyncStatus — fencing in-flight sync,
+            // clearing the checkpoint, and resetting the attested client —
+            // and only then wipe the files, so a racing sync pass cannot
+            // recreate them after the wipe.
+            await CloudSyncService.shared.clearSyncStatus(forUser: localUserId)
             await Chat.deleteAllChatsFromStorage(userId: localUserId)
         }
         EncryptionService.shared.clearKey()

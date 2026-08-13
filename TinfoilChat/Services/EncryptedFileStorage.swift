@@ -140,6 +140,13 @@ actor EncryptedFileStorage {
         return dir.appendingPathComponent("\(sanitizePathComponent(chatId)).sync.json")
     }
 
+    private func hasChatContentFile(chatId: String, userId: String) throws -> Bool {
+        let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
+        let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
+        return fileManager.fileExists(atPath: encPath.path)
+            || fileManager.fileExists(atPath: rawPath.path)
+    }
+
     private struct SyncMetadataSidecar: Codable {
         let syncVersion: Int
         let syncedAt: Date?
@@ -251,18 +258,7 @@ actor EncryptedFileStorage {
     ) throws {
         var availableIds: Set<String> = []
         for entry in entries {
-            let encPath = try chatFilePath(
-                chatId: entry.id,
-                userId: userId,
-                isCorrupted: false
-            )
-            let rawPath = try chatFilePath(
-                chatId: entry.id,
-                userId: userId,
-                isCorrupted: true
-            )
-            if fileManager.fileExists(atPath: encPath.path)
-                || fileManager.fileExists(atPath: rawPath.path) {
+            if try hasChatContentFile(chatId: entry.id, userId: userId) {
                 availableIds.insert(entry.id)
             }
         }
@@ -293,10 +289,7 @@ actor EncryptedFileStorage {
             ignoredIds: ignoredIds
         )
         for chatId in repairCandidates {
-            let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
-            let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
-            if !fileManager.fileExists(atPath: encPath.path)
-                && !fileManager.fileExists(atPath: rawPath.path) {
+            if try !hasChatContentFile(chatId: chatId, userId: userId) {
                 unresolvedIds.insert(chatId)
             }
         }
@@ -693,16 +686,63 @@ actor EncryptedFileStorage {
         return .applied
     }
 
+    /// Remove index entries (and their repair bookkeeping) for chats
+    /// whose content file no longer exists anywhere. Called by snapshot
+    /// repair for rows that are also absent remotely: with no local file
+    /// and no remote row there is nothing left to recover, and keeping
+    /// the entry would hold `needsContentRepair` true and fail every
+    /// reconcile. The file check re-runs under the write lock so an
+    /// entry whose content just reappeared (concurrent save) survives.
+    func pruneUnrecoverableIndexEntries(
+        chatIds: Set<String>,
+        userId: String
+    ) async throws -> Int {
+        guard !chatIds.isEmpty else { return 0 }
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+
+        var entries = try await loadIndex(userId: userId)
+        var pruned = 0
+        for chatId in chatIds {
+            guard try !hasChatContentFile(chatId: chatId, userId: userId) else {
+                continue
+            }
+            // Sidecars go first, and the entry is pruned only when they
+            // are gone: a leftover sidecar would overlay stale metadata
+            // (a stale higher syncVersion wins the sidecarIsNewer check)
+            // onto a future restore of the same chat id, silently
+            // poisoning its CAS base. Keeping the repair marker and index
+            // entry on failure means this cycle's reconcile still fails
+            // with incompletePull, but the prune — and the sidecar
+            // removal — reruns every cycle, so the stall lasts only as
+            // long as the removal failure (transient in practice, e.g.
+            // file protection while the device is locked). The lesser
+            // evil versus permanently stale metadata.
+            guard try removeSyncSidecars(chatId: chatId, userId: userId) else {
+                #if DEBUG
+                print("[EncryptedFileStorage] deferring prune of chat \(chatId): sync sidecar removal failed")
+                #endif
+                continue
+            }
+            contentRepairIds[userId]?.remove(chatId)
+            if entries.contains(where: { $0.id == chatId }) {
+                entries.removeAll { $0.id == chatId }
+                pruned += 1
+            }
+        }
+        if pruned > 0 {
+            try await saveIndex(entries, userId: userId)
+        }
+        return pruned
+    }
+
     func missingChatContentIds(chatIds: [String], userId: String) async throws -> Set<String> {
         await acquireWriteLock()
         defer { releaseWriteLock() }
 
         var missingIds = contentRepairIds[userId] ?? []
         for chatId in chatIds {
-            let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
-            let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
-            if !fileManager.fileExists(atPath: encPath.path)
-                && !fileManager.fileExists(atPath: rawPath.path) {
+            if try !hasChatContentFile(chatId: chatId, userId: userId) {
                 missingIds.insert(chatId)
             }
         }
@@ -726,11 +766,27 @@ actor EncryptedFileStorage {
             return []
         }
         let data = try Data(contentsOf: path)
-        let encrypted = try decoder.decode(EncryptedData.self, from: data)
-        let plaintext = try await encryptor.decryptData(encrypted)
-        let intents = try decoder.decode([PendingChatDelete].self, from: plaintext)
-        deleteIntentsCache[userId] = intents
-        return intents
+        // Mirror the index's rebuild-on-failure behavior: an unreadable
+        // intents file (corrupt bytes, or sealed under a key that no
+        // longer exists) must reset to empty instead of throwing on
+        // every sync cycle forever. Losing intents is bounded damage —
+        // the remote rows resurrect locally and can be re-deleted —
+        // whereas a bricked drain blocks deletes AND uploads unbounded.
+        // A missing key is the one exception: it is transient (the key
+        // loads later in the session), so rethrow and keep the file.
+        do {
+            let encrypted = try decoder.decode(EncryptedData.self, from: data)
+            let plaintext = try await encryptor.decryptData(encrypted)
+            let intents = try decoder.decode([PendingChatDelete].self, from: plaintext)
+            deleteIntentsCache[userId] = intents
+            return intents
+        } catch EncryptionError.keyNotInitialized {
+            throw EncryptionError.keyNotInitialized
+        } catch {
+            try? fileManager.removeItem(at: path)
+            deleteIntentsCache[userId] = []
+            return []
+        }
     }
 
     private func saveDeleteIntents(
@@ -791,6 +847,32 @@ actor EncryptedFileStorage {
         return true
     }
 
+    /// Best-effort removal of the sync sidecar files. Returns false when
+    /// a sidecar exists but could not be removed, so callers for whom a
+    /// surviving sidecar matters (the prune path — stale metadata would
+    /// overlay a future restore of the same chat id) can log it.
+    @discardableResult
+    private func removeSyncSidecars(chatId: String, userId: String) throws -> Bool {
+        var removedAll = true
+        let sidecarPath = try syncMetadataPath(chatId: chatId, userId: userId)
+        if fileManager.fileExists(atPath: sidecarPath.path) {
+            do {
+                try fileManager.removeItem(at: sidecarPath)
+            } catch {
+                removedAll = false
+            }
+        }
+        let legacySidecarPath = try legacySyncMetadataPath(chatId: chatId, userId: userId)
+        if fileManager.fileExists(atPath: legacySidecarPath.path) {
+            do {
+                try fileManager.removeItem(at: legacySidecarPath)
+            } catch {
+                removedAll = false
+            }
+        }
+        return removedAll
+    }
+
     private func performDeleteChat(chatId: String, userId: String) async throws {
         let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
         if fileManager.fileExists(atPath: encPath.path) {
@@ -802,14 +884,7 @@ actor EncryptedFileStorage {
             try fileManager.removeItem(at: rawPath)
         }
 
-        let sidecarPath = try syncMetadataPath(chatId: chatId, userId: userId)
-        if fileManager.fileExists(atPath: sidecarPath.path) {
-            try? fileManager.removeItem(at: sidecarPath)
-        }
-        let legacySidecarPath = try legacySyncMetadataPath(chatId: chatId, userId: userId)
-        if fileManager.fileExists(atPath: legacySidecarPath.path) {
-            try? fileManager.removeItem(at: legacySidecarPath)
-        }
+        try removeSyncSidecars(chatId: chatId, userId: userId)
 
         var entries = (try? await loadIndex(userId: userId)) ?? []
         entries.removeAll { $0.id == chatId }

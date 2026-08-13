@@ -35,6 +35,9 @@ final class SyncHealthStore: ObservableObject {
         case keyMismatch
         case keyConflict
         case accountBlocked
+        /// The server answered 426: it no longer speaks this client's
+        /// sync protocol version. Only an app update fixes it.
+        case upgradeRequired
     }
 
     enum Gate: Equatable {
@@ -52,10 +55,14 @@ final class SyncHealthStore: ObservableObject {
     /// The local key cannot write (stale after a rotation, unknown to
     /// the enclave, or colliding with data under another key) or the
     /// account is blocked. Requires a user-driven fix, so it sticks
-    /// until `reportKeyHealthy` confirms the key validates again.
+    /// until `reportKeyHealthy` confirms the key validates again. An
+    /// upgradeRequired gate outranks every other reason: no key fix can
+    /// resume sync against a server that refuses this protocol version,
+    /// so only `reset()` (sign-out / account change) clears it.
     func reportKeyActionRequired(_ reason: ActionReason) {
-        if case .actionRequired(let current, _) = gate, current == reason {
-            return
+        if case .actionRequired(let current, _) = gate {
+            if current == reason { return }
+            if current == .upgradeRequired { return }
         }
         gate = .actionRequired(reason: reason, since: Date())
     }
@@ -73,8 +80,12 @@ final class SyncHealthStore: ObservableObject {
 
     /// The enclave confirmed the local key is the registered current
     /// key. Clears any gate — reaching that verdict required a healthy
-    /// enclave round trip, so a paused gate is stale too.
+    /// enclave round trip, so a paused gate is stale too. The upgrade
+    /// gate is the one exception: a healthy key round trip says nothing
+    /// about the sync protocol version, and only an app update (hence a
+    /// fresh launch) can lift a 426 refusal.
     func reportKeyHealthy() {
+        if case .actionRequired(.upgradeRequired, _) = gate { return }
         if gate != .ok {
             gate = .ok
         }

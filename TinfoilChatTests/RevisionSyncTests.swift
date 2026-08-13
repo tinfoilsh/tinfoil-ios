@@ -194,6 +194,50 @@ struct RevisionSyncTests {
         #expect(candidates == ["missing"])
     }
 
+    @Test func deleteIntentDrainStopsOnlyForAccountWideFailures() {
+        #expect(DeleteIntentPlanner.isAccountWideFailure(.retry(reason: .network)))
+        #expect(DeleteIntentPlanner.isAccountWideFailure(.refreshCurrentKeyAndRetry))
+        #expect(DeleteIntentPlanner.isAccountWideFailure(.migrateLegacyAndRetry))
+        #expect(DeleteIntentPlanner.isAccountWideFailure(
+            .triggerRecoveryWizard(reason: .unknownKey)
+        ))
+        #expect(DeleteIntentPlanner.isAccountWideFailure(.surfaceExistingDataUnderOtherKey))
+        #expect(DeleteIntentPlanner.isAccountWideFailure(
+            .blockAllSync(reason: .attestationFailed)
+        ))
+        #expect(DeleteIntentPlanner.isAccountWideFailure(
+            .blockAllSync(reason: .upgradeRequired)
+        ))
+        #expect(DeleteIntentPlanner.isAccountWideFailure(
+            .abort(reason: .authenticationRequired)
+        ))
+        #expect(DeleteIntentPlanner.isAccountWideFailure(.abort(reason: .forbidden)))
+
+        // Row-specific outcomes keep the drain going: one poison intent
+        // must never starve the rest of the cycle.
+        #expect(!DeleteIntentPlanner.isAccountWideFailure(
+            .surfaceConflict(reason: .staleBlob)
+        ))
+        #expect(!DeleteIntentPlanner.isAccountWideFailure(.surfaceNotFound))
+        #expect(!DeleteIntentPlanner.isAccountWideFailure(.abort(reason: .unknown)))
+        #expect(!DeleteIntentPlanner.isAccountWideFailure(
+            .abort(reason: .idempotencyConflict)
+        ))
+        #expect(!DeleteIntentPlanner.isAccountWideFailure(
+            .abort(reason: .preconditionRequired)
+        ))
+    }
+
+    @Test func contentRepairPrunesOnlyIdsAbsentEverywhere() {
+        let unrecoverable = ChatContentIntegrity.unrecoverableIds(
+            repairIds: ["orphaned", "pullable", "pending-delete"],
+            remoteIds: ["pullable"],
+            pendingDeleteIds: ["pending-delete"]
+        )
+
+        #expect(unrecoverable == ["orphaned"])
+    }
+
     @MainActor
     @Test func pendingMetadataSelectionExcludesLocalOnlyAndCleanChats() {
         var pendingChat = ChatSearchServiceTests.makeChat(id: "pending", title: "Pending")
@@ -479,11 +523,6 @@ struct RevisionSyncTests {
         #expect(ProjectMetadataUploadPolicy.shouldInclude(
             syncVersion: 3,
             projectLocallyModified: true
-        ))
-        #expect(ProjectMetadataUploadPolicy.shouldInclude(
-            syncVersion: 3,
-            projectLocallyModified: false,
-            restoreDeleted: true
         ))
         #expect(ProjectMetadataUploadPolicy.flagAfterUpload(
             current: true,

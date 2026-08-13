@@ -39,6 +39,7 @@ let codedErrorExpectations: [CodedErrorExpectation] = [
     .init(code: .network, status: nil, action: .retry(reason: .network), kind: .retryableTransient),
     .init(code: .notFound, status: 404, action: .surfaceNotFound, kind: .userDecision),
     .init(code: .preconditionRequired, status: 428, action: .abort(reason: .preconditionRequired), kind: .terminal),
+    .init(code: .syncProtocolUpgradeRequired, status: 426, action: .blockAllSync(reason: .upgradeRequired), kind: .terminal),
 ]
 
 @Suite("EnclaveErrorRecovery dispatch table")
@@ -92,6 +93,17 @@ struct EnclaveErrorRecoveryTests {
             SyncEnclaveError(message: "missing", status: 404, code: nil)
         )
         #expect(decision.action == .surfaceNotFound)
+    }
+
+    @Test func status426WithoutCodeMapsToUpgradeRequired() {
+        // Older/simpler gateways may answer a bare 426 without the
+        // structured wire code; the status alone must gate sync.
+        let decision = EnclaveErrorRecovery.decide(
+            SyncEnclaveError(message: "upgrade required", status: 426, code: nil)
+        )
+        #expect(decision.action == .blockAllSync(reason: .upgradeRequired))
+        #expect(decision.classification.kind == .terminal)
+        #expect(decision.classification.code == .syncProtocolUpgradeRequired)
     }
 
     @Test func uncodedTerminalErrorMapsToAbortUnknown() {

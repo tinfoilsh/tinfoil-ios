@@ -44,6 +44,25 @@ enum DeleteIntentPlanner {
     ) -> Bool {
         !pendingDeleteIds.contains(chatId)
     }
+
+    /// True when a failed delete indicates a condition that would fail
+    /// every remaining intent identically (network trouble, auth, key
+    /// problems, attestation, forced upgrade), so the drain should stop
+    /// early instead of failing each row in turn. Row-specific outcomes
+    /// (conflicts, not-found, idempotency) keep the drain going so one
+    /// poison intent can never starve the rest of the cycle.
+    static func isAccountWideFailure(_ action: RecoveryAction) -> Bool {
+        switch action {
+        case .retry, .refreshCurrentKeyAndRetry, .migrateLegacyAndRetry,
+             .triggerRecoveryWizard, .surfaceExistingDataUnderOtherKey,
+             .blockAllSync:
+            return true
+        case .abort(let reason):
+            return reason == .authenticationRequired || reason == .forbidden
+        case .surfaceConflict, .surfaceNotFound:
+            return false
+        }
+    }
 }
 
 enum DecimalRevision {
@@ -217,15 +236,28 @@ enum ChatContentIntegrity {
     ) -> Set<String> {
         repairIds.intersection(indexedIds).subtracting(ignoredIds)
     }
+
+    /// Ids whose missing content cannot be repaired from anywhere: the
+    /// local file is gone and the remote snapshot has no row to pull
+    /// from. Left in place they would keep `needsContentRepair` true and
+    /// fail every snapshot reconcile, so the repair prunes their index
+    /// entries instead. Pending deletes are excluded — their local
+    /// absence is intentional and their intents resolve separately.
+    static func unrecoverableIds(
+        repairIds: Set<String>,
+        remoteIds: Set<String>,
+        pendingDeleteIds: Set<String>
+    ) -> Set<String> {
+        repairIds.subtracting(remoteIds).subtracting(pendingDeleteIds)
+    }
 }
 
 enum ProjectMetadataUploadPolicy {
     static func shouldInclude(
         syncVersion: Int,
-        projectLocallyModified: Bool,
-        restoreDeleted: Bool = false
+        projectLocallyModified: Bool
     ) -> Bool {
-        syncVersion == 0 || projectLocallyModified || restoreDeleted
+        syncVersion == 0 || projectLocallyModified
     }
 
     static func flagAfterUpload(
