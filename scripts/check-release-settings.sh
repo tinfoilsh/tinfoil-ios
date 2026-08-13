@@ -21,7 +21,7 @@ assert_setting() {
   local count
   local normalized
 
-  lines=$(configuration_block "$configuration_id" | grep -E "^[[:space:]]*${setting}(\\[[^]]+\\])?[[:space:]]*=" || true)
+  lines=$(configuration_block "$configuration_id" | grep -E "^[[:space:]]*\"?${setting}(\\[[^]]+\\])?\"?[[:space:]]*=" || true)
   count=$(printf '%s\n' "$lines" | sed '/^$/d' | wc -l | tr -d ' ')
   normalized=$(printf '%s\n' "$lines" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
 
