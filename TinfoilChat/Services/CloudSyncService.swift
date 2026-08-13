@@ -1617,9 +1617,13 @@ class CloudSyncService: ObservableObject {
     /// Retry deferred remote deletes whose stream-end removal failed.
     /// Runs once per sync cycle; entries whose chat is streaming again
     /// wait for the next stream end via their registered callback.
+    /// Iterates a snapshot of the keys and re-reads the live entry each
+    /// step: the dictionary is mutated inside the loop, and the awaits
+    /// mean stream-end callbacks can also mutate it mid-iteration.
     private func retryDeferredRemoteDeletes(generation: Int) async {
-        for (chatId, pending) in deferredRemoteDeletes {
+        for chatId in Array(deferredRemoteDeletes.keys) {
             guard generation == accountGeneration else { return }
+            guard let pending = deferredRemoteDeletes[chatId] else { continue }
             guard pending.generation == accountGeneration else {
                 deferredRemoteDeletes.removeValue(forKey: chatId)
                 continue
