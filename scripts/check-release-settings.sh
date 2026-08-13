@@ -31,12 +31,39 @@ assert_setting() {
   fi
 }
 
-project_debug="99F153CB2F4F5F0300E9174E"
-project_release="99F153CC2F4F5F0300E9174E"
-extension_debug="99AB000D2FABC00D00ABC00D"
-extension_release="99AB000E2FABC00E00ABC00E"
-app_debug="99F153CE2F4F5F0300E9174E"
-app_release="99F153CF2F4F5F0300E9174E"
+configuration_id() {
+  local owner="$1"
+  local configuration="$2"
+  awk -v owner="$owner" -v configuration="$configuration" '
+    index($0, "Build configuration list for " owner) && / \*\/ = \{/ {
+      in_owner = 1
+      next
+    }
+    in_owner && /buildConfigurations = \(/ {
+      in_configurations = 1
+      next
+    }
+    in_configurations && index($0, "/* " configuration " */") {
+      print $1
+      exit
+    }
+    in_configurations && /\);/ { exit }
+  ' "$project_file"
+}
+
+project_debug=$(configuration_id 'PBXProject "TinfoilChat"' Debug)
+project_release=$(configuration_id 'PBXProject "TinfoilChat"' Release)
+extension_debug=$(configuration_id 'PBXNativeTarget "TinfoilShareExtension"' Debug)
+extension_release=$(configuration_id 'PBXNativeTarget "TinfoilShareExtension"' Release)
+app_debug=$(configuration_id 'PBXNativeTarget "TinfoilChat"' Debug)
+app_release=$(configuration_id 'PBXNativeTarget "TinfoilChat"' Release)
+
+for configuration_id in "$project_debug" "$project_release" "$extension_debug" "$extension_release" "$app_debug" "$app_release"; do
+  if [[ -z "$configuration_id" ]]; then
+    echo "Could not derive all required Xcode configuration IDs." >&2
+    exit 1
+  fi
+done
 
 marketing_version=$(configuration_block "$project_debug" | sed -nE 's/^[[:space:]]*TINFOIL_MARKETING_VERSION = ([^;]+);/\1/p')
 build_number=$(configuration_block "$project_debug" | sed -nE 's/^[[:space:]]*TINFOIL_BUILD_NUMBER = ([^;]+);/\1/p')
