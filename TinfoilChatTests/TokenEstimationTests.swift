@@ -36,7 +36,7 @@ struct TokenEstimationTests {
     }
 
     @Test func budgetIsUsageRatioOfWindow() {
-        #expect(TokenEstimation.contextTokenBudget(100_000) == 90_000)
+        #expect(TokenEstimation.contextTokenBudget(100_000) == 80_000)
         #expect(TokenEstimation.contextTokenBudget(nil) ==
                 Int(Double(Constants.Context.defaultContextWindowTokens) * Constants.Context.contextWindowUsageRatio))
     }
