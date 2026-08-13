@@ -1894,6 +1894,10 @@ class CloudSyncService: ObservableObject {
     func clearSyncStatus(forUser userId: String?) async {
         await handleLocalStoreWipe(forUser: userId)
         lastSyncDate = nil
+        // The health gate is per-account state: key problems and even the
+        // sticky upgradeRequired gate must not block the NEXT account
+        // (reset() is the one designated way to lift the upgrade gate).
+        SyncHealthStore.shared.reset()
         // Drop any in-flight key registration so the next signed-in user
         // never awaits a task started under the previous user's key.
         emptyRemoteRegistration?.cancel()
