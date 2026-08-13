@@ -2024,6 +2024,10 @@ class ChatViewModel: ObservableObject {
         if hasUnfetchedImages {
             let chatId = chatToSelect.id
             Task {
+                let performanceToken = PerformanceInstrumentation.shared.begin(
+                    .selectedChatImageHydration
+                )
+                defer { PerformanceInstrumentation.shared.end(performanceToken) }
                 let loadedImages = await CloudStorageService.shared.loadImages(in: chatToSelect.messages)
                 guard !loadedImages.isEmpty, self.currentChat?.id == chatId else { return }
                 // Merge loaded base64 data into the current messages by attachment ID,
@@ -5216,6 +5220,8 @@ class ChatViewModel: ObservableObject {
         filter: ((ChatIndexEntry) -> Bool)? = nil
     ) async -> (chats: [Chat], totalEntries: Int) {
         guard let userId = userId else { return ([], 0) }
+        let performanceToken = PerformanceInstrumentation.shared.begin(.firstChatPageLoad)
+        defer { PerformanceInstrumentation.shared.end(performanceToken) }
         let index = await Chat.loadChatIndex(userId: userId)
         let filtered = index
             .filter { !excludedIds.contains($0.id) }

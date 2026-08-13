@@ -1348,8 +1348,10 @@ class CloudSyncService: ObservableObject {
         }
 
         isSyncing = true
+        let performanceToken = PerformanceInstrumentation.shared.begin(.cloudSyncCycle)
         syncStatus = "Syncing..."
         defer {
+            PerformanceInstrumentation.shared.end(performanceToken)
             if generation == accountGeneration {
                 isSyncing = false
                 syncStatus = ""

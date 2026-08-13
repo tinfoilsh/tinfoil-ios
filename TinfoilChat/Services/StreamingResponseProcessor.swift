@@ -503,7 +503,9 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     }
 
     func snapshot() -> Snapshot {
-        Snapshot(
+        let performanceToken = PerformanceInstrumentation.shared.begin(.streamSnapshotBuild)
+        defer { PerformanceInstrumentation.shared.end(performanceToken) }
+        return Snapshot(
             responseContent: responseContent,
             modelDisplayName: modelDisplayName,
             thoughts: currentThoughts,

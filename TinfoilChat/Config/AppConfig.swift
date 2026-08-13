@@ -333,6 +333,8 @@ class AppConfig: ObservableObject {
     
     
     func loadRemoteConfig() async {
+        let performanceToken = PerformanceInstrumentation.shared.begin(.remoteConfigLoad)
+        defer { PerformanceInstrumentation.shared.end(performanceToken) }
         do {
             guard networkMonitor.isConnected else {
                 initializationError = NSError(
