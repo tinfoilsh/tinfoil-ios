@@ -312,7 +312,56 @@ actor EncryptedFileStorage {
     func saveChat(_ chat: Chat, userId: String) async throws {
         await acquireWriteLock()
         defer { releaseWriteLock() }
-        try await performSaveChat(chat, userId: userId)
+        let prepared = try await prepareLocalChatForSave(chat, userId: userId)
+        try await performSaveChat(prepared, userId: userId)
+    }
+
+    private func prepareLocalChatForSave(_ chat: Chat, userId: String) async throws -> Chat {
+        guard subdirectory == nil, chat.locallyModified else { return chat }
+        let encPath = try chatFilePath(chatId: chat.id, userId: userId, isCorrupted: false)
+        let rawPath = try chatFilePath(chatId: chat.id, userId: userId, isCorrupted: true)
+        let hasEncryptedFile = fileManager.fileExists(atPath: encPath.path)
+        var existing: Chat?
+        if hasEncryptedFile || fileManager.fileExists(atPath: rawPath.path) {
+            if var loaded = try await loadChatFromFile(
+                hasEncryptedFile ? encPath : rawPath,
+                isRaw: !hasEncryptedFile
+            ) {
+                await overlaySyncSidecar(&loaded, userId: userId)
+                existing = loaded
+            }
+        }
+        EditClockStore.observe(existing?.clock)
+        EditClockStore.observe(chat.clock)
+        var prepared = chat
+        if let existing, existing.syncVersion > prepared.syncVersion {
+            prepared.syncVersion = existing.syncVersion
+            prepared.syncedAt = existing.syncedAt
+        }
+        let isContentMutation = existing?.updatedAt != chat.updatedAt
+        if !isContentMutation, let existing,
+           (prepared.clock ?? 0) <= (existing.clock ?? 0),
+           existing.writer?.isEmpty == false {
+            prepared.clock = existing.clock
+            prepared.writer = existing.writer
+            prepared.clockVersion = existing.clockVersion
+        }
+        if !isContentMutation,
+           prepared.clock != nil,
+           prepared.writer?.isEmpty == false {
+            return prepared
+        }
+        let carriesNewClock = chat.clock.map { $0 > (existing?.clock ?? 0) } == true
+            && chat.writer?.isEmpty == false
+        if !carriesNewClock {
+            let clock = EditClockStore.nextClock(
+                observedMax: max(existing?.clock ?? 0, chat.clock ?? 0)
+            )
+            prepared.clock = clock.v
+            prepared.writer = clock.w
+        }
+        prepared.clockVersion = prepared.syncVersion + 1
+        return prepared
     }
 
     func applyRemoteChatIfFresh(
@@ -348,6 +397,7 @@ actor EncryptedFileStorage {
         guard decision == .applied else {
             return decision
         }
+        EditClockStore.observe(chat.clock)
         try await performSaveChat(chat, userId: userId)
         return .applied
     }
@@ -357,6 +407,7 @@ actor EncryptedFileStorage {
         userId: String,
         expectedUpdatedAt: Date,
         syncVersion: Int,
+        uploadedClock: ChatClockState,
         attachmentRewrites: [
             (clientId: String, serverId: String, encryptionKey: String)
         ]
@@ -423,6 +474,35 @@ actor EncryptedFileStorage {
             if didChangeChat {
                 try await performSaveChat(chat, userId: userId)
             }
+        }
+        let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
+        let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
+        let hasEncryptedFile = fileManager.fileExists(atPath: encPath.path)
+        guard hasEncryptedFile || fileManager.fileExists(atPath: rawPath.path),
+              var currentChat = try await loadChatFromFile(
+                  hasEncryptedFile ? encPath : rawPath,
+                  isRaw: !hasEncryptedFile
+              ) else {
+            return false
+        }
+        await overlaySyncSidecar(&currentChat, userId: userId)
+        let finalizedClock = ChatEditClockPolicy.finalizedState(
+            uploaded: uploadedClock,
+            current: ChatClockState(
+                clock: currentChat.clock,
+                writer: currentChat.writer,
+                clockVersion: currentChat.clockVersion
+            ),
+            authoritativeSyncVersion: syncVersion,
+            editedDuringUpload: editedDuringUpload
+        )
+        if currentChat.clock != finalizedClock.clock
+            || currentChat.writer != finalizedClock.writer
+            || currentChat.clockVersion != finalizedClock.clockVersion {
+            currentChat.clock = finalizedClock.clock
+            currentChat.writer = finalizedClock.writer
+            currentChat.clockVersion = finalizedClock.clockVersion
+            try await performSaveChat(currentChat, userId: userId)
         }
         try await performUpdateSyncMetadata(
             chatId: chatId,

@@ -584,8 +584,11 @@ class CloudSyncService: ObservableObject {
                       ) else {
                     throw CancellationError()
                 }
+                let uploadChat = stampClockVersionForUpload(
+                    StoredChat(from: chat, syncVersion: chat.syncVersion)
+                )
                 let result = try await cloudStorage.uploadChat(
-                    StoredChat(from: chat, syncVersion: chat.syncVersion),
+                    uploadChat,
                     idempotencyKey: newSyncEnclaveIdempotencyKey()
                 )
                 guard generation == accountGeneration else {
@@ -597,6 +600,7 @@ class CloudSyncService: ObservableObject {
                     userId: userId,
                     expectedUpdatedAt: chat.updatedAt,
                     syncVersion: newVersion,
+                    uploadedClock: clockState(uploadChat),
                     attachmentRewrites: result.rewrites.map {
                         (
                             clientId: $0.clientId,
@@ -641,7 +645,7 @@ class CloudSyncService: ObservableObject {
     private func trustedChatClock(_ chat: Chat) -> EditClock? {
         guard let clock = chat.clock,
               let writer = chat.writer,
-              chat.clockVersion == chat.syncVersion
+              chat.clockVersion == chat.syncVersion + (chat.locallyModified ? 1 : 0)
         else {
             return nil
         }
@@ -788,7 +792,9 @@ class CloudSyncService: ObservableObject {
         }
 
         let preparedUpload = PreparedChatUpload(
-            chat: StoredChat(from: chat, syncVersion: chat.syncVersion),
+            chat: stampClockVersionForUpload(
+                StoredChat(from: chat, syncVersion: chat.syncVersion)
+            ),
             expectedUpdatedAt: chat.updatedAt,
             idempotencyKey: idempotencyKey,
             account: account
@@ -963,10 +969,10 @@ class CloudSyncService: ObservableObject {
             }
 
             let localClock = localChat.flatMap {
-                trustedClock(
-                    clock: $0.clock, writer: $0.writer,
-                    clockVersion: $0.clockVersion, syncVersion: $0.syncVersion
-                )
+                let expectedClockVersion = $0.syncVersion + ($0.locallyModified ? 1 : 0)
+                guard $0.clockVersion == expectedClockVersion,
+                      let clock = $0.clock, let writer = $0.writer else { return nil }
+                return EditClock(v: clock, w: writer)
             }
             let remoteClock = trustedClock(
                 clock: downloadedChat.clock, writer: downloadedChat.writer,
@@ -2173,6 +2179,7 @@ class CloudSyncService: ObservableObject {
             userId: account.userId,
             expectedUpdatedAt: expectedUpdatedAt,
             syncVersion: newVersion,
+            uploadedClock: clockState(chat),
             attachmentRewrites: result.rewrites.map {
                 (
                     clientId: $0.clientId,
@@ -2187,6 +2194,27 @@ class CloudSyncService: ObservableObject {
         if fullySynced {
             SyncHealthStore.shared.reportChatSynced(chat.id)
         }
+    }
+
+    private func stampClockVersionForUpload(_ chat: StoredChat) -> StoredChat {
+        var stamped = chat
+        let state = ChatEditClockPolicy.uploadState(
+            clock: chat.clock,
+            writer: chat.writer,
+            currentSyncVersion: chat.syncVersion
+        )
+        stamped.clock = state.clock
+        stamped.writer = state.writer
+        stamped.clockVersion = state.clockVersion
+        return stamped
+    }
+
+    private func clockState(_ chat: StoredChat) -> ChatClockState {
+        ChatClockState(
+            clock: chat.clock,
+            writer: chat.writer,
+            clockVersion: chat.clockVersion
+        )
     }
 
     private func isCurrentUploadAccount(_ account: UploadAccount) async -> Bool {

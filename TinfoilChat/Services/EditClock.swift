@@ -18,6 +18,48 @@ struct EditClock: Codable, Equatable {
     let w: String
 }
 
+struct ChatClockState: Equatable {
+    let clock: Int?
+    let writer: String?
+    let clockVersion: Int?
+}
+
+enum ChatEditClockPolicy {
+    static func uploadState(
+        clock: Int?,
+        writer: String?,
+        currentSyncVersion: Int
+    ) -> ChatClockState {
+        ChatClockState(
+            clock: clock,
+            writer: writer,
+            clockVersion: clock == nil || writer == nil ? nil : currentSyncVersion + 1
+        )
+    }
+
+    static func finalizedState(
+        uploaded: ChatClockState,
+        current: ChatClockState,
+        authoritativeSyncVersion: Int,
+        editedDuringUpload: Bool
+    ) -> ChatClockState {
+        if editedDuringUpload {
+            return ChatClockState(
+                clock: current.clock,
+                writer: current.writer,
+                clockVersion: current.clock == nil || current.writer == nil
+                    ? nil : authoritativeSyncVersion + 1
+            )
+        }
+        return ChatClockState(
+            clock: uploaded.clock,
+            writer: uploaded.writer,
+            clockVersion: uploaded.clock == nil || uploaded.writer == nil
+                ? nil : authoritativeSyncVersion
+        )
+    }
+}
+
 /// Persisted Lamport counter and stable device id backing the edit
 /// clock. The device id is only a tiebreak label, never a secret.
 enum EditClockStore {

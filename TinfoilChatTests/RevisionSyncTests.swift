@@ -534,6 +534,32 @@ struct RevisionSyncTests {
         ) == true)
     }
 
+    @Test func chatUploadClockTargetsExpectedCASVersion() {
+        #expect(ChatEditClockPolicy.uploadState(
+            clock: 7,
+            writer: "device-a",
+            currentSyncVersion: 3
+        ) == ChatClockState(clock: 7, writer: "device-a", clockVersion: 4))
+    }
+
+    @Test func chatUploadFinalizePreservesEditsThatRaceUpload() {
+        let uploaded = ChatClockState(clock: 7, writer: "device-a", clockVersion: 4)
+        let newer = ChatClockState(clock: 8, writer: "device-a", clockVersion: 4)
+
+        #expect(ChatEditClockPolicy.finalizedState(
+            uploaded: uploaded,
+            current: newer,
+            authoritativeSyncVersion: 4,
+            editedDuringUpload: false
+        ) == ChatClockState(clock: 7, writer: "device-a", clockVersion: 4))
+        #expect(ChatEditClockPolicy.finalizedState(
+            uploaded: uploaded,
+            current: newer,
+            authoritativeSyncVersion: 4,
+            editedDuringUpload: true
+        ) == ChatClockState(clock: 8, writer: "device-a", clockVersion: 5))
+    }
+
     @MainActor
     @Test func projectMoveIntentPersistsAndOlderChatsDecodeWithoutIt() throws {
         var chat = ChatSearchServiceTests.makeChat(id: "project-move", title: "Move")
