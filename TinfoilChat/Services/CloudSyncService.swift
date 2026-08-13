@@ -1940,6 +1940,10 @@ class CloudSyncService: ObservableObject {
     /// snapshot.
     func handleLocalStoreWipe(forUser userId: String?) async {
         accountGeneration += 1
+        // Before the first await, so no new-generation caller can slip
+        // in during a suspension and join the stale registration task.
+        emptyRemoteRegistration?.cancel()
+        emptyRemoteRegistration = nil
         isSyncing = false
         syncStatus = ""
         streamingCallbacks.removeAll()
@@ -1947,14 +1951,6 @@ class CloudSyncService: ObservableObject {
         pendingUploadCounts.removeAll()
         pendingUploadChatIds.removeAll()
         await uploadCoalescer.clear()
-        // Drop the memoized key registration: joining it across the
-        // generation bump would hand callers a result whose
-        // reportKeyHealthy was suppressed by the guard in
-        // registerKeyForEmptyRemote (and, on sign-out, a task started
-        // under the previous user's key). Post-wipe callers must re-run
-        // registration under the new generation and report fresh health.
-        emptyRemoteRegistration?.cancel()
-        emptyRemoteRegistration = nil
         if let userId {
             revisionCheckpointStore.clear(userId: userId)
         }
