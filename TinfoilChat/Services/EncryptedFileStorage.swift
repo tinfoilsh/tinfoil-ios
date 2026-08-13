@@ -707,14 +707,24 @@ actor EncryptedFileStorage {
             guard try !hasChatContentFile(chatId: chatId, userId: userId) else {
                 continue
             }
-            contentRepairIds[userId]?.remove(chatId)
-            // Drop the sync sidecars too: a later restore of the same
-            // chat id must not overlay this dead row's stale metadata.
-            if try !removeSyncSidecars(chatId: chatId, userId: userId) {
+            // Sidecars go first, and the entry is pruned only when they
+            // are gone: a leftover sidecar would overlay stale metadata
+            // (a stale higher syncVersion wins the sidecarIsNewer check)
+            // onto a future restore of the same chat id, silently
+            // poisoning its CAS base. Keeping the repair marker and index
+            // entry on failure means this cycle's reconcile still fails
+            // with incompletePull, but the prune — and the sidecar
+            // removal — reruns every cycle, so the stall lasts only as
+            // long as the removal failure (transient in practice, e.g.
+            // file protection while the device is locked). The lesser
+            // evil versus permanently stale metadata.
+            guard try removeSyncSidecars(chatId: chatId, userId: userId) else {
                 #if DEBUG
-                print("[EncryptedFileStorage] prune left a stale sync sidecar for chat \(chatId)")
+                print("[EncryptedFileStorage] deferring prune of chat \(chatId): sync sidecar removal failed")
                 #endif
+                continue
             }
+            contentRepairIds[userId]?.remove(chatId)
             if entries.contains(where: { $0.id == chatId }) {
                 entries.removeAll { $0.id == chatId }
                 pruned += 1
