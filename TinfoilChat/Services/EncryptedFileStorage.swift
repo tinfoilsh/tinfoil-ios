@@ -15,6 +15,10 @@
 import Foundation
 
 actor EncryptedFileStorage {
+    enum SaveError: Error {
+        case remotelyDeleted
+    }
+
     static let local = EncryptedFileStorage(
         encryptor: DeviceEncryptionService.shared,
         subdirectory: "local"
@@ -34,6 +38,7 @@ actor EncryptedFileStorage {
     private var indexCache: [String: [ChatIndexEntry]] = [:]
     private var pendingChatIdsCache: [String: Set<String>] = [:]
     private var deleteIntentsCache: [String: [PendingChatDelete]] = [:]
+    private var remoteDeleteTombstonesCache: [String: [String: Bool]] = [:]
     private var contentIntegrityCheckedUserIds: Set<String> = []
     private var contentRepairIds: [String: Set<String>] = [:]
 
@@ -128,6 +133,11 @@ actor EncryptedFileStorage {
     private func deleteIntentsFilePath(userId: String) throws -> URL {
         let dir = try chatsDirectory(userId: userId)
         return dir.appendingPathComponent("delete-intents.enc")
+    }
+
+    private func remoteDeleteTombstonesFilePath(userId: String) throws -> URL {
+        let dir = try chatsDirectory(userId: userId)
+        return dir.appendingPathComponent("remote-delete-tombstones.enc")
     }
 
     private func syncMetadataPath(chatId: String, userId: String) throws -> URL {
@@ -425,6 +435,9 @@ actor EncryptedFileStorage {
     }
 
     private func performSaveChat(_ chat: Chat, userId: String) async throws {
+        guard try await !hasRemoteDeleteTombstone(chatId: chat.id, userId: userId) else {
+            throw SaveError.remotelyDeleted
+        }
         let isCorrupted = chat.decryptionFailed || chat.dataCorrupted
 
         let data = try encoder.encode(chat)
@@ -789,6 +802,65 @@ actor EncryptedFileStorage {
         }
     }
 
+    func persistRemoteDeleteTombstone(
+        chatId: String,
+        userId: String,
+        preserveNeverSynced: Bool
+    ) async throws {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+        var tombstones = try await loadRemoteDeleteTombstones(userId: userId)
+        tombstones[chatId] = preserveNeverSynced
+        try await saveRemoteDeleteTombstones(tombstones, userId: userId)
+    }
+
+    func loadRemoteDeleteTombstones(userId: String) async throws -> [String: Bool] {
+        if let cached = remoteDeleteTombstonesCache[userId] { return cached }
+        let path = try remoteDeleteTombstonesFilePath(userId: userId)
+        guard fileManager.fileExists(atPath: path.path) else {
+            remoteDeleteTombstonesCache[userId] = [:]
+            return [:]
+        }
+        let data = try Data(contentsOf: path)
+        let encrypted = try decoder.decode(EncryptedData.self, from: data)
+        let plaintext = try await encryptor.decryptData(encrypted)
+        let tombstones = try decoder.decode([String: Bool].self, from: plaintext)
+        remoteDeleteTombstonesCache[userId] = tombstones
+        return tombstones
+    }
+
+    func clearRemoteDeleteTombstone(chatId: String, userId: String) async throws {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+        var tombstones = try await loadRemoteDeleteTombstones(userId: userId)
+        guard tombstones.removeValue(forKey: chatId) != nil else { return }
+        try await saveRemoteDeleteTombstones(tombstones, userId: userId)
+    }
+
+    func hasRemoteDeleteTombstone(chatId: String, userId: String) async throws -> Bool {
+        try await loadRemoteDeleteTombstones(userId: userId)[chatId] != nil
+    }
+
+    private func saveRemoteDeleteTombstones(
+        _ tombstones: [String: Bool],
+        userId: String
+    ) async throws {
+        let path = try remoteDeleteTombstonesFilePath(userId: userId)
+        if tombstones.isEmpty {
+            if fileManager.fileExists(atPath: path.path) {
+                try fileManager.removeItem(at: path)
+            }
+        } else {
+            let plaintext = try encoder.encode(tombstones)
+            let encrypted = try await encryptor.encryptData(plaintext)
+            try encoder.encode(encrypted).write(
+                to: path,
+                options: [.atomic, .completeFileProtection]
+            )
+        }
+        remoteDeleteTombstonesCache[userId] = tombstones
+    }
+
     private func saveDeleteIntents(
         _ intents: [PendingChatDelete],
         userId: String
@@ -911,6 +983,7 @@ actor EncryptedFileStorage {
         indexCache[userId] = []
         pendingChatIdsCache[userId] = []
         deleteIntentsCache[userId] = []
+        remoteDeleteTombstonesCache[userId] = [:]
         contentIntegrityCheckedUserIds.insert(userId)
         contentRepairIds[userId] = []
     }
