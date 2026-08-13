@@ -3,7 +3,7 @@ name: Create Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
@@ -15,6 +15,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Check release settings
+        run: bash scripts/check-release-settings.sh "${GITHUB_REF_NAME}"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

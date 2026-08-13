@@ -1,0 +1,31 @@
+name: Project checks
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/project-checks.yml"
+      - "scripts/check-release-settings.sh"
+      - "TinfoilChat.xcodeproj/project.pbxproj"
+      - "TinfoilChat.xcodeproj/xcshareddata/xcschemes/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/project-checks.yml"
+      - "scripts/check-release-settings.sh"
+      - "TinfoilChat.xcodeproj/project.pbxproj"
+      - "TinfoilChat.xcodeproj/xcshareddata/xcschemes/**"
+
+permissions:
+  contents: read
+
+jobs:
+  release-settings:
+    name: Release settings
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check release settings
+        run: bash scripts/check-release-settings.sh
