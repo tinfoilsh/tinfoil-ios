@@ -140,7 +140,6 @@ actor EncryptedFileStorage {
         return dir.appendingPathComponent("\(sanitizePathComponent(chatId)).sync.json")
     }
 
-    /// Whether a content file (.enc or .raw) exists for the chat.
     private func hasChatContentFile(chatId: String, userId: String) throws -> Bool {
         let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
         let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
@@ -711,7 +710,11 @@ actor EncryptedFileStorage {
             contentRepairIds[userId]?.remove(chatId)
             // Drop the sync sidecars too: a later restore of the same
             // chat id must not overlay this dead row's stale metadata.
-            try removeSyncSidecars(chatId: chatId, userId: userId)
+            if try !removeSyncSidecars(chatId: chatId, userId: userId) {
+                #if DEBUG
+                print("[EncryptedFileStorage] prune left a stale sync sidecar for chat \(chatId)")
+                #endif
+            }
             if entries.contains(where: { $0.id == chatId }) {
                 entries.removeAll { $0.id == chatId }
                 pruned += 1
@@ -834,15 +837,30 @@ actor EncryptedFileStorage {
         return true
     }
 
-    private func removeSyncSidecars(chatId: String, userId: String) throws {
+    /// Best-effort removal of the sync sidecar files. Returns false when
+    /// a sidecar exists but could not be removed, so callers for whom a
+    /// surviving sidecar matters (the prune path — stale metadata would
+    /// overlay a future restore of the same chat id) can log it.
+    @discardableResult
+    private func removeSyncSidecars(chatId: String, userId: String) throws -> Bool {
+        var removedAll = true
         let sidecarPath = try syncMetadataPath(chatId: chatId, userId: userId)
         if fileManager.fileExists(atPath: sidecarPath.path) {
-            try? fileManager.removeItem(at: sidecarPath)
+            do {
+                try fileManager.removeItem(at: sidecarPath)
+            } catch {
+                removedAll = false
+            }
         }
         let legacySidecarPath = try legacySyncMetadataPath(chatId: chatId, userId: userId)
         if fileManager.fileExists(atPath: legacySidecarPath.path) {
-            try? fileManager.removeItem(at: legacySidecarPath)
+            do {
+                try fileManager.removeItem(at: legacySidecarPath)
+            } catch {
+                removedAll = false
+            }
         }
+        return removedAll
     }
 
     private func performDeleteChat(chatId: String, userId: String) async throws {

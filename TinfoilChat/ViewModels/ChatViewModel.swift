@@ -4283,9 +4283,8 @@ class ChatViewModel: ObservableObject {
         localChats.removeAll()
         currentChat = nil
         
-        // Clear from file storage (both local and cloud stores). The
-        // fence must run before the deletion so an in-flight sync pass
-        // cannot recreate files (or persist a checkpoint) after the wipe.
+        // Clear from file storage (both local and cloud stores),
+        // fencing in-flight sync before the deletion.
         let userId = currentUserId
         await drainStreamTasks(canceledStreamTasks)
         await drainPendingSaves()
@@ -4625,8 +4624,7 @@ class ChatViewModel: ObservableObject {
     @MainActor
     func deleteNonLocalChats() async {
         // Delete all cloud chats from storage (the cloud store only has
-        // cloud chats), fencing in-flight sync first so a racing pass
-        // cannot recreate files or persist a checkpoint after the wipe.
+        // cloud chats), fencing in-flight sync before the deletion.
         if let userId = currentUserId {
             await cloudSync.handleLocalStoreWipe(forUser: userId)
             try? await EncryptedFileStorage.cloud.deleteAllChats(userId: userId)

@@ -1909,19 +1909,18 @@ class CloudSyncService: ObservableObject {
         await SyncEnclaveClient.shared.reset()
     }
 
-    /// Fence and invalidate sync state after the user's local cloud chat
-    /// store was wiped. Every wipe path must call this: a surviving
-    /// checkpoint makes the next sync take the incremental event-replay
-    /// path against an empty local store, so chats older than the
-    /// checkpoint would never be rehydrated (bootstrap never runs).
-    ///
-    /// The account generation advances BEFORE the checkpoint is cleared:
-    /// an in-flight sync pass re-checks the generation right before
-    /// every checkpoint save, so the bump guarantees it can never
-    /// rewrite the checkpoint after the wipe. Unlike clearSyncStatus
-    /// this keeps the attested client and token wiring intact — the
-    /// same account keeps syncing and the next pass bootstraps a
-    /// fresh snapshot.
+    /// Fence and invalidate sync state around a wipe of the user's local
+    /// cloud chat store. Every wipe path must call this BEFORE deleting
+    /// the store: the generation bump cancels the in-flight sync pass
+    /// (every write and checkpoint save re-checks the generation), so a
+    /// racing pass can neither recreate files after the wipe nor persist
+    /// a checkpoint that outlives it. A surviving checkpoint would make
+    /// the next sync take the incremental event-replay path against an
+    /// empty local store, so chats older than the checkpoint would never
+    /// be rehydrated (bootstrap never runs). Unlike clearSyncStatus this
+    /// keeps the attested client and token wiring intact — the same
+    /// account keeps syncing and the next pass bootstraps a fresh
+    /// snapshot.
     func handleLocalStoreWipe(forUser userId: String?) async {
         accountGeneration += 1
         isSyncing = false
