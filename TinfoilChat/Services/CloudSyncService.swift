@@ -451,7 +451,13 @@ class CloudSyncService: ObservableObject {
         }
         emptyRemoteRegistration = task
         let result = await task.value
-        emptyRemoteRegistration = nil
+        // Only clear the cache when no wipe intervened: after a
+        // generation bump the wipe already cleared it, and it may hold
+        // a newer post-wipe task that must not be clobbered (a clobber
+        // would let the next caller start a duplicate registration).
+        if generation == accountGeneration {
+            emptyRemoteRegistration = nil
+        }
         if result, generation == accountGeneration {
             // The local key just became the enclave's registered key, so
             // any surfaced key problem is stale.
@@ -1917,10 +1923,6 @@ class CloudSyncService: ObservableObject {
         // sticky upgradeRequired gate must not block the NEXT account
         // (reset() is the one designated way to lift the upgrade gate).
         SyncHealthStore.shared.reset()
-        // Drop any in-flight key registration so the next signed-in user
-        // never awaits a task started under the previous user's key.
-        emptyRemoteRegistration?.cancel()
-        emptyRemoteRegistration = nil
         await SyncEnclaveClient.shared.reset()
     }
 
@@ -1945,6 +1947,14 @@ class CloudSyncService: ObservableObject {
         pendingUploadCounts.removeAll()
         pendingUploadChatIds.removeAll()
         await uploadCoalescer.clear()
+        // Drop the memoized key registration: joining it across the
+        // generation bump would hand callers a result whose
+        // reportKeyHealthy was suppressed by the guard in
+        // registerKeyForEmptyRemote (and, on sign-out, a task started
+        // under the previous user's key). Post-wipe callers must re-run
+        // registration under the new generation and report fresh health.
+        emptyRemoteRegistration?.cancel()
+        emptyRemoteRegistration = nil
         if let userId {
             revisionCheckpointStore.clear(userId: userId)
         }
