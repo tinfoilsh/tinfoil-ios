@@ -13,6 +13,7 @@
 //
 
 import Foundation
+import OSLog
 
 actor EncryptedFileStorage {
     enum SaveError: Error {
@@ -35,10 +36,15 @@ actor EncryptedFileStorage {
     private let subdirectory: String?
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat",
+        category: "EncryptedFileStorage"
+    )
     private var indexCache: [String: [ChatIndexEntry]] = [:]
     private var pendingChatIdsCache: [String: Set<String>] = [:]
     private var deleteIntentsCache: [String: [PendingChatDelete]] = [:]
     private var remoteDeleteTombstonesCache: [String: [String: Bool]] = [:]
+    private var remoteDeleteRecoveryRequiredUserIds: Set<String> = []
     private var contentIntegrityCheckedUserIds: Set<String> = []
     private var contentRepairIds: [String: Set<String>] = [:]
 
@@ -138,6 +144,11 @@ actor EncryptedFileStorage {
     private func remoteDeleteTombstonesFilePath(userId: String) throws -> URL {
         let dir = try chatsDirectory(userId: userId)
         return dir.appendingPathComponent("remote-delete-tombstones.enc")
+    }
+
+    private func quarantinedRemoteDeleteTombstonesFilePath(userId: String) throws -> URL {
+        let dir = try chatsDirectory(userId: userId)
+        return dir.appendingPathComponent("remote-delete-tombstones.corrupt.enc")
     }
 
     private func syncMetadataPath(chatId: String, userId: String) throws -> URL {
@@ -354,7 +365,7 @@ actor EncryptedFileStorage {
         let carriesNewClock = chat.clock.map { $0 > (existing?.clock ?? 0) } == true
             && chat.writer?.isEmpty == false
         if !carriesNewClock {
-            let clock = EditClockStore.nextClock(
+            let clock = try EditClockStore.nextClock(
                 observedMax: max(existing?.clock ?? 0, chat.clock ?? 0)
             )
             prepared.clock = clock.v
@@ -382,7 +393,8 @@ actor EncryptedFileStorage {
         _ chat: Chat,
         userId: String,
         expectedLocalUpdatedAt: Date?,
-        allowLocallyModified: Bool = false
+        allowLocallyModified: Bool = false,
+        allowRemoteDeleteReplacement: Bool = false
     ) async throws -> RevisionApplyResult {
         await acquireWriteLock()
         defer { releaseWriteLock() }
@@ -398,7 +410,11 @@ actor EncryptedFileStorage {
             return decision
         }
         EditClockStore.observe(chat.clock)
-        try await performSaveChat(chat, userId: userId)
+        try await performSaveChat(
+            chat,
+            userId: userId,
+            allowRemoteDeleteReplacement: allowRemoteDeleteReplacement
+        )
         return .applied
     }
 
@@ -419,7 +435,17 @@ actor EncryptedFileStorage {
         guard let existing = entries.first(where: { $0.id == chatId }) else {
             return false
         }
+        guard let persistedClock = try await loadPersistedClockState(
+            chatId: chatId,
+            userId: userId
+        ) else {
+            return false
+        }
         let editedDuringUpload = existing.updatedAt != expectedUpdatedAt
+            || !ChatEditClockPolicy.matchesFrozenMutation(
+                current: persistedClock,
+                uploaded: uploadedClock
+            )
         if !attachmentRewrites.isEmpty
             || (!editedDuringUpload && existing.projectLocallyModified == true) {
             let encPath = try chatFilePath(
@@ -514,9 +540,38 @@ actor EncryptedFileStorage {
         return !editedDuringUpload
     }
 
-    private func performSaveChat(_ chat: Chat, userId: String) async throws {
-        guard try await !hasRemoteDeleteTombstone(chatId: chat.id, userId: userId) else {
-            throw SaveError.remotelyDeleted
+    private func loadPersistedClockState(
+        chatId: String,
+        userId: String
+    ) async throws -> ChatClockState? {
+        let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
+        let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
+        let hasEncryptedFile = fileManager.fileExists(atPath: encPath.path)
+        guard hasEncryptedFile || fileManager.fileExists(atPath: rawPath.path),
+              let chat = try await loadChatFromFile(
+                  hasEncryptedFile ? encPath : rawPath,
+                  isRaw: !hasEncryptedFile
+              ) else {
+            return nil
+        }
+        return ChatClockState(
+            clock: chat.clock,
+            writer: chat.writer,
+            clockVersion: chat.clockVersion
+        )
+    }
+
+    private func performSaveChat(
+        _ chat: Chat,
+        userId: String,
+        allowRemoteDeleteReplacement: Bool = false
+    ) async throws {
+        if !allowRemoteDeleteReplacement {
+            let isTombstoned = try await hasRemoteDeleteTombstoneUnlocked(
+                chatId: chat.id,
+                userId: userId
+            )
+            guard !isTombstoned else { throw SaveError.remotelyDeleted }
         }
         let isCorrupted = chat.decryptionFailed || chat.dataCorrupted
 
@@ -677,26 +732,47 @@ actor EncryptedFileStorage {
         try await performDeleteChat(chatId: chatId, userId: userId)
     }
 
-    func deleteCloudChatForRevision(
+    func removeChatForConfirmedRemoteDelete(
         chatId: String,
         userId: String,
         preserveNeverSynced: Bool
     ) async throws -> Bool {
         await acquireWriteLock()
         defer { releaseWriteLock() }
+        let entries = try await loadIndex(userId: userId)
+        if let entry = entries.first(where: { $0.id == chatId }),
+           entry.isLocalOnly || (preserveNeverSynced && !entry.requiresCloudDelete) {
+            return false
+        }
         var intents = try await loadDeleteIntents(userId: userId)
         if intents.contains(where: { $0.chatId == chatId }) {
             intents.removeAll { $0.chatId == chatId }
             try await saveDeleteIntents(intents, userId: userId)
         }
-        let entries = try await loadIndex(userId: userId)
-        guard let entry = entries.first(where: { $0.id == chatId }),
-              !entry.isLocalOnly,
-              !(preserveNeverSynced && !entry.requiresCloudDelete) else {
-            return false
+
+        let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
+        let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
+        for path in [encPath, rawPath] where fileManager.fileExists(atPath: path.path) {
+            try fileManager.removeItem(at: path)
         }
-        try await performDeleteChat(chatId: chatId, userId: userId)
-        return true
+        try removeSyncSidecarsStrict(chatId: chatId, userId: userId)
+
+        var updatedEntries = entries
+        updatedEntries.removeAll { $0.id == chatId }
+        if updatedEntries != entries {
+            try await saveIndex(updatedEntries, userId: userId)
+        }
+        contentRepairIds[userId]?.remove(chatId)
+
+        let contentIsAbsent = try !hasChatContentFile(chatId: chatId, userId: userId)
+        let sidecarPath = try syncMetadataPath(chatId: chatId, userId: userId)
+        let legacySidecarPath = try legacySyncMetadataPath(chatId: chatId, userId: userId)
+        return RemoteDeleteTombstonePolicy.canClearAfterLocalCleanup(
+            contentExists: !contentIsAbsent,
+            sidecarExists: fileManager.fileExists(atPath: sidecarPath.path)
+                || fileManager.fileExists(atPath: legacySidecarPath.path),
+            removalFailed: false
+        )
     }
 
     func stageCloudDelete(
@@ -735,7 +811,8 @@ actor EncryptedFileStorage {
         chatId: String,
         userId: String,
         projectId: String?,
-        syncVersion: Int
+        syncVersion: Int,
+        allowRemoteDeleteReplacement: Bool = false
     ) async throws -> RevisionApplyResult {
         await acquireWriteLock()
         defer { releaseWriteLock() }
@@ -744,7 +821,8 @@ actor EncryptedFileStorage {
         guard let entry = entries.first(where: { $0.id == chatId }), !entry.isLocalOnly else {
             return .refused
         }
-        guard !entry.locallyModified, entry.projectLocallyModified != true else {
+        guard allowRemoteDeleteReplacement
+            || (!entry.locallyModified && entry.projectLocallyModified != true) else {
             return .locallyModified
         }
         let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
@@ -765,17 +843,25 @@ actor EncryptedFileStorage {
               !currentEntry.isLocalOnly else {
             return .refused
         }
-        guard !currentEntry.locallyModified,
-              currentEntry.projectLocallyModified != true,
-              !chat.locallyModified,
-              chat.projectLocallyModified != true else {
+        guard allowRemoteDeleteReplacement
+            || (!currentEntry.locallyModified
+                && currentEntry.projectLocallyModified != true
+                && !chat.locallyModified
+                && chat.projectLocallyModified != true) else {
             return .locallyModified
         }
         chat.projectId = projectId
         chat.projectLocallyModified = false
+        if allowRemoteDeleteReplacement {
+            chat.locallyModified = false
+        }
         chat.syncVersion = syncVersion
         chat.syncedAt = chat.syncedAt ?? Date()
-        try await performSaveChat(chat, userId: userId)
+        try await performSaveChat(
+            chat,
+            userId: userId,
+            allowRemoteDeleteReplacement: allowRemoteDeleteReplacement
+        )
         return .applied
     }
 
@@ -897,16 +983,39 @@ actor EncryptedFileStorage {
     func loadRemoteDeleteTombstones(userId: String) async throws -> [String: Bool] {
         if let cached = remoteDeleteTombstonesCache[userId] { return cached }
         let path = try remoteDeleteTombstonesFilePath(userId: userId)
+        let quarantinePath = try quarantinedRemoteDeleteTombstonesFilePath(userId: userId)
         guard fileManager.fileExists(atPath: path.path) else {
+            if fileManager.fileExists(atPath: quarantinePath.path) {
+                remoteDeleteRecoveryRequiredUserIds.insert(userId)
+            }
             remoteDeleteTombstonesCache[userId] = [:]
             return [:]
         }
-        let data = try Data(contentsOf: path)
-        let encrypted = try decoder.decode(EncryptedData.self, from: data)
-        let plaintext = try await encryptor.decryptData(encrypted)
-        let tombstones = try decoder.decode([String: Bool].self, from: plaintext)
-        remoteDeleteTombstonesCache[userId] = tombstones
-        return tombstones
+        do {
+            let data = try Data(contentsOf: path)
+            let encrypted = try decoder.decode(EncryptedData.self, from: data)
+            let plaintext = try await encryptor.decryptData(encrypted)
+            let tombstones = try decoder.decode([String: Bool].self, from: plaintext)
+            if fileManager.fileExists(atPath: quarantinePath.path) {
+                remoteDeleteRecoveryRequiredUserIds.insert(userId)
+            }
+            remoteDeleteTombstonesCache[userId] = tombstones
+            return tombstones
+        } catch EncryptionError.keyNotInitialized {
+            throw EncryptionError.keyNotInitialized
+        } catch {
+            // Keep one bounded quarantine artifact and gate every cloud chat
+            // save/upload until a successful authoritative snapshot has
+            // reconciled remote rows and confirmed remote absences.
+            if fileManager.fileExists(atPath: quarantinePath.path) {
+                try fileManager.removeItem(at: quarantinePath)
+            }
+            try fileManager.moveItem(at: path, to: quarantinePath)
+            remoteDeleteRecoveryRequiredUserIds.insert(userId)
+            remoteDeleteTombstonesCache[userId] = [:]
+            logger.error("Quarantined corrupt remote-delete tombstone metadata")
+            return [:]
+        }
     }
 
     func clearRemoteDeleteTombstone(chatId: String, userId: String) async throws {
@@ -918,7 +1027,32 @@ actor EncryptedFileStorage {
     }
 
     func hasRemoteDeleteTombstone(chatId: String, userId: String) async throws -> Bool {
-        try await loadRemoteDeleteTombstones(userId: userId)[chatId] != nil
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+        return try await hasRemoteDeleteTombstoneUnlocked(chatId: chatId, userId: userId)
+    }
+
+    private func hasRemoteDeleteTombstoneUnlocked(
+        chatId: String,
+        userId: String
+    ) async throws -> Bool {
+        let tombstones = try await loadRemoteDeleteTombstones(userId: userId)
+        return remoteDeleteRecoveryRequiredUserIds.contains(userId) || tombstones[chatId] != nil
+    }
+
+    func requiresRemoteDeleteRecovery(userId: String) async throws -> Bool {
+        _ = try await loadRemoteDeleteTombstones(userId: userId)
+        return remoteDeleteRecoveryRequiredUserIds.contains(userId)
+    }
+
+    func completeRemoteDeleteRecovery(userId: String) async throws {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+        let quarantinePath = try quarantinedRemoteDeleteTombstonesFilePath(userId: userId)
+        if fileManager.fileExists(atPath: quarantinePath.path) {
+            try fileManager.removeItem(at: quarantinePath)
+        }
+        remoteDeleteRecoveryRequiredUserIds.remove(userId)
     }
 
     private func saveRemoteDeleteTombstones(
@@ -1025,6 +1159,15 @@ actor EncryptedFileStorage {
         return removedAll
     }
 
+    private func removeSyncSidecarsStrict(chatId: String, userId: String) throws {
+        let sidecarPath = try syncMetadataPath(chatId: chatId, userId: userId)
+        let legacySidecarPath = try legacySyncMetadataPath(chatId: chatId, userId: userId)
+        for path in [sidecarPath, legacySidecarPath]
+            where fileManager.fileExists(atPath: path.path) {
+            try fileManager.removeItem(at: path)
+        }
+    }
+
     private func performDeleteChat(chatId: String, userId: String) async throws {
         let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
         if fileManager.fileExists(atPath: encPath.path) {
@@ -1064,6 +1207,7 @@ actor EncryptedFileStorage {
         pendingChatIdsCache[userId] = []
         deleteIntentsCache[userId] = []
         remoteDeleteTombstonesCache[userId] = [:]
+        remoteDeleteRecoveryRequiredUserIds.remove(userId)
         contentIntegrityCheckedUserIds.insert(userId)
         contentRepairIds[userId] = []
     }

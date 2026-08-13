@@ -274,6 +274,20 @@ enum RevisionApplyResult: Equatable {
     case refused
 }
 
+enum RemoteDeleteTombstonePolicy {
+    static func canClearAfterLocalCleanup(
+        contentExists: Bool,
+        sidecarExists: Bool,
+        removalFailed: Bool
+    ) -> Bool {
+        !contentExists && !sidecarExists && !removalFailed
+    }
+
+    static func canClearAfterRemoteApply(_ result: RevisionApplyResult) -> Bool {
+        result == .applied
+    }
+}
+
 enum RevisionApplyPolicy {
     static func contentResult(
         existing: ChatIndexEntry?,

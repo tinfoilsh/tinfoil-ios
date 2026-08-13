@@ -587,6 +587,7 @@ class CloudSyncService: ObservableObject {
                 let uploadChat = stampClockVersionForUpload(
                     StoredChat(from: chat, syncVersion: chat.syncVersion)
                 )
+                try await ensureChatUploadIsAllowed(chatId: chat.id, userId: userId)
                 let result = try await cloudStorage.uploadChat(
                     uploadChat,
                     idempotencyKey: newSyncEnclaveIdempotencyKey()
@@ -1354,7 +1355,10 @@ class CloudSyncService: ObservableObject {
         guard await cloudStorage.isAuthenticated(),
               let userId = await getCurrentUserId() else { return SyncResult() }
         do {
-            try await restoreDurableRemoteDeletes(userId: userId, generation: generation)
+            let requiresTombstoneRecovery = try await restoreDurableRemoteDeletes(
+                userId: userId,
+                generation: generation
+            )
             guard generation == accountGeneration else { return SyncResult() }
             await retryDeferredRemoteDeletes(generation: generation)
             guard generation == accountGeneration else { return SyncResult() }
@@ -1371,7 +1375,7 @@ class CloudSyncService: ObservableObject {
             guard generation == accountGeneration else { return SyncResult() }
             let checkpoint = revisionCheckpointStore.load(userId: userId)
             var result: SyncResult
-            if needsContentRepair {
+            if needsContentRepair || requiresTombstoneRecovery {
                 result = try await reconcileRevisionSnapshot(
                     generation: generation,
                     userId: userId
@@ -1476,18 +1480,23 @@ class CloudSyncService: ObservableObject {
             userId: userId
         )
         let pendingDeleteIds = Set(pendingDeleteIntents.map(\.chatId))
+        let remoteDeleteIds = Set(
+            try await EncryptedFileStorage.cloud.loadRemoteDeleteTombstones(userId: userId).keys
+        )
         let pullIds = planned.compactMap { event -> String? in
             guard event.kind == .upsert else { return nil }
             guard DeleteIntentPlanner.shouldApplyRemoteUpsert(
                 chatId: event.id,
                 pendingDeleteIds: pendingDeleteIds
             ) else { return nil }
+            if remoteDeleteIds.contains(event.id) { return event.id }
             guard let entry = localById[event.id] else { return event.id }
             guard !entry.locallyModified else { return nil }
             return entry.decryptionFailed || String(entry.syncVersion) != event.etag
                 ? event.id : nil
         }
         let pulled = try await cloudStorage.downloadChats(pullIds)
+        let expectedPullIds = Set(pullIds)
         var result = SyncResult()
 
         for event in planned {
@@ -1514,12 +1523,6 @@ class CloudSyncService: ObservableObject {
                     chatId: event.id,
                     pendingDeleteIds: pendingDeleteIds
                 ) else { continue }
-                try await EncryptedFileStorage.cloud.clearRemoteDeleteTombstone(
-                    chatId: event.id,
-                    userId: userId
-                )
-                deferredRemoteDeletes.removeValue(forKey: event.id)
-                deletedChatsTracker.removeFromDeleted(event.id)
                 if let remote = pulled[event.id] {
                     var chat = remote
                     chat.projectId = event.projectId
@@ -1531,12 +1534,18 @@ class CloudSyncService: ObservableObject {
                         chat,
                         generation: generation,
                         userId: userId,
-                        expectedLocalUpdatedAt: localById[event.id]?.updatedAt
+                        expectedLocalUpdatedAt: localById[event.id]?.updatedAt,
+                        allowLocallyModified: remoteDeleteIds.contains(event.id),
+                        allowRemoteDeleteReplacement: remoteDeleteIds.contains(event.id)
                     )
                     if applyResult == .locallyModified { continue }
-                    guard applyResult == .applied else {
+                    guard RemoteDeleteTombstonePolicy.canClearAfterRemoteApply(applyResult) else {
                         throw RevisionSyncError.incompletePull
                     }
+                    try await completeAuthoritativeRemoteUpsert(
+                        chatId: event.id,
+                        userId: userId
+                    )
                     result = SyncResult(
                         downloaded: result.downloaded + 1,
                         deleted: result.deleted
@@ -1554,59 +1563,53 @@ class CloudSyncService: ObservableObject {
                         chatId: event.id,
                         userId: userId,
                         projectId: event.projectId,
-                        syncVersion: syncVersion
+                        syncVersion: syncVersion,
+                        allowRemoteDeleteReplacement: remoteDeleteIds.contains(event.id)
                     )
                     if applyResult == .locallyModified { continue }
-                    guard applyResult == .applied else {
+                    guard RemoteDeleteTombstonePolicy.canClearAfterRemoteApply(applyResult) else {
                         throw RevisionSyncError.incompletePull
                     }
+                    try await completeAuthoritativeRemoteUpsert(
+                        chatId: event.id,
+                        userId: userId
+                    )
+                } else if expectedPullIds.contains(event.id) {
+                    throw RevisionSyncError.incompletePull
                 }
             }
         }
         return result
     }
 
-    /// Apply a remote deletion locally, unless the chat is actively
-    /// streaming — deleting the files mid-stream would race the stream's
-    /// throttled saves, which recreate the chat with a stale sync
-    /// version that later uploads as a zombie against a tombstoned row.
-    /// Mirrors the upload path's deferral: tombstone immediately (so a
-    /// racing upload can't resurrect the row) and remove the local files
-    /// once the stream ends. Returns true when the chat was removed now.
+    /// Establish delete-wins before any local removal. Active streams defer
+    /// cleanup to stream end; every other delete removes and verifies all
+    /// local artifacts immediately. Returns true only after verified absence.
     private func applyRemoteChatDelete(
         chatId: String,
         userId: String,
         generation: Int,
         preserveNeverSynced: Bool
     ) async throws -> Bool {
-        guard streamingTracker.isStreaming(chatId) else {
-            let removed = try await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
-                chatId: chatId,
-                userId: userId,
-                preserveNeverSynced: preserveNeverSynced
-            )
-            if removed {
-                deletedChatsTracker.markAsDeleted(chatId)
-            }
-            return removed
-        }
-
         try await EncryptedFileStorage.cloud.persistRemoteDeleteTombstone(
             chatId: chatId,
             userId: userId,
             preserveNeverSynced: preserveNeverSynced
         )
+        guard generation == accountGeneration else { throw CancellationError() }
         deletedChatsTracker.markAsDeleted(chatId)
-        deferRemoteChatDelete(
-            chatId: chatId,
-            deferral: DeferredRemoteDelete(
-                userId: userId,
-                generation: generation,
-                preserveNeverSynced: preserveNeverSynced,
-                callbackRegistered: false
-            )
+        let pending = DeferredRemoteDelete(
+            userId: userId,
+            generation: generation,
+            preserveNeverSynced: preserveNeverSynced,
+            callbackRegistered: false
         )
-        return false
+        deferredRemoteDeletes[chatId] = pending
+        guard !streamingTracker.isStreaming(chatId) else {
+            deferRemoteChatDelete(chatId: chatId, deferral: pending)
+            return false
+        }
+        return try await finishRemoteChatDelete(chatId: chatId, pending: pending)
     }
 
     /// Register (or refresh) the stream-end callback for a deferred
@@ -1649,16 +1652,10 @@ class CloudSyncService: ObservableObject {
                     return
                 }
                 do {
-                    _ = try await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
+                    _ = try await self.finishRemoteChatDelete(
                         chatId: chatId,
-                        userId: pending.userId,
-                        preserveNeverSynced: pending.preserveNeverSynced
+                        pending: pending
                     )
-                    try await EncryptedFileStorage.cloud.clearRemoteDeleteTombstone(
-                        chatId: chatId,
-                        userId: pending.userId
-                    )
-                    self.deferredRemoteDeletes.removeValue(forKey: chatId)
                 } catch {
                     // Keep the entry; retryDeferredRemoteDeletes picks it
                     // up on the next sync cycle. The delete event will not
@@ -1692,24 +1689,36 @@ class CloudSyncService: ObservableObject {
                 continue
             }
             do {
-                _ = try await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
-                    chatId: chatId,
-                    userId: pending.userId,
-                    preserveNeverSynced: pending.preserveNeverSynced
-                )
-                guard generation == accountGeneration else { return }
-                try await EncryptedFileStorage.cloud.clearRemoteDeleteTombstone(
-                    chatId: chatId,
-                    userId: pending.userId
-                )
-                deferredRemoteDeletes.removeValue(forKey: chatId)
+                _ = try await finishRemoteChatDelete(chatId: chatId, pending: pending)
             } catch {
                 // Still failing; keep the entry for the next cycle.
             }
         }
     }
 
-    private func restoreDurableRemoteDeletes(userId: String, generation: Int) async throws {
+    private func finishRemoteChatDelete(
+        chatId: String,
+        pending: DeferredRemoteDelete
+    ) async throws -> Bool {
+        let confirmedAbsent = try await EncryptedFileStorage.cloud.removeChatForConfirmedRemoteDelete(
+            chatId: chatId,
+            userId: pending.userId,
+            preserveNeverSynced: pending.preserveNeverSynced
+        )
+        guard confirmedAbsent else { return false }
+        guard pending.generation == accountGeneration else { throw CancellationError() }
+        try await EncryptedFileStorage.cloud.clearRemoteDeleteTombstone(
+            chatId: chatId,
+            userId: pending.userId
+        )
+        deferredRemoteDeletes.removeValue(forKey: chatId)
+        return true
+    }
+
+    private func restoreDurableRemoteDeletes(
+        userId: String,
+        generation: Int
+    ) async throws -> Bool {
         let tombstones = try await EncryptedFileStorage.cloud.loadRemoteDeleteTombstones(
             userId: userId
         )
@@ -1728,6 +1737,7 @@ class CloudSyncService: ObservableObject {
                 deferredRemoteDeletes[chatId] = pending
             }
         }
+        return try await EncryptedFileStorage.cloud.requiresRemoteDeleteRecovery(userId: userId)
     }
 
     private func reconcileRevisionSnapshot(
@@ -1772,9 +1782,11 @@ class CloudSyncService: ObservableObject {
             userId: userId
         )
         let pendingDeleteIds = Set(snapshotDeleteIntents.map(\.chatId))
-        for id in remoteIds where !pendingDeleteIds.contains(id) {
-            deletedChatsTracker.removeFromDeleted(id)
-        }
+        let remoteDeleteIds = Set(
+            try await EncryptedFileStorage.cloud.loadRemoteDeleteTombstones(userId: userId).keys
+        )
+        let requiresTombstoneRecovery = try await EncryptedFileStorage.cloud
+            .requiresRemoteDeleteRecovery(userId: userId)
         for intent in DeleteIntentPlanner.confirmedAbsent(
             snapshotDeleteIntents,
             remoteIds: remoteIds
@@ -1820,7 +1832,7 @@ class CloudSyncService: ObservableObject {
                 userId: userId
             )
         }
-        let changed = SnapshotReconciliation.contentItems(
+        let plannedChanged = SnapshotReconciliation.contentItems(
             local: local,
             remote: items.filter {
                 DeleteIntentPlanner.shouldApplyRemoteUpsert(
@@ -1831,12 +1843,23 @@ class CloudSyncService: ObservableObject {
             recentLimit: Constants.Pagination.chatsPerPage,
             missingContentIds: missingContentIds
         )
+        var changedById = Dictionary(
+            plannedChanged.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for item in items where !pendingDeleteIds.contains(item.id)
+            && (remoteDeleteIds.contains(item.id) || requiresTombstoneRecovery) {
+            changedById[item.id] = item
+        }
+        let changed = items.compactMap { changedById[$0.id] }
         var metadataOnly: [EnclaveRevisionSnapshotItem] = []
         let pullItems = changed.filter { item in
             guard let entry = localById[item.id] else { return true }
             if String(entry.syncVersion) == item.etag
                 && !entry.decryptionFailed
-                && !missingContentIds.contains(item.id) {
+                && !missingContentIds.contains(item.id)
+                && !remoteDeleteIds.contains(item.id)
+                && !requiresTombstoneRecovery {
                 metadataOnly.append(item)
                 return false
             }
@@ -1862,11 +1885,16 @@ class CloudSyncService: ObservableObject {
                 userId: userId,
                 expectedLocalUpdatedAt: localById[item.id]?.updatedAt,
                 allowLocallyModified: missingContentIds.contains(item.id)
+                    || remoteDeleteIds.contains(item.id)
+                    || requiresTombstoneRecovery,
+                allowRemoteDeleteReplacement: remoteDeleteIds.contains(item.id)
+                    || requiresTombstoneRecovery
             )
             if applyResult == .locallyModified { continue }
-            guard applyResult == .applied else {
+            guard RemoteDeleteTombstonePolicy.canClearAfterRemoteApply(applyResult) else {
                 throw RevisionSyncError.incompletePull
             }
+            try await completeAuthoritativeRemoteUpsert(chatId: item.id, userId: userId)
             downloaded += 1
         }
         for item in metadataOnly {
@@ -1877,12 +1905,15 @@ class CloudSyncService: ObservableObject {
                 chatId: item.id,
                 userId: userId,
                 projectId: item.projectId,
-                syncVersion: syncVersion
+                syncVersion: syncVersion,
+                allowRemoteDeleteReplacement: remoteDeleteIds.contains(item.id)
+                    || requiresTombstoneRecovery
             )
             if applyResult == .locallyModified { continue }
-            guard applyResult == .applied else {
+            guard RemoteDeleteTombstonePolicy.canClearAfterRemoteApply(applyResult) else {
                 throw RevisionSyncError.incompletePull
             }
+            try await completeAuthoritativeRemoteUpsert(chatId: item.id, userId: userId)
         }
         guard generation == accountGeneration else { throw CancellationError() }
         guard try await EncryptedFileStorage.cloud.completeContentRepairIfResolved(
@@ -1893,6 +1924,9 @@ class CloudSyncService: ObservableObject {
         }
         guard generation == accountGeneration else { throw CancellationError() }
         revisionCheckpointStore.save(snapshotRevision, userId: userId)
+        if requiresTombstoneRecovery {
+            try await EncryptedFileStorage.cloud.completeRemoteDeleteRecovery(userId: userId)
+        }
         return SyncResult(downloaded: downloaded, deleted: deleted)
     }
 
@@ -1943,7 +1977,7 @@ class CloudSyncService: ObservableObject {
                   await getCurrentUserId() == userId else {
                 throw CancellationError()
             }
-            _ = try await EncryptedFileStorage.cloud.deleteCloudChatForRevision(
+            _ = try await EncryptedFileStorage.cloud.removeChatForConfirmedRemoteDelete(
                 chatId: intent.chatId,
                 userId: userId,
                 preserveNeverSynced: false
@@ -2111,14 +2145,16 @@ class CloudSyncService: ObservableObject {
         generation: Int,
         userId: String,
         expectedLocalUpdatedAt: Date?,
-        allowLocallyModified: Bool = false
+        allowLocallyModified: Bool = false,
+        allowRemoteDeleteReplacement: Bool = false
     ) async -> Bool {
         await applyRemoteChatToStorageResult(
             storedChat,
             generation: generation,
             userId: userId,
             expectedLocalUpdatedAt: expectedLocalUpdatedAt,
-            allowLocallyModified: allowLocallyModified
+            allowLocallyModified: allowLocallyModified,
+            allowRemoteDeleteReplacement: allowRemoteDeleteReplacement
         ) == .applied
     }
 
@@ -2127,7 +2163,8 @@ class CloudSyncService: ObservableObject {
         generation: Int,
         userId: String,
         expectedLocalUpdatedAt: Date?,
-        allowLocallyModified: Bool = false
+        allowLocallyModified: Bool = false,
+        allowRemoteDeleteReplacement: Bool = false
     ) async -> RevisionApplyResult {
         guard generation == accountGeneration else { return .refused }
         guard let chat = await convertStoredChat(storedChat) else { return .refused }
@@ -2136,8 +2173,18 @@ class CloudSyncService: ObservableObject {
             chat,
             userId: userId,
             expectedLocalUpdatedAt: expectedLocalUpdatedAt,
-            allowLocallyModified: allowLocallyModified
+            allowLocallyModified: allowLocallyModified,
+            allowRemoteDeleteReplacement: allowRemoteDeleteReplacement
         )) ?? .refused
+    }
+
+    private func completeAuthoritativeRemoteUpsert(chatId: String, userId: String) async throws {
+        try await EncryptedFileStorage.cloud.clearRemoteDeleteTombstone(
+            chatId: chatId,
+            userId: userId
+        )
+        deferredRemoteDeletes.removeValue(forKey: chatId)
+        deletedChatsTracker.removeFromDeleted(chatId)
     }
 
     private func uploadAndMarkSynced(_ upload: PreparedChatUpload) async throws {
@@ -2163,9 +2210,7 @@ class CloudSyncService: ObservableObject {
         guard await isCurrentUploadAccount(account) else {
             throw CancellationError()
         }
-        guard !deletedChatsTracker.isDeleted(chat.id) else {
-            throw CancellationError()
-        }
+        try await ensureChatUploadIsAllowed(chatId: chat.id, userId: account.userId)
         let result = try await cloudStorage.uploadChat(
             chat,
             idempotencyKey: idempotencyKey
@@ -2215,6 +2260,15 @@ class CloudSyncService: ObservableObject {
             writer: chat.writer,
             clockVersion: chat.clockVersion
         )
+    }
+
+    private func ensureChatUploadIsAllowed(chatId: String, userId: String) async throws {
+        guard !deletedChatsTracker.isDeleted(chatId) else { throw CancellationError() }
+        let isRemoteDeleted = try await EncryptedFileStorage.cloud.hasRemoteDeleteTombstone(
+            chatId: chatId,
+            userId: userId
+        )
+        guard !isRemoteDeleted else { throw CancellationError() }
     }
 
     private func isCurrentUploadAccount(_ account: UploadAccount) async -> Bool {

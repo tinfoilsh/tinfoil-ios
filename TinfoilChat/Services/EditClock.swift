@@ -25,6 +25,13 @@ struct ChatClockState: Equatable {
 }
 
 enum ChatEditClockPolicy {
+    static func matchesFrozenMutation(
+        current: ChatClockState,
+        uploaded: ChatClockState
+    ) -> Bool {
+        current.clock == uploaded.clock && current.writer == uploaded.writer
+    }
+
     static func uploadState(
         clock: Int?,
         writer: String?,
@@ -63,6 +70,10 @@ enum ChatEditClockPolicy {
 /// Persisted Lamport counter and stable device id backing the edit
 /// clock. The device id is only a tiebreak label, never a secret.
 enum EditClockStore {
+    enum ClockError: Error {
+        case counterExhausted
+    }
+
     private static let deviceIdKey = "tinfoil-sync-device-id"
     private static let counterKey = "tinfoil-sync-edit-clock"
 
@@ -110,13 +121,18 @@ enum EditClockStore {
         }
     }
 
+    static func incrementedCounter(after base: Int) throws -> Int {
+        guard base < maxCounter else { throw ClockError.counterExhausted }
+        return base + 1
+    }
+
     /// Produce the next clock for a local edit, advancing past
     /// `observedMax` (e.g. the unit's current clock) so a re-edit of an
-    /// already-high unit still moves forward. The base is clamped to the
-    /// ceiling so the increment can never overflow Int and trap.
-    static func nextClock(observedMax: Int? = nil) -> EditClock {
+    /// already-high unit still moves forward. Exhaustion refuses the edit
+    /// rather than reusing a tuple that would not be a monotonic tick.
+    static func nextClock(observedMax: Int? = nil) throws -> EditClock {
         let base = min(max(loadCounter(), observedMax ?? 0), maxCounter)
-        let next = min(base + 1, maxCounter)
+        let next = try incrementedCounter(after: base)
         persistCounter(next)
         return EditClock(v: next, w: deviceId())
     }

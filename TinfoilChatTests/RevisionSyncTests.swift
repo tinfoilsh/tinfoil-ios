@@ -558,6 +558,42 @@ struct RevisionSyncTests {
             authoritativeSyncVersion: 4,
             editedDuringUpload: true
         ) == ChatClockState(clock: 8, writer: "device-a", clockVersion: 5))
+        #expect(!ChatEditClockPolicy.matchesFrozenMutation(
+            current: newer,
+            uploaded: uploaded
+        ))
+    }
+
+    @Test func remoteDeleteTombstoneClearsOnlyAfterAuthoritativeCompletion() {
+        #expect(!RemoteDeleteTombstonePolicy.canClearAfterLocalCleanup(
+            contentExists: true,
+            sidecarExists: false,
+            removalFailed: false
+        ))
+        #expect(!RemoteDeleteTombstonePolicy.canClearAfterLocalCleanup(
+            contentExists: false,
+            sidecarExists: true,
+            removalFailed: false
+        ))
+        #expect(!RemoteDeleteTombstonePolicy.canClearAfterLocalCleanup(
+            contentExists: false,
+            sidecarExists: false,
+            removalFailed: true
+        ))
+        #expect(RemoteDeleteTombstonePolicy.canClearAfterLocalCleanup(
+            contentExists: false,
+            sidecarExists: false,
+            removalFailed: false
+        ))
+        #expect(!RemoteDeleteTombstonePolicy.canClearAfterRemoteApply(.refused))
+        #expect(!RemoteDeleteTombstonePolicy.canClearAfterRemoteApply(.locallyModified))
+        #expect(RemoteDeleteTombstonePolicy.canClearAfterRemoteApply(.applied))
+    }
+
+    @Test func editClockRefusesCounterExhaustion() {
+        #expect(throws: EditClockStore.ClockError.self) {
+            _ = try EditClockStore.incrementedCounter(after: EditClockStore.maxCounter)
+        }
     }
 
     @MainActor

@@ -140,13 +140,18 @@ actor ChatRecoverySync {
                 var candidate = preferredBase(local: local, remote: remoteChat)
                 try apply(mutation, to: &candidate, authoritativeRemote: remoteChat)
                 candidate.syncVersion = remote.syncVersion
-                stampEdit(&candidate, observedRemote: remoteChat)
+                try stampEdit(&candidate, observedRemote: remoteChat)
                 candidate.locallyModified = true
 
                 guard await Clerk.shared.user?.id == userId else {
                     throw ChatRecoverySyncError.chatMissing
                 }
                 try Task.checkCancellation()
+                let isRemoteDeleted = try await EncryptedFileStorage.cloud.hasRemoteDeleteTombstone(
+                    chatId: chatId,
+                    userId: userId
+                )
+                guard !isRemoteDeleted else { throw CancellationError() }
                 let result = try await CloudStorageService.shared.uploadChat(
                     StoredChat(from: candidate, syncVersion: remote.syncVersion),
                     idempotencyKey: UUID().uuidString.lowercased()
@@ -202,7 +207,7 @@ actor ChatRecoverySync {
             var candidate = try mutateValidCloudRecoveryChat(local) {
                 try apply(mutation, to: &$0, authoritativeRemote: local)
             }
-            stampEdit(&candidate, observedRemote: local)
+            try stampEdit(&candidate, observedRemote: local)
             candidate.locallyModified = true
             guard await Clerk.shared.user?.id == userId else {
                 throw ChatRecoverySyncError.chatMissing
@@ -466,10 +471,10 @@ actor ChatRecoverySync {
         chat.pendingRecoveries = pending.isEmpty ? nil : pending
     }
 
-    private func stampEdit(_ chat: inout Chat, observedRemote: Chat) {
+    private func stampEdit(_ chat: inout Chat, observedRemote: Chat) throws {
         EditClockStore.observe(chat.clock)
         EditClockStore.observe(observedRemote.clock)
-        let clock = EditClockStore.nextClock(
+        let clock = try EditClockStore.nextClock(
             observedMax: max(chat.clock ?? 0, observedRemote.clock ?? 0)
         )
         chat.clock = clock.v
@@ -504,7 +509,11 @@ actor ChatRecoverySync {
                     return
                 }
                 local.syncVersion = uploaded.syncVersion
-                stampEdit(&local, observedRemote: uploaded)
+                do {
+                    try stampEdit(&local, observedRemote: uploaded)
+                } catch {
+                    return
+                }
                 local.locallyModified = true
                 candidate = local
             } else {

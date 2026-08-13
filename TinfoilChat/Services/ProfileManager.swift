@@ -555,7 +555,7 @@ class ProfileManager: ObservableObject {
         isSyncing = isPulling || isPushing
     }
 
-    private func prepareLocalProfileForSync() -> ProfileData {
+    private func prepareLocalProfileForSync() throws -> ProfileData {
         var profile = createProfileData()
         let changedFields = ProfileMerge.changedProfileFields(
             local: profile,
@@ -566,7 +566,7 @@ class ProfileManager: ObservableObject {
             clocks[$0] == lastSyncedProfile?.fieldClocks?[$0]
         }
         if !unstampedFields.isEmpty {
-            let tick = EditClockStore.nextClock()
+            let tick = try EditClockStore.nextClock()
             for field in unstampedFields {
                 clocks[field] = tick
             }
@@ -609,9 +609,12 @@ class ProfileManager: ObservableObject {
             if let cloudProfile = try await profileSync.fetchProfile() {
                 guard generation == accountGeneration else { return false }
                 let cloudVersion = cloudProfile.version ?? 0
-                let localProfile = hasPendingLocalProfileChanges
-                    ? prepareLocalProfileForSync()
-                    : createProfileData()
+                let localProfile: ProfileData
+                if hasPendingLocalProfileChanges {
+                    localProfile = try prepareLocalProfileForSync()
+                } else {
+                    localProfile = createProfileData()
+                }
 
                 if let baseline = lastSyncedProfile {
                     let merge = ProfileMerge.mergeProfiles(
@@ -678,7 +681,13 @@ class ProfileManager: ObservableObject {
         }
 
         guard generation == accountGeneration else { return }
-        var profile = prepareLocalProfileForSync()
+        var profile: ProfileData
+        do {
+            profile = try prepareLocalProfileForSync()
+        } catch {
+            syncError = error.localizedDescription
+            return
+        }
 
         // Only push if there is a real change vs last synced baseline.
         // When nothing diverges, clear the pending flag so a phantom
