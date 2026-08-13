@@ -267,7 +267,7 @@ enum Constants {
         /// Fraction of the model's context window usable by conversation
         /// history. The remainder is headroom for the system prompt and the
         /// model's response. Mirrors the webapp's CONTEXT_WINDOW_USAGE_RATIO.
-        static let contextWindowUsageRatio: Double = 0.9
+        static let contextWindowUsageRatio: Double = 0.8
         /// Fallback context window size when a model doesn't report one.
         static let defaultContextWindowTokens = 64_000
         /// Smallest plausible model context window accepted from remote config.
