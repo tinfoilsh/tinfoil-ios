@@ -51,9 +51,7 @@ struct ContentView: View {
 
             // Initialize encryption with existing key only (no auto-creation)
             Task {
-                if EncryptionService.shared.hasEncryptionKey() {
-                    _ = try? await EncryptionService.shared.initialize()
-                }
+                await chatViewModel.initializeExistingEncryptionKeyIfAvailable()
 
                 await MainActor.run {
                     chatViewModel.updateModelBasedOnAuthStatus(
@@ -79,10 +77,10 @@ struct ContentView: View {
         .sheet(isPresented: $passkeyManager.showPasskeyRecoveryChoice) {
             PasskeyRecoveryChoiceView(
                 onTryAgain: {
-                    await passkeyManager.retryPasskeyRecovery()
+                    await chatViewModel.retryPasskeyRecovery()
                 },
                 onStartFresh: {
-                    await passkeyManager.startFreshWithNewKey()
+                    await chatViewModel.startFreshWithNewKey()
                 },
                 onSkip: {
                     passkeyManager.dismissRecoveryChoice()

@@ -277,6 +277,7 @@ class AuthManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: userDataKey)
         UserDefaults.standard.removeObject(forKey: subscriptionKey)
 
+        chatViewModel?.completeAccountTeardown()
     }
     
     func signOut() async {
@@ -284,11 +285,9 @@ class AuthManager: ObservableObject {
             // If we have a Clerk instance, use it, otherwise fall back to Clerk.shared
             let clerk = self.clerk ?? Clerk.shared
             try await clerk.auth.signOut()
-            
-            await clearAuthState()
-            
         } catch {
         }
+        await clearAuthState()
     }
     
     /// Fetches subscription status directly from the API

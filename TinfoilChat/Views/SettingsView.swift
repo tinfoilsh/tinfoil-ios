@@ -356,10 +356,13 @@ struct SettingsView: View {
     /// Shared destructive cleanup used by both "Delete Everything" and "Delete Account".
     private func performFullDataCleanup() async {
         await ProfileManager.shared.clearLocalProfileForAccountRemoval()
-        await chatViewModel.clearAllChatsFromDevice(resumeRecoveryScans: false)
+        await chatViewModel.clearAllChatsFromDevice(
+            resumeRecoveryScans: false,
+            reopenAccountOperations: false
+        )
+        await PasskeyManager.shared.reset()
         EncryptionService.shared.clearKey()
         await DeviceEncryptionService.shared.clearKey()
-        chatViewModel.resumeRecoveryScans()
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.hasLaunchedBefore)
         settings.clearAllSettings()
     }
