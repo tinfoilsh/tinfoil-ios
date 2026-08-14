@@ -73,6 +73,9 @@ actor UploadCoalescer {
     private struct ThrowingWaiter {
         let id: UUID
         let continuation: CheckedContinuation<Bool, Error>
+        let targetRevision: Int
+        var uploaded = false
+        var terminalError: Error?
     }
 
     private struct ChatUploadState {
@@ -81,6 +84,7 @@ actor UploadCoalescer {
         var queued: Bool = false
         var workerRunning: Bool = false
         var failureCount: Int = 0
+        var enqueuedRevision = 0
         var waiters: [CheckedContinuation<Void, Never>] = []
         var throwingWaiters: [ThrowingWaiter] = []
     }
@@ -112,6 +116,9 @@ actor UploadCoalescer {
 
     func enqueue(_ chatId: String, allowWhileStreaming: Bool = false) {
         var state = states[chatId] ?? ChatUploadState()
+        if !state.dirty {
+            state.enqueuedRevision += 1
+        }
         state.dirty = true
         state.allowWhileStreaming = state.allowWhileStreaming || allowWhileStreaming
         if !state.workerRunning && !state.queued {
@@ -156,7 +163,11 @@ actor UploadCoalescer {
                         continuation.resume(throwing: CancellationError())
                     } else {
                         states[chatId]?.throwingWaiters.append(
-                            ThrowingWaiter(id: waiterId, continuation: continuation)
+                            ThrowingWaiter(
+                                id: waiterId,
+                                continuation: continuation,
+                                targetRevision: state.enqueuedRevision
+                            )
                         )
                     }
                 }
@@ -205,11 +216,9 @@ actor UploadCoalescer {
     }
 
     private func runWorker(_ chatId: String, generation workerGeneration: Int) async {
-        var terminalError: Error?
-        var uploaded = false
-
         while states[chatId]?.dirty == true && workerGeneration == generation {
             states[chatId]?.dirty = false
+            let revision = states[chatId]?.enqueuedRevision ?? 0
             let allowWhileStreaming = states[chatId]?.allowWhileStreaming ?? false
             states[chatId]?.allowWhileStreaming = false
 
@@ -225,29 +234,45 @@ actor UploadCoalescer {
                 allowWhileStreaming: allowWhileStreaming,
                 generation: workerGeneration
             )
-            switch iterationOutcome {
-            case .noWork:
-                break
-            case .uploaded:
-                terminalError = nil
-                uploaded = true
-            case .failed(let iterationError):
-                terminalError = iterationError
-            }
+            record(
+                iterationOutcome,
+                for: chatId,
+                through: revision,
+                generation: workerGeneration
+            )
         }
         finishWorker(
             chatId,
-            generation: workerGeneration,
-            uploaded: uploaded,
-            terminalError: terminalError
+            generation: workerGeneration
         )
+    }
+
+    private func record(
+        _ outcome: UploadIterationOutcome,
+        for chatId: String,
+        through revision: Int,
+        generation workerGeneration: Int
+    ) {
+        guard workerGeneration == generation else { return }
+        guard var state = states[chatId] else { return }
+        for index in state.throwingWaiters.indices
+        where state.throwingWaiters[index].targetRevision <= revision {
+            switch outcome {
+            case .noWork:
+                break
+            case .uploaded:
+                state.throwingWaiters[index].uploaded = true
+                state.throwingWaiters[index].terminalError = nil
+            case .failed(let error):
+                state.throwingWaiters[index].terminalError = error
+            }
+        }
+        states[chatId] = state
     }
 
     private func finishWorker(
         _ chatId: String,
-        generation workerGeneration: Int,
-        uploaded: Bool,
-        terminalError: Error?
+        generation workerGeneration: Int
     ) {
         guard workerGeneration == generation,
               states[chatId]?.workerRunning == true else { return }
@@ -260,10 +285,10 @@ actor UploadCoalescer {
 
         let throwingWaiters = states[chatId]?.throwingWaiters ?? []
         for waiter in throwingWaiters {
-            if let terminalError {
+            if let terminalError = waiter.terminalError {
                 waiter.continuation.resume(throwing: terminalError)
             } else {
-                waiter.continuation.resume(returning: uploaded)
+                waiter.continuation.resume(returning: waiter.uploaded)
             }
         }
 
@@ -383,7 +408,11 @@ enum PendingChatBackupBatch {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            return PendingChatBackupBatchResult(uploaded: 0, errors: [], failedChatIds: [])
+            return PendingChatBackupBatchResult(
+                uploaded: 0,
+                errors: ["Failed to load pending chats: \(error.localizedDescription)"],
+                failedChatIds: []
+            )
         }
 
         var uploaded = 0
