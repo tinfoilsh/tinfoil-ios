@@ -665,7 +665,15 @@ class CloudSyncService: ObservableObject {
     private func trustedChatClock(_ chat: Chat) -> EditClock? {
         guard let clock = chat.clock,
               let writer = chat.writer,
-              chat.clockVersion == chat.syncVersion + (chat.locallyModified ? 1 : 0)
+              ChatEditClockPolicy.isTrusted(
+                  ChatClockState(
+                      clock: clock,
+                      writer: writer,
+                      clockVersion: chat.clockVersion
+                  ),
+                  syncVersion: chat.syncVersion,
+                  locallyModified: chat.locallyModified
+              )
         else {
             return nil
         }
