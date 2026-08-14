@@ -2001,8 +2001,10 @@ class ChatViewModel: ObservableObject {
     /// Selects a chat as the current chat
     @discardableResult
     func selectChat(id: String, isLocalOnly: Bool) -> Bool {
-        let source = isLocalOnly ? localChats : chats
-        guard let chat = source.first(where: { $0.id == id }) else { return false }
+        let preferredSource = isLocalOnly ? localChats : chats
+        let fallbackSource = isLocalOnly ? chats : localChats
+        guard let chat = preferredSource.first(where: { $0.id == id })
+            ?? fallbackSource.first(where: { $0.id == id }) else { return false }
         selectChat(chat)
         return true
     }
