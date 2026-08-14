@@ -3131,6 +3131,12 @@ class ChatViewModel: ObservableObject {
                             if parsed.events.isEmpty {
                                 outcome = processor.process(parsed)
                             } else {
+                                trailingFlushTask?.cancel()
+                                if let trailingFlushTask {
+                                    await trailingFlushTask.value
+                                }
+                                trailingFlushTask = nil
+                                snapshotPublisher.cancelTrailing()
                                 // Keep every processor mutation for an event-bearing
                                 // chunk in one transaction so a trailing snapshot
                                 // cannot observe partially-applied search state.
@@ -3187,7 +3193,6 @@ class ChatViewModel: ObservableObject {
                                     trailingFlushTask = nil
                                 }
                                 if let materializedSnapshot = publication.materializedSnapshot {
-                                    let thoughtsForSummary = pendingSummaryThoughts.take()
                                     let viewModel = self
                                     let applied = await MainActor.run {
                                         guard let self = viewModel else { return false }
@@ -3198,6 +3203,7 @@ class ChatViewModel: ObservableObject {
                                             materializedSnapshot.snapshot,
                                             streamChatId: streamChatId
                                         )
+                                        let thoughtsForSummary = applied ? pendingSummaryThoughts.take() : nil
                                         if applied, let thoughtsForSummary {
                                             summaryService.generateSummary(thoughts: thoughtsForSummary) { [weak self] summary in
                                                 guard self?.streamState.isStreaming(chatId: streamChatId) == true else { return }
@@ -3223,7 +3229,6 @@ class ChatViewModel: ObservableObject {
                                               let materializedSnapshot = snapshotPublisher.publishTrailing(scheduledFor: flushTime) else {
                                             return
                                         }
-                                        let thoughtsForSummary = pendingSummaryThoughts.take()
                                         let applied = await MainActor.run {
                                             guard let self = viewModel else { return false }
                                             guard snapshotPublicationFence.accept(materializedSnapshot.id) else {
@@ -3233,6 +3238,7 @@ class ChatViewModel: ObservableObject {
                                                 materializedSnapshot.snapshot,
                                                 streamChatId: streamChatId
                                             )
+                                            let thoughtsForSummary = applied ? pendingSummaryThoughts.take() : nil
                                             if applied, let thoughtsForSummary {
                                                 summaryService.generateSummary(thoughts: thoughtsForSummary) { [weak self] summary in
                                                     guard self?.streamState.isStreaming(chatId: streamChatId) == true else { return }
