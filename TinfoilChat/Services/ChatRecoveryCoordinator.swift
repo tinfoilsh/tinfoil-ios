@@ -1285,57 +1285,84 @@ actor ChatRecoveryCoordinator {
         let snapshotPublicationFence = SnapshotPublicationFence()
         var eventState = RecoveredEventState()
         var lastProgressDraft: Message?
-        for try await chunk in stream {
-            let parsed = processor.parse(chunk)
-            let outcome = processor.withProcessor { underlyingProcessor in
-                for event in parsed.events {
-                    eventState.apply(event, processor: underlyingProcessor)
+        do {
+            for try await chunk in stream {
+                let parsed = processor.parse(chunk)
+                let outcome = processor.withProcessor { underlyingProcessor in
+                    for event in parsed.events {
+                        eventState.apply(event, processor: underlyingProcessor)
+                    }
+                    return underlyingProcessor.process(parsed)
                 }
-                return underlyingProcessor.process(parsed)
-            }
-            if outcome.didMutateState || !parsed.events.isEmpty {
-                snapshotPublisher.markDirty()
-                let publication = snapshotPublisher.acceptUpdate(
-                    at: Date(),
-                    scheduleTrailing: false
-                )
-                if let materializedSnapshot = publication.materializedSnapshot,
-                   snapshotPublicationFence.accept(materializedSnapshot.id) {
-                    try ensureRecoveryIsCurrent(
-                        chatId: chatId,
-                        turnId: turnId,
-                        userId: userId,
-                        accountGeneration: accountGeneration,
-                        scanGeneration: scanGeneration,
-                        storage: storage
+                if outcome.didMutateState || !parsed.events.isEmpty {
+                    snapshotPublisher.markDirty()
+                    let publication = snapshotPublisher.acceptUpdate(
+                        at: Date(),
+                        scheduleTrailing: false
                     )
-                    let draft = recoveredMessage(
-                        snapshot: materializedSnapshot.snapshot,
-                        eventState: eventState,
-                        chatId: chatId,
-                        turnId: turnId,
-                        isStreaming: true
-                    )
-                    if recoveryDraftHasVisibleContent(draft) {
-                        let published = try await publishRecoveryDraft(
-                            draft,
+                    if let materializedSnapshot = publication.materializedSnapshot,
+                       snapshotPublicationFence.accept(materializedSnapshot.id) {
+                        try ensureRecoveryIsCurrent(
                             chatId: chatId,
                             turnId: turnId,
-                            sessionId: sessionId,
+                            userId: userId,
                             accountGeneration: accountGeneration,
                             scanGeneration: scanGeneration,
-                            userId: userId,
                             storage: storage
                         )
-                        if published && draft != lastProgressDraft {
-                            lastProgressDraft = draft
-                            await onProgress()
+                        let draft = recoveredMessage(
+                            snapshot: materializedSnapshot.snapshot,
+                            eventState: eventState,
+                            chatId: chatId,
+                            turnId: turnId,
+                            isStreaming: true
+                        )
+                        if recoveryDraftHasVisibleContent(draft) {
+                            let published = try await publishRecoveryDraft(
+                                draft,
+                                chatId: chatId,
+                                turnId: turnId,
+                                sessionId: sessionId,
+                                accountGeneration: accountGeneration,
+                                scanGeneration: scanGeneration,
+                                userId: userId,
+                                storage: storage
+                            )
+                            if published && draft != lastProgressDraft {
+                                lastProgressDraft = draft
+                                await onProgress()
+                            }
                         }
-                    } else {
-                        snapshotPublisher.discardPublication()
                     }
                 }
             }
+        } catch {
+            snapshotPublisher.cancelTrailing()
+            if let materializedSnapshot = snapshotPublisher.flushIfDirty() {
+                let draft = recoveredMessage(
+                    snapshot: materializedSnapshot.snapshot,
+                    eventState: eventState,
+                    chatId: chatId,
+                    turnId: turnId,
+                    isStreaming: true
+                )
+                if recoveryDraftHasVisibleContent(draft) {
+                    let published = try? await publishRecoveryDraft(
+                        draft,
+                        chatId: chatId,
+                        turnId: turnId,
+                        sessionId: sessionId,
+                        accountGeneration: accountGeneration,
+                        scanGeneration: scanGeneration,
+                        userId: userId,
+                        storage: storage
+                    )
+                    if published == true && draft != lastProgressDraft {
+                        await onProgress()
+                    }
+                }
+            }
+            throw error
         }
         snapshotPublisher.cancelTrailing()
         let finalSnapshot = try processor.finishAndSnapshot()

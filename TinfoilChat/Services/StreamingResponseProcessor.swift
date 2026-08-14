@@ -784,14 +784,6 @@ final class LazySnapshotPublisher<Snapshot>: @unchecked Sendable {
         lock.unlock()
     }
 
-    func discardPublication() {
-        lock.lock()
-        nextPublishTime = .distantPast
-        trailingFireTime = nil
-        isDirty = false
-        lock.unlock()
-    }
-
     func finish() -> MaterializedSnapshot<Snapshot> {
         lock.lock()
         defer { lock.unlock() }
