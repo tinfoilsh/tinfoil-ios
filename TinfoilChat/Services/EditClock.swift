@@ -13,69 +13,204 @@ import Foundation
 
 /// Per-unit logical edit clock: `v` is a Lamport counter, `w` the
 /// writing device id used as a deterministic tiebreak.
-struct EditClock: Codable, Equatable {
+struct EditClock: Codable, Equatable, Sendable {
     let v: Int
     let w: String
+}
+
+final class EditClockAllocator: @unchecked Sendable {
+    private let defaults: UserDefaults
+    private let lock = NSLock()
+
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+    }
+
+    func deviceId() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return deviceIdUnlocked()
+    }
+
+    func observe(_ remoteV: Int?) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let remoteV, remoteV > 0, remoteV < EditClockStore.maxCounter else { return }
+        if remoteV > loadCounterUnlocked() {
+            persistCounterUnlocked(remoteV)
+        }
+    }
+
+    func nextClock(observedMax: Int? = nil) throws -> EditClock {
+        lock.lock()
+        defer { lock.unlock() }
+        let validObservedMax = observedMax.flatMap {
+            $0 > 0 && $0 < EditClockStore.maxCounter ? $0 : nil
+        } ?? 0
+        let base = min(
+            max(loadCounterUnlocked(), validObservedMax),
+            EditClockStore.maxCounter
+        )
+        let next = try EditClockStore.incrementedCounter(after: base)
+        persistCounterUnlocked(next)
+        return EditClock(v: next, w: deviceIdUnlocked())
+    }
+
+    private func deviceIdUnlocked() -> String {
+        if let existing = defaults.string(forKey: EditClockStore.deviceIdKey), !existing.isEmpty {
+            return existing
+        }
+        let next = UUID().uuidString.lowercased()
+        defaults.set(next, forKey: EditClockStore.deviceIdKey)
+        return next
+    }
+
+    private func loadCounterUnlocked() -> Int {
+        let value = defaults.integer(forKey: EditClockStore.counterKey)
+        guard value > 0 else { return 0 }
+        return min(value, EditClockStore.maxCounter)
+    }
+
+    private func persistCounterUnlocked(_ value: Int) {
+        defaults.set(value, forKey: EditClockStore.counterKey)
+    }
+}
+
+struct ChatClockState: Equatable {
+    let clock: Int?
+    let writer: String?
+    let clockVersion: Int?
+}
+
+enum ChatEditClockPolicy {
+    static func nextSyncVersion(after syncVersion: Int) -> Int? {
+        guard syncVersion >= 0, syncVersion < Int.max else { return nil }
+        return syncVersion + 1
+    }
+
+    static func isTrusted(
+        _ state: ChatClockState,
+        syncVersion: Int,
+        locallyModified: Bool
+    ) -> Bool {
+        let expectedClockVersion: Int
+        if locallyModified {
+            guard let nextVersion = nextSyncVersion(after: syncVersion) else { return false }
+            expectedClockVersion = nextVersion
+        } else {
+            guard syncVersion >= 0 else { return false }
+            expectedClockVersion = syncVersion
+        }
+        return state.clock != nil
+            && state.writer?.isEmpty == false
+            && state.clockVersion == expectedClockVersion
+    }
+
+    static func matchesFrozenMutation(
+        current: ChatClockState,
+        uploaded: ChatClockState
+    ) -> Bool {
+        current.clock == uploaded.clock && current.writer == uploaded.writer
+    }
+
+    static func uploadState(
+        clock: Int?,
+        writer: String?,
+        sourceClockVersion: Int?,
+        locallyModified: Bool,
+        currentSyncVersion: Int
+    ) -> ChatClockState {
+        let source = ChatClockState(
+            clock: clock,
+            writer: writer,
+            clockVersion: sourceClockVersion
+        )
+        guard isTrusted(
+            source,
+            syncVersion: currentSyncVersion,
+            locallyModified: locallyModified
+        ), let nextVersion = nextSyncVersion(after: currentSyncVersion) else {
+            return ChatClockState(clock: nil, writer: nil, clockVersion: nil)
+        }
+        return ChatClockState(
+            clock: clock,
+            writer: writer,
+            clockVersion: nextVersion
+        )
+    }
+
+    static func finalizedState(
+        uploaded: ChatClockState,
+        current: ChatClockState,
+        currentSyncVersion: Int,
+        currentLocallyModified: Bool,
+        authoritativeSyncVersion: Int,
+        editedDuringUpload: Bool
+    ) -> ChatClockState {
+        if editedDuringUpload {
+            guard isTrusted(
+                current,
+                syncVersion: currentSyncVersion,
+                locallyModified: currentLocallyModified
+            ), let nextVersion = nextSyncVersion(after: authoritativeSyncVersion) else {
+                return ChatClockState(clock: nil, writer: nil, clockVersion: nil)
+            }
+            return ChatClockState(
+                clock: current.clock,
+                writer: current.writer,
+                clockVersion: nextVersion
+            )
+        }
+        return ChatClockState(
+            clock: uploaded.clock,
+            writer: uploaded.writer,
+            clockVersion: uploaded.clock == nil || uploaded.writer == nil
+                ? nil : authoritativeSyncVersion
+        )
+    }
 }
 
 /// Persisted Lamport counter and stable device id backing the edit
 /// clock. The device id is only a tiebreak label, never a secret.
 enum EditClockStore {
-    private static let deviceIdKey = "tinfoil-sync-device-id"
-    private static let counterKey = "tinfoil-sync-edit-clock"
+    enum ClockError: Error {
+        case counterExhausted
+    }
+
+    fileprivate static let deviceIdKey = "tinfoil-sync-device-id"
+    fileprivate static let counterKey = "tinfoil-sync-edit-clock"
+    private static let allocator = EditClockAllocator(defaults: .standard)
 
     /// Upper bound for the logical counter. Far above any value a
     /// legitimate edit history could reach, yet with ample headroom
-    /// below Int.max so incrementing can never overflow and trap, even
-    /// when a corrupted or hostile remote blob carries an absurd clock.
-    /// Matches the webapp's JS safe-integer ceiling so both platforms
-    /// clamp identically.
+    /// below Int.max so incrementing can never overflow and trap.
+    /// Matches the webapp's JS safe-integer ceiling.
     static let maxCounter = 9_007_199_254_740_991  // 2^53 - 1
-
-    private static var defaults: UserDefaults { .standard }
 
     /// Stable id for this installation. Generated once and persisted.
     static func deviceId() -> String {
-        if let existing = defaults.string(forKey: deviceIdKey), !existing.isEmpty {
-            return existing
-        }
-        let next = UUID().uuidString.lowercased()
-        defaults.set(next, forKey: deviceIdKey)
-        return next
-    }
-
-    private static func loadCounter() -> Int {
-        let value = defaults.integer(forKey: counterKey)
-        guard value > 0 else { return 0 }
-        // Clamp a previously-persisted value too, so a counter poisoned
-        // before this guard existed self-heals instead of trapping.
-        return min(value, maxCounter)
-    }
-
-    private static func persistCounter(_ value: Int) {
-        defaults.set(value, forKey: counterKey)
+        allocator.deviceId()
     }
 
     /// Advance the local counter past an observed remote value without
     /// producing a new tick, so a later local edit outranks it. Remote
-    /// values are untrusted input (decrypted blob), so a value above the
-    /// ceiling is treated as malformed and ignored rather than allowed
-    /// to poison the counter toward an overflow.
+    /// values are untrusted input (decrypted blob), so a value at or above
+    /// the ceiling is malformed: accepting it would prevent every future
+    /// local edit from allocating a distinct tuple.
     static func observe(_ remoteV: Int?) {
-        guard let remoteV = remoteV, remoteV > 0, remoteV <= maxCounter else { return }
-        if remoteV > loadCounter() {
-            persistCounter(remoteV)
-        }
+        allocator.observe(remoteV)
+    }
+
+    static func incrementedCounter(after base: Int) throws -> Int {
+        guard base < maxCounter else { throw ClockError.counterExhausted }
+        return base + 1
     }
 
     /// Produce the next clock for a local edit, advancing past
     /// `observedMax` (e.g. the unit's current clock) so a re-edit of an
-    /// already-high unit still moves forward. The base is clamped to the
-    /// ceiling so the increment can never overflow Int and trap.
-    static func nextClock(observedMax: Int? = nil) -> EditClock {
-        let base = min(max(loadCounter(), observedMax ?? 0), maxCounter)
-        let next = min(base + 1, maxCounter)
-        persistCounter(next)
-        return EditClock(v: next, w: deviceId())
+    /// already-high unit still moves forward. Exhaustion refuses the edit
+    /// rather than reusing a tuple that would not be a monotonic tick.
+    static func nextClock(observedMax: Int? = nil) throws -> EditClock {
+        try allocator.nextClock(observedMax: observedMax)
     }
 }

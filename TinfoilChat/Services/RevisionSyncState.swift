@@ -219,6 +219,29 @@ enum SnapshotReconciliation {
                 || missingContentIds.contains(item.id)
         }
     }
+
+    static func contentItemsForTombstoneRecovery(
+        local: [ChatIndexEntry],
+        remote: [EnclaveRevisionSnapshotItem],
+        recentLimit: Int,
+        missingContentIds: Set<String> = [],
+        knownTombstoneIds: Set<String>
+    ) -> [EnclaveRevisionSnapshotItem] {
+        let planned = contentItems(
+            local: local,
+            remote: remote,
+            recentLimit: recentLimit,
+            missingContentIds: missingContentIds
+        )
+        var plannedById = Dictionary(
+            planned.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for item in remote where knownTombstoneIds.contains(item.id) {
+            plannedById[item.id] = item
+        }
+        return remote.compactMap { plannedById[$0.id] }
+    }
 }
 
 enum ChatContentIntegrity {
@@ -272,6 +295,20 @@ enum RevisionApplyResult: Equatable {
     case applied
     case locallyModified
     case refused
+}
+
+enum RemoteDeleteTombstonePolicy {
+    static func canClearAfterLocalCleanup(
+        contentExists: Bool,
+        sidecarExists: Bool,
+        removalFailed: Bool
+    ) -> Bool {
+        !contentExists && !sidecarExists && !removalFailed
+    }
+
+    static func canClearAfterRemoteApply(_ result: RevisionApplyResult) -> Bool {
+        result == .applied
+    }
 }
 
 enum RevisionApplyPolicy {

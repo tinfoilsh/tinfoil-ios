@@ -3,9 +3,34 @@
 //  TinfoilChatTests
 //
 
+import Dispatch
 import Foundation
 import Testing
 @testable import TinfoilChat
+
+private final class EditClockResults: @unchecked Sendable {
+    private let lock = NSLock()
+    private var clocks: [EditClock] = []
+    private var failureCount = 0
+
+    func append(_ clock: EditClock) {
+        lock.lock()
+        clocks.append(clock)
+        lock.unlock()
+    }
+
+    func recordFailure() {
+        lock.lock()
+        failureCount += 1
+        lock.unlock()
+    }
+
+    func snapshot() -> (clocks: [EditClock], failureCount: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (clocks, failureCount)
+    }
+}
 
 struct RevisionSyncTests {
     @Test func revisionDTOsUseDecimalStringsAndSnakeCase() throws {
@@ -398,6 +423,43 @@ struct RevisionSyncTests {
     }
 
     @MainActor
+    @Test func tombstoneRecoveryPreservesDirtyRemoteRowsAndDeletesMissingSyncedRows() {
+        var dirty = ChatSearchServiceTests.makeChat(id: "dirty", title: "Dirty")
+        dirty.syncedAt = Date()
+        dirty.syncVersion = 2
+        dirty.locallyModified = true
+        var missing = ChatSearchServiceTests.makeChat(id: "missing", title: "Missing")
+        missing.syncedAt = Date()
+        missing.syncVersion = 2
+        missing.locallyModified = true
+        let remoteDirty = EnclaveRevisionSnapshotItem(
+            id: dirty.id,
+            etag: "3",
+            keyId: "key",
+            projectId: nil,
+            updatedAt: "2026-08-13T00:00:00.000Z"
+        )
+        let local = [dirty, missing].map { ChatIndexEntry(from: $0) }
+
+        #expect(SnapshotReconciliation.contentItemsForTombstoneRecovery(
+            local: local,
+            remote: [remoteDirty],
+            recentLimit: 1,
+            knownTombstoneIds: []
+        ).isEmpty)
+        #expect(SnapshotReconciliation.contentItemsForTombstoneRecovery(
+            local: local,
+            remote: [remoteDirty],
+            recentLimit: 1,
+            knownTombstoneIds: [dirty.id]
+        ) == [remoteDirty])
+        #expect(SnapshotReconciliation.locallyRemovedIds(
+            local: local,
+            remoteIds: [dirty.id]
+        ) == [missing.id])
+    }
+
+    @MainActor
     @Test func snapshotRepairsMissingContentEvenWhenIndexMetadataIsClean() {
         var clean = ChatSearchServiceTests.makeChat(id: "missing-file", title: "Missing")
         clean.syncedAt = Date()
@@ -532,6 +594,150 @@ struct RevisionSyncTests {
             current: true,
             editedDuringUpload: true
         ) == true)
+    }
+
+    @Test func chatUploadClockTargetsExpectedCASVersion() {
+        #expect(ChatEditClockPolicy.uploadState(
+            clock: 7,
+            writer: "device-a",
+            sourceClockVersion: 4,
+            locallyModified: true,
+            currentSyncVersion: 3
+        ) == ChatClockState(clock: 7, writer: "device-a", clockVersion: 4))
+        #expect(ChatEditClockPolicy.uploadState(
+            clock: 7,
+            writer: "device-a",
+            sourceClockVersion: nil,
+            locallyModified: true,
+            currentSyncVersion: 3
+        ) == ChatClockState(clock: nil, writer: nil, clockVersion: nil))
+        #expect(ChatEditClockPolicy.nextSyncVersion(after: Int.max) == nil)
+        #expect(!ChatEditClockPolicy.isTrusted(
+            ChatClockState(clock: 7, writer: "device-a", clockVersion: Int.max),
+            syncVersion: Int.max,
+            locallyModified: true
+        ))
+        #expect(ChatEditClockPolicy.uploadState(
+            clock: 7,
+            writer: "device-a",
+            sourceClockVersion: Int.max,
+            locallyModified: false,
+            currentSyncVersion: Int.max
+        ) == ChatClockState(clock: nil, writer: nil, clockVersion: nil))
+    }
+
+    @Test func chatUploadFinalizePreservesEditsThatRaceUpload() {
+        let uploaded = ChatClockState(clock: 7, writer: "device-a", clockVersion: 4)
+        let newer = ChatClockState(clock: 8, writer: "device-a", clockVersion: 4)
+
+        #expect(ChatEditClockPolicy.finalizedState(
+            uploaded: uploaded,
+            current: newer,
+            currentSyncVersion: 3,
+            currentLocallyModified: true,
+            authoritativeSyncVersion: 4,
+            editedDuringUpload: false
+        ) == ChatClockState(clock: 7, writer: "device-a", clockVersion: 4))
+        #expect(ChatEditClockPolicy.finalizedState(
+            uploaded: uploaded,
+            current: newer,
+            currentSyncVersion: 3,
+            currentLocallyModified: true,
+            authoritativeSyncVersion: 4,
+            editedDuringUpload: true
+        ) == ChatClockState(clock: 8, writer: "device-a", clockVersion: 5))
+        #expect(ChatEditClockPolicy.finalizedState(
+            uploaded: uploaded,
+            current: ChatClockState(clock: 8, writer: "device-a", clockVersion: nil),
+            currentSyncVersion: 3,
+            currentLocallyModified: true,
+            authoritativeSyncVersion: 4,
+            editedDuringUpload: true
+        ) == ChatClockState(clock: nil, writer: nil, clockVersion: nil))
+        #expect(!ChatEditClockPolicy.matchesFrozenMutation(
+            current: newer,
+            uploaded: uploaded
+        ))
+    }
+
+    @Test func remoteDeleteTombstoneClearsOnlyAfterAuthoritativeCompletion() {
+        #expect(!RemoteDeleteTombstonePolicy.canClearAfterLocalCleanup(
+            contentExists: true,
+            sidecarExists: false,
+            removalFailed: false
+        ))
+        #expect(!RemoteDeleteTombstonePolicy.canClearAfterLocalCleanup(
+            contentExists: false,
+            sidecarExists: true,
+            removalFailed: false
+        ))
+        #expect(!RemoteDeleteTombstonePolicy.canClearAfterLocalCleanup(
+            contentExists: false,
+            sidecarExists: false,
+            removalFailed: true
+        ))
+        #expect(RemoteDeleteTombstonePolicy.canClearAfterLocalCleanup(
+            contentExists: false,
+            sidecarExists: false,
+            removalFailed: false
+        ))
+        #expect(!RemoteDeleteTombstonePolicy.canClearAfterRemoteApply(.refused))
+        #expect(!RemoteDeleteTombstonePolicy.canClearAfterRemoteApply(.locallyModified))
+        #expect(RemoteDeleteTombstonePolicy.canClearAfterRemoteApply(.applied))
+    }
+
+    @Test func editClockRefusesCounterExhaustion() {
+        #expect(throws: EditClockStore.ClockError.self) {
+            _ = try EditClockStore.incrementedCounter(after: EditClockStore.maxCounter)
+        }
+    }
+
+    @Test func editClockAllocatorSerializesConcurrentTicks() {
+        let suite = "edit-clock-concurrency-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let allocator = EditClockAllocator(defaults: defaults)
+        let allocationCount = 64
+        let results = EditClockResults()
+
+        DispatchQueue.concurrentPerform(iterations: allocationCount) { _ in
+            do {
+                results.append(try allocator.nextClock())
+            } catch {
+                results.recordFailure()
+            }
+        }
+
+        let snapshot = results.snapshot()
+        #expect(snapshot.failureCount == 0)
+        #expect(snapshot.clocks.count == allocationCount)
+        #expect(Set(snapshot.clocks.map(\.v)).count == allocationCount)
+        #expect(Set(snapshot.clocks.map(\.w)).count == 1)
+    }
+
+    @Test func editClockIgnoresExhaustingRemoteBoundaries() throws {
+        let suite = "edit-clock-boundary-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let allocator = EditClockAllocator(defaults: defaults)
+
+        allocator.observe(EditClockStore.maxCounter)
+        #expect(try allocator.nextClock().v == 1)
+
+        let observedSuite = "edit-clock-observed-boundary-\(UUID().uuidString)"
+        let observedDefaults = UserDefaults(suiteName: observedSuite)!
+        observedDefaults.removePersistentDomain(forName: observedSuite)
+        defer { observedDefaults.removePersistentDomain(forName: observedSuite) }
+        let observedAllocator = EditClockAllocator(defaults: observedDefaults)
+        #expect(try observedAllocator.nextClock(observedMax: EditClockStore.maxCounter).v == 1)
+
+        observedAllocator.observe(EditClockStore.maxCounter - 1)
+        #expect(try observedAllocator.nextClock().v == EditClockStore.maxCounter)
+        #expect(throws: EditClockStore.ClockError.self) {
+            _ = try observedAllocator.nextClock()
+        }
     }
 
     @MainActor
