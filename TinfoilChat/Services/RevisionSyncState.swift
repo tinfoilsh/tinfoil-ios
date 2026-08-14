@@ -219,6 +219,29 @@ enum SnapshotReconciliation {
                 || missingContentIds.contains(item.id)
         }
     }
+
+    static func contentItemsForTombstoneRecovery(
+        local: [ChatIndexEntry],
+        remote: [EnclaveRevisionSnapshotItem],
+        recentLimit: Int,
+        missingContentIds: Set<String> = [],
+        knownTombstoneIds: Set<String>
+    ) -> [EnclaveRevisionSnapshotItem] {
+        let planned = contentItems(
+            local: local,
+            remote: remote,
+            recentLimit: recentLimit,
+            missingContentIds: missingContentIds
+        )
+        var plannedById = Dictionary(
+            planned.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for item in remote where knownTombstoneIds.contains(item.id) {
+            plannedById[item.id] = item
+        }
+        return remote.compactMap { plannedById[$0.id] }
+    }
 }
 
 enum ChatContentIntegrity {

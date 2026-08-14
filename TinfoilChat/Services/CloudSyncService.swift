@@ -1832,7 +1832,7 @@ class CloudSyncService: ObservableObject {
                 userId: userId
             )
         }
-        let plannedChanged = SnapshotReconciliation.contentItems(
+        let changed = SnapshotReconciliation.contentItemsForTombstoneRecovery(
             local: local,
             remote: items.filter {
                 DeleteIntentPlanner.shouldApplyRemoteUpsert(
@@ -1841,25 +1841,16 @@ class CloudSyncService: ObservableObject {
                 )
             },
             recentLimit: Constants.Pagination.chatsPerPage,
-            missingContentIds: missingContentIds
+            missingContentIds: missingContentIds,
+            knownTombstoneIds: remoteDeleteIds
         )
-        var changedById = Dictionary(
-            plannedChanged.map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        for item in items where !pendingDeleteIds.contains(item.id)
-            && (remoteDeleteIds.contains(item.id) || requiresTombstoneRecovery) {
-            changedById[item.id] = item
-        }
-        let changed = items.compactMap { changedById[$0.id] }
         var metadataOnly: [EnclaveRevisionSnapshotItem] = []
         let pullItems = changed.filter { item in
             guard let entry = localById[item.id] else { return true }
             if String(entry.syncVersion) == item.etag
                 && !entry.decryptionFailed
                 && !missingContentIds.contains(item.id)
-                && !remoteDeleteIds.contains(item.id)
-                && !requiresTombstoneRecovery {
+                && !remoteDeleteIds.contains(item.id) {
                 metadataOnly.append(item)
                 return false
             }
@@ -1885,8 +1876,7 @@ class CloudSyncService: ObservableObject {
                 userId: userId,
                 expectedLocalUpdatedAt: localById[item.id]?.updatedAt,
                 allowLocallyModified: missingContentIds.contains(item.id)
-                    || remoteDeleteIds.contains(item.id)
-                    || requiresTombstoneRecovery,
+                    || remoteDeleteIds.contains(item.id),
                 allowRemoteDeleteReplacement: remoteDeleteIds.contains(item.id)
                     || requiresTombstoneRecovery
             )
