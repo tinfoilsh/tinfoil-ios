@@ -83,14 +83,27 @@ struct ChatClockState: Equatable {
 }
 
 enum ChatEditClockPolicy {
+    static func nextSyncVersion(after syncVersion: Int) -> Int? {
+        guard syncVersion >= 0, syncVersion < Int.max else { return nil }
+        return syncVersion + 1
+    }
+
     static func isTrusted(
         _ state: ChatClockState,
         syncVersion: Int,
         locallyModified: Bool
     ) -> Bool {
-        state.clock != nil
+        let expectedClockVersion: Int
+        if locallyModified {
+            guard let nextVersion = nextSyncVersion(after: syncVersion) else { return false }
+            expectedClockVersion = nextVersion
+        } else {
+            guard syncVersion >= 0 else { return false }
+            expectedClockVersion = syncVersion
+        }
+        return state.clock != nil
             && state.writer?.isEmpty == false
-            && state.clockVersion == syncVersion + (locallyModified ? 1 : 0)
+            && state.clockVersion == expectedClockVersion
     }
 
     static func matchesFrozenMutation(
@@ -116,13 +129,13 @@ enum ChatEditClockPolicy {
             source,
             syncVersion: currentSyncVersion,
             locallyModified: locallyModified
-        ) else {
+        ), let nextVersion = nextSyncVersion(after: currentSyncVersion) else {
             return ChatClockState(clock: nil, writer: nil, clockVersion: nil)
         }
         return ChatClockState(
             clock: clock,
             writer: writer,
-            clockVersion: currentSyncVersion + 1
+            clockVersion: nextVersion
         )
     }
 
@@ -139,14 +152,13 @@ enum ChatEditClockPolicy {
                 current,
                 syncVersion: currentSyncVersion,
                 locallyModified: currentLocallyModified
-            ) else {
+            ), let nextVersion = nextSyncVersion(after: authoritativeSyncVersion) else {
                 return ChatClockState(clock: nil, writer: nil, clockVersion: nil)
             }
             return ChatClockState(
                 clock: current.clock,
                 writer: current.writer,
-                clockVersion: current.clock == nil || current.writer == nil
-                    ? nil : authoritativeSyncVersion + 1
+                clockVersion: nextVersion
             )
         }
         return ChatClockState(

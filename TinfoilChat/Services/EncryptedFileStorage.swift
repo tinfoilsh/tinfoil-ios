@@ -18,6 +18,7 @@ import OSLog
 actor EncryptedFileStorage {
     enum SaveError: Error {
         case remotelyDeleted
+        case invalidSyncVersion
     }
 
     static let local = EncryptedFileStorage(
@@ -362,7 +363,8 @@ actor EncryptedFileStorage {
            prepared.writer?.isEmpty == false {
             return prepared
         }
-        let carriesNewClock = chat.clockVersion == chat.syncVersion + 1
+        let nextSyncVersion = ChatEditClockPolicy.nextSyncVersion(after: chat.syncVersion)
+        let carriesNewClock = chat.clockVersion == nextSyncVersion
             && chat.clock.map { $0 > (existing?.clock ?? 0) } == true
             && chat.writer?.isEmpty == false
         if !carriesNewClock {
@@ -372,7 +374,12 @@ actor EncryptedFileStorage {
             prepared.clock = clock.v
             prepared.writer = clock.w
         }
-        prepared.clockVersion = prepared.syncVersion + 1
+        guard let preparedClockVersion = ChatEditClockPolicy.nextSyncVersion(
+            after: prepared.syncVersion
+        ) else {
+            throw SaveError.invalidSyncVersion
+        }
+        prepared.clockVersion = preparedClockVersion
         return prepared
     }
 

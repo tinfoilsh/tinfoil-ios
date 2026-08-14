@@ -607,7 +607,10 @@ class CloudSyncService: ObservableObject {
                 guard generation == accountGeneration else {
                     throw SyncEnclaveError(message: "account changed during cloud backup")
                 }
-                let newVersion = result.syncVersion ?? chat.syncVersion + 1
+                guard let newVersion = result.syncVersion
+                    ?? ChatEditClockPolicy.nextSyncVersion(after: chat.syncVersion) else {
+                    throw RevisionSyncError.invalidRevision
+                }
                 let fullySynced = try await EncryptedFileStorage.cloud.finalizeUploadIfFresh(
                     chatId: chat.id,
                     userId: userId,
@@ -1713,6 +1716,7 @@ class CloudSyncService: ObservableObject {
                 chatId: chatId,
                 userId: pending.userId
             )
+            guard pending.generation == accountGeneration else { throw CancellationError() }
             deferredRemoteDeletes.removeValue(forKey: chatId)
             deletedChatsTracker.removeFromDeleted(chatId)
             return false
@@ -1721,6 +1725,7 @@ class CloudSyncService: ObservableObject {
             chatId: chatId,
             userId: pending.userId
         )
+        guard pending.generation == accountGeneration else { throw CancellationError() }
         deferredRemoteDeletes.removeValue(forKey: chatId)
         return true
     }
@@ -2219,7 +2224,10 @@ class CloudSyncService: ObservableObject {
         guard await isCurrentUploadAccount(account) else {
             throw CancellationError()
         }
-        let newVersion = result.syncVersion ?? chat.syncVersion + 1
+        guard let newVersion = result.syncVersion
+            ?? ChatEditClockPolicy.nextSyncVersion(after: chat.syncVersion) else {
+            throw RevisionSyncError.invalidRevision
+        }
         let fullySynced = try await EncryptedFileStorage.cloud.finalizeUploadIfFresh(
             chatId: chat.id,
             userId: account.userId,

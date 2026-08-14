@@ -611,6 +611,19 @@ struct RevisionSyncTests {
             locallyModified: true,
             currentSyncVersion: 3
         ) == ChatClockState(clock: nil, writer: nil, clockVersion: nil))
+        #expect(ChatEditClockPolicy.nextSyncVersion(after: Int.max) == nil)
+        #expect(!ChatEditClockPolicy.isTrusted(
+            ChatClockState(clock: 7, writer: "device-a", clockVersion: Int.max),
+            syncVersion: Int.max,
+            locallyModified: true
+        ))
+        #expect(ChatEditClockPolicy.uploadState(
+            clock: 7,
+            writer: "device-a",
+            sourceClockVersion: Int.max,
+            locallyModified: false,
+            currentSyncVersion: Int.max
+        ) == ChatClockState(clock: nil, writer: nil, clockVersion: nil))
     }
 
     @Test func chatUploadFinalizePreservesEditsThatRaceUpload() {

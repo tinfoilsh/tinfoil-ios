@@ -157,12 +157,20 @@ actor ChatRecoverySync {
                 guard await Clerk.shared.user?.id == userId else {
                     throw ChatRecoverySyncError.chatMissing
                 }
+                let isDeletedBeforeUpload = try await EncryptedFileStorage.cloud
+                    .hasRemoteDeleteTombstone(chatId: chatId, userId: userId)
+                guard !isDeletedBeforeUpload else { throw ChatRecoverySyncError.chatMissing }
+                try Task.checkCancellation()
                 let result = try await CloudStorageService.shared.uploadChat(
                     StoredChat(from: candidate, syncVersion: remote.syncVersion),
                     idempotencyKey: UUID().uuidString.lowercased()
                 )
                 applyAttachmentRewrites(result.rewrites, to: &candidate)
-                candidate.syncVersion = result.syncVersion ?? remote.syncVersion + 1
+                guard let syncVersion = result.syncVersion
+                    ?? ChatEditClockPolicy.nextSyncVersion(after: remote.syncVersion) else {
+                    throw ChatRecoverySyncError.conflict
+                }
+                candidate.syncVersion = syncVersion
                 candidate.syncedAt = Date()
                 candidate.locallyModified = false
                 candidate.clockVersion = candidate.syncVersion
@@ -484,7 +492,10 @@ actor ChatRecoverySync {
         )
         chat.clock = clock.v
         chat.writer = clock.w
-        chat.clockVersion = chat.syncVersion + 1
+        guard let clockVersion = ChatEditClockPolicy.nextSyncVersion(after: chat.syncVersion) else {
+            throw ChatRecoverySyncError.conflict
+        }
+        chat.clockVersion = clockVersion
         chat.updatedAt = Date()
     }
 
