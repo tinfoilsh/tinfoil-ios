@@ -427,7 +427,10 @@ struct ChatContainer: View {
             viewModel: viewModel,
             messageText: $messageText
         )
-        .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
+        .background(
+            Color.chatBackground(isDarkMode: colorScheme == .dark)
+                .ignoresSafeArea(edges: .bottom)
+        )
         .ignoresSafeArea(edges: .top)
     }
     
