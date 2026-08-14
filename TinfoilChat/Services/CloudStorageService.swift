@@ -329,44 +329,99 @@ class CloudStorageService: ObservableObject {
 
     // MARK: - Attachments
 
+    struct ImageDownloadRequest: Sendable {
+        let attachmentId: String
+        let encryptionKey: String
+    }
+
+    static func downloadImages(
+        _ requests: [ImageDownloadRequest],
+        maxConcurrent: Int,
+        download: @escaping @Sendable (ImageDownloadRequest) async throws -> String
+    ) async throws -> [String: String] {
+        guard !requests.isEmpty else { return [:] }
+        precondition(maxConcurrent > 0)
+
+        let completed = try await withThrowingTaskGroup(
+            of: (Int, String?).self,
+            returning: [String?].self
+        ) { group in
+            let initialCount = min(maxConcurrent, requests.count)
+            var nextIndex = initialCount
+            var completed = Array<String?>(repeating: nil, count: requests.count)
+
+            for index in 0..<initialCount {
+                let request = requests[index]
+                group.addTask {
+                    try Task.checkCancellation()
+                    do {
+                        return (index, try await download(request))
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        return (index, nil)
+                    }
+                }
+            }
+
+            while let (index, base64) = try await group.next() {
+                completed[index] = base64
+                try Task.checkCancellation()
+                if nextIndex < requests.count {
+                    let replacementIndex = nextIndex
+                    let request = requests[replacementIndex]
+                    nextIndex += 1
+                    group.addTask {
+                        try Task.checkCancellation()
+                        do {
+                            return (replacementIndex, try await download(request))
+                        } catch is CancellationError {
+                            throw CancellationError()
+                        } catch {
+                            return (replacementIndex, nil)
+                        }
+                    }
+                }
+            }
+            return completed
+        }
+
+        var results: [String: String] = [:]
+        for (index, base64) in completed.enumerated() {
+            if let base64 {
+                results[requests[index].attachmentId] = base64
+            }
+        }
+        return results
+    }
+
     /// Fetch and decrypt all image attachments that have no base64 yet.
     /// Returns a dictionary mapping attachment IDs to their decoded
     /// base64 strings so callers can merge results into the current
     /// (possibly updated) messages without overwriting the entire
     /// array with a stale snapshot.
-    func loadImages(in messages: [Message]) async -> [String: String] {
-        var work: [(String, String)] = []
+    func loadImages(in messages: [Message]) async throws -> [String: String] {
+        var work: [ImageDownloadRequest] = []
         for msg in messages {
             for att in msg.attachments {
                 guard att.type == .image,
                       att.base64 == nil,
                       let attKey = att.encryptionKey else { continue }
-                work.append((att.id, attKey))
+                work.append(ImageDownloadRequest(attachmentId: att.id, encryptionKey: attKey))
             }
         }
-        guard !work.isEmpty else { return [:] }
-
-        var results: [String: String] = [:]
-        await withTaskGroup(of: (String, String?).self) { group in
-            for (attId, key) in work {
-                group.addTask {
-                    do {
-                        let bytes = try await SyncEnclaveAPI.attachmentGet(
-                            EnclaveAttachmentGetRequest(id: attId, attKey: key)
-                        )
-                        return (attId, bytes.base64EncodedString())
-                    } catch {
-                        return (attId, nil)
-                    }
-                }
-            }
-            for await (attId, base64) in group {
-                if let b64 = base64 {
-                    results[attId] = b64
-                }
-            }
+        return try await Self.downloadImages(
+            work,
+            maxConcurrent: Constants.Attachments.maxConcurrentImageDownloads
+        ) { request in
+            let bytes = try await SyncEnclaveAPI.attachmentGet(
+                EnclaveAttachmentGetRequest(
+                    id: request.attachmentId,
+                    attKey: request.encryptionKey
+                )
+            )
+            return bytes.base64EncodedString()
         }
-        return results
     }
 
     // MARK: - List

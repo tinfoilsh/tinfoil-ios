@@ -70,17 +70,29 @@ private enum UploadIterationOutcome {
 /// bytes under the same key and fail with 409 IDEMPOTENCY_CONFLICT
 /// instead of deduping.
 actor UploadCoalescer {
+    private struct ThrowingWaiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Bool, Error>
+    }
+
     private struct ChatUploadState {
         var dirty: Bool = false
         var allowWhileStreaming: Bool = false
+        var queued: Bool = false
         var workerRunning: Bool = false
         var failureCount: Int = 0
         var waiters: [CheckedContinuation<Void, Never>] = []
-        var throwingWaiters: [CheckedContinuation<Void, Error>] = []
+        var throwingWaiters: [ThrowingWaiter] = []
     }
 
     private var states: [String: ChatUploadState] = [:]
+    private var queuedChatIds: [String] = []
+    private var queuedChatIndex = 0
+    private var workerTasks: [String: Task<Void, Never>] = [:]
+    private var activeWorkerCount = 0
     private var generation = 0
+    private var pendingThrowingWaiterIds: Set<UUID> = []
+    private var cancelledThrowingWaiterIds: Set<UUID> = []
     private let prepareUpload: @Sendable (String, String, Bool) async throws -> UploadAttempt?
     private let waitBeforeRetry: @Sendable (Int) async -> Void
 
@@ -102,12 +114,12 @@ actor UploadCoalescer {
         var state = states[chatId] ?? ChatUploadState()
         state.dirty = true
         state.allowWhileStreaming = state.allowWhileStreaming || allowWhileStreaming
-        states[chatId] = state
-
-        if !state.workerRunning {
-            states[chatId]?.workerRunning = true
-            Task { await runWorker(chatId) }
+        if !state.workerRunning && !state.queued {
+            state.queued = true
+            queuedChatIds.append(chatId)
         }
+        states[chatId] = state
+        startQueuedWorkers()
     }
 
     func waitForUpload(_ chatId: String) async {
@@ -119,24 +131,82 @@ actor UploadCoalescer {
         }
     }
 
+    @discardableResult
     func enqueueAndWait(
         _ chatId: String,
         allowWhileStreaming: Bool = false
-    ) async throws {
-        enqueue(chatId, allowWhileStreaming: allowWhileStreaming)
+    ) async throws -> Bool {
+        let waiterId = UUID()
+        pendingThrowingWaiterIds.insert(waiterId)
+        return try await withTaskCancellationHandler {
+            do {
+                try Task.checkCancellation()
+                enqueue(chatId, allowWhileStreaming: allowWhileStreaming)
 
-        guard let state = states[chatId], state.workerRunning || state.dirty else {
-            return
-        }
+                guard let state = states[chatId], state.workerRunning || state.dirty else {
+                    pendingThrowingWaiterIds.remove(waiterId)
+                    cancelledThrowingWaiterIds.remove(waiterId)
+                    return false
+                }
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            states[chatId]?.throwingWaiters.append(continuation)
+                let uploaded = try await withCheckedThrowingContinuation {
+                    (continuation: CheckedContinuation<Bool, Error>) in
+                    pendingThrowingWaiterIds.remove(waiterId)
+                    if Task.isCancelled || cancelledThrowingWaiterIds.remove(waiterId) != nil {
+                        continuation.resume(throwing: CancellationError())
+                    } else {
+                        states[chatId]?.throwingWaiters.append(
+                            ThrowingWaiter(id: waiterId, continuation: continuation)
+                        )
+                    }
+                }
+                try Task.checkCancellation()
+                return uploaded
+            } catch {
+                pendingThrowingWaiterIds.remove(waiterId)
+                cancelledThrowingWaiterIds.remove(waiterId)
+                throw error
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(chatId: chatId, waiterId: waiterId) }
         }
     }
 
-    private func runWorker(_ chatId: String) async {
-        let workerGeneration = generation
+    private func cancelWaiter(chatId: String, waiterId: UUID) {
+        if var state = states[chatId],
+           let index = state.throwingWaiters.firstIndex(where: { $0.id == waiterId }) {
+            let waiter = state.throwingWaiters.remove(at: index)
+            states[chatId] = state
+            waiter.continuation.resume(throwing: CancellationError())
+        } else if pendingThrowingWaiterIds.contains(waiterId) {
+            cancelledThrowingWaiterIds.insert(waiterId)
+        }
+    }
+
+    private func startQueuedWorkers() {
+        while activeWorkerCount < Constants.Sync.maxConcurrentChatUploads,
+              queuedChatIndex < queuedChatIds.count {
+            let chatId = queuedChatIds[queuedChatIndex]
+            queuedChatIndex += 1
+            guard var state = states[chatId], state.queued else { continue }
+            state.queued = false
+            state.workerRunning = true
+            states[chatId] = state
+            activeWorkerCount += 1
+            let workerGeneration = generation
+            workerTasks[chatId] = Task {
+                await self.runWorker(chatId, generation: workerGeneration)
+            }
+        }
+        if queuedChatIndex == queuedChatIds.count {
+            queuedChatIds.removeAll(keepingCapacity: true)
+            queuedChatIndex = 0
+        }
+    }
+
+    private func runWorker(_ chatId: String, generation workerGeneration: Int) async {
         var terminalError: Error?
+        var uploaded = false
 
         while states[chatId]?.dirty == true && workerGeneration == generation {
             states[chatId]?.dirty = false
@@ -160,11 +230,27 @@ actor UploadCoalescer {
                 break
             case .uploaded:
                 terminalError = nil
+                uploaded = true
             case .failed(let iterationError):
                 terminalError = iterationError
             }
         }
-        guard workerGeneration == generation else { return }
+        finishWorker(
+            chatId,
+            generation: workerGeneration,
+            uploaded: uploaded,
+            terminalError: terminalError
+        )
+    }
+
+    private func finishWorker(
+        _ chatId: String,
+        generation workerGeneration: Int,
+        uploaded: Bool,
+        terminalError: Error?
+    ) {
+        guard workerGeneration == generation,
+              states[chatId]?.workerRunning == true else { return }
 
         // Notify waiters and clean up in a single access
         let waiters = states[chatId]?.waiters ?? []
@@ -175,9 +261,9 @@ actor UploadCoalescer {
         let throwingWaiters = states[chatId]?.throwingWaiters ?? []
         for waiter in throwingWaiters {
             if let terminalError {
-                waiter.resume(throwing: terminalError)
+                waiter.continuation.resume(throwing: terminalError)
             } else {
-                waiter.resume()
+                waiter.continuation.resume(returning: uploaded)
             }
         }
 
@@ -189,6 +275,9 @@ actor UploadCoalescer {
             states[chatId]?.waiters = []
             states[chatId]?.throwingWaiters = []
         }
+        workerTasks.removeValue(forKey: chatId)
+        activeWorkerCount -= 1
+        startQueuedWorkers()
     }
 
     private func uploadWithRetry(
@@ -208,6 +297,7 @@ actor UploadCoalescer {
 
         for attempt in 0...Constants.Sync.uploadMaxRetries {
             do {
+                try Task.checkCancellation()
                 if !prepared {
                     preparedAttempt = try await prepareUpload(
                         chatId,
@@ -222,6 +312,7 @@ actor UploadCoalescer {
                 if allowWhileStreaming && preparedAttempt == nil {
                     throw UploadCoalescerError.requiredUploadNotPrepared
                 }
+                try Task.checkCancellation()
                 let attemptOutcome = try await preparedAttempt?()
                 guard workerGeneration == generation else {
                     return .failed(CancellationError())
@@ -258,9 +349,64 @@ actor UploadCoalescer {
         generation += 1
         let waiters = states.values.flatMap(\.waiters)
         let throwingWaiters = states.values.flatMap(\.throwingWaiters)
+        let tasks = Array(workerTasks.values)
         states.removeAll()
+        queuedChatIds.removeAll()
+        queuedChatIndex = 0
+        workerTasks.removeAll()
+        activeWorkerCount = 0
+        pendingThrowingWaiterIds.removeAll()
+        cancelledThrowingWaiterIds.removeAll()
+        // A canceled stale generation may briefly overlap new work, but it
+        // cannot mutate new-generation state. Fresh capacity prevents a hung
+        // old account request from starving the newly selected account.
+        tasks.forEach { $0.cancel() }
         waiters.forEach { $0.resume() }
-        throwingWaiters.forEach { $0.resume(throwing: CancellationError()) }
+        throwingWaiters.forEach { $0.continuation.resume(throwing: CancellationError()) }
+    }
+}
+
+struct PendingChatBackupBatchResult: Sendable {
+    let uploaded: Int
+    let errors: [String]
+    let failedChatIds: [String]
+}
+
+enum PendingChatBackupBatch {
+    static func run(
+        pendingChatIds: @Sendable () async throws -> [String],
+        upload: @escaping @Sendable (String) async throws -> Bool
+    ) async throws -> PendingChatBackupBatchResult {
+        let chatIds: [String]
+        do {
+            chatIds = try await pendingChatIds()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return PendingChatBackupBatchResult(uploaded: 0, errors: [], failedChatIds: [])
+        }
+
+        var uploaded = 0
+        var errors: [String] = []
+        var failedChatIds: [String] = []
+        for chatId in chatIds {
+            try Task.checkCancellation()
+            do {
+                if try await upload(chatId) {
+                    uploaded += 1
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                failedChatIds.append(chatId)
+                errors.append("Failed to backup chat \(chatId): \(error.localizedDescription)")
+            }
+        }
+        return PendingChatBackupBatchResult(
+            uploaded: uploaded,
+            errors: errors,
+            failedChatIds: failedChatIds
+        )
     }
 }
 
@@ -1051,22 +1197,6 @@ class CloudSyncService: ObservableObject {
 
     // MARK: - Bulk Sync Operations
 
-    /// Load full chat objects for every locally-modified or never-synced,
-    /// non-local-only chat. Returns nil when the account generation moved
-    /// on while loading.
-    private func loadUnsyncedChats(userId: String, generation: Int) async -> [Chat]? {
-        let unsyncedIds = (try? await EncryptedFileStorage.cloud.pendingChatIds(
-            userId: userId
-        )) ?? []
-        guard generation == accountGeneration else { return nil }
-        let unsyncedChats = (try? await EncryptedFileStorage.cloud.loadChats(
-            chatIds: unsyncedIds,
-            userId: userId
-        )) ?? []
-        guard generation == accountGeneration else { return nil }
-        return unsyncedChats
-    }
-
     /// Backup all unsynced chats
     private func backupUnsyncedChats() async -> SyncResult {
         let generation = accountGeneration
@@ -1080,54 +1210,44 @@ class CloudSyncService: ObservableObject {
             return result
         }
 
-        guard let unsyncedChats = await loadUnsyncedChats(
-            userId: userId, generation: generation
-        ) else { return result }
-        
-        
-        // Filter out blank, empty, decryption failure, and streaming chats
-        var chatsToSync: [Chat] = []
-        for chat in unsyncedChats {
-            if !chat.isBlankChat && !chat.messages.isEmpty
-                && !chat.decryptionFailed && !chat.dataCorrupted {
-                let isStreaming = streamingTracker.isStreaming(chat.id)
-                if !isStreaming {
-                    chatsToSync.append(chat)
+        let batch: PendingChatBackupBatchResult
+        do {
+            batch = try await PendingChatBackupBatch.run(
+                pendingChatIds: {
+                    try await EncryptedFileStorage.cloud.pendingChatIds(userId: userId)
+                },
+                upload: { [weak self] chatId in
+                    guard let self else { throw CancellationError() }
+                    guard await self.accountGeneration == generation else {
+                        throw CancellationError()
+                    }
+                    return try await self.uploadCoalescer.enqueueAndWait(chatId)
                 }
-            }
+            )
+        } catch is CancellationError {
+            return result
+        } catch {
+            return result
         }
-        
-        
-        // Upload chats sequentially to avoid connection exhaustion
-        for chat in chatsToSync {
-            guard generation == accountGeneration else { return result }
-            // Skip if chat started streaming
-            if streamingTracker.isStreaming(chat.id) {
-                continue
-            }
-
-            do {
-                try await uploadCoalescer.enqueueAndWait(chat.id)
-                guard generation == accountGeneration else { return result }
-                result = SyncResult(
-                    uploaded: result.uploaded + 1,
-                    downloaded: result.downloaded,
-                    errors: result.errors
-                )
-            } catch {
-                guard generation == accountGeneration else { return result }
-                SyncHealthStore.shared.reportChatSyncFailed(
-                    chat.id,
-                    message: "This chat couldn't be synced"
-                )
-                result = SyncResult(
-                    uploaded: result.uploaded,
-                    downloaded: result.downloaded,
-                    errors: result.errors + ["Failed to backup chat \(chat.id): \(error.localizedDescription)"]
-                )
-            }
+        guard generation == accountGeneration else { return result }
+        for chatId in batch.failedChatIds {
+            SyncHealthStore.shared.reportChatSyncFailed(
+                chatId,
+                message: "This chat couldn't be synced"
+            )
         }
-        
+        for error in batch.errors {
+            result = SyncResult(
+                uploaded: result.uploaded,
+                downloaded: result.downloaded,
+                errors: result.errors + [error]
+            )
+        }
+        result = SyncResult(
+            uploaded: batch.uploaded,
+            downloaded: result.downloaded,
+            errors: result.errors
+        )
         return result
     }
     

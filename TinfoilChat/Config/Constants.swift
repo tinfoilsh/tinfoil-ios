@@ -321,6 +321,7 @@ enum Constants {
 
     enum Sync {
         static let protocolVersion = 2
+        static let maxConcurrentChatUploads = 2
         static let chatSyncIntervalSeconds: TimeInterval = 20.0
         static let profileSyncIntervalSeconds: TimeInterval = 60.0  // 1 minute
         static let profileSyncProtocolVersion = 2
@@ -554,6 +555,7 @@ enum Constants {
     }
 
     enum Attachments {
+        static let maxConcurrentImageDownloads = 3
         static let maxImageDimension: CGFloat = 1536
         static let imageCompressionQuality: CGFloat = 0.85
         static let maxFileSizeBytes = SharedImportConfiguration.maximumDocumentSizeBytes
