@@ -40,6 +40,7 @@ struct ChatContainer: View {
     
     // Sidebar constants
     private let sidebarWidth: CGFloat = 300
+    private let toolbarPrimaryLabelHeight: CGFloat = 22
 
     private let backgroundTimeThreshold: TimeInterval = 300 // 5 minutes in seconds
 
@@ -53,6 +54,19 @@ struct ChatContainer: View {
 
     private var toolbarContentColor: Color {
         colorScheme == .dark ? Color.white : Color.black
+    }
+
+    private var showsPrimaryToolbarLabel: Bool {
+        if viewModel.activeProject != nil || viewModel.isTemporaryMode {
+            return true
+        }
+        if isSidebarOpen {
+            return true
+        }
+        return authManager.isAuthenticated
+            && settings.isCloudSyncEnabled
+            && settings.isLocalOnlyModeEnabled
+            && viewModel.activeStorageTab == .local
     }
     
     var body: some View {
@@ -275,7 +289,7 @@ struct ChatContainer: View {
                     Image(colorScheme == .dark ? "logo-white" : "logo-dark")
                         .resizable()
                         .scaledToFit()
-                        .frame(height: 22)
+                        .frame(height: toolbarPrimaryLabelHeight)
                         .opacity(isSidebarOpen && viewModel.activeProject == nil ? 1 : 0)
                         .accessibilityLabel("Tinfoil")
                         .accessibilityHidden(!(isSidebarOpen && viewModel.activeProject == nil))
@@ -317,6 +331,7 @@ struct ChatContainer: View {
                         .accessibilityHidden(isSidebarOpen || isVerificationBadgeExpanded)
                     }
                 }
+                .frame(height: showsPrimaryToolbarLabel ? toolbarPrimaryLabelHeight : 0)
 
                     if let presetId = viewModel.currentChat?.promptPresetId,
                        let preset = profileManager.promptPreset(for: presetId),
