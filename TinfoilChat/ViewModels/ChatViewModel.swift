@@ -5271,6 +5271,13 @@ class ChatViewModel: ObservableObject {
         localChats = []
         cloudSidebarSummaries = []
         localSidebarSummaries = []
+        projectLoadGeneration += 1
+        projects = []
+        activeProject = nil
+        projectDocuments = []
+        projectError = nil
+        isViewingProjectChat = false
+        pendingSearchResultChatId = nil
         activeStorageTab = .cloud
         let newChat = Chat.create(modelType: currentModel)
         currentChat = newChat
