@@ -36,6 +36,13 @@ struct ChatMutationGate {
     }
 }
 
+struct FailedChatHydration: Equatable {
+    let id: String
+    let storage: ChatStorageTab
+
+    var isLocalOnly: Bool { storage == .local }
+}
+
 protocol ChatLoadingService {
     func loadIndex(userId: String, storage: ChatStorageTab) async throws -> [ChatIndexEntry]
     func loadChat(id: String, userId: String, storage: ChatStorageTab) async throws -> Chat
@@ -105,9 +112,10 @@ enum ChatPaginationCoordinator {
         original: ChatPaginationPageState,
         next: ChatPaginationPageState,
         allRowsPersisted: Bool,
-        pageFailed: Bool = false
+        pageFailed: Bool = false,
+        pageCancelled: Bool = false
     ) -> ChatPaginationPageState {
-        allRowsPersisted && !pageFailed ? next : original
+        allRowsPersisted && !pageFailed && !pageCancelled ? next : original
     }
 }
 
@@ -154,8 +162,7 @@ enum ChatProjectStorageTransition {
             try validateAccount()
         } catch {
             if wasLocal {
-                try await loadingService.deleteChat(id: movedChat.id, userId: userId, storage: .cloud)
-                try validateAccount()
+                try? await loadingService.deleteChat(id: movedChat.id, userId: userId, storage: .cloud)
             }
             throw error
         }
@@ -164,11 +171,10 @@ enum ChatProjectStorageTransition {
         do {
             try await loadingService.deleteChat(id: movedChat.id, userId: userId, storage: .local)
         } catch {
+            let localDeleteError = error
             try await loadingService.deleteChat(id: movedChat.id, userId: userId, storage: .cloud)
-            try validateAccount()
-            throw error
+            throw localDeleteError
         }
-        try validateAccount()
     }
 }
 

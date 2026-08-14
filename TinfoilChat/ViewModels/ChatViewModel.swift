@@ -157,6 +157,7 @@ class ChatViewModel: ObservableObject {
     @Published private(set) var selectedChatId: String?
     @Published private(set) var hydratingChatId: String?
     @Published private(set) var chatHydrationError: String?
+    var canRetryFailedChatHydration: Bool { failedChatHydration != nil && chatHydrationError != nil }
     @Published var currentChat: Chat? {
         didSet {
             if currentChat?.id != oldValue?.id {
@@ -428,6 +429,7 @@ class ChatViewModel: ObservableObject {
     private var selectedChatImageTask: Task<Void, Never>?
     private var chatSelectionTask: Task<Void, Never>?
     private var chatSelectionFence = ChatSelectionFence()
+    private var failedChatHydration: FailedChatHydration?
     private var chatMutationGate = ChatMutationGate()
     private let chatLoadingService: any ChatLoadingService
     private var materializationOperationIds: Set<String> = []
@@ -2193,6 +2195,7 @@ class ChatViewModel: ObservableObject {
                 else {
                     return
                 }
+                self.failedChatHydration = FailedChatHydration(id: id, storage: storage)
                 self.failSelection(id: id, generation: generation)
                 self.syncErrors.append(error.localizedDescription)
             }
@@ -2202,6 +2205,7 @@ class ChatViewModel: ObservableObject {
 
     func selectChat(_ chat: Chat) {
         projectLoadGeneration += 1
+        failedChatHydration = nil
         let generation = chatSelectionFence.begin(id: chat.id)
         chatSelectionTask?.cancel()
         chatSelectionTask = nil
@@ -2213,6 +2217,7 @@ class ChatViewModel: ObservableObject {
 
     private func beginSelection(id: String) {
         projectLoadGeneration += 1
+        failedChatHydration = nil
         _ = chatSelectionFence.begin(id: id)
         chatSelectionTask?.cancel()
         selectedChatImageTask?.cancel()
@@ -2222,6 +2227,11 @@ class ChatViewModel: ObservableObject {
         chatHydrationError = nil
         currentChat = nil
         evictInactiveMaterializedChats()
+    }
+
+    func retryFailedChatHydration() {
+        guard let failedChatHydration, chatHydrationError != nil else { return }
+        _ = selectChat(id: failedChatHydration.id, isLocalOnly: failedChatHydration.isLocalOnly)
     }
 
     private func failSelection(id: String, generation: Int) {
@@ -4770,7 +4780,8 @@ class ChatViewModel: ObservableObject {
     }
 
     private func endStreamingAndBackup(chatId: String) {
-        guard authManager?.isAuthenticated == true else { return }
+        guard authManager?.isAuthenticated == true,
+              let userId = currentUserId else { return }
 
         streamingTracker.endStreaming(chatId)
 
@@ -4784,16 +4795,24 @@ class ChatViewModel: ObservableObject {
         let isLocal = location.isLocal
         Task { @MainActor in
             await saveTask?.value
+            guard self.currentUserId == userId else { return }
             if SettingsManager.shared.isCloudSyncEnabled && !latestChat.isLocalOnly {
                 await self.cloudSync.backupChat(latestChat.id)
+                guard self.currentUserId == userId else { return }
             }
 
-            if let userId = self.currentUserId,
-               let syncedChat = try? await self.chatLoadingService.loadChat(
-                   id: latestChat.id,
-                   userId: userId,
-                   storage: isLocal ? .local : .cloud
-               ) {
+            do {
+                let syncedChat = try await self.chatLoadingService.loadChat(
+                    id: latestChat.id,
+                    userId: userId,
+                    storage: isLocal ? .local : .cloud
+                )
+                guard self.currentUserId == userId,
+                      let currentLocation = self.findChatLocation(latestChat.id),
+                      currentLocation.isLocal == isLocal
+                else {
+                    return
+                }
                 if isLocal {
                     if let idx = self.localChats.firstIndex(where: { $0.id == latestChat.id }) {
                         self.localChats[idx] = syncedChat
@@ -4806,6 +4825,10 @@ class ChatViewModel: ObservableObject {
                 if self.currentChat?.id == latestChat.id {
                     self.currentChat = syncedChat
                 }
+            } catch is CancellationError {
+            } catch {
+                guard self.currentUserId == userId else { return }
+                self.syncErrors.append(error.localizedDescription)
             }
         }
     }
@@ -6070,6 +6093,7 @@ class ChatViewModel: ObservableObject {
             loadLocal: false  // Don't fall back to local when paginating
         )
         guard !Task.isCancelled, currentUserId == userId else { return }
+        guard !result.cancelled else { return }
 
         let convertedChats = result.chats.compactMap { $0.toChat() }
         let conversionFailures = result.chats.count - convertedChats.count

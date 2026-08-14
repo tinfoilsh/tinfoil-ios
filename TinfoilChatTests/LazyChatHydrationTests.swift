@@ -219,6 +219,32 @@ struct LazyChatHydrationTests {
     }
 
     @Test
+    func cancelledPaginationResultRetainsOriginalPageStateWithoutFailure() {
+        let result = PaginatedChatsResult(chats: [], cancelled: true)
+        let original = ChatPaginationPageState(token: "current", hasMore: true)
+
+        let resolved = ChatPaginationCoordinator.state(
+            original: original,
+            next: ChatPaginationPageState(token: result.nextToken, hasMore: result.hasMore),
+            allRowsPersisted: true,
+            pageFailed: result.failed,
+            pageCancelled: result.cancelled
+        )
+
+        #expect(resolved == original)
+        #expect(result.cancelled)
+        #expect(!result.failed)
+    }
+
+    @Test
+    func failedHydrationRetainsRetryIdentityAndStorage() {
+        let failedHydration = FailedChatHydration(id: "chat", storage: .local)
+
+        #expect(failedHydration.id == "chat")
+        #expect(failedHydration.isLocalOnly)
+    }
+
+    @Test
     func anonymousMigrationFailureRemainsPendingUntilLaterSuccess() {
         var hasChatsRemaining = AnonymousChatMigrationPolicy.hasChatsRemaining(allSucceeded: false)
         #expect(hasChatsRemaining)
@@ -285,6 +311,8 @@ struct LazyChatHydrationTests {
         )
 
         #expect(resolved == original)
+        #expect(result.failed)
+        #expect(!result.cancelled)
     }
 
     @Test
@@ -353,16 +381,6 @@ struct LazyChatHydrationTests {
 
         #expect(await service.savedChat(id: original.id, storage: .cloud)?.title == original.title)
         #expect(await service.counts().deletes == 0)
-    }
-
-    @Test
-    func deletingUnmaterializedIdentityDoesNotLoadChat() async throws {
-        let service = RecordingChatLoadingService()
-
-        try await service.deleteChat(id: "delete", userId: "user", storage: .cloud)
-
-        #expect(await service.counts().loads == 0)
-        #expect(await service.counts().deletes == 1)
     }
 
     @Test

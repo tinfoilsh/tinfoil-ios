@@ -252,10 +252,16 @@ struct ChatListView: View {
                     Text(viewModel.chatHydrationError ?? "Loading conversation...")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
+                    if viewModel.chatHydrationError != nil && viewModel.canRetryFailedChatHydration {
+                        Button("Try Again") {
+                            viewModel.retryFailedChatHydration()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.chatBackground(isDarkMode: isDarkMode))
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: .contain)
                 .accessibilityLabel(viewModel.chatHydrationError ?? "Loading conversation")
             }
         }
