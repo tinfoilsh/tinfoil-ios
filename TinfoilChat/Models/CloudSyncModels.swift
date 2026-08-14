@@ -411,11 +411,18 @@ struct PaginatedChatsResult {
     let chats: [StoredChat]
     let hasMore: Bool
     let nextToken: String?
+    let failed: Bool
     
-    init(chats: [StoredChat], hasMore: Bool = false, nextToken: String? = nil) {
+    init(
+        chats: [StoredChat],
+        hasMore: Bool = false,
+        nextToken: String? = nil,
+        failed: Bool = false
+    ) {
         self.chats = chats
         self.hasMore = hasMore
         self.nextToken = nextToken
+        self.failed = failed
     }
 }
 

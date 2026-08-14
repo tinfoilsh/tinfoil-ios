@@ -178,6 +178,7 @@ struct MessageInputView: View {
     /// an attachment is still processing or the previous response is being
     /// recovered; voice greys out while a recording is being transcribed.
     private var isTrailingActionDisabled: Bool {
+        guard viewModel.canUseCurrentChatActions else { return true }
         switch trailingAction {
         case .voice: return viewModel.isTranscribing
         case .send:
@@ -245,6 +246,7 @@ struct MessageInputView: View {
             .onChange(of: messageText) { _, newValue in
                 messageTextHasNonWhitespace = hasNonWhitespaceContent(newValue)
             }
+            .disabled(!viewModel.canUseCurrentChatActions)
             .onChange(of: textHeight) { _, newHeight in
                 guard let isInputExpanded else { return }
                 let expanded = newHeight > Layout.minimumHeight + 1

@@ -1,0 +1,432 @@
+import Foundation
+import Testing
+@testable import TinfoilChat
+
+private enum LazyHydrationTestError: Error, Sendable {
+    case corrupt
+}
+
+private actor RecordingChatLoadingService: ChatLoadingService {
+    private var indexes: [ChatStorageTab: [ChatIndexEntry]] = [:]
+    private var storedChats: [ChatStorageTab: [String: Chat]] = [:]
+    private var loadCalls: [(String, ChatStorageTab)] = []
+    private var saveCalls: [(String, ChatStorageTab)] = []
+    private var deleteCalls: [(String, ChatStorageTab)] = []
+    private var shouldThrowCorrupt = false
+    private var failingSaveIds: Set<String> = []
+    private var failingDeleteIds: [ChatStorageTab: Set<String>] = [:]
+
+    func setIndex(_ entries: [ChatIndexEntry], storage: ChatStorageTab) {
+        indexes[storage] = entries
+    }
+
+    func setChat(_ chat: Chat, storage: ChatStorageTab) {
+        storedChats[storage, default: [:]][chat.id] = chat
+    }
+
+    func setCorruptLoad() {
+        shouldThrowCorrupt = true
+    }
+
+    func setFailingSaveIds(_ ids: Set<String>) {
+        failingSaveIds = ids
+    }
+
+    func setFailingDeleteIds(_ ids: Set<String>, storage: ChatStorageTab) {
+        failingDeleteIds[storage] = ids
+    }
+
+    func loadIndex(userId: String, storage: ChatStorageTab) async throws -> [ChatIndexEntry] {
+        indexes[storage] ?? []
+    }
+
+    func loadChat(id: String, userId: String, storage: ChatStorageTab) async throws -> Chat {
+        loadCalls.append((id, storage))
+        if shouldThrowCorrupt { throw LazyHydrationTestError.corrupt }
+        guard let chat = storedChats[storage]?[id] else {
+            throw ChatLoadingError.chatNotFound(id: id, storage: storage)
+        }
+        return chat
+    }
+
+    func saveChat(_ chat: Chat, userId: String, storage: ChatStorageTab) async throws {
+        saveCalls.append((chat.id, storage))
+        if failingSaveIds.contains(chat.id) { throw LazyHydrationTestError.corrupt }
+        storedChats[storage, default: [:]][chat.id] = chat
+    }
+
+    func deleteChat(id: String, userId: String, storage: ChatStorageTab) async throws {
+        deleteCalls.append((id, storage))
+        if failingDeleteIds[storage]?.contains(id) == true { throw LazyHydrationTestError.corrupt }
+        storedChats[storage]?[id] = nil
+    }
+
+    func counts() -> (loads: Int, saves: Int, deletes: Int) {
+        (loadCalls.count, saveCalls.count, deleteCalls.count)
+    }
+
+    func lastLoad() -> (String, ChatStorageTab)? { loadCalls.last }
+    func savedChat(id: String, storage: ChatStorageTab) -> Chat? { storedChats[storage]?[id] }
+    func deletedStorages() -> [ChatStorageTab] { deleteCalls.map(\.1) }
+}
+
+struct LazyChatHydrationTests {
+    @Test
+    func publishesThousandIndexSummariesWithoutLoadingFullChats() async throws {
+        let service = RecordingChatLoadingService()
+        let entries = (0..<1_000).map { index in
+            ChatIndexEntry(from: makeChat(id: "chat-\(index)", updatedAt: Date(timeIntervalSince1970: Double(index))))
+        }
+        await service.setIndex(entries, storage: .cloud)
+
+        let loadedIndex = try await service.loadIndex(userId: "user", storage: .cloud)
+        let result = ChatSummaryState.page(from: loadedIndex)
+
+        #expect(result.summaries.count == 1_000)
+        #expect(result.totalEntries == 1_000)
+        #expect(await service.counts().loads == 0)
+    }
+
+    @Test
+    func hydrationUsesTheRequestedStoreAndSurfacesMissingOrCorruptLoads() async throws {
+        let service = RecordingChatLoadingService()
+        let cloudChat = makeChat(id: "cloud", updatedAt: Date())
+        await service.setChat(cloudChat, storage: .cloud)
+
+        let loaded = try await service.loadChat(id: cloudChat.id, userId: "user", storage: .cloud)
+        #expect(loaded.id == cloudChat.id)
+        #expect(await service.lastLoad()?.1 == .cloud)
+
+        do {
+            _ = try await service.loadChat(id: "missing", userId: "user", storage: .local)
+            Issue.record("Expected an explicit missing-chat failure")
+        } catch let error as ChatLoadingError {
+            #expect(error == .chatNotFound(id: "missing", storage: .local))
+        }
+
+        await service.setCorruptLoad()
+        await #expect(throws: LazyHydrationTestError.self) {
+            _ = try await service.loadChat(id: cloudChat.id, userId: "user", storage: .cloud)
+        }
+    }
+
+    @Test
+    func newerSelectionSuppressesAnOlderHydration() {
+        var fence = ChatSelectionFence()
+        let generationA = fence.begin(id: "A")
+        let generationB = fence.begin(id: "B")
+
+        #expect(!fence.accepts(id: "A", generation: generationA))
+        #expect(fence.accepts(id: "B", generation: generationB))
+    }
+
+    @Test
+    func invalidatingSelectionRejectsHydrationCompletion() {
+        var fence = ChatSelectionFence()
+        let generation = fence.begin(id: "delete")
+
+        fence.invalidate()
+
+        #expect(!fence.accepts(id: "delete", generation: generation))
+        #expect(fence.selectedId == nil)
+    }
+
+    @Test
+    func newerTransientSummaryOverridesOlderIndexSummary() {
+        let older = makeChat(id: "chat", updatedAt: Date(timeIntervalSince1970: 1))
+        var newer = older
+        newer.title = "New title"
+        newer.updatedAt = Date(timeIntervalSince1970: 2)
+
+        let reconciled = ChatSummaryState.reconcilingIndex(
+            [ChatListSummary(from: older)],
+            withTransient: [ChatListSummary(from: newer)]
+        )
+
+        #expect(reconciled.first?.title == "New title")
+    }
+
+    @Test
+    func blankUpsertReplacesExistingBlankForStorage() {
+        let oldBlank = makeBlankChat(id: "old-blank")
+        let newBlank = makeBlankChat(id: "new-blank")
+        let regular = makeChat(id: "regular", updatedAt: Date())
+
+        let summaries = ChatSummaryState.upserting(
+            ChatListSummary(from: newBlank),
+            into: [ChatListSummary(from: oldBlank), ChatListSummary(from: regular)]
+        )
+
+        #expect(summaries.filter(\.isBlankChat).map(\.id) == [newBlank.id])
+        #expect(summaries.contains { $0.id == regular.id })
+    }
+
+    @Test
+    func refreshedCloudIndexPreservesLoadedRootIdsAndProjects() {
+        var entries = (0..<5).map { index in
+            ChatIndexEntry(from: makeChat(
+                id: "root-\(index)",
+                updatedAt: Date(timeIntervalSince1970: Double(index))
+            ))
+        }
+        var projectChat = makeChat(id: "project", updatedAt: Date(timeIntervalSince1970: 10))
+        projectChat.projectId = "project-id"
+        entries.append(ChatIndexEntry(from: projectChat))
+
+        let result = ChatSummaryState.cloudIndexSummaries(
+            from: entries,
+            loadedRootIds: ["root-0"],
+            firstPageLimit: 2
+        )
+        let ids = Set(result.summaries.map(\.id))
+
+        #expect(ids == ["root-4", "root-3", "root-0", "project"])
+        #expect(result.firstPageIds == ["root-4", "root-3"])
+        #expect(result.totalRootEntries == 5)
+    }
+
+    @Test
+    func paginationPersistenceReturnsOnlySuccessfullySavedChats() async {
+        let service = RecordingChatLoadingService()
+        let saved = makeChat(id: "saved", updatedAt: Date())
+        let failed = makeChat(id: "failed", updatedAt: Date())
+        await service.setFailingSaveIds([failed.id])
+
+        let result = await ChatPaginationPersistence.saveCloudChats(
+            [saved, failed],
+            userId: "user",
+            loadingService: service
+        )
+
+        #expect(result.saved.map(\.id) == [saved.id])
+        #expect(result.failedIds == [failed.id])
+        #expect(await service.savedChat(id: saved.id, storage: .cloud) != nil)
+        #expect(await service.savedChat(id: failed.id, storage: .cloud) == nil)
+    }
+
+    @Test
+    func paginationPartialFailureRetainsOriginalPageState() {
+        let original = ChatPaginationPageState(token: "current", hasMore: true)
+        let next = ChatPaginationPageState(token: "next", hasMore: false)
+
+        let resolved = ChatPaginationCoordinator.state(
+            original: original,
+            next: next,
+            allRowsPersisted: false
+        )
+
+        #expect(resolved == original)
+    }
+
+    @Test
+    func anonymousMigrationFailureRemainsPendingUntilLaterSuccess() {
+        var hasChatsRemaining = AnonymousChatMigrationPolicy.hasChatsRemaining(allSucceeded: false)
+        #expect(hasChatsRemaining)
+
+        hasChatsRemaining = AnonymousChatMigrationPolicy.hasChatsRemaining(allSucceeded: true)
+        #expect(!hasChatsRemaining)
+    }
+
+    @Test
+    func deleteFailureRestoresSelectedConversation() {
+        #expect(ChatDeleteSelectionResolution.resolve(
+            deletionOwnedSelection: true,
+            deletionSucceeded: false,
+            deletionGeneration: 2,
+            currentGeneration: 2,
+            deletedId: "deleted",
+            currentSelectedId: "deleted"
+        ) == .restore)
+        #expect(ChatDeleteSelectionResolution.resolve(
+            deletionOwnedSelection: true,
+            deletionSucceeded: true,
+            deletionGeneration: 2,
+            currentGeneration: 2,
+            deletedId: "deleted",
+            currentSelectedId: "deleted"
+        ) == .clearAndReplace)
+    }
+
+    @Test
+    func newerSelectionIsNotOverriddenByDeleteCompletion() {
+        let resolution = ChatDeleteSelectionResolution.resolve(
+            deletionOwnedSelection: true,
+            deletionSucceeded: true,
+            deletionGeneration: 2,
+            currentGeneration: 3,
+            deletedId: "deleted",
+            currentSelectedId: "newer"
+        )
+
+        #expect(resolution == .unchanged)
+    }
+
+    @Test
+    func mutationGateRejectsConcurrentOperationForSameChat() {
+        var gate = ChatMutationGate()
+
+        #expect(gate.begin(chatId: "chat"))
+        #expect(!gate.begin(chatId: "chat"))
+        #expect(gate.begin(chatId: "other"))
+        gate.end(chatId: "chat")
+        #expect(gate.begin(chatId: "chat"))
+    }
+
+    @Test
+    func failedEmptyPaginationResultRetainsOriginalPageState() {
+        let result = PaginatedChatsResult(chats: [], failed: true)
+        let original = ChatPaginationPageState(token: "current", hasMore: true)
+
+        let resolved = ChatPaginationCoordinator.state(
+            original: original,
+            next: ChatPaginationPageState(token: result.nextToken, hasMore: result.hasMore),
+            allRowsPersisted: true,
+            pageFailed: result.failed
+        )
+
+        #expect(resolved == original)
+    }
+
+    @Test
+    @MainActor
+    func throwingProjectSaveDoesNotDeleteOriginalStorage() async {
+        let service = RecordingChatLoadingService()
+        var moved = makeChat(id: "move", updatedAt: Date())
+        moved.isLocalOnly = false
+        await service.setChat(makeChat(id: moved.id, updatedAt: moved.updatedAt), storage: .local)
+        await service.setFailingSaveIds([moved.id])
+
+        await #expect(throws: LazyHydrationTestError.self) {
+            try await ChatProjectStorageTransition.persist(
+                moved,
+                wasLocal: true,
+                userId: "user",
+                loadingService: service,
+                validateAccount: {}
+            )
+        }
+
+        #expect(await service.savedChat(id: moved.id, storage: .local) != nil)
+        #expect(await service.savedChat(id: moved.id, storage: .cloud) == nil)
+        #expect(await service.counts().deletes == 0)
+    }
+
+    @Test
+    @MainActor
+    func failedLocalProjectDeleteCompensatesCloudWrite() async {
+        let service = RecordingChatLoadingService()
+        var original = makeChat(id: "move", updatedAt: Date())
+        original.isLocalOnly = true
+        var moved = original
+        moved.isLocalOnly = false
+        moved.projectId = "project"
+        await service.setChat(original, storage: .local)
+        await service.setFailingDeleteIds([moved.id], storage: .local)
+
+        await #expect(throws: LazyHydrationTestError.self) {
+            try await ChatProjectStorageTransition.persist(
+                moved,
+                wasLocal: true,
+                userId: "user",
+                loadingService: service,
+                validateAccount: {}
+            )
+        }
+
+        #expect(await service.savedChat(id: moved.id, storage: .local) != nil)
+        #expect(await service.savedChat(id: moved.id, storage: .cloud) == nil)
+        #expect(await service.deletedStorages() == [.local, .cloud])
+    }
+
+    @Test
+    func throwingTitleSaveLeavesOriginalValueUncommitted() async {
+        let service = RecordingChatLoadingService()
+        let original = makeChat(id: "title", updatedAt: Date())
+        var proposed = original
+        proposed.title = "Updated"
+        await service.setChat(original, storage: .cloud)
+        await service.setFailingSaveIds([original.id])
+
+        await #expect(throws: LazyHydrationTestError.self) {
+            try await service.saveChat(proposed, userId: "user", storage: .cloud)
+        }
+
+        #expect(await service.savedChat(id: original.id, storage: .cloud)?.title == original.title)
+        #expect(await service.counts().deletes == 0)
+    }
+
+    @Test
+    func deletingUnmaterializedIdentityDoesNotLoadChat() async throws {
+        let service = RecordingChatLoadingService()
+
+        try await service.deleteChat(id: "delete", userId: "user", storage: .cloud)
+
+        #expect(await service.counts().loads == 0)
+        #expect(await service.counts().deletes == 1)
+    }
+
+    @Test
+    func workingSetRetainsCurrentStreamRecoveryAndDirtyChats() {
+        let current = makeChat(id: "current", updatedAt: Date())
+        var stream = makeChat(id: "stream", updatedAt: Date())
+        stream.hasActiveStream = true
+        let recovery = makeChat(id: "recovery", updatedAt: Date())
+        var dirty = makeChat(id: "dirty", updatedAt: Date())
+        dirty.locallyModified = true
+        var inactive = makeChat(id: "inactive", updatedAt: Date())
+        inactive.locallyModified = false
+
+        let retained = MaterializedChatWorkingSet.retained(
+            [current, stream, recovery, dirty, inactive],
+            selectedId: current.id,
+            streamingIds: [stream.id],
+            recoveryIds: [recovery.id],
+            operationIds: [dirty.id]
+        )
+
+        #expect(Set(retained.map(\.id)) == [current.id, stream.id, recovery.id, dirty.id])
+    }
+
+    @Test
+    func summaryPagePreservesIndexFilterOrderAndCount() {
+        let entries = (0..<80).map { index -> ChatIndexEntry in
+            var chat = makeChat(id: "chat-\(index)", updatedAt: Date(timeIntervalSince1970: Double(index)))
+            chat.projectId = index.isMultiple(of: 3) ? "project" : nil
+            return ChatIndexEntry(from: chat)
+        }
+
+        let page = ChatSummaryState.page(
+            from: entries,
+            filter: \.isCloudDisplayable,
+            limit: 20
+        )
+
+        #expect(page.totalEntries == entries.filter(\.isCloudDisplayable).count)
+        #expect(page.summaries.count == 20)
+        #expect(page.summaries.map(\.updatedAt) == page.summaries.map(\.updatedAt).sorted(by: >))
+    }
+
+    private func makeChat(id: String, updatedAt: Date) -> Chat {
+        var chat = Chat(
+            id: id,
+            title: id,
+            messages: [Message(role: .user, content: id)],
+            createdAt: updatedAt,
+            modelType: ChatSearchServiceTests.testModel,
+            updatedAt: updatedAt
+        )
+        chat.locallyModified = false
+        return chat
+    }
+
+    private func makeBlankChat(id: String) -> Chat {
+        Chat(
+            id: id,
+            title: Chat.placeholderTitle,
+            messages: [],
+            createdAt: Date(),
+            modelType: ChatSearchServiceTests.testModel,
+            updatedAt: Date()
+        )
+    }
+}

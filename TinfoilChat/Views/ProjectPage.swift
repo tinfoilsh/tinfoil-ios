@@ -140,7 +140,7 @@ struct ProjectPage: View {
         }
     }
 
-    private func chatRow(_ chat: Chat) -> some View {
+    private func chatRow(_ chat: ChatListSummary) -> some View {
         Button {
             viewModel.openProjectChat(chat)
         } label: {
@@ -245,7 +245,7 @@ struct ProjectPage: View {
         }
     }
 
-    private func timestampText(for chat: Chat) -> Text {
+    private func timestampText(for chat: ChatListSummary) -> Text {
         let created = relativeTimeString(from: chat.createdAt)
         let updated = relativeTimeString(from: chat.updatedAt)
         let createdText = Text(created)

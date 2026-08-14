@@ -1298,14 +1298,14 @@ class CloudSyncService: ObservableObject {
                     continuationToken: continuationToken
                 )
                 guard generation == accountGeneration else {
-                    return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+                    return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, failed: true)
                 }
                 return result
             }
-            return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+            return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, failed: true)
         }
         guard generation == accountGeneration else {
-            return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+            return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, failed: true)
         }
         
         do {
@@ -1317,7 +1317,7 @@ class CloudSyncService: ObservableObject {
                 includeContent: true
             )
             guard generation == accountGeneration else {
-                return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+                return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, failed: true)
             }
             
             // Process remote chats in parallel
@@ -1328,13 +1328,13 @@ class CloudSyncService: ObservableObject {
             // fetch metadata and store encrypted placeholders. Decryption will be attempted per-chat.
             _ = try? await encryptionService.initialize()
             guard generation == accountGeneration else {
-                return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+                return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, failed: true)
             }
 
             // Process chats sequentially to avoid connection exhaustion
             for remoteChat in chatsToProcess {
                 guard generation == accountGeneration else {
-                    return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+                    return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, failed: true)
                 }
                 // Skip recently deleted chats
                 if deletedChatsTracker.isDeleted(remoteChat.id) {
@@ -1352,12 +1352,12 @@ class CloudSyncService: ObservableObject {
 
                 if let decrypted = await decryptRemoteChat(remoteChat, content: content) {
                     guard generation == accountGeneration else {
-                        return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+                        return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, failed: true)
                     }
                     downloadedChats.append(decrypted.chat)
                 } else {
                     guard generation == accountGeneration else {
-                        return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+                        return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, failed: true)
                     }
                     let placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
                     downloadedChats.append(placeholder)
@@ -1382,11 +1382,11 @@ class CloudSyncService: ObservableObject {
                     continuationToken: continuationToken
                 )
                 guard generation == accountGeneration else {
-                    return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+                    return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, failed: true)
                 }
                 return result
             }
-            return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+            return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, failed: true)
         }
     }
     
