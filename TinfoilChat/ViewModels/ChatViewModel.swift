@@ -148,6 +148,12 @@ class ChatViewModel: ObservableObject {
     // Published properties for UI updates
     @Published var chats: [Chat] = []
     @Published var localChats: [Chat] = []
+    var cloudSidebarSummaries: [ChatListSummary] {
+        chats.map { ChatListSummary(from: $0) }
+    }
+    var localSidebarSummaries: [ChatListSummary] {
+        localChats.map { ChatListSummary(from: $0) }
+    }
     @Published var currentChat: Chat? {
         didSet {
             if currentChat?.id != oldValue?.id {
@@ -1993,6 +1999,14 @@ class ChatViewModel: ObservableObject {
     }
 
     /// Selects a chat as the current chat
+    @discardableResult
+    func selectChat(id: String, isLocalOnly: Bool) -> Bool {
+        let source = isLocalOnly ? localChats : chats
+        guard let chat = source.first(where: { $0.id == id }) else { return false }
+        selectChat(chat)
+        return true
+    }
+
     func selectChat(_ chat: Chat) {
         selectedChatImageTask?.cancel()
         // Any explicit selection supersedes a search hit whose project
