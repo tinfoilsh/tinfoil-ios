@@ -4,7 +4,7 @@
 //
 //  Icon-only pill that opens a menu for picking reasoning effort and (for
 //  models that support it) toggling thinking on/off. The button label is
-//  intentionally just the lightbulb icon — the current effort/state is
+//  intentionally just the controls icon — the current effort/state is
 //  surfaced via the menu's checkmarks rather than the button text.
 //
 //   - Toggle-only (e.g. Gemma): tapping the icon flips `thinkingEnabled`
@@ -140,14 +140,12 @@ struct ReasoningEffortSelector: View {
     }
 
     /// Shared icon-only pill body used by both the toggle button and the
-    /// effort menu. Uses the SF Symbols `lightbulb`/`lightbulb.slash`
-    /// glyph pair — the system-provided slash variant adapts to both
-    /// light and dark modes natively, so no manual overlay is needed.
+    /// effort menu. Uses the SF Symbols `slider.horizontal.3` glyph.
     @ViewBuilder
     private func iconLabel(active: Bool) -> some View {
-        let pill = Image(systemName: active ? "lightbulb" : "lightbulb.slash")
+        let pill = Image(systemName: "slider.horizontal.3")
             .font(.system(size: 12, weight: .semibold))
-            .foregroundColor(active ? .primary : .primary.opacity(0.9))
+            .foregroundColor(active ? .primary : .secondary.opacity(0.45))
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(Color.secondary.opacity(0.12))

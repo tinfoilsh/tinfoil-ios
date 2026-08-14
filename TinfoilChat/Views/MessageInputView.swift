@@ -327,7 +327,13 @@ struct MessageInputView: View {
                     }
                 )
                 .environmentObject(authManager)
-                .presentationDetents([.height(showContextIndicator ? 324 : 280)])
+                .presentationDetents([
+                    .height(
+                        showContextIndicator
+                            ? Constants.AddToChatSheet.heightWithContext
+                            : Constants.AddToChatSheet.height
+                    )
+                ])
                 .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
             }
             .sheet(isPresented: $viewModel.showRateLimitPaywall) {
@@ -626,7 +632,7 @@ struct MessageInputView: View {
                 .frame(width: 24, height: 24)
         }
         .disabled(viewModel.isProcessingAttachment)
-        .accessibilityLabel("Add attachment")
+        .accessibilityLabel("Add to chat")
         .accessibleHitTarget()
         .padding(.leading, 8)
     }
@@ -1140,17 +1146,35 @@ private final class FloatingRecordingBubbleView: UIView {
     }
 }
 
-/// Bottom sheet presented from the "+" button with attachment options and web search toggle
+/// Bottom sheet presented from the "+" button with attachment options and chat features
 struct AddToSheetView: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @EnvironmentObject private var authManager: AuthManager
     @ObservedObject private var settings = SettingsManager.shared
+    @ObservedObject private var profileManager = ProfileManager.shared
     let isDarkMode: Bool
     let contextUsage: ContextUsage?
     let onCamera: () -> Void
     let onPhotos: () -> Void
     let onFiles: () -> Void
     @Environment(\.dismiss) private var dismiss
+
+    private var selectedPrompt: PromptPreset? {
+        profileManager.promptPreset(for: viewModel.currentChat?.promptPresetId)
+    }
+
+    private var promptDisplay: (name: String, icon: String) {
+        if let selectedPrompt {
+            return (selectedPrompt.name, selectedPrompt.iconName)
+        }
+        if viewModel.currentChat?.promptPresetId != nil {
+            return ("Unavailable", "exclamationmark.triangle")
+        }
+        if profileManager.isUsingCustomPrompt || settings.isUsingCustomPrompt {
+            return ("Custom Prompt", "square.and.pencil")
+        }
+        return ("Default", "text.quote")
+    }
 
     var body: some View {
         NavigationStack {
@@ -1192,6 +1216,27 @@ struct AddToSheetView: View {
                     .tint(.green)
                     .padding(.horizontal, 20)
                 }
+
+                NavigationLink {
+                    PromptLibraryView(
+                        activePresetId: viewModel.currentChat?.promptPresetId,
+                        onSelectPreset: { viewModel.setPromptPreset($0) }
+                    )
+                } label: {
+                    HStack {
+                        Label("Prompt", systemImage: promptDisplay.icon)
+                        Spacer()
+                        Text(promptDisplay.name)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .foregroundColor(.primary)
+                .padding(.horizontal, 20)
+                .accessibilityValue(promptDisplay.name)
 
                 if let contextUsage {
                     HStack {
