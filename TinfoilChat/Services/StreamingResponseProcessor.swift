@@ -16,11 +16,6 @@ enum StreamingResponseProcessorError: Error {
 /// bookkeeping) so the stream can be consumed off the main actor. The main
 /// actor only receives immutable snapshots and per-chunk outcomes.
 ///
-/// Thread-safety contract (`@unchecked Sendable`): the stream task is the
-/// single consumer. The main actor touches the processor only through the
-/// event-application accessors, and only while the stream task is suspended
-/// awaiting that main-actor hop, so all access is serialized even though the
-/// class is not internally synchronized.
 final class StreamingResponseProcessor: @unchecked Sendable {
 
     /// Everything the UI writes onto the streaming message. Captured as a
@@ -621,5 +616,213 @@ final class StreamingResponseProcessor: @unchecked Sendable {
         lastHapticTime = now
         hapticChunkCount += 1
         return true
+    }
+}
+
+final class SynchronizedStreamingResponseProcessor: @unchecked Sendable {
+    private let lock = NSLock()
+    private let processor: StreamingResponseProcessor
+
+    init(_ processor: StreamingResponseProcessor) {
+        self.processor = processor
+    }
+
+    func withProcessor<Result>(
+        _ transaction: (StreamingResponseProcessor) throws -> Result
+    ) rethrows -> Result {
+        lock.lock()
+        defer { lock.unlock() }
+        return try transaction(processor)
+    }
+
+    func parse(_ chunk: ChatStreamResult) -> StreamingResponseProcessor.ParsedChunk {
+        withProcessor { $0.parse(chunk) }
+    }
+
+    func process(
+        _ parsed: StreamingResponseProcessor.ParsedChunk
+    ) -> StreamingResponseProcessor.ChunkOutcome {
+        withProcessor { $0.process(parsed) }
+    }
+
+    func snapshot() -> StreamingResponseProcessor.Snapshot {
+        withProcessor { $0.snapshot() }
+    }
+
+    func finishStream() throws {
+        try withProcessor { try $0.finishStream() }
+    }
+
+    func finishAndSnapshot() throws -> StreamingResponseProcessor.Snapshot {
+        try withProcessor {
+            try $0.finishStream()
+            return $0.snapshot()
+        }
+    }
+}
+
+struct MaterializedSnapshot<Snapshot> {
+    let id: UInt64
+    let snapshot: Snapshot
+}
+
+struct LazySnapshotPublication<Snapshot> {
+    let materializedSnapshot: MaterializedSnapshot<Snapshot>?
+    let trailingFireTime: Date?
+    let shouldCancelTrailing: Bool
+}
+
+final class SnapshotPublicationIDs: @unchecked Sendable {
+    private let lock = NSLock()
+    private var latestID: UInt64 = 0
+
+    func next() -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        latestID += 1
+        return latestID
+    }
+}
+
+final class SnapshotPublicationFence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var latestAppliedID: UInt64 = 0
+
+    func accept(_ id: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard id > latestAppliedID else { return false }
+        latestAppliedID = id
+        return true
+    }
+}
+
+final class LazySnapshotPublisher<Snapshot>: @unchecked Sendable {
+    private let lock = NSLock()
+    private let interval: TimeInterval
+    private let buildSnapshot: () -> Snapshot
+    private let publicationIDs: SnapshotPublicationIDs
+    private var nextPublishTime = Date.distantPast
+    private var trailingFireTime: Date?
+    private var isDirty = false
+
+    init(
+        interval: TimeInterval,
+        publicationIDs: SnapshotPublicationIDs = SnapshotPublicationIDs(),
+        buildSnapshot: @escaping () -> Snapshot
+    ) {
+        self.interval = interval
+        self.publicationIDs = publicationIDs
+        self.buildSnapshot = buildSnapshot
+    }
+
+    func acceptUpdate(
+        at now: Date,
+        scheduleTrailing: Bool
+    ) -> LazySnapshotPublication<Snapshot> {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if now >= nextPublishTime {
+            let shouldCancelTrailing = trailingFireTime != nil
+            trailingFireTime = nil
+            isDirty = false
+            nextPublishTime = now.addingTimeInterval(interval)
+            return LazySnapshotPublication(
+                materializedSnapshot: materializeSnapshot(),
+                trailingFireTime: nil,
+                shouldCancelTrailing: shouldCancelTrailing
+            )
+        }
+
+        isDirty = true
+        guard scheduleTrailing, trailingFireTime == nil else {
+            return LazySnapshotPublication(
+                materializedSnapshot: nil,
+                trailingFireTime: nil,
+                shouldCancelTrailing: false
+            )
+        }
+
+        let fireTime = nextPublishTime
+        trailingFireTime = fireTime
+        nextPublishTime = fireTime.addingTimeInterval(interval)
+        return LazySnapshotPublication(
+            materializedSnapshot: nil,
+            trailingFireTime: fireTime,
+            shouldCancelTrailing: false
+        )
+    }
+
+    func publishTrailing(scheduledFor fireTime: Date) -> MaterializedSnapshot<Snapshot>? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard trailingFireTime == fireTime, isDirty else { return nil }
+        trailingFireTime = nil
+        isDirty = false
+        return materializeSnapshot()
+    }
+
+    func flushIfDirty() -> MaterializedSnapshot<Snapshot>? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard isDirty else { return nil }
+        trailingFireTime = nil
+        isDirty = false
+        return materializeSnapshot()
+    }
+
+    func markDirty() {
+        lock.lock()
+        isDirty = true
+        lock.unlock()
+    }
+
+    func cancelTrailing() {
+        lock.lock()
+        trailingFireTime = nil
+        lock.unlock()
+    }
+
+    func discardPublication() {
+        lock.lock()
+        nextPublishTime = .distantPast
+        trailingFireTime = nil
+        isDirty = false
+        lock.unlock()
+    }
+
+    func finish() -> MaterializedSnapshot<Snapshot> {
+        lock.lock()
+        defer { lock.unlock() }
+        trailingFireTime = nil
+        isDirty = false
+        return materializeSnapshot()
+    }
+
+    private func materializeSnapshot() -> MaterializedSnapshot<Snapshot> {
+        MaterializedSnapshot(
+            id: publicationIDs.next(),
+            snapshot: buildSnapshot()
+        )
+    }
+}
+
+final class PendingStreamingSummary: @unchecked Sendable {
+    private let lock = NSLock()
+    private var thoughts: String?
+
+    func replace(with thoughts: String?) {
+        lock.lock()
+        self.thoughts = thoughts
+        lock.unlock()
+    }
+
+    func take() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        let value = thoughts
+        thoughts = nil
+        return value
     }
 }

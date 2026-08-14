@@ -1270,55 +1270,75 @@ actor ChatRecoveryCoordinator {
         let modelDisplayNamesByName = await MainActor.run {
             AppConfig.shared.modelDisplayNamesByName
         }
-        let processor = StreamingResponseProcessor(
-            isWebSearchEnabled: true,
-            hapticEnabled: false,
-            modelDisplayName: modelDisplayName,
-            modelDisplayNamesByName: modelDisplayNamesByName
+        let processor = SynchronizedStreamingResponseProcessor(
+            StreamingResponseProcessor(
+                isWebSearchEnabled: true,
+                hapticEnabled: false,
+                modelDisplayName: modelDisplayName,
+                modelDisplayNamesByName: modelDisplayNamesByName
+            )
         )
+        let snapshotPublisher = LazySnapshotPublisher(
+            interval: Constants.Streaming.uiUpdateInterval,
+            buildSnapshot: processor.snapshot
+        )
+        let snapshotPublicationFence = SnapshotPublicationFence()
         var eventState = RecoveredEventState()
         var lastProgressDraft: Message?
         for try await chunk in stream {
             let parsed = processor.parse(chunk)
-            for event in parsed.events {
-                eventState.apply(event, processor: processor)
+            let outcome = processor.withProcessor { underlyingProcessor in
+                for event in parsed.events {
+                    eventState.apply(event, processor: underlyingProcessor)
+                }
+                return underlyingProcessor.process(parsed)
             }
-            let outcome = processor.process(parsed)
             if outcome.didMutateState || !parsed.events.isEmpty {
-                try ensureRecoveryIsCurrent(
-                    chatId: chatId,
-                    turnId: turnId,
-                    userId: userId,
-                    accountGeneration: accountGeneration,
-                    scanGeneration: scanGeneration,
-                    storage: storage
+                snapshotPublisher.markDirty()
+                let publication = snapshotPublisher.acceptUpdate(
+                    at: Date(),
+                    scheduleTrailing: false
                 )
-                let draft = recoveredMessage(
-                    snapshot: processor.snapshot(),
-                    eventState: eventState,
-                    chatId: chatId,
-                    turnId: turnId,
-                    isStreaming: true
-                )
-                if recoveryDraftHasVisibleContent(draft) {
-                    let published = try await publishRecoveryDraft(
-                        draft,
+                if let materializedSnapshot = publication.materializedSnapshot,
+                   snapshotPublicationFence.accept(materializedSnapshot.id) {
+                    try ensureRecoveryIsCurrent(
                         chatId: chatId,
                         turnId: turnId,
-                        sessionId: sessionId,
+                        userId: userId,
                         accountGeneration: accountGeneration,
                         scanGeneration: scanGeneration,
-                        userId: userId,
                         storage: storage
                     )
-                    if published && draft != lastProgressDraft {
-                        lastProgressDraft = draft
-                        await onProgress()
+                    let draft = recoveredMessage(
+                        snapshot: materializedSnapshot.snapshot,
+                        eventState: eventState,
+                        chatId: chatId,
+                        turnId: turnId,
+                        isStreaming: true
+                    )
+                    if recoveryDraftHasVisibleContent(draft) {
+                        let published = try await publishRecoveryDraft(
+                            draft,
+                            chatId: chatId,
+                            turnId: turnId,
+                            sessionId: sessionId,
+                            accountGeneration: accountGeneration,
+                            scanGeneration: scanGeneration,
+                            userId: userId,
+                            storage: storage
+                        )
+                        if published && draft != lastProgressDraft {
+                            lastProgressDraft = draft
+                            await onProgress()
+                        }
+                    } else {
+                        snapshotPublisher.discardPublication()
                     }
                 }
             }
         }
-        try processor.finishStream()
+        snapshotPublisher.cancelTrailing()
+        let finalSnapshot = try processor.finishAndSnapshot()
         try ensureRecoveryIsCurrent(
             chatId: chatId,
             turnId: turnId,
@@ -1328,7 +1348,7 @@ actor ChatRecoveryCoordinator {
             storage: storage
         )
         let message = recoveredMessage(
-            snapshot: processor.snapshot(),
+            snapshot: finalSnapshot,
             eventState: eventState,
             chatId: chatId,
             turnId: turnId,
@@ -1439,7 +1459,9 @@ actor ChatRecoveryCoordinator {
         message.timeline = snapshot.timelineBlocks
         message.urlFetches = eventState.urlFetches
         message.annotations = snapshot.collectedAnnotations
-        message.webSearchBeforeThinking = snapshot.webSearchBeforeThinking
+        if let webSearchBeforeThinking = snapshot.webSearchBeforeThinking {
+            message.webSearchBeforeThinking = webSearchBeforeThinking
+        }
         return message
     }
 

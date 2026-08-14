@@ -2684,6 +2684,9 @@ class ChatViewModel: ObservableObject {
             var recoveryRegistered = false
             var recoveryRegistrationAttempted = false
             var recoverySessionMayHaveStarted = false
+            var activeSnapshotPublisher: LazySnapshotPublisher<StreamingResponseProcessor.Snapshot>?
+            let snapshotPublicationIDs = SnapshotPublicationIDs()
+            let snapshotPublicationFence = SnapshotPublicationFence()
 
             retryLoop: do {
                 if !hasRetriedWithFreshKey,
@@ -2867,16 +2870,24 @@ class ChatViewModel: ObservableObject {
                 // thinking state machine, tool calls, web search bookkeeping)
                 // lives in the processor so the stream can be consumed off
                 // the main actor.
-                let processor = StreamingResponseProcessor(
-                    isWebSearchEnabled: webSearchEnabled,
-                    hapticEnabled: hapticEnabled,
-                    responseContent: initialResponseContent,
-                    modelDisplayName: streamModel.responseDisplayName,
-                    modelDisplayNamesByName: modelDisplayNamesByName,
-                    currentThoughts: initialThoughts,
-                    generationTimeSeconds: initialGenerationTime,
-                    isInThinkingMode: initialIsThinking
+                let processor = SynchronizedStreamingResponseProcessor(
+                    StreamingResponseProcessor(
+                        isWebSearchEnabled: webSearchEnabled,
+                        hapticEnabled: hapticEnabled,
+                        responseContent: initialResponseContent,
+                        modelDisplayName: streamModel.responseDisplayName,
+                        modelDisplayNamesByName: modelDisplayNamesByName,
+                        currentThoughts: initialThoughts,
+                        generationTimeSeconds: initialGenerationTime,
+                        isInThinkingMode: initialIsThinking
+                    )
                 )
+                let snapshotPublisher = LazySnapshotPublisher(
+                    interval: Constants.Streaming.uiUpdateInterval,
+                    publicationIDs: snapshotPublicationIDs,
+                    buildSnapshot: processor.snapshot
+                )
+                activeSnapshotPublisher = snapshotPublisher
 
                 // Web search progress now rides inline with the model's
                 // content as `<tinfoil-event>` markers (opted into via
@@ -2949,7 +2960,10 @@ class ChatViewModel: ObservableObject {
                 // callback used to provide, but driven off the inline
                 // marker stream so the app stays in sync with router
                 // progress without a second SSE channel.
-                let applyWebSearchCallEvent: @MainActor (TinfoilWebSearchCallEvent) -> Void = { [weak self] event in
+                let applyWebSearchCallEvent: @MainActor (
+                    TinfoilWebSearchCallEvent,
+                    StreamingResponseProcessor
+                ) -> Void = { [weak self] event, processor in
                     guard let self = self else { return }
                     // Look up the streaming chat by ID, not self.currentChat,
                     // so an event landing after the user switched chats never
@@ -3096,155 +3110,169 @@ class ChatViewModel: ObservableObject {
                 // actor is only hopped to for rare event application, haptics,
                 // and the throttled snapshot updates.
                 let consumeTask = Task.detached(priority: .userInitiated) { [weak self] in
-                    let uiUpdateInterval: TimeInterval = Constants.Streaming.uiUpdateInterval
-                    // Earliest moment the next publish may occur. Advanced on
-                    // every leading-edge publish and whenever a trailing flush
-                    // is scheduled, so flushes count against the throttle and
-                    // the publish rate stays bounded at one per interval.
-                    var nextPublishTime = Date.distantPast
                     // Latest thoughts awaiting a summary request; forwarded with
                     // the next throttled snapshot so summary generation does not
                     // force a main-actor hop per reasoning chunk.
-                    var pendingSummaryThoughts: String? = nil
+                    let pendingSummaryThoughts = PendingStreamingSummary()
                     // Trailing-edge flush for the UI throttle below. The throttle
                     // only publishes when a new chunk arrives after the interval
                     // has elapsed, so content landing inside the window would
                     // otherwise stay invisible until the next chunk — if the
                     // stream pauses (typical right after the first tokens), that
                     // reads as a stall followed by a burst. The flush publishes
-                    // the held snapshot at the end of the current window instead.
+                    // the latest processor state at the end of the current window instead.
                     var trailingFlushTask: Task<Void, Never>? = nil
-                    // Fire time of the most recently scheduled trailing flush.
-                    // Cleared when a leading-edge publish supersedes it, but not
-                    // when the flush fires: the flush task never mutates consumer
-                    // state, so a fired flush simply leaves a past date behind
-                    // and the `pending > now` check below treats it as consumed.
-                    var scheduledFlushTime: Date? = nil
-                    defer { trailingFlushTask?.cancel() }
+                    do {
+                        for try await chunk in stream {
+                            try Task.checkCancellation()
 
-                    for try await chunk in stream {
-                        if Task.isCancelled { break }
-
-                        let parsed = processor.parse(chunk)
-
-                        // Apply decoded marker events on the main actor before
-                        // processing the chunk's text. The loop suspends until
-                        // each event lands, so event handling stays ordered
-                        // relative to the streamed text around it and the
-                        // processor is never touched concurrently.
-                        for event in parsed.events {
-                            await applyWebSearchCallEvent(event)
-                        }
-
-                        let outcome = processor.process(parsed)
-
-                        if outcome.shouldTickHaptic {
-                            await MainActor.run {
-                                hapticGenerator?.impactOccurred(intensity: 0.5)
-                            }
-                        }
-
-                        for action in outcome.summaryActions {
-                            switch action {
-                            case .beginThinkingSession:
-                                pendingSummaryThoughts = nil
-                                await MainActor.run {
-                                    summaryService.reset()
-                                }
-                            case .endThinkingSession:
-                                pendingSummaryThoughts = nil
-                                let viewModel = self
-                                await MainActor.run {
-                                    summaryService.reset()
-                                    viewModel?.streamState.setThinkingSummary(nil, chatId: streamChatId)
-                                }
-                            case .generate(let thoughts):
-                                pendingSummaryThoughts = thoughts
-                            }
-                        }
-
-                        // Update UI at a throttled rate to avoid overwhelming SwiftUI with diffs
-                        let now = Date()
-                        if outcome.didMutateState {
-                            if now >= nextPublishTime {
-                                trailingFlushTask?.cancel()
-                                trailingFlushTask = nil
-                                scheduledFlushTime = nil
-                                nextPublishTime = now.addingTimeInterval(uiUpdateInterval)
-                                let snapshot = processor.snapshot()
-                                let thoughtsForSummary = pendingSummaryThoughts
-                                pendingSummaryThoughts = nil
-                                let viewModel = self
-                                await MainActor.run {
-                                    guard let self = viewModel else { return }
-                                    self.applyStreamSnapshot(snapshot, streamChatId: streamChatId)
-                                    if let thoughtsForSummary {
-                                        summaryService.generateSummary(thoughts: thoughtsForSummary) { [weak self] summary in
-                                            guard self?.streamState.isStreaming(chatId: streamChatId) == true else { return }
-                                            self?.streamState.setThinkingSummary(summary, chatId: streamChatId)
+                            let parsed = processor.parse(chunk)
+                            let outcome: StreamingResponseProcessor.ChunkOutcome
+                            if parsed.events.isEmpty {
+                                outcome = processor.process(parsed)
+                            } else {
+                                // Keep every processor mutation for an event-bearing
+                                // chunk in one transaction so a trailing snapshot
+                                // cannot observe partially-applied search state.
+                                outcome = await MainActor.run {
+                                    processor.withProcessor { underlyingProcessor in
+                                        for event in parsed.events {
+                                            applyWebSearchCallEvent(event, underlyingProcessor)
                                         }
+                                        return underlyingProcessor.process(parsed)
                                     }
                                 }
+                            }
+
+                            let publication: LazySnapshotPublication<StreamingResponseProcessor.Snapshot>?
+                            if outcome.didMutateState || !parsed.events.isEmpty {
+                                snapshotPublisher.markDirty()
+                                publication = snapshotPublisher.acceptUpdate(
+                                    at: Date(),
+                                    scheduleTrailing: true
+                                )
                             } else {
-                                // Inside the throttle window: hold a snapshot and
-                                // publish it when the window closes. The snapshot
-                                // is captured here, serialized with `process`,
-                                // because the processor must never be read from
-                                // the flush task while a later chunk mutates it.
-                                // A newer chunk replaces the pending snapshot but
-                                // keeps the original fire time, and the flush
-                                // consumes a publish slot so the rate stays at
-                                // one per interval. Pending summary thoughts are
-                                // forwarded without being cleared: a reschedule
-                                // must not drop them, and a duplicate request is
-                                // deduplicated by the summary service.
-                                trailingFlushTask?.cancel()
-                                let flushTime: Date
-                                if let pending = scheduledFlushTime, pending > now {
-                                    flushTime = pending
-                                } else {
-                                    // No pending flush (or the previous one
-                                    // already fired): schedule at the next free
-                                    // publish slot and reserve the one after it.
-                                    flushTime = nextPublishTime
-                                    scheduledFlushTime = flushTime
-                                    nextPublishTime = flushTime.addingTimeInterval(uiUpdateInterval)
+                                publication = nil
+                            }
+
+                            if outcome.shouldTickHaptic {
+                                await MainActor.run {
+                                    hapticGenerator?.impactOccurred(intensity: 0.5)
                                 }
-                                let snapshot = processor.snapshot()
-                                let thoughtsForSummary = pendingSummaryThoughts
-                                let delay = max(0, flushTime.timeIntervalSince(now))
-                                let viewModel = self
-                                trailingFlushTask = Task {
-                                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                                    guard !Task.isCancelled else { return }
+                            }
+
+                            for action in outcome.summaryActions {
+                                switch action {
+                                case .beginThinkingSession:
+                                    pendingSummaryThoughts.replace(with: nil)
                                     await MainActor.run {
-                                        guard !Task.isCancelled, let self = viewModel else { return }
-                                        self.applyStreamSnapshot(snapshot, streamChatId: streamChatId)
-                                        if let thoughtsForSummary {
+                                        summaryService.reset()
+                                    }
+                                case .endThinkingSession:
+                                    pendingSummaryThoughts.replace(with: nil)
+                                    let viewModel = self
+                                    await MainActor.run {
+                                        summaryService.reset()
+                                        viewModel?.streamState.setThinkingSummary(nil, chatId: streamChatId)
+                                    }
+                                case .generate(let thoughts):
+                                    pendingSummaryThoughts.replace(with: thoughts)
+                                }
+                            }
+
+                            // Update UI at a throttled rate to avoid overwhelming SwiftUI with diffs
+                            if let publication {
+                                if publication.shouldCancelTrailing {
+                                    trailingFlushTask?.cancel()
+                                    trailingFlushTask = nil
+                                }
+                                if let materializedSnapshot = publication.materializedSnapshot {
+                                    let thoughtsForSummary = pendingSummaryThoughts.take()
+                                    let viewModel = self
+                                    let applied = await MainActor.run {
+                                        guard let self = viewModel else { return false }
+                                        guard snapshotPublicationFence.accept(materializedSnapshot.id) else {
+                                            return true
+                                        }
+                                        let applied = self.applyStreamSnapshot(
+                                            materializedSnapshot.snapshot,
+                                            streamChatId: streamChatId
+                                        )
+                                        if applied, let thoughtsForSummary {
                                             summaryService.generateSummary(thoughts: thoughtsForSummary) { [weak self] summary in
                                                 guard self?.streamState.isStreaming(chatId: streamChatId) == true else { return }
                                                 self?.streamState.setThinkingSummary(summary, chatId: streamChatId)
                                             }
                                         }
+                                        return applied
+                                    }
+                                    if !applied {
+                                        snapshotPublisher.markDirty()
+                                    }
+                                }
+                                if let flushTime = publication.trailingFireTime {
+                                    let delay = max(0, flushTime.timeIntervalSinceNow)
+                                    let viewModel = self
+                                    trailingFlushTask = Task {
+                                        do {
+                                            try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                                        } catch {
+                                            return
+                                        }
+                                        guard !Task.isCancelled,
+                                              let materializedSnapshot = snapshotPublisher.publishTrailing(scheduledFor: flushTime) else {
+                                            return
+                                        }
+                                        let thoughtsForSummary = pendingSummaryThoughts.take()
+                                        let applied = await MainActor.run {
+                                            guard let self = viewModel else { return false }
+                                            guard snapshotPublicationFence.accept(materializedSnapshot.id) else {
+                                                return true
+                                            }
+                                            let applied = self.applyStreamSnapshot(
+                                                materializedSnapshot.snapshot,
+                                                streamChatId: streamChatId
+                                            )
+                                            if applied, let thoughtsForSummary {
+                                                summaryService.generateSummary(thoughts: thoughtsForSummary) { [weak self] summary in
+                                                    guard self?.streamState.isStreaming(chatId: streamChatId) == true else { return }
+                                                    self?.streamState.setThinkingSummary(summary, chatId: streamChatId)
+                                                }
+                                            }
+                                            return applied
+                                        }
+                                        if !applied {
+                                            snapshotPublisher.markDirty()
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    try processor.finishStream()
+                        trailingFlushTask?.cancel()
+                        if let trailingFlushTask {
+                            await trailingFlushTask.value
+                        }
+                        snapshotPublisher.cancelTrailing()
+                        return try processor.finishAndSnapshot()
+                    } catch {
+                        trailingFlushTask?.cancel()
+                        if let trailingFlushTask {
+                            await trailingFlushTask.value
+                        }
+                        snapshotPublisher.cancelTrailing()
+                        throw error
+                    }
                 }
 
                 // Propagate cancellation from cancelGeneration (which cancels
                 // the outer task) into the detached stream consumer.
-                try await withTaskCancellationHandler {
+                let finalSnapshot = try await withTaskCancellationHandler {
                     try await consumeTask.value
                 } onCancel: {
                     consumeTask.cancel()
                 }
                 try Task.checkCancellation()
-
-                let finalSnapshot = processor.snapshot()
 
                 // Finalize message content and prepare chat for save
                 // Look up the streaming chat by ID, not self.currentChat, because
@@ -3270,7 +3298,9 @@ class ChatViewModel: ObservableObject {
                         chat.messages[lastIndex].isThinking = false
                         chat.messages[lastIndex].generationTimeSeconds = finalSnapshot.generationTimeSeconds
                         chat.messages[lastIndex].thinkingDuration = finalSnapshot.generationTimeSeconds
-                        chat.messages[lastIndex].webSearchBeforeThinking = finalSnapshot.webSearchBeforeThinking
+                        if let webSearchBeforeThinking = finalSnapshot.webSearchBeforeThinking {
+                            chat.messages[lastIndex].webSearchBeforeThinking = webSearchBeforeThinking
+                        }
                         chat.messages[lastIndex].contentChunks = finalSnapshot.contentChunks
                         chat.messages[lastIndex].segments = finalSnapshot.segments.isEmpty ? nil : finalSnapshot.segments
                         chat.messages[lastIndex].toolCalls = finalSnapshot.toolCalls
@@ -3371,12 +3401,34 @@ class ChatViewModel: ObservableObject {
                 }
             } catch {
                 if error is CancellationError || Task.isCancelled {
+                    if let materializedSnapshot = activeSnapshotPublisher?.flushIfDirty() {
+                        await MainActor.run {
+                            guard snapshotPublicationFence.accept(materializedSnapshot.id) else { return }
+                            self.applyStreamSnapshot(
+                                materializedSnapshot.snapshot,
+                                streamChatId: streamChatId,
+                                requireActiveStream: false,
+                                persistImmediately: true
+                            )
+                        }
+                    }
                     if recoverySessionMayHaveStarted,
                        !recoveryRegistrationAttempted,
                        let attempt = recoveryAttempt {
                         await ChatRecoveryCoordinator.shared.deleteSession(attempt: attempt)
                     }
                     return
+                }
+
+                if let materializedSnapshot = activeSnapshotPublisher?.flushIfDirty() {
+                    await MainActor.run {
+                        guard snapshotPublicationFence.accept(materializedSnapshot.id) else { return }
+                        self.applyStreamSnapshot(
+                            materializedSnapshot.snapshot,
+                            streamChatId: streamChatId,
+                            requireActiveStream: false
+                        )
+                    }
                 }
 
                 #if DEBUG
@@ -3517,14 +3569,20 @@ class ChatViewModel: ObservableObject {
     /// Applies one throttled streaming snapshot to the streaming chat's last
     /// message. Snapshots are immutable values produced by the stream task's
     /// processor, so this never reads live parsing state.
-    private func applyStreamSnapshot(_ snapshot: StreamingResponseProcessor.Snapshot, streamChatId: String) {
-        guard let location = findChatLocation(streamChatId) else { return }
+    @discardableResult
+    private func applyStreamSnapshot(
+        _ snapshot: StreamingResponseProcessor.Snapshot,
+        streamChatId: String,
+        requireActiveStream: Bool = true,
+        persistImmediately: Bool = false
+    ) -> Bool {
+        guard let location = findChatLocation(streamChatId) else { return false }
         var chat = chat(at: location)
         guard
-              chat.hasActiveStream,
+              (!requireActiveStream || chat.hasActiveStream),
               !chat.messages.isEmpty,
               let lastIndex = chat.messages.indices.last else {
-            return
+            return false
         }
 
         chat.messages[lastIndex].content = snapshot.responseContent
@@ -3533,6 +3591,10 @@ class ChatViewModel: ObservableObject {
         chat.messages[lastIndex].thinkingChunks = snapshot.thinkingChunks
         chat.messages[lastIndex].isThinking = snapshot.isThinking
         chat.messages[lastIndex].generationTimeSeconds = snapshot.generationTimeSeconds
+        chat.messages[lastIndex].thinkingDuration = snapshot.generationTimeSeconds
+        if let webSearchBeforeThinking = snapshot.webSearchBeforeThinking {
+            chat.messages[lastIndex].webSearchBeforeThinking = webSearchBeforeThinking
+        }
         chat.messages[lastIndex].contentChunks = snapshot.contentChunks
         chat.messages[lastIndex].segments = snapshot.segments.isEmpty ? nil : snapshot.segments
         chat.messages[lastIndex].webSearches = snapshot.webSearches.isEmpty ? nil : snapshot.webSearches
@@ -3551,7 +3613,14 @@ class ChatViewModel: ObservableObject {
             chat.messages[lastIndex].annotations = snapshot.collectedAnnotations
         }
 
-        self.updateChat(chat, throttleForStreaming: true)
+        if persistImmediately {
+            self.updateChat(chat)
+        } else if requireActiveStream {
+            self.updateChat(chat, throttleForStreaming: true)
+        } else {
+            self.updateChat(chat, persist: false)
+        }
+        return true
     }
 
     /// Formats a user-friendly error message from the caught error
