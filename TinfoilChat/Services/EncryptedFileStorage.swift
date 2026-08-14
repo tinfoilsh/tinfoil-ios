@@ -350,6 +350,11 @@ actor EncryptedFileStorage {
             prepared.syncVersion = existing.syncVersion
             prepared.syncedAt = existing.syncedAt
         }
+        guard let preparedClockVersion = ChatEditClockPolicy.nextSyncVersion(
+            after: prepared.syncVersion
+        ) else {
+            throw SaveError.invalidSyncVersion
+        }
         let isContentMutation = existing?.updatedAt != chat.updatedAt
         if !isContentMutation, let existing,
            (prepared.clock ?? 0) <= (existing.clock ?? 0),
@@ -373,11 +378,6 @@ actor EncryptedFileStorage {
             )
             prepared.clock = clock.v
             prepared.writer = clock.w
-        }
-        guard let preparedClockVersion = ChatEditClockPolicy.nextSyncVersion(
-            after: prepared.syncVersion
-        ) else {
-            throw SaveError.invalidSyncVersion
         }
         prepared.clockVersion = preparedClockVersion
         return prepared
