@@ -23,7 +23,10 @@ struct TinfoilChatApp: App {
 
     init() {
         StorageKeysMigration.migrateIfNeeded()
-        Clerk.configure(publishableKey: AppConfig.shared.clerkPublishableKey)
+        Clerk.configure(
+            publishableKey: AppConfig.shared.clerkPublishableKey,
+            options: Clerk.Options(telemetryEnabled: false)
+        )
         _clerk = State(initialValue: Clerk.shared)
         // Build the profile manager before any view can read it. Its
         // initializer applies the stored profile, which writes shared
