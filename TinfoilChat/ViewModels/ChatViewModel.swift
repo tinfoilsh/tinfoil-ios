@@ -150,6 +150,10 @@ class ChatViewModel: ObservableObject {
     @Published var localChats: [Chat] = []
     @Published var currentChat: Chat? {
         didSet {
+            if currentChat?.id != oldValue?.id {
+                selectedChatImageTask?.cancel()
+                selectedChatImageTask = nil
+            }
             let enabled = currentChat?.webSearchEnabled
                 ?? SettingsManager.shared.webSearchAvailable
             if isWebSearchEnabled != enabled {
