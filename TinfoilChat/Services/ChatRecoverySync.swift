@@ -151,7 +151,12 @@ actor ChatRecoverySync {
                     chatId: chatId,
                     userId: userId
                 )
-                guard !isRemoteDeleted else { throw CancellationError() }
+                guard !isRemoteDeleted else { throw ChatRecoverySyncError.chatMissing }
+                _ = try await CloudUploadGate.allowsWrite(required: true)
+                try Task.checkCancellation()
+                guard await Clerk.shared.user?.id == userId else {
+                    throw ChatRecoverySyncError.chatMissing
+                }
                 let result = try await CloudStorageService.shared.uploadChat(
                     StoredChat(from: candidate, syncVersion: remote.syncVersion),
                     idempotencyKey: UUID().uuidString.lowercased()

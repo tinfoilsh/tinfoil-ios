@@ -264,6 +264,23 @@ actor UploadCoalescer {
     }
 }
 
+@MainActor
+enum CloudUploadGate {
+    static func allowsWrite(required: Bool) throws -> Bool {
+        guard case .actionRequired(.upgradeRequired, _) = SyncHealthStore.shared.gate else {
+            return true
+        }
+        if required {
+            throw SyncEnclaveError(
+                message: "cloud sync requires an app update",
+                status: 426,
+                code: WireCodes.syncProtocolUpgradeRequired
+            )
+        }
+        return false
+    }
+}
+
 /// Main service for managing cloud synchronization of chats
 @MainActor
 class CloudSyncService: ObservableObject {
@@ -555,6 +572,7 @@ class CloudSyncService: ObservableObject {
 
     func backupChatAndWait(_ chatId: String, requiredTurnId: String) async throws {
         let generation = accountGeneration
+        _ = try CloudUploadGate.allowsWrite(required: true)
         guard let userId = await getCurrentUserId(),
               await cloudStorage.isAuthenticated(), await canWriteToCloud(),
               generation == accountGeneration
@@ -577,16 +595,10 @@ class CloudSyncService: ObservableObject {
                 throw SyncEnclaveError(message: "required chat turn is not ready for backup")
             }
             do {
-                guard !deletedChatsTracker.isDeleted(chat.id),
-                      try await !EncryptedFileStorage.cloud.hasRemoteDeleteTombstone(
-                          chatId: chat.id,
-                          userId: userId
-                      ) else {
-                    throw CancellationError()
-                }
                 let uploadChat = stampClockVersionForUpload(
                     StoredChat(from: chat, syncVersion: chat.syncVersion)
                 )
+                _ = try CloudUploadGate.allowsWrite(required: true)
                 try await ensureChatUploadIsAllowed(chatId: chat.id, userId: userId)
                 let result = try await cloudStorage.uploadChat(
                     uploadChat,
@@ -610,6 +622,10 @@ class CloudSyncService: ObservableObject {
                         )
                     }
                 )
+                guard generation == accountGeneration,
+                      await getCurrentUserId() == userId else {
+                    throw CancellationError()
+                }
                 if fullySynced {
                     SyncHealthStore.shared.reportChatSynced(chat.id)
                 }
@@ -688,16 +704,7 @@ class CloudSyncService: ObservableObject {
         // syncAllChats, so the upgrade gate must be enforced in this
         // path too — pushing against a server that refuses this
         // protocol version can never succeed.
-        if case .actionRequired(.upgradeRequired, _) = SyncHealthStore.shared.gate {
-            if allowWhileStreaming {
-                throw SyncEnclaveError(
-                    message: "cloud sync requires an app update",
-                    status: 426,
-                    code: WireCodes.syncProtocolUpgradeRequired
-                )
-            }
-            return nil
-        }
+        guard try CloudUploadGate.allowsWrite(required: allowWhileStreaming) else { return nil }
         guard let userId = await getCurrentUserId() else {
             if allowWhileStreaming {
                 throw SyncEnclaveError(message: "recovery upload is not authenticated")
@@ -969,12 +976,7 @@ class CloudSyncService: ObservableObject {
                 return EditClock(v: clock, w: writer)
             }
 
-            let localClock = localChat.flatMap {
-                let expectedClockVersion = $0.syncVersion + ($0.locallyModified ? 1 : 0)
-                guard $0.clockVersion == expectedClockVersion,
-                      let clock = $0.clock, let writer = $0.writer else { return nil }
-                return EditClock(v: clock, w: writer)
-            }
+            let localClock = localChat.flatMap(trustedChatClock)
             let remoteClock = trustedClock(
                 clock: downloadedChat.clock, writer: downloadedChat.writer,
                 clockVersion: downloadedChat.clockVersion,
@@ -1705,8 +1707,16 @@ class CloudSyncService: ObservableObject {
             userId: pending.userId,
             preserveNeverSynced: pending.preserveNeverSynced
         )
-        guard confirmedAbsent else { return false }
         guard pending.generation == accountGeneration else { throw CancellationError() }
+        guard confirmedAbsent else {
+            try await EncryptedFileStorage.cloud.clearRemoteDeleteTombstone(
+                chatId: chatId,
+                userId: pending.userId
+            )
+            deferredRemoteDeletes.removeValue(forKey: chatId)
+            deletedChatsTracker.removeFromDeleted(chatId)
+            return false
+        }
         try await EncryptedFileStorage.cloud.clearRemoteDeleteTombstone(
             chatId: chatId,
             userId: pending.userId
@@ -2200,6 +2210,7 @@ class CloudSyncService: ObservableObject {
         guard await isCurrentUploadAccount(account) else {
             throw CancellationError()
         }
+        _ = try CloudUploadGate.allowsWrite(required: true)
         try await ensureChatUploadIsAllowed(chatId: chat.id, userId: account.userId)
         let result = try await cloudStorage.uploadChat(
             chat,
@@ -2236,6 +2247,8 @@ class CloudSyncService: ObservableObject {
         let state = ChatEditClockPolicy.uploadState(
             clock: chat.clock,
             writer: chat.writer,
+            sourceClockVersion: chat.clockVersion,
+            locallyModified: chat.locallyModified,
             currentSyncVersion: chat.syncVersion
         )
         stamped.clock = state.clock

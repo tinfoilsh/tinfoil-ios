@@ -600,8 +600,17 @@ struct RevisionSyncTests {
         #expect(ChatEditClockPolicy.uploadState(
             clock: 7,
             writer: "device-a",
+            sourceClockVersion: 4,
+            locallyModified: true,
             currentSyncVersion: 3
         ) == ChatClockState(clock: 7, writer: "device-a", clockVersion: 4))
+        #expect(ChatEditClockPolicy.uploadState(
+            clock: 7,
+            writer: "device-a",
+            sourceClockVersion: nil,
+            locallyModified: true,
+            currentSyncVersion: 3
+        ) == ChatClockState(clock: nil, writer: nil, clockVersion: nil))
     }
 
     @Test func chatUploadFinalizePreservesEditsThatRaceUpload() {
@@ -611,15 +620,27 @@ struct RevisionSyncTests {
         #expect(ChatEditClockPolicy.finalizedState(
             uploaded: uploaded,
             current: newer,
+            currentSyncVersion: 3,
+            currentLocallyModified: true,
             authoritativeSyncVersion: 4,
             editedDuringUpload: false
         ) == ChatClockState(clock: 7, writer: "device-a", clockVersion: 4))
         #expect(ChatEditClockPolicy.finalizedState(
             uploaded: uploaded,
             current: newer,
+            currentSyncVersion: 3,
+            currentLocallyModified: true,
             authoritativeSyncVersion: 4,
             editedDuringUpload: true
         ) == ChatClockState(clock: 8, writer: "device-a", clockVersion: 5))
+        #expect(ChatEditClockPolicy.finalizedState(
+            uploaded: uploaded,
+            current: ChatClockState(clock: 8, writer: "device-a", clockVersion: nil),
+            currentSyncVersion: 3,
+            currentLocallyModified: true,
+            authoritativeSyncVersion: 4,
+            editedDuringUpload: true
+        ) == ChatClockState(clock: nil, writer: nil, clockVersion: nil))
         #expect(!ChatEditClockPolicy.matchesFrozenMutation(
             current: newer,
             uploaded: uploaded

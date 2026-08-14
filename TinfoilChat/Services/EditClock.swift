@@ -83,6 +83,16 @@ struct ChatClockState: Equatable {
 }
 
 enum ChatEditClockPolicy {
+    static func isTrusted(
+        _ state: ChatClockState,
+        syncVersion: Int,
+        locallyModified: Bool
+    ) -> Bool {
+        state.clock != nil
+            && state.writer?.isEmpty == false
+            && state.clockVersion == syncVersion + (locallyModified ? 1 : 0)
+    }
+
     static func matchesFrozenMutation(
         current: ChatClockState,
         uploaded: ChatClockState
@@ -93,22 +103,45 @@ enum ChatEditClockPolicy {
     static func uploadState(
         clock: Int?,
         writer: String?,
+        sourceClockVersion: Int?,
+        locallyModified: Bool,
         currentSyncVersion: Int
     ) -> ChatClockState {
-        ChatClockState(
+        let source = ChatClockState(
             clock: clock,
             writer: writer,
-            clockVersion: clock == nil || writer == nil ? nil : currentSyncVersion + 1
+            clockVersion: sourceClockVersion
+        )
+        guard isTrusted(
+            source,
+            syncVersion: currentSyncVersion,
+            locallyModified: locallyModified
+        ) else {
+            return ChatClockState(clock: nil, writer: nil, clockVersion: nil)
+        }
+        return ChatClockState(
+            clock: clock,
+            writer: writer,
+            clockVersion: currentSyncVersion + 1
         )
     }
 
     static func finalizedState(
         uploaded: ChatClockState,
         current: ChatClockState,
+        currentSyncVersion: Int,
+        currentLocallyModified: Bool,
         authoritativeSyncVersion: Int,
         editedDuringUpload: Bool
     ) -> ChatClockState {
         if editedDuringUpload {
+            guard isTrusted(
+                current,
+                syncVersion: currentSyncVersion,
+                locallyModified: currentLocallyModified
+            ) else {
+                return ChatClockState(clock: nil, writer: nil, clockVersion: nil)
+            }
             return ChatClockState(
                 clock: current.clock,
                 writer: current.writer,

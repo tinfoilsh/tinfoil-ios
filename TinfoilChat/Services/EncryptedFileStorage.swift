@@ -362,7 +362,8 @@ actor EncryptedFileStorage {
            prepared.writer?.isEmpty == false {
             return prepared
         }
-        let carriesNewClock = chat.clock.map { $0 > (existing?.clock ?? 0) } == true
+        let carriesNewClock = chat.clockVersion == chat.syncVersion + 1
+            && chat.clock.map { $0 > (existing?.clock ?? 0) } == true
             && chat.writer?.isEmpty == false
         if !carriesNewClock {
             let clock = try EditClockStore.nextClock(
@@ -519,6 +520,8 @@ actor EncryptedFileStorage {
                 writer: currentChat.writer,
                 clockVersion: currentChat.clockVersion
             ),
+            currentSyncVersion: currentChat.syncVersion,
+            currentLocallyModified: currentChat.locallyModified,
             authoritativeSyncVersion: syncVersion,
             editedDuringUpload: editedDuringUpload
         )
