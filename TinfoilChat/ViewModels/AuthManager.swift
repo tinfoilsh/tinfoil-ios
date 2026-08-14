@@ -27,6 +27,8 @@ class AuthManager: ObservableObject {
     private var clerk: Clerk?
     private var hasTriggeredSignIn = false
     private var accountSwitchTask: Task<Void, Never>?
+    private var accountTeardownTask: Task<Void, Never>?
+    private var accountTeardownGeneration: UInt64 = 0
     
     // UserDefaults keys
     private let authStateKey = Constants.StorageKeys.Auth.state
@@ -241,6 +243,21 @@ class AuthManager: ObservableObject {
     }
     
     private func clearAuthState() async {
+        accountTeardownGeneration += 1
+        let generation = accountTeardownGeneration
+        let previousTask = accountTeardownTask
+        let teardownTask = Task { @MainActor [weak self] in
+            await previousTask?.value
+            guard let self else { return }
+            await self.performAccountTeardown()
+            guard self.accountTeardownGeneration == generation else { return }
+            self.chatViewModel?.completeAccountTeardown()
+        }
+        accountTeardownTask = teardownTask
+        await teardownTask.value
+    }
+
+    private func performAccountTeardown() async {
         // Handle chat state BEFORE clearing auth so the view model can still
         // save the current chat (hasChatAccess depends on isAuthenticated).
         await chatViewModel?.handleSignOut()
@@ -276,8 +293,6 @@ class AuthManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: authStateKey)
         UserDefaults.standard.removeObject(forKey: userDataKey)
         UserDefaults.standard.removeObject(forKey: subscriptionKey)
-
-        chatViewModel?.completeAccountTeardown()
     }
     
     func signOut() async {

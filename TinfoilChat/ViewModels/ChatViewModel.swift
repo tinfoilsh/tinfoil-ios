@@ -419,6 +419,7 @@ class ChatViewModel: ObservableObject {
     private var streamUpdateTimers: [String: Timer] = [:]
     private var pendingStreamUpdates: [String: Chat] = [:]
     private var pendingSaveTask: Task<Void, Never>?
+    private var pendingBackupTasks: [UUID: Task<Void, Never>] = [:]
     private var lastKnownAuthState: Bool?
     @Published private var genUIRetryStates: [GenUIRetryKey: GenUIRetryState] = [:]
     private var activeGenUIRetryIds: [GenUIRetryKey: UUID] = [:]
@@ -4442,11 +4443,14 @@ class ChatViewModel: ObservableObject {
         // has messages, and no active stream.
         if shouldBackup && SettingsManager.shared.isCloudSyncEnabled && !chat.isLocalOnly && !chat.messages.isEmpty && !chat.hasActiveStream {
             let saveTask = pendingSaveTask
-            Task { [weak self] in
+            let backupId = UUID()
+            let backupTask = Task { [weak self] in
+                defer { self?.pendingBackupTasks[backupId] = nil }
                 await saveTask?.value
                 guard let self, self.acceptsChatSaves else { return }
                 await self.cloudSync.backupChat(chat.id)
             }
+            pendingBackupTasks[backupId] = backupTask
         }
     }
 
@@ -4479,6 +4483,9 @@ class ChatViewModel: ObservableObject {
 
     private func drainPendingSaves() async {
         await pendingSaveTask?.value
+        while let backupTask = pendingBackupTasks.values.first {
+            await backupTask.value
+        }
     }
 
     private func persistRecoveryCriticalSnapshot(
@@ -4542,7 +4549,7 @@ class ChatViewModel: ObservableObject {
         !Task.isCancelled && isCurrentAccountOperation(token, userId: userId)
     }
 
-    private func legacyMigrationToken(userId: String) -> AccountOperationFence.Token {
+    private func currentAccountOperationToken(userId: String) -> AccountOperationFence.Token {
         if let activeSignInToken,
            accountOperationFence.isCurrent(activeSignInToken, currentUserId: userId) {
             return activeSignInToken
@@ -5211,7 +5218,7 @@ class ChatViewModel: ObservableObject {
             guard isCurrentSignIn(token, userId: userId) else { return }
 
             // Setup pagination token
-            await setupPaginationForAppRestart(token: token, userId: userId)
+            await setupPaginationForAppRestart(userId: userId, token: token)
             guard isCurrentSignIn(token, userId: userId) else { return }
 
             await loadProjects()
@@ -5225,38 +5232,18 @@ class ChatViewModel: ObservableObject {
 
     // MARK: - Pagination Methods
     
-    /// Setup pagination state for app restart (when already authenticated)
-    private func setupPaginationForAppRestart() async {
-        // Try to get pagination token from cloud to enable Load More
-        do {
-            // Get the list result to check if there are more pages
-            if let listResult = try? await CloudStorageService.shared.listChats(
-                limit: Constants.Pagination.chatsPerPage,
-                continuationToken: nil,
-                includeContent: false
-            ) {
-                await MainActor.run {
-                    self.paginationToken = listResult.nextContinuationToken
-                    self.hasMoreChats = listResult.hasMore
-                    self.isPaginationActive = true
-                    self.hasLoadedInitialPage = true
-                }
-            }
-        }
-    }
-
     private func setupPaginationForAppRestart(
-        token: AccountOperationFence.Token,
-        userId: String
+        userId: String,
+        token: AccountOperationFence.Token? = nil
     ) async {
-        guard isCurrentSignIn(token, userId: userId) else { return }
+        guard isCurrentPaginationOperation(userId: userId, token: token) else { return }
         // Try to get pagination token from cloud to enable Load More
         let listResult = try? await CloudStorageService.shared.listChats(
             limit: Constants.Pagination.chatsPerPage,
             continuationToken: nil,
             includeContent: false
         )
-        guard isCurrentSignIn(token, userId: userId) else { return }
+        guard isCurrentPaginationOperation(userId: userId, token: token) else { return }
         if let listResult {
             paginationToken = listResult.nextContinuationToken
             hasMoreChats = listResult.hasMore
@@ -5264,11 +5251,27 @@ class ChatViewModel: ObservableObject {
             hasLoadedInitialPage = true
         }
     }
+
+    private func isCurrentPaginationOperation(
+        userId: String,
+        token: AccountOperationFence.Token?
+    ) -> Bool {
+        guard !Task.isCancelled,
+              !isAccountTeardownInProgress,
+              currentUserId == userId
+        else {
+            return false
+        }
+        guard let token else { return true }
+        return isCurrentSignIn(token, userId: userId)
+    }
     
     /// Perform initial sync if it hasn't been done yet
     private func performInitialSyncIfNeeded() async {
         guard !hasPerformedInitialSync else { return }
         guard hasChatAccess else { return }
+        guard let userId = currentUserId else { return }
+        let token = currentAccountOperationToken(userId: userId)
         
         hasPerformedInitialSync = true
         
@@ -5291,11 +5294,11 @@ class ChatViewModel: ObservableObject {
             }
             
             // Setup pagination after sync
-            await setupPaginationForAppRestart()
+            await setupPaginationForAppRestart(userId: userId, token: token)
             
             // Load and display cloud chats after sync from file index
             let result = await loadFirstPageOfChats(
-                userId: currentUserId,
+                userId: userId,
                 filter: \.isCloudDisplayable
             )
             await MainActor.run {
@@ -5589,6 +5592,8 @@ class ChatViewModel: ObservableObject {
     
     /// Perform a full sync with the cloud
     func performFullSync() async {
+        guard let userId = currentUserId else { return }
+        let token = currentAccountOperationToken(userId: userId)
         // Gate sync when cloud sync is disabled
         if !SettingsManager.shared.isCloudSyncEnabled {
             return
@@ -5613,7 +5618,7 @@ class ChatViewModel: ObservableObject {
         
         // Always refresh pagination token and hasMore state from the server after a sync
         // This guards against cold-start races where the token wasn't available yet
-        await self.setupPaginationForAppRestart()
+        await self.setupPaginationForAppRestart(userId: userId, token: token)
         
         // Also sync profile settings
         await ProfileManager.shared.performFullSync()
@@ -5690,7 +5695,7 @@ class ChatViewModel: ObservableObject {
         // A v1 user activating their key on a fresh device has legacy
         // cloud data but no registered key. Re-kick migration now that
         // a key is active so adoption happens in-session.
-        let migrationToken = legacyMigrationToken(userId: operationUserId)
+        let migrationToken = currentAccountOperationToken(userId: operationUserId)
         startLegacyMigration(token: migrationToken, userId: operationUserId)
     }
 
@@ -5834,7 +5839,7 @@ class ChatViewModel: ObservableObject {
         guard currentUserId == operationUserId else { return .recoveryFailed }
         switch result {
         case .success, .newUserSetupDone:
-            let migrationToken = legacyMigrationToken(userId: operationUserId)
+            let migrationToken = currentAccountOperationToken(userId: operationUserId)
             startLegacyMigration(token: migrationToken, userId: operationUserId)
         default:
             break
@@ -5859,7 +5864,7 @@ class ChatViewModel: ObservableObject {
         let succeeded = await operationTask.value
         guard currentUserId == operationUserId else { return }
         guard succeeded else { return }
-        let migrationToken = legacyMigrationToken(userId: operationUserId)
+        let migrationToken = currentAccountOperationToken(userId: operationUserId)
         startLegacyMigration(token: migrationToken, userId: operationUserId)
     }
 

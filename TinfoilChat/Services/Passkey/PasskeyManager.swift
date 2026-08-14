@@ -65,6 +65,7 @@ final class PasskeyManager: ObservableObject {
 
     private var syncCheckTask: Task<Void, Never>?
     private var accountOperationsEnabled = true
+    private let accountOperationTracker = AccountOperationTracker()
     private let passkeyService = PasskeyService.shared
 
     /// Remote keyId currently surfaced in the recovery-choice sheet,
@@ -111,6 +112,7 @@ final class PasskeyManager: ObservableObject {
 
     func reset() async {
         accountOperationsEnabled = false
+        await accountOperationTracker.closeAndWait()
         let canceledSyncCheckTask = syncCheckTask
         canceledSyncCheckTask?.cancel()
         syncCheckTask = nil
@@ -131,6 +133,7 @@ final class PasskeyManager: ObservableObject {
 
     func resumeAccountOperations() {
         accountOperationsEnabled = true
+        accountOperationTracker.reopen()
     }
 
     // MARK: - Recovery Flow
@@ -442,7 +445,7 @@ final class PasskeyManager: ObservableObject {
                 passkeySetupAvailable = true
                 return .manualRecoveryRequired
             }
-            _ = await createPasskeyBackup()
+            guard await createPasskeyBackup() else { return .recoveryFailed }
             return .success
         }
         return await attemptPasskeyKeyRecovery()
@@ -452,6 +455,7 @@ final class PasskeyManager: ObservableObject {
     func checkPasskeyStateForExistingKey() async {
         do {
             let state = try await SyncEnclaveAPI.keyCurrent()
+            guard canMutateAccountKey else { return }
             if let remoteKeyId = state.keyId, !state.bundles.isEmpty {
                 // Derive the local key id so we can tell whether this
                 // device is actually on the current key or is holding a
@@ -514,6 +518,7 @@ final class PasskeyManager: ObservableObject {
             // state is stale and must not survive the transition.
             passkeyActive = false
         } catch {
+            guard canMutateAccountKey else { return }
             // fall through to "setup available"
         }
         passkeySetupAvailable = true
@@ -541,14 +546,27 @@ final class PasskeyManager: ObservableObject {
     /// Remove a passkey bundle from the enclave's current key, then
     /// re-evaluate the local passkey state.
     func removePasskeyBundle(credentialId: String) async throws {
-        let cek = try EncryptionService.shared.getKeyBytesOrThrow()
-        let keyIdHex = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
-        try await PasskeyKeyFlow.removeBundleFromCurrentKey(
-            cek: cek,
-            keyIdHex: keyIdHex,
-            credentialId: credentialId
-        )
-        await refreshBundleState()
+        guard accountOperationsEnabled else { throw CancellationError() }
+        let operationTask = Task {
+            try Task.checkCancellation()
+            let cek = try EncryptionService.shared.getKeyBytesOrThrow()
+            let keyIdHex = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+            try await PasskeyKeyFlow.removeBundleFromCurrentKey(
+                cek: cek,
+                keyIdHex: keyIdHex,
+                credentialId: credentialId
+            )
+            try Task.checkCancellation()
+            guard accountOperationsEnabled else { throw CancellationError() }
+            await refreshBundleState()
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            throw CancellationError()
+        }
+        defer { accountOperationTracker.end(operationToken) }
+
+        try await operationTask.value
     }
 
     /// Create a passkey bundle for the user's existing CEK. Used by
