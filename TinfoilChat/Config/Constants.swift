@@ -254,6 +254,11 @@ enum Constants {
         static let homeSuggestionCount = 3
     }
 
+    enum AddToChatSheet {
+        static let height: CGFloat = 324
+        static let heightWithContext: CGFloat = 368
+    }
+
     enum Pagination {
         static let chatsPerPage = 20
         static let projectsPerPage = 20
