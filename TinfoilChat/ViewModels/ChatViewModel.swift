@@ -371,6 +371,9 @@ class ChatViewModel: ObservableObject {
     @Published var isLoadingProject: Bool = false
     @Published var isUploadingProjectDocument: Bool = false
     @Published var projectError: String?
+    private var projectListLoadGeneration = 0
+    private var latestAppliedProjectListLoadGeneration = 0
+    private var projectListAccountGeneration = 0
 
     // Private properties
     private var client: TinfoilAI?
@@ -1197,19 +1200,40 @@ class ChatViewModel: ObservableObject {
     }
 
     func loadProjects() async {
-        guard hasChatAccess, SettingsManager.shared.isCloudSyncEnabled else {
+        projectListLoadGeneration += 1
+        let generation = projectListLoadGeneration
+        let accountGeneration = projectListAccountGeneration
+        guard hasChatAccess,
+              let userId = currentUserId,
+              SettingsManager.shared.isCloudSyncEnabled else {
             projects = []
+            isLoadingProjects = false
             return
         }
 
         isLoadingProjects = true
         projectError = nil
+        defer {
+            if generation == projectListLoadGeneration {
+                isLoadingProjects = false
+            }
+        }
         do {
-            projects = try await projectStorage.loadProjects()
+            let loadedProjects = try await projectStorage.loadProjects()
+            guard accountGeneration == projectListAccountGeneration,
+                  generation > latestAppliedProjectListLoadGeneration,
+                  currentUserId == userId,
+                  SettingsManager.shared.isCloudSyncEnabled else { return }
+            latestAppliedProjectListLoadGeneration = generation
+            projects = loadedProjects
+        } catch is CancellationError {
         } catch {
+            guard generation == projectListLoadGeneration,
+                  accountGeneration == projectListAccountGeneration,
+                  currentUserId == userId,
+                  SettingsManager.shared.isCloudSyncEnabled else { return }
             projectError = error.localizedDescription
         }
-        isLoadingProjects = false
     }
 
     @discardableResult
@@ -4213,6 +4237,18 @@ class ChatViewModel: ObservableObject {
         // which currentUserId no longer resolves this user.
         let signingOutUserId = currentUserId
 
+        projectListLoadGeneration += 1
+        projectListAccountGeneration += 1
+        projectLoadGeneration += 1
+        projects = []
+        activeProject = nil
+        projectDocuments = []
+        projectError = nil
+        isLoadingProjects = false
+        isLoadingProject = false
+        isViewingProjectChat = false
+        pendingSearchResultChatId = nil
+
         // Allow a new sign-in flow after sign-out
         isSignInInProgress = false
         hasPerformedInitialSync = false
@@ -4679,6 +4715,7 @@ class ChatViewModel: ObservableObject {
             
             // Setup pagination token
             await setupPaginationForAppRestart()
+            await loadProjects()
             scanPendingRecoveries()
         } catch {
             await MainActor.run {
@@ -5056,6 +5093,9 @@ class ChatViewModel: ObservableObject {
         
         // Also sync profile settings
         await ProfileManager.shared.performFullSync()
+
+        // Project metadata is synced separately from chat revisions.
+        await loadProjects()
         
         // Re-load localChats from the local-only store
         let freshLocal = await loadAllLocalChats(userId: self.currentUserId)
