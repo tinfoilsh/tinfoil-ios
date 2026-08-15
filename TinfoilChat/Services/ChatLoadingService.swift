@@ -149,6 +149,15 @@ enum ChatDeleteSelectionResolution: Equatable {
 }
 
 enum ChatProjectStorageTransition {
+    struct RollbackError: LocalizedError {
+        let primary: any Error
+        let rollback: any Error
+
+        var errorDescription: String? {
+            "\(primary.localizedDescription) Cleanup also failed: \(rollback.localizedDescription)"
+        }
+    }
+
     @MainActor
     static func persist(
         _ movedChat: Chat,
@@ -162,7 +171,11 @@ enum ChatProjectStorageTransition {
             try validateAccount()
         } catch {
             if wasLocal {
-                try? await loadingService.deleteChat(id: movedChat.id, userId: userId, storage: .cloud)
+                do {
+                    try await loadingService.deleteChat(id: movedChat.id, userId: userId, storage: .cloud)
+                } catch let rollbackError {
+                    throw RollbackError(primary: error, rollback: rollbackError)
+                }
             }
             throw error
         }
@@ -172,7 +185,11 @@ enum ChatProjectStorageTransition {
             try await loadingService.deleteChat(id: movedChat.id, userId: userId, storage: .local)
         } catch {
             let localDeleteError = error
-            try await loadingService.deleteChat(id: movedChat.id, userId: userId, storage: .cloud)
+            do {
+                try await loadingService.deleteChat(id: movedChat.id, userId: userId, storage: .cloud)
+            } catch let rollbackError {
+                throw RollbackError(primary: localDeleteError, rollback: rollbackError)
+            }
             throw localDeleteError
         }
     }

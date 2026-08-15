@@ -367,6 +367,33 @@ struct LazyChatHydrationTests {
     }
 
     @Test
+    @MainActor
+    func failedProjectRollbackPreservesBothErrors() async {
+        let service = RecordingChatLoadingService()
+        var moved = makeChat(id: "rollback", updatedAt: Date())
+        moved.isLocalOnly = false
+        moved.projectId = "project"
+        await service.setFailingDeleteIds([moved.id], storage: .local)
+        await service.setFailingDeleteIds([moved.id], storage: .cloud)
+
+        do {
+            try await ChatProjectStorageTransition.persist(
+                moved,
+                wasLocal: true,
+                userId: "user",
+                loadingService: service,
+                validateAccount: {}
+            )
+            Issue.record("Expected project rollback to fail")
+        } catch let error as ChatProjectStorageTransition.RollbackError {
+            #expect(!error.primary.localizedDescription.isEmpty)
+            #expect(!error.rollback.localizedDescription.isEmpty)
+        } catch {
+            Issue.record("Expected both project transition errors to be preserved")
+        }
+    }
+
+    @Test
     func throwingTitleSaveLeavesOriginalValueUncommitted() async {
         let service = RecordingChatLoadingService()
         let original = makeChat(id: "title", updatedAt: Date())

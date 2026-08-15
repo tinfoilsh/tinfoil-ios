@@ -2230,7 +2230,7 @@ class ChatViewModel: ObservableObject {
     }
 
     func retryFailedChatHydration() {
-        guard let failedChatHydration, chatHydrationError != nil else { return }
+        guard canRetryFailedChatHydration, let failedChatHydration else { return }
         _ = selectChat(id: failedChatHydration.id, isLocalOnly: failedChatHydration.isLocalOnly)
     }
 
@@ -4827,7 +4827,13 @@ class ChatViewModel: ObservableObject {
                 }
             } catch is CancellationError {
             } catch {
-                guard self.currentUserId == userId else { return }
+                let summaryExists = isLocal
+                    ? self.localSidebarSummaries.contains { $0.id == latestChat.id }
+                    : self.cloudSidebarSummaries.contains { $0.id == latestChat.id }
+                guard self.currentUserId == userId,
+                      !self.chatMutationGate.activeChatIds.contains(latestChat.id),
+                      summaryExists
+                else { return }
                 self.syncErrors.append(error.localizedDescription)
             }
         }
@@ -6093,8 +6099,6 @@ class ChatViewModel: ObservableObject {
             loadLocal: false  // Don't fall back to local when paginating
         )
         guard !Task.isCancelled, currentUserId == userId else { return }
-        guard !result.cancelled else { return }
-
         let convertedChats = result.chats.compactMap { $0.toChat() }
         let conversionFailures = result.chats.count - convertedChats.count
         let persisted = await ChatPaginationPersistence.saveCloudChats(
@@ -6121,7 +6125,8 @@ class ChatViewModel: ObservableObject {
             original: originalPageState,
             next: ChatPaginationPageState(token: result.nextToken, hasMore: result.hasMore),
             allRowsPersisted: allRowsPersisted,
-            pageFailed: result.failed
+            pageFailed: result.failed,
+            pageCancelled: result.cancelled
         )
         paginationToken = pageState.token
         hasMoreChats = pageState.hasMore
