@@ -260,6 +260,7 @@ class ChatViewModel: ObservableObject {
     @Published private(set) var isPasskeyRecoverySkipped: Bool = false
     private let passkeyManager = PasskeyManager.shared
     private let cloudSync = CloudSyncService.shared
+    private let cloudStorage = CloudStorageService.shared
     private let streamingTracker = StreamingTracker.shared
     private let projectStorage = ProjectStorageService.shared
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
@@ -367,6 +368,7 @@ class ChatViewModel: ObservableObject {
     @Published var projects: [Project] = []
     @Published var activeProject: Project?
     @Published var projectDocuments: [ProjectDocument] = []
+    @Published private(set) var favoriteChats: [Chat] = []
     @Published var isLoadingProjects: Bool = false
     @Published var isLoadingProject: Bool = false
     @Published var isUploadingProjectDocument: Bool = false
@@ -374,6 +376,19 @@ class ChatViewModel: ObservableObject {
     private var projectListLoadGeneration = 0
     private var latestAppliedProjectListLoadGeneration = 0
     private var projectListAccountGeneration = 0
+    private var favoriteLoadGeneration = 0
+    private var favoriteStorageGeneration = 0
+    private enum ExactFavoriteHydrationResult {
+        case found(Chat)
+        case confirmedMissing
+        case unavailable
+    }
+    private struct ExactFavoriteHydrationOperation {
+        let token: UUID
+        let task: Task<ExactFavoriteHydrationResult, Never>
+    }
+    private var exactFavoriteHydrationOperations: [String: ExactFavoriteHydrationOperation] = [:]
+    private var favoriteDeletionTokens: [String: UUID] = [:]
     private var isProjectAccountActive = false
 
     // Private properties
@@ -413,6 +428,7 @@ class ChatViewModel: ObservableObject {
             
             // When auth becomes available and authenticated, restore persisted pagination state immediately
             if authManager?.isAuthenticated == true {
+                clearHydratedFavorites()
                 isProjectAccountActive = true
                 loadPersistedPaginationState()
 
@@ -429,7 +445,9 @@ class ChatViewModel: ObservableObject {
                     currentChat = localChat
                     activeStorageTab = .local
                 }
+                Task { await refreshFavoriteChats() }
             } else {
+                clearHydratedFavorites()
                 clearProjectState()
             }
         }
@@ -484,6 +502,206 @@ class ChatViewModel: ObservableObject {
         return chats
             .filter { $0.projectId == projectId && !$0.isTemporary && !$0.isBlankChat && !$0.decryptionFailed }
             .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    func isChatPinned(_ chatId: String) -> Bool {
+        ProfileManager.shared.isChatPinned(chatId)
+    }
+
+    func canPinChat(_ chat: Chat) -> Bool {
+        ChatFavorites.isPinnable(chat)
+    }
+
+    func toggleChatPin(_ chat: Chat) {
+        favoriteLoadGeneration += 1
+        if isChatPinned(chat.id) {
+            ProfileManager.shared.unpinChat(chat.id)
+            favoriteChats.removeAll { $0.id == chat.id }
+        } else {
+            guard canPinChat(chat) else { return }
+            ProfileManager.shared.pinChat(chat.id)
+            favoriteChats = ChatFavorites.resolve(
+                ids: ProfileManager.shared.pinnedChatIds ?? [],
+                from: [chat] + favoriteChats,
+                id: \.id
+            )
+        }
+        Task { await refreshFavoriteChats() }
+    }
+
+    private func clearHydratedFavorites() {
+        favoriteLoadGeneration += 1
+        favoriteStorageGeneration += 1
+        exactFavoriteHydrationOperations.values.forEach { $0.task.cancel() }
+        exactFavoriteHydrationOperations.removeAll()
+        favoriteDeletionTokens.removeAll()
+        favoriteChats = []
+    }
+
+    private func isCurrentFavoriteHydration(generation: Int, userId: String) -> Bool {
+        generation == favoriteLoadGeneration
+            && currentUserId == userId
+            && hasChatAccess
+    }
+
+    private func isCurrentFavoriteStorage(generation: Int, userId: String) -> Bool {
+        ChatFavorites.persistenceRemainsCurrent(
+            expectedGeneration: generation,
+            currentGeneration: favoriteStorageGeneration,
+            expectedUserId: userId,
+            currentUserId: currentUserId
+        ) && hasChatAccess
+    }
+
+    private func beginExactFavoriteHydration(
+        chatId: String,
+        userId: String,
+        generation: Int,
+        storageGeneration: Int
+    ) -> ExactFavoriteHydrationOperation? {
+        guard favoriteDeletionTokens[chatId] == nil else { return nil }
+        let previousTask = exactFavoriteHydrationOperations[chatId]?.task
+        previousTask?.cancel()
+        let token = UUID()
+        let task: Task<ExactFavoriteHydrationResult, Never> = Task { @MainActor [weak self] in
+            _ = await previousTask?.value
+            guard !Task.isCancelled, let self else { return .unavailable }
+            return await self.hydrateExactFavorite(
+                chatId: chatId,
+                userId: userId,
+                generation: generation,
+                storageGeneration: storageGeneration
+            )
+        }
+        let operation = ExactFavoriteHydrationOperation(token: token, task: task)
+        exactFavoriteHydrationOperations[chatId] = operation
+        return operation
+    }
+
+    private func cancelExactFavoriteHydration(chatId: String) -> Task<ExactFavoriteHydrationResult, Never>? {
+        favoriteLoadGeneration += 1
+        guard let operation = exactFavoriteHydrationOperations.removeValue(forKey: chatId) else {
+            return nil
+        }
+        operation.task.cancel()
+        return operation.task
+    }
+
+    private func hydrateExactFavorite(
+        chatId: String,
+        userId: String,
+        generation: Int,
+        storageGeneration: Int
+    ) async -> ExactFavoriteHydrationResult {
+        guard !Task.isCancelled,
+              isCurrentFavoriteHydration(generation: generation, userId: userId) else {
+            return .unavailable
+        }
+        do {
+            guard let downloaded = try await cloudStorage.downloadChat(chatId) else {
+                guard !Task.isCancelled,
+                      isCurrentFavoriteHydration(generation: generation, userId: userId) else {
+                    return .unavailable
+                }
+                return .confirmedMissing
+            }
+            guard !Task.isCancelled,
+                  isCurrentFavoriteHydration(generation: generation, userId: userId),
+                  let chat = downloaded.toChat(),
+                  ChatFavorites.isPinnable(chat) else {
+                return .unavailable
+            }
+            let applyResult = (try? await EncryptedFileStorage.cloud.applyRemoteChatIfFreshResult(
+                chat,
+                userId: userId,
+                expectedLocalUpdatedAt: nil
+            )) ?? .refused
+            guard !Task.isCancelled,
+                  isCurrentFavoriteStorage(generation: storageGeneration, userId: userId) else {
+                return .unavailable
+            }
+            let hydratedChat: Chat?
+            if applyResult == .applied {
+                hydratedChat = chat
+            } else {
+                hydratedChat = try? await EncryptedFileStorage.cloud.loadChat(
+                    chatId: chatId,
+                    userId: userId
+                )
+            }
+            guard !Task.isCancelled,
+                  isCurrentFavoriteStorage(generation: storageGeneration, userId: userId),
+                  isCurrentFavoriteHydration(generation: generation, userId: userId),
+                  let hydratedChat,
+                  ChatFavorites.isPinnable(hydratedChat) else {
+                return .unavailable
+            }
+            return .found(hydratedChat)
+        } catch {
+            return .unavailable
+        }
+    }
+
+    func refreshFavoriteChats() async {
+        favoriteLoadGeneration += 1
+        let generation = favoriteLoadGeneration
+        let storageGeneration = favoriteStorageGeneration
+        guard hasChatAccess,
+              SettingsManager.shared.isCloudSyncEnabled,
+              let userId = currentUserId else {
+            favoriteChats = []
+            return
+        }
+
+        let ids = ProfileManager.shared.pinnedChatIds ?? []
+        guard !ids.isEmpty else {
+            favoriteChats = []
+            return
+        }
+
+        var resolved = (chats + favoriteChats).filter(ChatFavorites.isPinnable)
+        let resolvedIds = Set(resolved.map(\.id))
+        let missingIds = ids.filter { !resolvedIds.contains($0) }
+        let stored = await Chat.loadChats(chatIds: missingIds, userId: userId)
+            .filter(ChatFavorites.isPinnable)
+        guard isCurrentFavoriteHydration(generation: generation, userId: userId) else { return }
+        resolved.append(contentsOf: stored)
+
+        let storedIds = Set(stored.map(\.id))
+        var confirmedMissingIds = Set<String>()
+        for id in missingIds where !storedIds.contains(id) {
+            guard isCurrentFavoriteHydration(generation: generation, userId: userId) else { return }
+            guard let operation = beginExactFavoriteHydration(
+                chatId: id,
+                userId: userId,
+                generation: generation,
+                storageGeneration: storageGeneration
+            ) else { continue }
+            let result = await operation.task.value
+            if ChatFavorites.operationIsCurrent(
+                operation.token,
+                currentToken: exactFavoriteHydrationOperations[id]?.token
+            ) {
+                exactFavoriteHydrationOperations.removeValue(forKey: id)
+            }
+            guard isCurrentFavoriteHydration(generation: generation, userId: userId) else { return }
+            switch result {
+            case .found(let hydratedChat):
+                resolved.append(hydratedChat)
+            case .confirmedMissing:
+                confirmedMissingIds.insert(id)
+            case .unavailable:
+                break
+            }
+        }
+
+        guard isCurrentFavoriteHydration(generation: generation, userId: userId) else { return }
+        ProfileManager.shared.removePinnedChats(confirmedMissingIds)
+        let favorites = ChatFavorites.resolve(ids: ids, from: resolved, id: \.id)
+        for chat in favorites {
+            replaceChat(chat)
+        }
+        favoriteChats = favorites
     }
     
     // Computed property to check if user has premium access
@@ -650,6 +868,7 @@ class ChatViewModel: ObservableObject {
 
         // Setup Tinfoil client immediately
         setupTinfoilClient()
+        Task { await refreshFavoriteChats() }
     }
     
     deinit {
@@ -753,6 +972,8 @@ class ChatViewModel: ObservableObject {
         if let thinkingEnabled = profile.thinkingEnabled {
             self.thinkingEnabled = thinkingEnabled
         }
+        favoriteLoadGeneration += 1
+        Task { await refreshFavoriteChats() }
     }
     
     /// Setup auto-sync timer to sync every 30 seconds
@@ -1585,6 +1806,9 @@ class ChatViewModel: ObservableObject {
         if wasCurrent {
             currentChat = chat
         }
+        if let favoriteIndex = favoriteChats.firstIndex(where: { $0.id == chatId }) {
+            favoriteChats[favoriteIndex] = chat
+        }
 
         saveChat(chat)
 
@@ -1871,6 +2095,10 @@ class ChatViewModel: ObservableObject {
         }
 
         let userId = currentUserId
+        let storageGeneration = favoriteStorageGeneration
+        let deletionToken = UUID()
+        favoriteDeletionTokens[id] = deletionToken
+        let exactHydrationTask = cancelExactFavoriteHydration(chatId: id)
         discardMessageQueue(chatId: id)
         let canceledStreamTask = cancelGeneration(
             chatId: id,
@@ -1879,6 +2107,18 @@ class ChatViewModel: ObservableObject {
 
         // Delete from file storage and cloud
         Task {
+            defer {
+                if ChatFavorites.operationIsCurrent(
+                    deletionToken,
+                    currentToken: favoriteDeletionTokens[id]
+                ) {
+                    favoriteDeletionTokens.removeValue(forKey: id)
+                }
+            }
+            _ = await exactHydrationTask?.value
+            guard storageGeneration == favoriteStorageGeneration,
+                  currentUserId == userId,
+                  hasChatAccess else { return }
             await canceledStreamTask?.value
             await drainPendingSaves()
 
@@ -1894,8 +2134,18 @@ class ChatViewModel: ObservableObject {
                 DeletedChatsTracker.shared.markAsDeleted(id)
             }
 
+            guard storageGeneration == favoriteStorageGeneration,
+                  currentUserId == userId,
+                  hasChatAccess else { return }
             await Chat.deleteChatFromStorage(chatId: id, userId: userId)
+            guard storageGeneration == favoriteStorageGeneration,
+                  currentUserId == userId,
+                  hasChatAccess else { return }
             ChatRecoveryDraftStore.shared.discard(chatId: id)
+            favoriteLoadGeneration += 1
+            ProfileManager.shared.unpinChat(id)
+            favoriteChats.removeAll { $0.id == id }
+            Task { await refreshFavoriteChats() }
 
             if let index = localChats.firstIndex(where: { $0.id == id }) {
                 localChats.remove(at: index)
@@ -1952,6 +2202,13 @@ class ChatViewModel: ObservableObject {
     /// Replaces a chat in whichever array (localChats or chats) it belongs to.
     /// If the chat isn't in either array, inserts it into the appropriate one.
     private func replaceChat(_ updatedChat: Chat) {
+        if let favoriteIndex = favoriteChats.firstIndex(where: { $0.id == updatedChat.id }) {
+            if ChatFavorites.isPinnable(updatedChat) {
+                favoriteChats[favoriteIndex] = updatedChat
+            } else {
+                favoriteChats.remove(at: favoriteIndex)
+            }
+        }
         if let index = localChats.firstIndex(where: { $0.id == updatedChat.id }) {
             localChats[index] = updatedChat
         } else if let index = chats.firstIndex(where: { $0.id == updatedChat.id }) {
@@ -1983,6 +2240,9 @@ class ChatViewModel: ObservableObject {
             chat.locallyModified = true
             chat.updatedAt = Date()
         }) {
+            if let favoriteIndex = favoriteChats.firstIndex(where: { $0.id == id }) {
+                favoriteChats[favoriteIndex] = updated
+            }
             saveChat(updated)
         }
     }
@@ -4297,6 +4557,7 @@ class ChatViewModel: ObservableObject {
         // which currentUserId no longer resolves this user.
         let signingOutUserId = currentUserId
 
+        clearHydratedFavorites()
         clearProjectState()
 
         // Allow a new sign-in flow after sign-out
@@ -4360,6 +4621,7 @@ class ChatViewModel: ObservableObject {
     
     /// Clear all local chats and reset to fresh state
     func clearAllChatsFromDevice(resumeRecoveryScans: Bool = true) async {
+        clearHydratedFavorites()
         let canceledStreamTasks = cancelAllGenerations()
         await suspendRecoveryScans()
 
@@ -4402,6 +4664,7 @@ class ChatViewModel: ObservableObject {
     /// signed-out session still has a usable chat. Must run before the auth
     /// manager clears its authenticated state so currentUserId still resolves.
     func wipeLocalChatsForSignOut() async {
+        clearHydratedFavorites()
         // Drain the queued disk saves first; the queue is chained, so
         // awaiting the latest task flushes every earlier one. Otherwise a
         // detached save kicked off by handleSignOut could land after the
@@ -4695,6 +4958,9 @@ class ChatViewModel: ObservableObject {
             try await cloudSync.deleteAllFromCloud()
         }
 
+        clearHydratedFavorites()
+        ProfileManager.shared.clearPinnedChats()
+
         // Tombstone so an in-flight sync pass can't resurrect wiped chats
         for id in localIds {
             DeletedChatsTracker.shared.markAsDeleted(id)
@@ -4710,6 +4976,7 @@ class ChatViewModel: ObservableObject {
     /// Removes all cloud (non-local) chats from the device
     @MainActor
     func deleteNonLocalChats() async {
+        clearHydratedFavorites()
         // Delete all cloud chats from storage (the cloud store only has
         // cloud chats), fencing in-flight sync before the deletion.
         if let userId = currentUserId {

@@ -40,6 +40,7 @@ struct ChatSidebar: View {
     @State private var showDeleteAlert: Bool = false
 
     @State private var isTabSwitching: Bool = false
+    @State private var isFavoritesExpanded: Bool = true
     @State private var isProjectsExpanded: Bool = false
     @State private var isChatsExpanded: Bool = true
     @State private var chatSearchTerm: String = ""
@@ -47,6 +48,7 @@ struct ChatSidebar: View {
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var cloudSync = CloudSyncService.shared
     @ObservedObject private var syncHealth = SyncHealthStore.shared
+    @ObservedObject private var profileManager = ProfileManager.shared
 
     private var activeTab: ChatStorageTab {
         viewModel.activeStorageTab
@@ -251,9 +253,13 @@ struct ChatSidebar: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if authManager.isAuthenticated && settings.isCloudSyncEnabled {
-                        projectsSection
+                        favoritesSection
                             .padding(.horizontal, 16)
                             .padding(.top, 16)
+
+                        projectsSection
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
                     }
 
                     chatsSectionHeader
@@ -386,6 +392,7 @@ struct ChatSidebar: View {
                     isSyncing: !chat.isBlankChat && cloudSync.pendingUploadChatIds.contains(chat.id),
                     syncFailed: !chat.isBlankChat && syncHealth.failedChats[chat.id] != nil,
                     isGenerating: viewModel.isChatStreaming(chat.id),
+                    isPinned: profileManager.isChatPinned(chat.id),
                     onSelect: {
                         if isChatSearchActive {
                             viewModel.openSearchResult(chat)
@@ -405,6 +412,16 @@ struct ChatSidebar: View {
                     showEditDelete: authManager.isAuthenticated
                 )
                 .contextMenu {
+                    if viewModel.canPinChat(chat) || profileManager.isChatPinned(chat.id) {
+                        Button {
+                            viewModel.toggleChatPin(chat)
+                        } label: {
+                            Label(
+                                profileManager.isChatPinned(chat.id) ? "Unpin" : "Pin",
+                                systemImage: profileManager.isChatPinned(chat.id) ? "pin.slash" : "pin"
+                            )
+                        }
+                    }
                     if authManager.isAuthenticated && !chat.isBlankChat && !chat.decryptionFailed {
                         ForEach(viewModel.projects.filter { $0.decryptionFailed != true }) { project in
                             Button {
@@ -435,6 +452,101 @@ struct ChatSidebar: View {
                     .padding(.vertical, 16)
                 } else {
                     loadMoreButton
+                }
+            }
+        }
+    }
+
+    private var favoritesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isFavoritesExpanded.toggle()
+                }
+            } label: {
+                HStack {
+                    Label("Favorites", systemImage: "pin")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.caption)
+                        .rotationEffect(.degrees(isFavoritesExpanded ? 0 : -90))
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Favorites")
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityValue(isFavoritesExpanded ? "Expanded" : "Collapsed")
+
+            if isFavoritesExpanded {
+                if viewModel.favoriteChats.isEmpty {
+                    Text("Pin cloud chats for quick access.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 14)
+                } else {
+                    ForEach(viewModel.favoriteChats) { chat in
+                        ChatListItem(
+                            chat: chat,
+                            isSelected: viewModel.currentChat?.id == chat.id,
+                            isEditing: editingChatId == chat.id,
+                            editingTitle: $editingTitle,
+                            createdTimeString: relativeTimeString(from: chat.createdAt),
+                            updatedTimeString: updatedTimeString(for: chat),
+                            isSyncing: cloudSync.pendingUploadChatIds.contains(chat.id),
+                            syncFailed: syncHealth.failedChats[chat.id] != nil,
+                            isGenerating: viewModel.isChatStreaming(chat.id),
+                            isPinned: true,
+                            onSelect: { viewModel.openSearchResult(chat) },
+                            onEdit: {
+                                if editingChatId == chat.id {
+                                    viewModel.updateChatTitle(chat.id, newTitle: editingTitle)
+                                    editingChatId = nil
+                                } else {
+                                    startEditing(chat)
+                                }
+                            },
+                            onDelete: { confirmDelete(chat) },
+                            showEditDelete: true
+                        )
+                        .contextMenu {
+                            Button {
+                                viewModel.toggleChatPin(chat)
+                            } label: {
+                                Label("Unpin", systemImage: "pin.slash")
+                            }
+
+                            if chat.projectId != nil {
+                                Button {
+                                    Task {
+                                        await viewModel.removeChatFromProject(chatId: chat.id)
+                                    }
+                                } label: {
+                                    Label("Remove from Project", systemImage: "arrow.uturn.left")
+                                }
+                            }
+
+                            ForEach(viewModel.projects.filter {
+                                $0.decryptionFailed != true && $0.id != chat.projectId
+                            }) { project in
+                                Button {
+                                    Task {
+                                        await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
+                                    }
+                                } label: {
+                                    Label(
+                                        chat.projectId == nil ? "Add to \(project.name)" : "Move to \(project.name)",
+                                        systemImage: "folder"
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -749,6 +861,7 @@ struct ChatListItem: View {
     var isSyncing: Bool = false
     var syncFailed: Bool = false
     var isGenerating: Bool = false
+    var isPinned: Bool = false
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -784,6 +897,12 @@ struct ChatListItem: View {
                         HStack(spacing: 4) {
                             if chat.projectId != nil {
                                 Image(systemName: "folder")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .accessibilityHidden(true)
+                            }
+                            if isPinned {
+                                Image(systemName: "pin.fill")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                     .accessibilityHidden(true)
@@ -885,6 +1004,9 @@ struct ChatListItem: View {
         var components = [chat.title.isEmpty ? "Untitled chat" : chat.title]
         if chat.projectId != nil {
             components.append("Project chat")
+        }
+        if isPinned {
+            components.append("Favorite")
         }
         if chat.isBlankChat {
             components.append("New chat")

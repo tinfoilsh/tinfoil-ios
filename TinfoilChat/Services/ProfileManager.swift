@@ -37,6 +37,8 @@ class ProfileManager: ObservableObject {
 
     // Preset ids pinned as homescreen favorites (built-in or custom)
     @Published var favoritePromptPresetIds: [String] = []
+
+    @Published private(set) var pinnedChatIds: [String]? = nil
     
     // Sync state
     @Published var isSyncing: Bool = false
@@ -232,6 +234,7 @@ class ProfileManager: ObservableObject {
             genUIEnabled: SettingsManager.shared.genUIEnabled,
             chatFont: chatFont,
             projectUploadPreference: projectUploadPreference,
+            pinnedChatIds: pinnedChatIds,
             version: lastSyncedVersion,  // Will be incremented by ProfileSyncService
             updatedAt: localProfileChangedAt(),
             fieldClocks: localFieldClocks,
@@ -307,6 +310,9 @@ class ProfileManager: ObservableObject {
         }
         if let projectUploadPreference = profile.projectUploadPreference {
             self.projectUploadPreference = projectUploadPreference
+        }
+        if let pinnedChatIds = profile.pinnedChatIds {
+            self.pinnedChatIds = ChatFavorites.normalize(pinnedChatIds)
         }
         if let version = profile.version {
             self.lastSyncedVersion = version
@@ -419,6 +425,14 @@ class ProfileManager: ObservableObject {
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
+
+        $pinnedChatIds
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
+                self?.saveToKeychain()
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Prompt Presets
@@ -508,6 +522,30 @@ class ProfileManager: ObservableObject {
         } else if canAddFavorite {
             favoritePromptPresetIds.append(id)
         }
+    }
+
+    func isChatPinned(_ id: String) -> Bool {
+        pinnedChatIds?.contains(id) == true
+    }
+
+    func pinChat(_ id: String) {
+        guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        pinnedChatIds = ChatFavorites.normalize([id] + (pinnedChatIds ?? []))
+    }
+
+    func unpinChat(_ id: String) {
+        guard pinnedChatIds?.contains(id) == true else { return }
+        pinnedChatIds = pinnedChatIds?.filter { $0 != id }
+    }
+
+    func removePinnedChats(_ ids: Set<String>) {
+        guard let pinnedChatIds,
+              pinnedChatIds.contains(where: { ids.contains($0) }) else { return }
+        self.pinnedChatIds = ChatFavorites.removing(pinnedChatIds, confirmedMissing: ids)
+    }
+
+    func clearPinnedChats() {
+        pinnedChatIds = []
     }
 
     /// Duplicate a built-in or user preset into a new editable user preset.
@@ -829,7 +867,8 @@ class ProfileManager: ObservableObject {
                p1.piiCheckEnabled != p2.piiCheckEnabled ||
                p1.genUIEnabled != p2.genUIEnabled ||
                p1.chatFont != p2.chatFont ||
-               p1.projectUploadPreference != p2.projectUploadPreference
+               p1.projectUploadPreference != p2.projectUploadPreference ||
+               p1.pinnedChatIds != p2.pinnedChatIds
     }
 
     func sharedSettingsDidChange() {
@@ -912,7 +951,7 @@ class ProfileManager: ObservableObject {
         return !result.isEmpty
     }
     
-    private func applyDefaultProfile() {
+    private func applyDefaultProfile(pinnedChatIds: [String]? = nil) {
         isApplyingProfile = true
         isDarkMode = true
         themeMode = nil
@@ -926,11 +965,12 @@ class ProfileManager: ObservableObject {
         customSystemPrompt = ""
         customPromptPresets = []
         favoritePromptPresetIds = []
+        self.pinnedChatIds = pinnedChatIds
         isApplyingProfile = false
     }
 
     func resetProfile() {
-        applyDefaultProfile()
+        applyDefaultProfile(pinnedChatIds: [])
         persistProfileToKeychain(createProfileData())
         markLocalProfileChanged()
         debounceCloudSync()

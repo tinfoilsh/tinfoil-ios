@@ -22,6 +22,7 @@ enum ProfileSyncError: LocalizedError {
     }
 }
 
+
 /// Service for managing profile synchronization with cloud.
 @MainActor
 class ProfileSyncService: ObservableObject {
@@ -53,6 +54,7 @@ class ProfileSyncService: ObservableObject {
         "favoritePromptPresetIds", "reasoningEffort",
         "thinkingEnabled", "webSearchAvailable", "codeExecutionEnabled",
         "piiCheckEnabled", "genUIEnabled", "chatFont", "projectUploadPreference",
+        "pinnedChatIds",
         "version", "updatedAt", "fieldClocks", "clockVersion",
     ]
 
@@ -367,4 +369,3 @@ class ProfileSyncService: ObservableObject {
         }
     }
 }
-

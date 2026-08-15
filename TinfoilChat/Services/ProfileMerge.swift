@@ -29,7 +29,7 @@ enum ProfileMerge {
         "thinkingEnabled", "webSearchAvailable",
         "codeExecutionEnabled",
         "piiCheckEnabled", "genUIEnabled", "chatFont",
-        "projectUploadPreference",
+        "projectUploadPreference", "pinnedChatIds",
     ]
 
     private static let isoFormatter: ISO8601DateFormatter = {
@@ -58,8 +58,16 @@ enum ProfileMerge {
     /// True when the profile carries user content worth protecting.
     static func isProfilePopulated(_ p: ProfileData?) -> Bool {
         guard let p = p else { return false }
+        if hasSubstantiveContent(p) { return true }
+        if let favs = p.favoritePromptPresetIds, !favs.isEmpty { return true }
+        if let pinnedChatIds = p.pinnedChatIds, !pinnedChatIds.isEmpty { return true }
+        return false
+    }
+
+    private static func hasSubstantiveContent(_ p: ProfileData?) -> Bool {
+        guard let p else { return false }
         func nonEmpty(_ s: String?) -> Bool {
-            guard let s = s else { return false }
+            guard let s else { return false }
             return !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
         if nonEmpty(p.nickname) || nonEmpty(p.profession)
@@ -68,7 +76,6 @@ enum ProfileMerge {
         }
         if let traits = p.traits, !traits.isEmpty { return true }
         if let presets = p.customPromptPresets, !presets.isEmpty { return true }
-        if let favs = p.favoritePromptPresetIds, !favs.isEmpty { return true }
         return false
     }
 
@@ -201,7 +208,7 @@ enum ProfileMerge {
         // On the fallback path there is no per-field signal to trust, so
         // a single empty/default remote could clobber every populated
         // local field at once (the data-loss incident). Refuse it.
-        if fallback && !isProfilePopulated(remote) && isProfilePopulated(local) {
+        if fallback && !hasSubstantiveContent(remote) && isProfilePopulated(local) {
             return (local, false)
         }
 
