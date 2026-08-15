@@ -374,6 +374,7 @@ class ChatViewModel: ObservableObject {
     private var projectListLoadGeneration = 0
     private var latestAppliedProjectListLoadGeneration = 0
     private var projectListAccountGeneration = 0
+    private var isProjectAccountActive = false
 
     // Private properties
     private var client: TinfoilAI?
@@ -412,6 +413,7 @@ class ChatViewModel: ObservableObject {
             
             // When auth becomes available and authenticated, restore persisted pagination state immediately
             if authManager?.isAuthenticated == true {
+                isProjectAccountActive = true
                 loadPersistedPaginationState()
 
                 // Move the initial blank chat to the correct array based on cloud sync state.
@@ -428,10 +430,7 @@ class ChatViewModel: ObservableObject {
                     activeStorageTab = .local
                 }
             } else {
-                projects = []
-                activeProject = nil
-                projectDocuments = []
-                projectError = nil
+                clearProjectState()
             }
         }
     }
@@ -1204,9 +1203,11 @@ class ChatViewModel: ObservableObject {
         let generation = projectListLoadGeneration
         let accountGeneration = projectListAccountGeneration
         guard hasChatAccess,
+              isProjectAccountActive,
               let userId = currentUserId,
               SettingsManager.shared.isCloudSyncEnabled else {
             projects = []
+            projectError = nil
             isLoadingProjects = false
             return
         }
@@ -1236,30 +1237,59 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    private func clearProjectState() {
+        isProjectAccountActive = false
+        projectListLoadGeneration += 1
+        projectListAccountGeneration += 1
+        projectLoadGeneration += 1
+        projects = []
+        activeProject = nil
+        projectDocuments = []
+        projectError = nil
+        isLoadingProjects = false
+        isLoadingProject = false
+        isUploadingProjectDocument = false
+        isViewingProjectChat = false
+        pendingSearchResultChatId = nil
+    }
+
+    private func isCurrentProjectAccount(_ generation: Int) -> Bool {
+        isProjectAccountActive && generation == projectListAccountGeneration
+    }
+
     @discardableResult
     func createProject(name: String? = nil) async -> Project? {
-        guard hasChatAccess else { return nil }
+        guard hasChatAccess, isProjectAccountActive else { return nil }
+        let accountGeneration = projectListAccountGeneration
 
         isLoadingProject = true
         projectError = nil
+        defer {
+            if isCurrentProjectAccount(accountGeneration) {
+                isLoadingProject = false
+            }
+        }
         do {
             let resolvedName = name ?? "My Project #\(projects.count + 1)"
             let project = try await projectStorage.createProject(
                 CreateProjectData(name: resolvedName)
             )
+            guard isCurrentProjectAccount(accountGeneration) else { return nil }
             projects.insert(project, at: 0)
             await enterProject(projectId: project.id)
-            isLoadingProject = false
+            guard isCurrentProjectAccount(accountGeneration) else { return nil }
             return project
         } catch {
+            guard isCurrentProjectAccount(accountGeneration) else { return nil }
             projectError = error.localizedDescription
-            isLoadingProject = false
             return nil
         }
     }
 
     func enterProject(projectId: String) async {
+        let accountGeneration = projectListAccountGeneration
         guard await loadProject(projectId: projectId) else { return }
+        guard isCurrentProjectAccount(accountGeneration) else { return }
         createNewChat(isLocalOnly: false, projectId: projectId, focusInput: false)
     }
 
@@ -1272,7 +1302,7 @@ class ChatViewModel: ObservableObject {
     /// published with that context only after all project resources load.
     @discardableResult
     func loadProject(projectId: String, searchResultChat: Chat? = nil) async -> Bool {
-        guard hasChatAccess else { return false }
+        guard hasChatAccess, isProjectAccountActive else { return false }
 
         projectLoadGeneration += 1
         let generation = projectLoadGeneration
@@ -1405,6 +1435,7 @@ class ChatViewModel: ObservableObject {
 
     func updateActiveProject(name: String? = nil, description: String? = nil, systemInstructions: String? = nil, memory: [MemoryFact]? = nil) async {
         guard let project = activeProject else { return }
+        let accountGeneration = projectListAccountGeneration
 
         projectError = nil
         do {
@@ -1415,6 +1446,7 @@ class ChatViewModel: ObservableObject {
                 memory: memory
             )
             try await projectStorage.updateProject(project.id, data: update)
+            guard isCurrentProjectAccount(accountGeneration) else { return }
             var updated = project
             updated.name = name ?? updated.name
             updated.description = description ?? updated.description
@@ -1426,6 +1458,7 @@ class ChatViewModel: ObservableObject {
                 projects[index] = updated
             }
         } catch {
+            guard isCurrentProjectAccount(accountGeneration) else { return }
             projectError = error.localizedDescription
         }
     }
@@ -1435,7 +1468,10 @@ class ChatViewModel: ObservableObject {
     /// leave local state untouched for a retry.
     @MainActor
     func deleteAllProjects() async throws {
+        guard isProjectAccountActive else { return }
+        let accountGeneration = projectListAccountGeneration
         _ = try await projectStorage.deleteAllProjects()
+        guard isCurrentProjectAccount(accountGeneration) else { return }
         projects = []
         if activeProject != nil {
             exitProject()
@@ -1444,27 +1480,37 @@ class ChatViewModel: ObservableObject {
 
     func deleteActiveProject() async {
         guard let project = activeProject else { return }
+        let accountGeneration = projectListAccountGeneration
 
         projectError = nil
         do {
             try await projectStorage.deleteProject(project.id)
+            guard isCurrentProjectAccount(accountGeneration) else { return }
             projects.removeAll { $0.id == project.id }
             exitProject()
         } catch {
+            guard isCurrentProjectAccount(accountGeneration) else { return }
             projectError = error.localizedDescription
         }
     }
 
     func uploadProjectDocument(url: URL, filename: String) async {
         guard let project = activeProject else { return }
+        let accountGeneration = projectListAccountGeneration
 
         isUploadingProjectDocument = true
         projectError = nil
+        defer {
+            if isCurrentProjectAccount(accountGeneration) {
+                isUploadingProjectDocument = false
+            }
+        }
         do {
             let markdown = try await DocumentConversionService.shared.convertToMarkdown(
                 url: url,
                 filename: filename
             )
+            guard isCurrentProjectAccount(accountGeneration) else { return }
             let contentType = DocumentConversionService.mimeType(for: filename)
             let document = try await projectStorage.uploadDocument(
                 projectId: project.id,
@@ -1472,21 +1518,24 @@ class ChatViewModel: ObservableObject {
                 contentType: contentType,
                 content: markdown
             )
+            guard isCurrentProjectAccount(accountGeneration) else { return }
             projectDocuments.append(document)
         } catch {
+            guard isCurrentProjectAccount(accountGeneration) else { return }
             projectError = error.localizedDescription
         }
-        isUploadingProjectDocument = false
     }
 
     func deleteProjectDocument(_ documentId: String) async {
         guard let project = activeProject else { return }
+        let accountGeneration = projectListAccountGeneration
 
         let existing = projectDocuments
         projectDocuments.removeAll { $0.id == documentId }
         do {
             try await projectStorage.deleteDocument(projectId: project.id, documentId: documentId)
         } catch {
+            guard isCurrentProjectAccount(accountGeneration) else { return }
             projectDocuments = existing
             projectError = error.localizedDescription
         }
@@ -1501,7 +1550,8 @@ class ChatViewModel: ObservableObject {
     }
 
     private func updateChatProject(chatId: String, projectId: String?) async {
-        guard hasChatAccess else { return }
+        guard hasChatAccess, isProjectAccountActive else { return }
+        let accountGeneration = projectListAccountGeneration
 
         let wasCurrent = currentChat?.id == chatId
         guard var chat = chatForProjectMove(chatId) else { return }
@@ -1526,6 +1576,7 @@ class ChatViewModel: ObservableObject {
             chats.insert(chat, at: min(1, chats.count))
             if let userId = currentUserId {
                 try? await EncryptedFileStorage.local.deleteChat(chatId: chatId, userId: userId)
+                guard isCurrentProjectAccount(accountGeneration) else { return }
             }
         } else {
             replaceChat(chat)
@@ -1543,8 +1594,13 @@ class ChatViewModel: ObservableObject {
         // can't land right now the chat stays locallyModified and the
         // next sync retries it, like any other offline edit.
         await cloudSync.backupChat(chatId, ensureLatestUpload: true)
+        guard isCurrentProjectAccount(accountGeneration) else { return }
         if let projectId {
-            await loadProjectChatsIntoMemory(projectId: projectId)
+            await loadProjectChatsIntoMemory(
+                projectId: projectId,
+                accountGeneration: accountGeneration
+            )
+            guard isCurrentProjectAccount(accountGeneration) else { return }
         }
 
         if wasCurrent, activeProject?.id != projectId {
@@ -1597,8 +1653,12 @@ class ChatViewModel: ObservableObject {
         return nil
     }
 
-    private func loadProjectChatsIntoMemory(projectId: String) async {
+    private func loadProjectChatsIntoMemory(
+        projectId: String,
+        accountGeneration: Int
+    ) async {
         let projectChats = await loadProjectChatsFromStorage(projectId: projectId)
+        guard isCurrentProjectAccount(accountGeneration) else { return }
         mergeProjectChats(projectChats)
     }
 
@@ -4237,17 +4297,7 @@ class ChatViewModel: ObservableObject {
         // which currentUserId no longer resolves this user.
         let signingOutUserId = currentUserId
 
-        projectListLoadGeneration += 1
-        projectListAccountGeneration += 1
-        projectLoadGeneration += 1
-        projects = []
-        activeProject = nil
-        projectDocuments = []
-        projectError = nil
-        isLoadingProjects = false
-        isLoadingProject = false
-        isViewingProjectChat = false
-        pendingSearchResultChatId = nil
+        clearProjectState()
 
         // Allow a new sign-in flow after sign-out
         isSignInInProgress = false
@@ -4417,6 +4467,7 @@ class ChatViewModel: ObservableObject {
         #endif
         
         if hasChatAccess, let userId = currentUserId {
+            isProjectAccountActive = true
             isSignInInProgress = true
             #if DEBUG
             print("handleSignIn: Starting sign-in flow for user \(userId)")
