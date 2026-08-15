@@ -4763,6 +4763,9 @@ class ChatViewModel: ObservableObject {
                 // Set hasMoreChats based on total count
                 self.hasMoreChats = result.totalEntries > Constants.Pagination.chatsPerPage
             }
+            if let userId = currentUserId {
+                await refreshCurrentCloudChatFromStorage(userId: userId)
+            }
             
             // Setup pagination token
             await setupPaginationForAppRestart()
@@ -4882,6 +4885,9 @@ class ChatViewModel: ObservableObject {
                 self.chats = result.chats
                 normalizeChatsArray()
             }
+            if let userId = currentUserId {
+                await refreshCurrentCloudChatFromStorage(userId: userId)
+            }
             scanPendingRecoveries()
         } catch {
             #if DEBUG
@@ -4917,6 +4923,43 @@ class ChatViewModel: ObservableObject {
             .sorted { $0.updatedAt > $1.updatedAt }
 
         return (chats, filtered.count)
+    }
+
+    private func refreshCurrentCloudChatFromStorage(userId: String) async {
+        guard let current = currentChat,
+              !current.isBlankChat,
+              !current.isLocalOnly,
+              !current.hasActiveStream,
+              !streamingTracker.isStreaming(current.id) else { return }
+
+        let chatId = current.id
+        let expectedUpdatedAt = current.updatedAt
+        let expectedModelType = current.modelType
+        await drainPendingSaves()
+        guard currentUserId == userId,
+              currentChat?.id == chatId,
+              currentChat?.updatedAt == expectedUpdatedAt,
+              currentChat?.modelType == expectedModelType,
+              !streamingTracker.isStreaming(chatId),
+              let stored = try? await EncryptedFileStorage.cloud.loadChat(
+                  chatId: chatId,
+                  userId: userId
+              ),
+              stored.updatedAt >= expectedUpdatedAt else { return }
+        guard currentUserId == userId,
+              currentChat?.id == chatId,
+              currentChat?.updatedAt == expectedUpdatedAt,
+              currentChat?.modelType == expectedModelType,
+              !streamingTracker.isStreaming(chatId) else { return }
+
+        var refreshed = stored
+        refreshed.modelType = expectedModelType
+        replaceChat(refreshed)
+        chats.sort { left, right in
+            if left.isBlankChat != right.isBlankChat { return left.isBlankChat }
+            return left.updatedAt > right.updatedAt
+        }
+        currentChat = refreshed
     }
 
     /// Clean up chats beyond first page (called on app launch to ensure clean state)
@@ -5003,18 +5046,28 @@ class ChatViewModel: ObservableObject {
         let savedPaginationToken = self.paginationToken
         let savedIsPaginationActive = self.isPaginationActive
 
-        // IMPORTANT: Preserve the current chat ID so it stays in the array even if beyond first page
-        let currentChatId = self.currentChat?.id
-
-        // IMPORTANT: Preserve locally modified chats and chats with active streams
-        let locallyModifiedChats = chats.filter { $0.locallyModified || $0.hasActiveStream || streamingTracker.isStreaming($0.id) }
-        let locallyModifiedIds = Set(locallyModifiedChats.map { $0.id })
+        let initiallyProtectedIds = Set(chats.filter {
+            $0.locallyModified || $0.hasActiveStream || streamingTracker.isStreaming($0.id)
+        }.map(\.id))
 
         // Load first page of cloud chats from files, excluding locally modified ones
-        let result = await loadFirstPageOfChats(userId: userId, excluding: locallyModifiedIds, filter: \.isCloudDisplayable)
+        let result = await loadFirstPageOfChats(userId: userId, excluding: initiallyProtectedIds, filter: \.isCloudDisplayable)
+        guard currentUserId == userId else { return }
+
+        // Re-read protected state after the storage await so a new edit or stream
+        // that started while loading cannot be replaced by the disk snapshot.
+        let currentChatId = self.currentChat?.id
+        let locallyModifiedChats = chats.filter {
+            initiallyProtectedIds.contains($0.id)
+                || $0.locallyModified
+                || $0.hasActiveStream
+                || streamingTracker.isStreaming($0.id)
+        }
+        let locallyModifiedIds = Set(locallyModifiedChats.map { $0.id })
 
         // Combine: locally modified chats + synced chats from files
-        let sortedChats = (locallyModifiedChats + result.chats).sorted { $0.updatedAt > $1.updatedAt }
+        let syncedChatsFromStorage = result.chats.filter { !locallyModifiedIds.contains($0.id) }
+        let sortedChats = (locallyModifiedChats + syncedChatsFromStorage).sorted { $0.updatedAt > $1.updatedAt }
 
         // Keep track of currently loaded chat IDs to preserve pagination
         let currentlyLoadedIds = Set(chats.map { $0.id })
@@ -5099,6 +5152,7 @@ class ChatViewModel: ObservableObject {
             self.paginationToken = savedPaginationToken
             self.isPaginationActive = savedIsPaginationActive
         }
+        await refreshCurrentCloudChatFromStorage(userId: userId)
         scanPendingRecoveries()
     }
     
