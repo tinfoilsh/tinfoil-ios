@@ -4944,7 +4944,8 @@ class ChatViewModel: ObservableObject {
               let stored = try? await EncryptedFileStorage.cloud.loadChat(
                   chatId: chatId,
                   userId: userId
-              ) else { return }
+              ),
+              stored.updatedAt >= expectedUpdatedAt else { return }
         guard currentUserId == userId,
               currentChat?.id == chatId,
               currentChat?.updatedAt == expectedUpdatedAt,
@@ -4954,6 +4955,10 @@ class ChatViewModel: ObservableObject {
         var refreshed = stored
         refreshed.modelType = expectedModelType
         replaceChat(refreshed)
+        chats.sort { left, right in
+            if left.isBlankChat != right.isBlankChat { return left.isBlankChat }
+            return left.updatedAt > right.updatedAt
+        }
         currentChat = refreshed
     }
 
