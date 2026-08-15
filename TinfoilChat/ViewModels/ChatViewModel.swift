@@ -420,6 +420,7 @@ class ChatViewModel: ObservableObject {
     private var pendingStreamUpdates: [String: Chat] = [:]
     private var pendingSaveTask: Task<Void, Never>?
     private var pendingBackupTasks: [UUID: Task<Void, Never>] = [:]
+    private var activeFullSyncId: UUID?
     private var lastKnownAuthState: Bool?
     @Published private var genUIRetryStates: [GenUIRetryKey: GenUIRetryState] = [:]
     private var activeGenUIRetryIds: [GenUIRetryKey: UUID] = [:]
@@ -4448,7 +4449,7 @@ class ChatViewModel: ObservableObject {
                 defer { self?.pendingBackupTasks[backupId] = nil }
                 await saveTask?.value
                 guard let self, self.acceptsChatSaves else { return }
-                await self.cloudSync.backupChat(chat.id)
+                await self.cloudSync.backupChat(chat.id, ensureLatestUpload: true)
             }
             pendingBackupTasks[backupId] = backupTask
         }
@@ -4483,7 +4484,8 @@ class ChatViewModel: ObservableObject {
 
     private func drainPendingSaves() async {
         await pendingSaveTask?.value
-        while let backupTask = pendingBackupTasks.values.first {
+        let backupTasks = Array(pendingBackupTasks.values)
+        for backupTask in backupTasks {
             await backupTask.value
         }
     }
@@ -4679,6 +4681,8 @@ class ChatViewModel: ObservableObject {
         clearHydratedFavorites()
         isAccountTeardownInProgress = true
         clearProjectState()
+        activeFullSyncId = nil
+        isSyncing = false
         let canceledSignInTask = cancelSignInOperation()
         let canceledLegacyMigrationTask = cancelLegacyMigration()
         hasPerformedInitialSync = false
@@ -5461,8 +5465,14 @@ class ChatViewModel: ObservableObject {
     
     /// Intelligently update chats after sync without resetting pagination
     @MainActor
-    private func updateChatsAfterSync() async {
-        guard let userId = currentUserId else { return }
+    private func updateChatsAfterSync(
+        token: AccountOperationFence.Token? = nil,
+        userId expectedUserId: String? = nil
+    ) async {
+        guard let userId = expectedUserId ?? currentUserId else { return }
+        if let token {
+            guard isCurrentSignIn(token, userId: userId) else { return }
+        }
 
         // IMPORTANT: Preserve pagination token before updating
         let savedPaginationToken = self.paginationToken
@@ -5475,6 +5485,9 @@ class ChatViewModel: ObservableObject {
         // Load first page of cloud chats from files, excluding locally modified ones
         let result = await loadFirstPageOfChats(userId: userId, excluding: initiallyProtectedIds, filter: \.isCloudDisplayable)
         guard currentUserId == userId else { return }
+        if let token {
+            guard isCurrentSignIn(token, userId: userId) else { return }
+        }
 
         // Re-read protected state after the storage await so a new edit or stream
         // that started while loading cannot be replaced by the disk snapshot.
@@ -5575,6 +5588,9 @@ class ChatViewModel: ObservableObject {
             self.isPaginationActive = savedIsPaginationActive
         }
         await refreshCurrentCloudChatFromStorage(userId: userId)
+        if let token {
+            guard isCurrentSignIn(token, userId: userId) else { return }
+        }
         scanPendingRecoveries()
     }
     
@@ -5604,40 +5620,52 @@ class ChatViewModel: ObservableObject {
             return
         }
 
-        await MainActor.run {
-            self.isSyncing = true
-            self.syncErrors = []
+        guard isCurrentSignIn(token, userId: userId) else { return }
+        let syncId = UUID()
+        activeFullSyncId = syncId
+        isSyncing = true
+        syncErrors = []
+        defer {
+            if activeFullSyncId == syncId {
+                activeFullSyncId = nil
+                if isCurrentAccountOperation(token, userId: userId) {
+                    isSyncing = false
+                }
+            }
         }
         
         let result = await cloudSync.syncAllChats()
+        guard isCurrentSignIn(token, userId: userId) else { return }
         
         // Update chats if there were changes (await this before marking sync complete)
         if result.downloaded > 0 || result.uploaded > 0 || result.deleted > 0 {
-            await self.updateChatsAfterSync()
+            await updateChatsAfterSync(token: token, userId: userId)
+            guard isCurrentSignIn(token, userId: userId) else { return }
         }
         
         // Always refresh pagination token and hasMore state from the server after a sync
         // This guards against cold-start races where the token wasn't available yet
-        await self.setupPaginationForAppRestart(userId: userId, token: token)
+        await setupPaginationForAppRestart(userId: userId, token: token)
+        guard isCurrentSignIn(token, userId: userId) else { return }
         
         // Also sync profile settings
         await ProfileManager.shared.performFullSync()
+        guard isCurrentSignIn(token, userId: userId) else { return }
 
         // Project metadata is synced separately from chat revisions.
         await loadProjects()
+        guard isCurrentSignIn(token, userId: userId) else { return }
         
         // Re-load localChats from the local-only store
-        let freshLocal = await loadAllLocalChats(userId: self.currentUserId)
+        let freshLocal = await loadAllLocalChats(userId: userId)
+        guard isCurrentSignIn(token, userId: userId) else { return }
 
-        await MainActor.run {
-            self.localChats = freshLocal
-            self.isSyncing = false
-            self.lastSyncDate = Date()
-            self.ensureBlankChatAtTop()
-            
-            if !result.errors.isEmpty {
-                self.syncErrors = result.errors
-            }
+        localChats = freshLocal
+        lastSyncDate = Date()
+        ensureBlankChatAtTop()
+
+        if !result.errors.isEmpty {
+            syncErrors = result.errors
         }
     }
     

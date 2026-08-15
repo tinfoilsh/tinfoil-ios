@@ -28,7 +28,7 @@ class AuthManager: ObservableObject {
     private var hasTriggeredSignIn = false
     private var accountSwitchTask: Task<Void, Never>?
     private var accountTeardownTask: Task<Void, Never>?
-    private var accountTeardownGeneration: UInt64 = 0
+    private var accountTeardownId: UUID?
     
     // UserDefaults keys
     private let authStateKey = Constants.StorageKeys.Auth.state
@@ -243,18 +243,23 @@ class AuthManager: ObservableObject {
     }
     
     private func clearAuthState() async {
-        accountTeardownGeneration += 1
-        let generation = accountTeardownGeneration
-        let previousTask = accountTeardownTask
+        if let accountTeardownTask {
+            await accountTeardownTask.value
+            return
+        }
+
+        let teardownId = UUID()
         let teardownTask = Task { @MainActor [weak self] in
-            await previousTask?.value
             guard let self else { return }
             await self.performAccountTeardown()
-            guard self.accountTeardownGeneration == generation else { return }
             self.chatViewModel?.completeAccountTeardown()
         }
+        accountTeardownId = teardownId
         accountTeardownTask = teardownTask
         await teardownTask.value
+        guard accountTeardownId == teardownId else { return }
+        accountTeardownTask = nil
+        accountTeardownId = nil
     }
 
     private func performAccountTeardown() async {
