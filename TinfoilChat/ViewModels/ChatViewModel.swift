@@ -4777,10 +4777,25 @@ class ChatViewModel: ObservableObject {
             // IMPORTANT: Do NOT auto-generate a key here; allow UI to prompt the user
             Task {
                 do {
+                    // Sign-out clears account-bound token providers, so restore them
+                    // before passkey recovery or any other enclave request.
+                    try await self.cloudSync.initialize()
+                    guard self.currentUserId == userId,
+                          self.hasChatAccess,
+                          self.isProjectAccountActive else {
+                        if self.currentUserId == userId {
+                            self.isSignInInProgress = false
+                        }
+                        return
+                    }
+
                     // Always load local chats first — they use the device key,
                     // not the cloud encryption key, so they're available regardless
                     // of cloud sync setup state.
-                    let allLocal = await loadAllLocalChats(userId: self.currentUserId)
+                    let allLocal = await loadAllLocalChats(userId: userId)
+                    guard self.currentUserId == userId,
+                          self.isSignInInProgress,
+                          self.isProjectAccountActive else { return }
                     await MainActor.run {
                         self.localChats = allLocal
                         normalizeLocalChatsArray()
@@ -4800,6 +4815,9 @@ class ChatViewModel: ObservableObject {
                     // If no cloud key exists, try passkey recovery before falling back
                     if !EncryptionService.shared.hasEncryptionKey() {
                         let passkeyResult = await self.passkeyManager.attemptPasskeyKeyRecovery()
+                        guard self.currentUserId == userId,
+                              self.isSignInInProgress,
+                              self.isProjectAccountActive else { return }
                         switch passkeyResult {
                         case .success, .newUserSetupDone:
                             break
@@ -4827,6 +4845,9 @@ class ChatViewModel: ObservableObject {
 
                     // Initialize encryption - this will load existing key from keychain
                     let key = try await EncryptionService.shared.initialize()
+                    guard self.currentUserId == userId,
+                          self.isSignInInProgress,
+                          self.isProjectAccountActive else { return }
                     self.encryptionKey = key
 
                     // Ensure the current key is authorized for cloud writes.
@@ -4834,6 +4855,9 @@ class ChatViewModel: ObservableObject {
                     // authorization record yet.
                     if !CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey(userId: userId) {
                         let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
+                        guard self.currentUserId == userId,
+                              self.isSignInInProgress,
+                              self.isProjectAccountActive else { return }
                         if validation.canWrite {
                             _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated, userId: userId)
                         }
@@ -4843,21 +4867,35 @@ class ChatViewModel: ObservableObject {
                     // key can never sync or migrate. Converge silently via
                     // passkey when possible; otherwise prompt the user to
                     // recover so this stale device enters v2.
-                    if SettingsManager.shared.isCloudSyncEnabled,
-                       await self.passkeyManager.resolveKeyMismatchAtLaunch() == .manualRecoveryRequired {
-                        await MainActor.run {
-                            self.cloudSyncOnboardingMode = .recovery
-                            self.showCloudSyncOnboarding = true
+                    if SettingsManager.shared.isCloudSyncEnabled {
+                        let mismatchResult = await self.passkeyManager.resolveKeyMismatchAtLaunch()
+                        guard self.currentUserId == userId,
+                              self.isSignInInProgress,
+                              self.isProjectAccountActive else { return }
+                        if mismatchResult == .manualRecoveryRequired {
+                            await MainActor.run {
+                                self.cloudSyncOnboardingMode = .recovery
+                                self.showCloudSyncOnboarding = true
+                            }
                         }
                     }
 
                     // Check passkey state for users who already have keys
                     await self.passkeyManager.checkPasskeyStateForExistingKey()
+                    guard self.currentUserId == userId,
+                          self.isSignInInProgress,
+                          self.isProjectAccountActive else { return }
 
                     // Retry decryption for any previously failed chats now that key is loaded
                     let decryptedCount = await cloudSync.retryDecryptionWithNewKey(onProgress: nil)
+                    guard self.currentUserId == userId,
+                          self.isSignInInProgress,
+                          self.isProjectAccountActive else { return }
                     if decryptedCount > 0 {
-                        let result = await loadFirstPageOfChats(userId: self.currentUserId, filter: \.isCloudDisplayable)
+                        let result = await loadFirstPageOfChats(userId: userId, filter: \.isCloudDisplayable)
+                        guard self.currentUserId == userId,
+                              self.isSignInInProgress,
+                              self.isProjectAccountActive else { return }
                         await MainActor.run {
                             self.chats = result.chats
                             // Refresh currentChat to show decrypted content
