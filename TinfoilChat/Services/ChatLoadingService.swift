@@ -170,7 +170,16 @@ enum ChatPaginationPersistence {
                 )
                 guard !Task.isCancelled else { break }
                 guard !DeletedChatsTracker.shared.isDeleted(chat.id) else {
-                    outcomes.append(.deleted(chat.id))
+                    do {
+                        try await loadingService.deleteChat(
+                            id: chat.id,
+                            userId: userId,
+                            storage: .cloud
+                        )
+                        outcomes.append(.deleted(chat.id))
+                    } catch {
+                        outcomes.append(.failed(chat.id))
+                    }
                     continue
                 }
                 if result == .applied {
@@ -218,7 +227,14 @@ enum RemoteSearchPersistence {
                 storage: .cloud
             )
             try validateOperation()
-            guard !DeletedChatsTracker.shared.isDeleted(remoteChat.id) else { return .deleted }
+            if DeletedChatsTracker.shared.isDeleted(remoteChat.id) {
+                try await loadingService.deleteChat(
+                    id: remoteChat.id,
+                    userId: userId,
+                    storage: .cloud
+                )
+                return .deleted
+            }
             return .chat(local)
         }
 
@@ -236,7 +252,14 @@ enum RemoteSearchPersistence {
             return .deleted
         }
         try validateOperation()
-        guard !DeletedChatsTracker.shared.isDeleted(remoteChat.id) else { return .deleted }
+        if DeletedChatsTracker.shared.isDeleted(remoteChat.id) {
+            try await loadingService.deleteChat(
+                id: remoteChat.id,
+                userId: userId,
+                storage: .cloud
+            )
+            return .deleted
+        }
         if result == .applied {
             return .chat(remoteChat)
         }
@@ -246,7 +269,14 @@ enum RemoteSearchPersistence {
             storage: .cloud
         )
         try validateOperation()
-        guard !DeletedChatsTracker.shared.isDeleted(remoteChat.id) else { return .deleted }
+        if DeletedChatsTracker.shared.isDeleted(remoteChat.id) {
+            try await loadingService.deleteChat(
+                id: remoteChat.id,
+                userId: userId,
+                storage: .cloud
+            )
+            return .deleted
+        }
         return .chat(local)
     }
 }
