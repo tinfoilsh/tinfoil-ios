@@ -3,9 +3,10 @@ import Foundation
 enum ChatFavorites {
     static func normalize(_ ids: [String]) -> [String] {
         var seen = Set<String>()
-        return ids.filter { id in
-            !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && seen.insert(id).inserted
+        return ids.compactMap { id in
+            let normalizedId = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalizedId.isEmpty, seen.insert(normalizedId).inserted else { return nil }
+            return normalizedId
         }
         .prefix(Constants.ChatFavorites.maxPinnedChats)
         .map { $0 }

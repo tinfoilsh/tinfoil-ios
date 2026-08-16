@@ -24,7 +24,9 @@ struct ChatFavoritesTests {
     @Test("normalization keeps newest unique ids within the cap")
     func normalizesPinnedIds() {
         let ids = (0...Constants.ChatFavorites.maxPinnedChats).map { "chat-\($0)" }
-        let normalized = ChatFavorites.normalize([ids[0], ids[0], ""] + Array(ids.dropFirst()))
+        let normalized = ChatFavorites.normalize([
+            " \(ids[0]) ", ids[0], "\n",
+        ] + Array(ids.dropFirst()))
 
         #expect(normalized.count == Constants.ChatFavorites.maxPinnedChats)
         #expect(normalized.first == ids[0])

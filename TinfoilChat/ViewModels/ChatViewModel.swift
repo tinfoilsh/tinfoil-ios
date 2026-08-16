@@ -659,17 +659,15 @@ class ChatViewModel: ObservableObject {
             return
         }
 
-        var resolved = (chats + favoriteChats).filter(ChatFavorites.isPinnable)
-        let resolvedIds = Set(resolved.map(\.id))
-        let missingIds = ids.filter { !resolvedIds.contains($0) }
-        let stored = await Chat.loadChats(chatIds: missingIds, userId: userId)
+        let stored = await Chat.loadChats(chatIds: ids, userId: userId)
             .filter(ChatFavorites.isPinnable)
         guard isCurrentFavoriteHydration(generation: generation, userId: userId) else { return }
-        resolved.append(contentsOf: stored)
 
-        let storedIds = Set(stored.map(\.id))
+        var resolved = (chats + stored).filter(ChatFavorites.isPinnable)
+        let resolvedIds = Set(resolved.map(\.id))
+        let missingIds = ids.filter { !resolvedIds.contains($0) }
         var confirmedMissingIds = Set<String>()
-        for id in missingIds where !storedIds.contains(id) {
+        for id in missingIds {
             guard isCurrentFavoriteHydration(generation: generation, userId: userId) else { return }
             guard let operation = beginExactFavoriteHydration(
                 chatId: id,

@@ -160,6 +160,7 @@ struct ProjectPage: View {
                     Image(systemName: "pin.fill")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .accessibilityLabel("Pinned")
                 }
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
