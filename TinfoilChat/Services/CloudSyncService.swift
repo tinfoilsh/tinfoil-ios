@@ -1896,7 +1896,6 @@ class CloudSyncService: ObservableObject {
             )
             guard pending.generation == accountGeneration else { throw CancellationError() }
             deferredRemoteDeletes.removeValue(forKey: chatId)
-            deletedChatsTracker.removeFromDeleted(chatId)
             return false
         }
         try await EncryptedFileStorage.cloud.clearRemoteDeleteTombstone(
@@ -2418,7 +2417,6 @@ class CloudSyncService: ObservableObject {
             userId: userId
         )
         deferredRemoteDeletes.removeValue(forKey: chatId)
-        deletedChatsTracker.removeFromDeleted(chatId)
     }
 
     private func uploadAndMarkSynced(_ upload: PreparedChatUpload) async throws {

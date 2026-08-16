@@ -103,9 +103,35 @@ struct FileChatLoadingService: ChatLoadingService {
 }
 
 enum ChatPaginationPersistence {
+    enum RowOutcome: Equatable {
+        case applied(ChatListSummary)
+        case retained(ChatListSummary)
+        case deleted(String)
+        case failed(String)
+    }
+
     struct Result {
-        let summaries: [ChatListSummary]
-        let failedIds: [String]
+        let outcomes: [RowOutcome]
+
+        var summaries: [ChatListSummary] {
+            outcomes.compactMap { outcome in
+                switch outcome {
+                case .applied(let summary), .retained(let summary): summary
+                case .deleted, .failed: nil
+                }
+            }
+        }
+
+        var failedIds: [String] {
+            outcomes.compactMap { outcome in
+                guard case .failed(let id) = outcome else { return nil }
+                return id
+            }
+        }
+
+        var safelyPersistedCount: Int {
+            outcomes.count - failedIds.count
+        }
     }
 
     @MainActor
@@ -118,16 +144,23 @@ enum ChatPaginationPersistence {
         do {
             localEntries = try await loadingService.loadIndex(userId: userId, storage: .cloud)
         } catch {
-            return Result(summaries: [], failedIds: chats.map(\.id))
+            return Result(outcomes: chats.map {
+                DeletedChatsTracker.shared.isDeleted($0.id)
+                    ? .deleted($0.id)
+                    : .failed($0.id)
+            })
         }
         let localById = Dictionary(
             localEntries.map { ($0.id, $0) },
             uniquingKeysWith: { _, latest in latest }
         )
-        var summaries: [ChatListSummary] = []
-        var failedIds: [String] = []
+        var outcomes: [RowOutcome] = []
         for chat in chats {
             guard !Task.isCancelled else { break }
+            if DeletedChatsTracker.shared.isDeleted(chat.id) {
+                outcomes.append(.deleted(chat.id))
+                continue
+            }
             do {
                 let result = try await loadingService.applyRemoteChatIfFreshResult(
                     chat,
@@ -136,33 +169,48 @@ enum ChatPaginationPersistence {
                     allowLocallyModified: false
                 )
                 guard !Task.isCancelled else { break }
+                guard !DeletedChatsTracker.shared.isDeleted(chat.id) else {
+                    outcomes.append(.deleted(chat.id))
+                    continue
+                }
                 if result == .applied {
-                    summaries.append(ChatListSummary(from: chat))
+                    outcomes.append(.applied(ChatListSummary(from: chat)))
                 } else if let existing = localById[chat.id] {
-                    summaries.append(ChatListSummary(from: existing))
+                    outcomes.append(.retained(ChatListSummary(from: existing)))
                 } else {
-                    failedIds.append(chat.id)
+                    outcomes.append(.failed(chat.id))
                 }
             } catch {
                 guard !Task.isCancelled else { break }
-                failedIds.append(chat.id)
+                outcomes.append(
+                    DeletedChatsTracker.shared.isDeleted(chat.id)
+                        ? .deleted(chat.id)
+                        : .failed(chat.id)
+                )
             }
         }
-        return Result(summaries: summaries, failedIds: failedIds)
+        return Result(outcomes: outcomes)
     }
 }
 
 enum RemoteSearchPersistence {
+    enum Result {
+        case chat(Chat)
+        case deleted
+    }
+
     @MainActor
     static func resolve(
         _ remoteChat: Chat,
         userId: String,
         loadingService: any ChatLoadingService,
         validateOperation: @MainActor () throws -> Void = {}
-    ) async throws -> Chat {
+    ) async throws -> Result {
         try validateOperation()
+        guard !DeletedChatsTracker.shared.isDeleted(remoteChat.id) else { return .deleted }
         let index = try await loadingService.loadIndex(userId: userId, storage: .cloud)
         try validateOperation()
+        guard !DeletedChatsTracker.shared.isDeleted(remoteChat.id) else { return .deleted }
         if index.contains(where: { $0.id == remoteChat.id }) {
             let local = try await loadingService.loadChat(
                 id: remoteChat.id,
@@ -170,18 +218,27 @@ enum RemoteSearchPersistence {
                 storage: .cloud
             )
             try validateOperation()
-            return local
+            guard !DeletedChatsTracker.shared.isDeleted(remoteChat.id) else { return .deleted }
+            return .chat(local)
         }
 
-        let result = try await loadingService.applyRemoteChatIfFreshResult(
-            remoteChat,
-            userId: userId,
-            expectedLocalUpdatedAt: nil,
-            allowLocallyModified: false
-        )
+        guard !DeletedChatsTracker.shared.isDeleted(remoteChat.id) else { return .deleted }
+        let result: RevisionApplyResult
+        do {
+            result = try await loadingService.applyRemoteChatIfFreshResult(
+                remoteChat,
+                userId: userId,
+                expectedLocalUpdatedAt: nil,
+                allowLocallyModified: false
+            )
+        } catch {
+            guard DeletedChatsTracker.shared.isDeleted(remoteChat.id) else { throw error }
+            return .deleted
+        }
         try validateOperation()
+        guard !DeletedChatsTracker.shared.isDeleted(remoteChat.id) else { return .deleted }
         if result == .applied {
-            return remoteChat
+            return .chat(remoteChat)
         }
         let local = try await loadingService.loadChat(
             id: remoteChat.id,
@@ -189,7 +246,8 @@ enum RemoteSearchPersistence {
             storage: .cloud
         )
         try validateOperation()
-        return local
+        guard !DeletedChatsTracker.shared.isDeleted(remoteChat.id) else { return .deleted }
+        return .chat(local)
     }
 }
 
@@ -219,11 +277,13 @@ enum DeleteAllChatsCoordinator {
 struct DeleteAllOperationalRestoration: Equatable {
     let reloadEncryptionKey: Bool
     let ensureUsableChat: Bool
+    let restartSignIn: Bool
 
     static func resolve(inMemoryWasCleared: Bool, hasCurrentChat: Bool) -> Self {
         Self(
             reloadEncryptionKey: inMemoryWasCleared,
-            ensureUsableChat: inMemoryWasCleared || !hasCurrentChat
+            ensureUsableChat: inMemoryWasCleared || !hasCurrentChat,
+            restartSignIn: true
         )
     }
 }

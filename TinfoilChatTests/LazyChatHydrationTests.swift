@@ -270,6 +270,41 @@ struct LazyChatHydrationTests {
     }
 
     @Test
+    @MainActor
+    func tombstonedPaginationAndSearchRowsNeverApplyOrPublish() async throws {
+        let paginationService = RecordingChatLoadingService()
+        let paginationChat = makeChat(id: "deleted-pagination", updatedAt: Date())
+        DeletedChatsTracker.shared.markAsDeleted(paginationChat.id)
+
+        let page = await ChatPaginationPersistence.saveCloudChats(
+            [paginationChat],
+            userId: "user",
+            loadingService: paginationService
+        )
+
+        #expect(page.outcomes == [.deleted(paginationChat.id)])
+        #expect(page.summaries.isEmpty)
+        #expect(page.failedIds.isEmpty)
+        #expect(page.safelyPersistedCount == 1)
+        #expect(await paginationService.counts().saves == 0)
+
+        let searchService = RecordingChatLoadingService()
+        let searchChat = makeChat(id: "deleted-search", updatedAt: Date())
+        DeletedChatsTracker.shared.markAsDeleted(searchChat.id)
+        let searchResult = try await RemoteSearchPersistence.resolve(
+            searchChat,
+            userId: "user",
+            loadingService: searchService
+        )
+
+        guard case .deleted = searchResult else {
+            Issue.record("Expected tombstoned search result to be skipped")
+            return
+        }
+        #expect(await searchService.counts().saves == 0)
+    }
+
+    @Test
     func paginationPartialFailureRetainsOriginalPageState() {
         let original = ChatPaginationPageState(token: "current", hasMore: true)
         let next = ChatPaginationPageState(token: "next", hasMore: false)
@@ -608,8 +643,10 @@ struct LazyChatHydrationTests {
 
         #expect(afterCleanupFailure.reloadEncryptionKey)
         #expect(afterCleanupFailure.ensureUsableChat)
+        #expect(afterCleanupFailure.restartSignIn)
         #expect(!afterCloudFailure.reloadEncryptionKey)
         #expect(!afterCloudFailure.ensureUsableChat)
+        #expect(afterCloudFailure.restartSignIn)
     }
 
     @Test
@@ -618,11 +655,15 @@ struct LazyChatHydrationTests {
         let service = RecordingChatLoadingService()
         let remote = makeChat(id: "remote-search", updatedAt: Date())
 
-        let persisted = try await RemoteSearchPersistence.resolve(
+        let persistenceResult = try await RemoteSearchPersistence.resolve(
             remote,
             userId: "user",
             loadingService: service
         )
+        guard case .chat(let persisted) = persistenceResult else {
+            Issue.record("Expected remote search chat to persist")
+            return
+        }
         let reopened = try await service.loadChat(
             id: remote.id,
             userId: "user",
@@ -637,11 +678,15 @@ struct LazyChatHydrationTests {
         local.locallyModified = true
         await conflictService.setChat(local, storage: .cloud)
         await conflictService.setApplyResult(.locallyModified, chatId: remote.id)
-        let resolved = try await RemoteSearchPersistence.resolve(
+        let conflictResult = try await RemoteSearchPersistence.resolve(
             remote,
             userId: "user",
             loadingService: conflictService
         )
+        guard case .chat(let resolved) = conflictResult else {
+            Issue.record("Expected local search conflict to resolve")
+            return
+        }
         #expect(resolved.title == local.title)
     }
 

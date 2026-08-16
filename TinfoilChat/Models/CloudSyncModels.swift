@@ -552,7 +552,7 @@ struct ProfileSyncStatus: Codable {
 
 /// Tracks deleted chats to prevent resurrection during sync.
 /// IDs persist for the lifetime of the app session — they are only
-/// removed explicitly via `removeFromDeleted` or `clear`.
+/// removed when account state is cleared.
 @MainActor
 class DeletedChatsTracker {
     static let shared = DeletedChatsTracker()
@@ -569,11 +569,6 @@ class DeletedChatsTracker {
     /// Check if a chat was deleted this session
     func isDeleted(_ chatId: String) -> Bool {
         return deletedChats.contains(chatId)
-    }
-    
-    /// Remove from deleted tracking (e.g., after successful cloud deletion)
-    func removeFromDeleted(_ chatId: String) {
-        deletedChats.remove(chatId)
     }
     
     /// Clear all tracked deletions (e.g., on logout)

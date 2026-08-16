@@ -1824,9 +1824,9 @@ class ChatViewModel: ObservableObject {
         pendingSearchResultChatId = chat.id
         let loadingService = chatLoadingService
         chatSelectionTask = Task { [weak self, loadingService] in
-            let persisted: Chat
+            let persistenceResult: RemoteSearchPersistence.Result
             do {
-                persisted = try await RemoteSearchPersistence.resolve(
+                persistenceResult = try await RemoteSearchPersistence.resolve(
                     chat,
                     userId: userId,
                     loadingService: loadingService,
@@ -1843,6 +1843,16 @@ class ChatViewModel: ObservableObject {
                     }
                 )
             } catch {
+                guard let self,
+                      self.currentUserId == userId,
+                      self.chatSelectionFence.accepts(
+                          id: chat.id,
+                          generation: selectionGeneration
+                      ) else { return }
+                self.failSelection(id: chat.id, generation: selectionGeneration)
+                return
+            }
+            guard case .chat(let persisted) = persistenceResult else {
                 guard let self,
                       self.currentUserId == userId,
                       self.chatSelectionFence.accepts(
@@ -6075,6 +6085,12 @@ class ChatViewModel: ObservableObject {
             }
         }
         recoveryScansSuspended = false
+        if restoration.restartSignIn {
+            let canceledSignInTask = cancelSignInOperation()
+            await canceledSignInTask?.value
+            guard currentUserId == userId else { return }
+            handleSignIn()
+        }
         setupAutoSyncTimer()
     }
 
@@ -6385,7 +6401,7 @@ class ChatViewModel: ObservableObject {
         let allRowsPersisted = !result.failed
             && conversionFailures == 0
             && persisted.failedIds.isEmpty
-            && persisted.summaries.count == result.chats.count
+            && persisted.safelyPersistedCount == result.chats.count
         let pageState = ChatPaginationCoordinator.state(
             original: originalPageState,
             next: ChatPaginationPageState(token: result.nextToken, hasMore: result.hasMore),
