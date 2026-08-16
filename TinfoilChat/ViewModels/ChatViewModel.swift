@@ -5747,14 +5747,17 @@ class ChatViewModel: ObservableObject {
                 // do we persist it. If the enclave can't be reached we throw
                 // and discard the staged key, so a new key is never stranded
                 // locally while the enclave keeps the old one.
+                var remoteRegistrationCommitted = false
                 do {
                     try await EncryptionService.shared.setKey(key, persist: false)
                     try ensureCurrentAccount(operationUserId)
                     try await CloudKeyAuthorizationStore.shared.registerStartFreshKeyIfNeeded()
-                    try ensureCurrentAccount(operationUserId)
+                    remoteRegistrationCommitted = true
                     try EncryptionService.shared.persistCurrentKeyState()
                 } catch {
-                    EncryptionService.shared.discardStagedKeyState()
+                    if !remoteRegistrationCommitted {
+                        EncryptionService.shared.discardStagedKeyState()
+                    }
                     throw error
                 }
                 // The enclave has already rebound the account to this key
