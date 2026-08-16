@@ -211,7 +211,7 @@ struct VerifierView: View {
                     action: { toggle(section) }
                 )
 
-                if isExpanded {
+                ExpansionContainer(isExpanded: isExpanded) {
                     Divider()
 
                     VStack(alignment: .leading, spacing: Constants.UI.VerificationCenter.drawerContentSpacing) {
@@ -221,7 +221,6 @@ struct VerifierView: View {
                     .padding(.horizontal, Constants.UI.VerificationCenter.drawerContentHorizontalPadding)
                     .padding(.top, Constants.UI.VerificationCenter.drawerContentSpacing)
                     .padding(.bottom, Constants.UI.VerificationCenter.drawerContentBottomPadding)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 if section != .code {
@@ -644,6 +643,38 @@ private struct RuntimeSectionCards: View {
 }
 
 // MARK: - Shared Components
+
+private struct ExpansionContainer<Content: View>: View {
+    let isExpanded: Bool
+    @ViewBuilder let content: Content
+    @State private var contentHeight: CGFloat = .zero
+
+    var body: some View {
+        content
+            .fixedSize(horizontal: false, vertical: true)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: ExpansionHeightPreferenceKey.self,
+                        value: geometry.size.height
+                    )
+                }
+            )
+            .frame(height: isExpanded ? contentHeight : .zero, alignment: .top)
+            .clipped()
+            .allowsHitTesting(isExpanded)
+            .accessibilityHidden(!isExpanded)
+            .onPreferenceChange(ExpansionHeightPreferenceKey.self) { contentHeight = $0 }
+    }
+}
+
+private struct ExpansionHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = .zero
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
 
 private struct FingerprintCard: View {
     let icon: String
