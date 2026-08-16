@@ -90,6 +90,46 @@ struct ProfileMergeTests {
         #expect(result.adoptedRemote == false)
     }
 
+    @Test("pins-only remote cannot bypass the destructive fallback guard")
+    func pinsOnlyRemoteGuard() {
+        var local = ProfileData(nickname: "real-user", profession: "Engineer")
+        local.updatedAt = "2024-01-01T00:00:00.000Z"
+        var remote = ProfileData(pinnedChatIds: ["chat-a"])
+        remote.updatedAt = "2024-01-02T00:00:00.000Z"
+
+        let result = ProfileMerge.mergeProfiles(local: local, remote: remote)
+
+        #expect(result.merged.nickname == "real-user")
+        #expect(result.merged.profession == "Engineer")
+        #expect(result.adoptedRemote == false)
+    }
+
+    @Test("preset favorites-only remote cannot bypass the fallback guard")
+    func presetFavoritesOnlyRemoteGuard() {
+        var local = ProfileData(customSystemPrompt: "Keep this")
+        local.updatedAt = "2024-01-01T00:00:00.000Z"
+        var remote = ProfileData(favoritePromptPresetIds: ["preset-a"])
+        remote.updatedAt = "2024-01-02T00:00:00.000Z"
+
+        let result = ProfileMerge.mergeProfiles(local: local, remote: remote)
+
+        #expect(result.merged.customSystemPrompt == "Keep this")
+        #expect(result.adoptedRemote == false)
+    }
+
+    @Test("fallback explicit clear does not wipe pins-only local content")
+    func pinsOnlyFallbackClearGuard() {
+        var local = ProfileData(pinnedChatIds: ["chat-a"])
+        local.updatedAt = "2024-01-01T00:00:00.000Z"
+        var remote = ProfileData(pinnedChatIds: [])
+        remote.updatedAt = "2024-01-02T00:00:00.000Z"
+
+        let result = ProfileMerge.mergeProfiles(local: local, remote: remote)
+
+        #expect(result.merged.pinnedChatIds == ["chat-a"])
+        #expect(result.adoptedRemote == false)
+    }
+
     @Test("does not carry untrusted local clocks into the merged output")
     func dropsUntrustedLocalClocks() {
         var local = ProfileData(nickname: "local", profession: "local-job")
@@ -138,6 +178,8 @@ struct ProfileMergeTests {
     func populated() {
         #expect(ProfileMerge.isProfilePopulated(ProfileData(nickname: "x")) == true)
         #expect(ProfileMerge.isProfilePopulated(ProfileData(traits: ["a"])) == true)
+        #expect(ProfileMerge.isProfilePopulated(ProfileData(pinnedChatIds: ["chat-a"])) == true)
+        #expect(ProfileMerge.isProfilePopulated(ProfileData(favoritePromptPresetIds: ["preset-a"])) == true)
         #expect(ProfileMerge.isProfilePopulated(nil) == false)
         #expect(
             ProfileMerge.isProfilePopulated(
@@ -271,6 +313,51 @@ struct ProfileMergeTests {
 
         #expect(result.merged.nickname == "Grace")
         #expect(result.conflicts == ["nickname"])
+    }
+
+    @Test("merges pinned chat ids as one ordered field")
+    func mergesPinnedChatsAtomically() {
+        var local = ProfileData(pinnedChatIds: ["local", "shared"])
+        local.fieldClocks = ["pinnedChatIds": EditClock(v: 2, w: "A")]
+        var remote = ProfileData(pinnedChatIds: ["remote", "shared"])
+        remote.fieldClocks = ["pinnedChatIds": EditClock(v: 3, w: "B")]
+
+        let result = ProfileMerge.mergeProfiles(
+            local: trusted(local), remote: trusted(remote)
+        )
+
+        #expect(result.merged.pinnedChatIds == ["remote", "shared"])
+        #expect(result.adoptedRemote)
+    }
+
+    @Test("remote omission does not clear pinned chats")
+    func preservesPinnedChatsOnRemoteOmission() {
+        let baseline = ProfileData(pinnedChatIds: ["chat-a"])
+        let local = ProfileData(pinnedChatIds: ["chat-a"])
+        var remote = ProfileData(nickname: "Ada")
+        remote.version = 2
+
+        let result = ProfileMerge.mergeProfiles(
+            baseline: baseline, local: local, remote: remote
+        )
+
+        #expect(result.merged.pinnedChatIds == ["chat-a"])
+        #expect(result.conflicts.isEmpty)
+    }
+
+    @Test("explicit empty pinned chats clears the field")
+    func appliesExplicitPinnedChatClear() {
+        let baseline = ProfileData(pinnedChatIds: ["chat-a"])
+        let local = baseline
+        var remote = ProfileData(pinnedChatIds: [])
+        remote.version = 2
+
+        let result = ProfileMerge.mergeProfiles(
+            baseline: baseline, local: local, remote: remote
+        )
+
+        #expect(result.merged.pinnedChatIds == [])
+        #expect(result.conflicts.isEmpty)
     }
 }
 

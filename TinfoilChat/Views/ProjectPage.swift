@@ -11,6 +11,7 @@ import SwiftUI
 struct ProjectPage: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
+    @ObservedObject private var profileManager = ProfileManager.shared
 
     @State private var deletingChatId: String?
     @State private var showDeleteChatAlert = false
@@ -155,12 +156,31 @@ struct ProjectPage: View {
                     }
                 }
                 Spacer()
+                if profileManager.isChatPinned(chat.id) {
+                    Image(systemName: "pin.fill")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .accessibilityLabel("Pinned")
+                }
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
                     .foregroundColor(.secondary)
             }
         }
         .accessibilityHint("Opens chat")
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            if viewModel.canPinChat(chat) || profileManager.isChatPinned(chat.id) {
+                Button {
+                    viewModel.toggleChatPin(chat)
+                } label: {
+                    Label(
+                        profileManager.isChatPinned(chat.id) ? "Unpin" : "Pin",
+                        systemImage: profileManager.isChatPinned(chat.id) ? "pin.slash" : "pin"
+                    )
+                }
+                .tint(.blue)
+            }
+        }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
                 deletingChatId = chat.id
@@ -179,6 +199,17 @@ struct ProjectPage: View {
             .tint(.orange)
         }
         .contextMenu {
+            if viewModel.canPinChat(chat) || profileManager.isChatPinned(chat.id) {
+                Button {
+                    viewModel.toggleChatPin(chat)
+                } label: {
+                    Label(
+                        profileManager.isChatPinned(chat.id) ? "Unpin" : "Pin",
+                        systemImage: profileManager.isChatPinned(chat.id) ? "pin.slash" : "pin"
+                    )
+                }
+            }
+
             Button {
                 Task {
                     await viewModel.removeChatFromProject(chatId: chat.id)

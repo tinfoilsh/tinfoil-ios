@@ -573,6 +573,31 @@ struct RevisionSyncTests {
         ) == .refused)
     }
 
+    @MainActor
+    @Test func exactHydrationAppliesOnlyWhenNoCurrentEntryExists() {
+        var current = ChatSearchServiceTests.makeChat(id: "favorite", title: "Current")
+        current.locallyModified = false
+        let entry = ChatIndexEntry(from: current)
+
+        #expect(RevisionApplyPolicy.contentResult(
+            existing: nil,
+            expectedUpdatedAt: nil,
+            allowLocallyModified: false
+        ) == .applied)
+        #expect(RevisionApplyPolicy.contentResult(
+            existing: entry,
+            expectedUpdatedAt: nil,
+            allowLocallyModified: false
+        ) == .refused)
+
+        current.locallyModified = true
+        #expect(RevisionApplyPolicy.contentResult(
+            existing: ChatIndexEntry(from: current),
+            expectedUpdatedAt: nil,
+            allowLocallyModified: false
+        ) == .locallyModified)
+    }
+
     @Test func projectMetadataUploadsOnlyForCreatesOrIntentionalMoves() {
         #expect(ProjectMetadataUploadPolicy.shouldInclude(
             syncVersion: 0,

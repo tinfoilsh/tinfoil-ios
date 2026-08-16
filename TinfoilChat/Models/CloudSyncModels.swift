@@ -517,6 +517,7 @@ struct ProfileData: Codable {
     var genUIEnabled: Bool?
     var chatFont: String?
     var projectUploadPreference: String?
+    var pinnedChatIds: [String]?
     
     // Metadata
     var version: Int?

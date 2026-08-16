@@ -272,6 +272,10 @@ enum Constants {
         static let homeSuggestionCount = 3
     }
 
+    enum ChatFavorites {
+        static let maxPinnedChats = 20
+    }
+
     enum AddToChatSheet {
         static let height: CGFloat = 324
         static let heightWithContext: CGFloat = 368
