@@ -59,6 +59,24 @@ enum Constants {
         static let initFailedIconSize: CGFloat = 72
         static let actionButtonCornerRadius: CGFloat = 6
         static let iPadInputBottomPadding: CGFloat = 16
+
+        enum VerificationCenter {
+            static let drawerCornerRadius: CGFloat = 12
+            static let drawerBorderWidth: CGFloat = 1
+            static let drawerDarkBackgroundOpacity = 0.35
+            static let drawerDarkBorderOpacity = 0.18
+            static let drawerLightBorderOpacity = 0.1
+            static let drawerContentSpacing: CGFloat = 16
+            static let drawerContentHorizontalPadding: CGFloat = 14
+            static let drawerContentBottomPadding: CGFloat = 16
+            static let drawerHeaderSpacing: CGFloat = 14
+            static let drawerHeaderHorizontalPadding: CGFloat = 16
+            static let drawerHeaderMinimumHeight: CGFloat = 56
+            static let drawerIconSize: CGFloat = 16
+            static let drawerIconWidth: CGFloat = 22
+            static let drawerChevronSize: CGFloat = 12
+            static let drawerChevronWidth: CGFloat = 16
+        }
     }
 
     enum Accessibility {

@@ -8,36 +8,28 @@
 import SwiftUI
 import TinfoilAI
 
-// MARK: - Tab Model
+// MARK: - Verification Section
 
-private enum VerificationTab: String, CaseIterable, Identifiable {
+private enum VerificationSection: String, CaseIterable, Identifiable {
     case runtime
     case encryption
     case code
 
     var id: String { rawValue }
 
-    var prefix: String {
+    var title: String {
         switch self {
-        case .encryption: return "Data is"
-        case .code: return "Code is"
-        case .runtime: return "Runtime is"
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .encryption: return "Encrypted"
-        case .code: return "Auditable"
-        case .runtime: return "Isolated"
+        case .encryption: return "Data is Encrypted"
+        case .code: return "Code is Auditable"
+        case .runtime: return "Runtime is Isolated"
         }
     }
 
     var iconName: String {
         switch self {
-        case .encryption: return "lock.fill"
-        case .code: return "terminal.fill"
-        case .runtime: return "cpu.fill"
+        case .encryption: return "lock"
+        case .code: return "terminal"
+        case .runtime: return "cpu"
         }
     }
 }
@@ -47,9 +39,11 @@ private enum VerificationTab: String, CaseIterable, Identifiable {
 struct VerifierView: View {
     @EnvironmentObject var chatViewModel: ChatViewModel
     @Environment(\.colorScheme) private var colorScheme
-    @State private var selectedTab: VerificationTab = .encryption
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var expandedSections: Set<VerificationSection> = []
 
     private var isDarkMode: Bool { colorScheme == .dark }
+    private var verificationAccent: Color { .verificationAccent(isDarkMode: isDarkMode) }
 
     private var sheetBackground: Color {
         isDarkMode ? Color.backgroundPrimary : Color(UIColor.systemBackground)
@@ -57,20 +51,15 @@ struct VerifierView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
+            ScrollView {
                 if let doc = chatViewModel.verificationDocument {
-                    statusBanner(for: doc)
-                    tabSelector(for: doc)
-
-                    tabHeader(for: doc)
-
-                    ScrollView {
-                        tabContent(for: doc, tab: selectedTab)
-                            .padding(.bottom, 32)
+                    VStack(spacing: 16) {
+                        statusBanner(for: doc)
+                        drawerList(for: doc)
                     }
+                    .padding(.bottom, 32)
                 } else {
                     loadingState
-                    Spacer()
                 }
             }
             .padding(.horizontal, 20)
@@ -111,14 +100,24 @@ struct VerifierView: View {
                     .fill(isDarkMode ? Color(.systemGray6).opacity(0.5) : Color(.systemGray6))
             )
 
-            HStack(spacing: 0) {
-                ForEach(VerificationTab.allCases) { tab in
-                    tabCard(tab: tab, status: .pending, isSelected: false)
-                    if tab != .code {
-                        Spacer(minLength: 12)
+            VStack(spacing: 0) {
+                ForEach(VerificationSection.allCases) { section in
+                    drawerHeader(
+                        section: section,
+                        status: .pending,
+                        isExpanded: false,
+                        isEnabled: false,
+                        action: {}
+                    )
+
+                    if section != .code {
+                        Divider()
                     }
                 }
             }
+            .background(drawerBackground)
+            .clipShape(RoundedRectangle(cornerRadius: Constants.UI.VerificationCenter.drawerCornerRadius))
+            .overlay(drawerBorder)
         }
     }
 
@@ -129,7 +128,7 @@ struct VerifierView: View {
             if doc.securityVerified {
                 Text("Your data is encrypted end-to-end to a server running inside a secure hardware enclave.")
                     .font(.system(size: 15))
-                    .foregroundColor(Color.tinfoilAccentLight)
+                    .foregroundColor(verificationAccent)
 
                 HStack(spacing: 6) {
                     let isSEV = doc.enclaveMeasurement.measurement.type.lowercased().contains("sev")
@@ -186,68 +185,119 @@ struct VerifierView: View {
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(doc.securityVerified
-                      ? Color.tinfoilAccentLight.opacity(isDarkMode ? 0.1 : 0.08)
+                      ? verificationAccent.opacity(isDarkMode ? 0.1 : 0.08)
                       : (isDarkMode ? Color(.systemGray6).opacity(0.5) : Color(.systemGray6)))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(doc.securityVerified
-                        ? Color.tinfoilAccentLight.opacity(0.3)
+                        ? verificationAccent.opacity(0.3)
                         : Color.clear,
                         lineWidth: 1)
         )
     }
 
-    // MARK: - Tab Selector
+    // MARK: - Verification Drawers
 
-    private func tabSelector(for doc: VerificationDocument) -> some View {
-        HStack(spacing: 0) {
-            ForEach(VerificationTab.allCases) { tab in
-                let status = tabStatus(tab, doc: doc)
-                tabCard(tab: tab, status: status, isSelected: selectedTab == tab)
-                    .onTapGesture { selectedTab = tab }
-                    .accessibilityAddTraits(.isButton)
-                if tab != .code {
-                    Spacer(minLength: 12)
+    private func drawerList(for doc: VerificationDocument) -> some View {
+        VStack(spacing: 0) {
+            ForEach(VerificationSection.allCases) { section in
+                let isExpanded = expandedSections.contains(section)
+
+                drawerHeader(
+                    section: section,
+                    status: sectionStatus(section, doc: doc),
+                    isExpanded: isExpanded,
+                    action: { toggle(section) }
+                )
+
+                if isExpanded {
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: Constants.UI.VerificationCenter.drawerContentSpacing) {
+                        sectionHeader(for: section)
+                        sectionContent(for: doc, section: section)
+                    }
+                    .padding(.horizontal, Constants.UI.VerificationCenter.drawerContentHorizontalPadding)
+                    .padding(.top, Constants.UI.VerificationCenter.drawerContentSpacing)
+                    .padding(.bottom, Constants.UI.VerificationCenter.drawerContentBottomPadding)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                if section != .code {
+                    Divider()
                 }
             }
         }
+        .background(drawerBackground)
+        .clipShape(RoundedRectangle(cornerRadius: Constants.UI.VerificationCenter.drawerCornerRadius))
+        .overlay(drawerBorder)
     }
 
-    private func tabCard(tab: VerificationTab, status: VerifierStatus, isSelected: Bool) -> some View {
-        VStack(spacing: 6) {
-            Text(tab.prefix)
-                .font(.system(size: 11))
-                .foregroundColor(isSelected ? Color.tinfoilAccentLight : .secondary)
-            Text(tab.label)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(isSelected ? Color.tinfoilAccentLight : .primary)
-            Image(systemName: tab.iconName)
-                .font(.system(size: 14))
-                .foregroundColor(isSelected ? Color.tinfoilAccentLight : .secondary)
+    private var drawerBackground: some ShapeStyle {
+        isDarkMode
+            ? Color(.systemGray6).opacity(Constants.UI.VerificationCenter.drawerDarkBackgroundOpacity)
+            : Color(UIColor.systemBackground)
+    }
+
+    private var drawerBorder: some View {
+        RoundedRectangle(cornerRadius: Constants.UI.VerificationCenter.drawerCornerRadius)
+            .stroke(
+                Color.primary.opacity(
+                    isDarkMode
+                        ? Constants.UI.VerificationCenter.drawerDarkBorderOpacity
+                        : Constants.UI.VerificationCenter.drawerLightBorderOpacity
+                ),
+                lineWidth: Constants.UI.VerificationCenter.drawerBorderWidth
+            )
+    }
+
+    private func drawerHeader(
+        section: VerificationSection,
+        status: VerifierStatus,
+        isExpanded: Bool,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: Constants.UI.VerificationCenter.drawerHeaderSpacing) {
+                Image(systemName: section.iconName)
+                    .font(.system(size: Constants.UI.VerificationCenter.drawerIconSize, weight: .medium))
+                    .foregroundColor(verificationAccent)
+                    .frame(width: Constants.UI.VerificationCenter.drawerIconWidth)
+
+                Text(section.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.primary)
+
+                Spacer()
+
+                statusBadge(status)
+
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: Constants.UI.VerificationCenter.drawerChevronSize, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .frame(width: Constants.UI.VerificationCenter.drawerChevronWidth)
+            }
+            .padding(.horizontal, Constants.UI.VerificationCenter.drawerHeaderHorizontalPadding)
+            .frame(minHeight: Constants.UI.VerificationCenter.drawerHeaderMinimumHeight)
+            .contentShape(Rectangle())
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 80)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(isDarkMode ? Color(.systemGray6).opacity(0.5) : Color(.systemGray6))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(
-                    isSelected
-                        ? Color.tinfoilAccentLight
-                        : Color.primary.opacity(isDarkMode ? 0.18 : 0.12),
-                    lineWidth: isSelected ? 1.5 : 1
-                )
-        )
-        .overlay(alignment: .topTrailing) {
-            statusBadge(status)
-                .offset(x: 6, y: -6)
-        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(tab.label), \(statusAccessibilityText(status))")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityLabel("\(section.title), \(statusAccessibilityText(status))")
+        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+    }
+
+    private func toggle(_ section: VerificationSection) {
+        withAnimation(reduceMotion ? nil : .easeInOut) {
+            if expandedSections.contains(section) {
+                expandedSections.remove(section)
+            } else {
+                expandedSections.insert(section)
+            }
+        }
     }
 
     private func statusAccessibilityText(_ status: VerifierStatus) -> String {
@@ -265,7 +315,7 @@ struct VerifierView: View {
         case .success:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 18))
-                .foregroundColor(Color.tinfoilAccentLight)
+                .foregroundColor(verificationAccent)
                 .background(Circle().fill(isDarkMode ? Color.backgroundPrimary : .white).padding(2))
         case .error:
             Image(systemName: "xmark.circle.fill")
@@ -287,8 +337,8 @@ struct VerifierView: View {
         }
     }
 
-    private func tabStatus(_ tab: VerificationTab, doc: VerificationDocument) -> VerifierStatus {
-        switch tab {
+    private func sectionStatus(_ section: VerificationSection, doc: VerificationDocument) -> VerifierStatus {
+        switch section {
         case .encryption:
             if let verifyHPKE = doc.steps.verifyHPKEKey {
                 return verifyHPKE.status.uiStatus
@@ -301,38 +351,46 @@ struct VerifierView: View {
         }
     }
 
-    // MARK: - Tab Header (fixed)
-
     @ViewBuilder
-    private func tabHeader(for doc: VerificationDocument) -> some View {
-        switch selectedTab {
+    private func sectionHeader(for section: VerificationSection) -> some View {
+        switch section {
         case .encryption:
-            EncryptionTabHeader()
+            EncryptionSectionHeader()
         case .code:
-            CodeTabHeader()
+            CodeSectionHeader()
         case .runtime:
-            RuntimeTabHeader()
+            RuntimeSectionHeader()
         }
     }
 
-    // MARK: - Tab Content
-
     @ViewBuilder
-    private func tabContent(for doc: VerificationDocument, tab: VerificationTab) -> some View {
-        switch tab {
+    private func sectionContent(for doc: VerificationDocument, section: VerificationSection) -> some View {
+        switch section {
         case .encryption:
-            EncryptionTabCards(document: doc, isDarkMode: isDarkMode)
+            EncryptionSectionCards(
+                document: doc,
+                status: sectionStatus(section, doc: doc),
+                isDarkMode: isDarkMode
+            )
         case .code:
-            CodeTabCards(document: doc, isDarkMode: isDarkMode)
+            CodeSectionCards(
+                document: doc,
+                status: sectionStatus(section, doc: doc),
+                isDarkMode: isDarkMode
+            )
         case .runtime:
-            RuntimeTabCards(document: doc, isDarkMode: isDarkMode)
+            RuntimeSectionCards(
+                document: doc,
+                status: sectionStatus(section, doc: doc),
+                isDarkMode: isDarkMode
+            )
         }
     }
 }
 
-// MARK: - Tab Headers (fixed)
+// MARK: - Section Headers
 
-private struct EncryptionTabHeader: View {
+private struct EncryptionSectionHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Data is encrypted")
@@ -345,7 +403,7 @@ private struct EncryptionTabHeader: View {
     }
 }
 
-private struct CodeTabHeader: View {
+private struct CodeSectionHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Code is auditable")
@@ -358,7 +416,7 @@ private struct CodeTabHeader: View {
     }
 }
 
-private struct RuntimeTabHeader: View {
+private struct RuntimeSectionHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Runtime is isolated")
@@ -371,10 +429,11 @@ private struct RuntimeTabHeader: View {
     }
 }
 
-// MARK: - Tab Cards (scrollable)
+// MARK: - Section Cards
 
-private struct EncryptionTabCards: View {
+private struct EncryptionSectionCards: View {
     let document: VerificationDocument
+    let status: VerifierStatus
     let isDarkMode: Bool
 
     var body: some View {
@@ -383,8 +442,8 @@ private struct EncryptionTabCards: View {
                 icon: "key.fill",
                 label: "Your unique encryption key",
                 value: document.hpkePublicKey,
-                badgeText: "Attested",
-                badgeSuccess: true,
+                successBadgeText: "Attested",
+                status: status,
                 isDarkMode: isDarkMode
             )
 
@@ -392,7 +451,7 @@ private struct EncryptionTabCards: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Encryption Protocol")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Color.tinfoilAccentLight)
+                        .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
                     Text("EHBP (Encrypted HTTP Body Protocol) encrypts HTTP message bodies end-to-end using HPKE, ensuring only the intended recipient can decrypt the payload.")
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
@@ -405,7 +464,7 @@ private struct EncryptionTabCards: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Full HPKE Public Key")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Color.tinfoilAccentLight)
+                        .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
                     Text(document.hpkePublicKey)
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.primary)
@@ -417,8 +476,9 @@ private struct EncryptionTabCards: View {
     }
 }
 
-private struct CodeTabCards: View {
+private struct CodeSectionCards: View {
     let document: VerificationDocument
+    let status: VerifierStatus
     let isDarkMode: Bool
 
     var body: some View {
@@ -427,8 +487,8 @@ private struct CodeTabCards: View {
                 icon: "touchid",
                 label: "Source code fingerprint",
                 value: document.codeFingerprint,
-                badgeText: "Verified",
-                badgeSuccess: true,
+                successBadgeText: "Verified",
+                status: status,
                 isDarkMode: isDarkMode
             )
 
@@ -436,7 +496,7 @@ private struct CodeTabCards: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Full Code Fingerprint")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Color.tinfoilAccentLight)
+                        .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
                     Text(document.codeFingerprint)
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.primary)
@@ -451,7 +511,7 @@ private struct CodeTabCards: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Configuration Repository")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(Color.tinfoilAccentLight)
+                                .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
                             Text("The configuration repository specifies exactly what code is running inside the secure enclave, including dependencies and build instructions.")
                                 .font(.system(size: 13))
                                 .foregroundColor(.secondary)
@@ -476,7 +536,7 @@ private struct CodeTabCards: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Sigstore Transparency Log")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(Color.tinfoilAccentLight)
+                                .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
                             Text("Verifies that the source code published on GitHub was correctly built through GitHub Actions and that the resulting binary is available on the Sigstore transparency log.")
                                 .font(.system(size: 13))
                                 .foregroundColor(.secondary)
@@ -500,8 +560,9 @@ private struct CodeTabCards: View {
     }
 }
 
-private struct RuntimeTabCards: View {
+private struct RuntimeSectionCards: View {
     let document: VerificationDocument
+    let status: VerifierStatus
     let isDarkMode: Bool
 
     private var isSEV: Bool {
@@ -518,8 +579,8 @@ private struct RuntimeTabCards: View {
                 icon: "touchid",
                 label: "Enclave code fingerprint",
                 value: document.enclaveFingerprint,
-                badgeText: "Attested",
-                badgeSuccess: true,
+                successBadgeText: "Attested",
+                status: status,
                 isDarkMode: isDarkMode
             )
 
@@ -527,7 +588,7 @@ private struct RuntimeTabCards: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Hardware Attestation")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Color.tinfoilAccentLight)
+                        .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
                     Text("The verifier receives a signed measurement from NVIDIA\(isSEV ? ", AMD" : "")\(isTDX ? ", Intel" : "") certifying the enclave environment and the digest of the binary actively running inside it.")
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
@@ -549,7 +610,7 @@ private struct RuntimeTabCards: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("TLS Public Key Fingerprint")
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(Color.tinfoilAccentLight)
+                            .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
                         Text(tlsFingerprint)
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundColor(.primary)
@@ -563,7 +624,7 @@ private struct RuntimeTabCards: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Hardware Measurements")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Color.tinfoilAccentLight)
+                        .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
 
                     MeasurementField(
                         label: "Type",
@@ -588,8 +649,8 @@ private struct FingerprintCard: View {
     let icon: String
     let label: String
     let value: String
-    let badgeText: String
-    let badgeSuccess: Bool
+    let successBadgeText: String
+    let status: VerifierStatus
     let isDarkMode: Bool
 
     var body: some View {
@@ -604,13 +665,7 @@ private struct FingerprintCard: View {
 
                 Spacer()
 
-                HStack(spacing: 4) {
-                    Text(badgeText)
-                        .font(.system(size: 13, weight: .medium))
-                    Image(systemName: badgeSuccess ? "checkmark" : "xmark")
-                        .font(.system(size: 11, weight: .bold))
-                }
-                .foregroundColor(badgeSuccess ? Color.tinfoilAccentLight : .red)
+                fingerprintStatus
             }
 
             Text(value.isEmpty ? "Not available" : value)
@@ -624,6 +679,44 @@ private struct FingerprintCard: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(isDarkMode ? Color(.systemGray5).opacity(0.5) : Color(.systemGray6))
         )
+    }
+
+    @ViewBuilder
+    private var fingerprintStatus: some View {
+        switch status {
+        case .success:
+            HStack(spacing: 4) {
+                Text(successBadgeText)
+                    .font(.system(size: 13, weight: .medium))
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
+        case .error:
+            HStack(spacing: 4) {
+                Text("Failed")
+                    .font(.system(size: 13, weight: .medium))
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .foregroundColor(.red)
+        case .loading:
+            HStack(spacing: 4) {
+                Text("Verifying")
+                    .font(.system(size: 13, weight: .medium))
+                ProgressView()
+                    .scaleEffect(0.6)
+            }
+            .foregroundColor(.secondary)
+        case .pending:
+            HStack(spacing: 4) {
+                Text("Pending")
+                    .font(.system(size: 13, weight: .medium))
+                Image(systemName: "clock")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .foregroundColor(.secondary)
+        }
     }
 }
 
@@ -645,6 +738,7 @@ private struct InfoCard<Content: View>: View {
 private struct ExternalLink: View {
     let text: String
     let url: String
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         if let linkURL = URL(string: url) {
@@ -655,9 +749,15 @@ private struct ExternalLink: View {
                     Image(systemName: "arrow.up.right")
                         .font(.system(size: 10, weight: .semibold))
                 }
-                .foregroundColor(Color.tinfoilAccentLight)
+                .foregroundColor(Color.verificationAccent(isDarkMode: colorScheme == .dark))
             }
         }
+    }
+}
+
+private extension Color {
+    static func verificationAccent(isDarkMode: Bool) -> Color {
+        isDarkMode ? .tinfoilAccentLight : .tinfoilAccentDark
     }
 }
 
@@ -678,5 +778,3 @@ private struct MeasurementField: View {
         }
     }
 }
-
-
