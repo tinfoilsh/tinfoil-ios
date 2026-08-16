@@ -4519,7 +4519,9 @@ class ChatViewModel: ObservableObject {
                     // Sign-out clears account-bound token providers, so restore them
                     // before passkey recovery or any other enclave request.
                     try await self.cloudSync.initialize()
-                    guard self.currentUserId == userId, self.hasChatAccess else {
+                    guard self.currentUserId == userId,
+                          self.hasChatAccess,
+                          self.isProjectAccountActive else {
                         if self.currentUserId == userId {
                             self.isSignInInProgress = false
                         }
@@ -4530,6 +4532,9 @@ class ChatViewModel: ObservableObject {
                     // not the cloud encryption key, so they're available regardless
                     // of cloud sync setup state.
                     let allLocal = await loadAllLocalChats(userId: userId)
+                    guard self.currentUserId == userId,
+                          self.isSignInInProgress,
+                          self.isProjectAccountActive else { return }
                     await MainActor.run {
                         self.localChats = allLocal
                         normalizeLocalChatsArray()
@@ -4549,6 +4554,9 @@ class ChatViewModel: ObservableObject {
                     // If no cloud key exists, try passkey recovery before falling back
                     if !EncryptionService.shared.hasEncryptionKey() {
                         let passkeyResult = await self.passkeyManager.attemptPasskeyKeyRecovery()
+                        guard self.currentUserId == userId,
+                              self.isSignInInProgress,
+                              self.isProjectAccountActive else { return }
                         switch passkeyResult {
                         case .success, .newUserSetupDone:
                             break
