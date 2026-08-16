@@ -4516,10 +4516,20 @@ class ChatViewModel: ObservableObject {
             // IMPORTANT: Do NOT auto-generate a key here; allow UI to prompt the user
             Task {
                 do {
+                    // Sign-out clears account-bound token providers, so restore them
+                    // before passkey recovery or any other enclave request.
+                    try await self.cloudSync.initialize()
+                    guard self.currentUserId == userId, self.hasChatAccess else {
+                        if self.currentUserId == userId {
+                            self.isSignInInProgress = false
+                        }
+                        return
+                    }
+
                     // Always load local chats first — they use the device key,
                     // not the cloud encryption key, so they're available regardless
                     // of cloud sync setup state.
-                    let allLocal = await loadAllLocalChats(userId: self.currentUserId)
+                    let allLocal = await loadAllLocalChats(userId: userId)
                     await MainActor.run {
                         self.localChats = allLocal
                         normalizeLocalChatsArray()
