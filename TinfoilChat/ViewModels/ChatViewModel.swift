@@ -1732,6 +1732,7 @@ class ChatViewModel: ObservableObject {
                 modelType: model,
                 userId: currentUserId,
                 isLocalOnly: true,
+                promptPresetId: currentChat?.promptPresetId,
                 webSearchEnabled: SettingsManager.shared.webSearchAvailable
             )
             temp.isTemporary = true
