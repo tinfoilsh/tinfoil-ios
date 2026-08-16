@@ -424,6 +424,7 @@ class ChatViewModel: ObservableObject {
     private var recoverySessionCleanupTasks: [String: Task<Void, Never>] = [:]
     private var thinkingSummaryServices: [String: ThinkingSummaryService] = [:]
     private var autoSyncTimer: Timer?
+    private var autoSyncTask: Task<Void, Never>?
     private var recoveryScanTimer: Timer?
     private var recoveryScanTask: Task<Void, Never>?
     private var selectedChatImageTask: Task<Void, Never>?
@@ -933,6 +934,7 @@ class ChatViewModel: ObservableObject {
         // Stop sync timers
         autoSyncTimer?.invalidate()
         autoSyncTimer = nil
+        autoSyncTask?.cancel()
         recoveryScanTimer?.invalidate()
         recoveryScanTimer = nil
         recoveryScanTask?.cancel()
@@ -985,16 +987,42 @@ class ChatViewModel: ObservableObject {
                           ChatRecoveryNotificationKey.storage
                       ] as? String,
                       let storage = ChatRecoveryStorage(rawValue: storageValue),
-                      !self.streamingTracker.isStreaming(chatId),
-                      let recovered = try? await storage.fileStorage.loadChat(
-                          chatId: chatId,
-                          userId: userId
-                      )
+                      !self.streamingTracker.isStreaming(chatId)
                 else {
                     return
                 }
-                guard self.currentUserId == userId,
-                      !self.streamingTracker.isStreaming(chatId)
+                let accountToken = self.currentAccountOperationToken(userId: userId)
+                let wasSelected = self.selectedChatId == chatId
+                let selectionGeneration = self.chatSelectionFence.generation
+                let wasMutating = self.chatMutationGate.activeChatIds.contains(chatId)
+                guard let recovered = try? await storage.fileStorage.loadChat(
+                           chatId: chatId,
+                           userId: userId
+                       )
+                else {
+                    return
+                }
+                let identityExists: Bool
+                switch storage {
+                case .cloud:
+                    identityExists = self.cloudSidebarSummaries.contains { $0.id == chatId }
+                        || self.chats.contains { $0.id == chatId }
+                case .local:
+                    identityExists = self.localSidebarSummaries.contains { $0.id == chatId }
+                        || self.localChats.contains { $0.id == chatId }
+                }
+                guard RecoveryUpdateAdmission.accepts(
+                    accountIsCurrent: self.isCurrentAccountOperation(accountToken, userId: userId),
+                    isAccountTeardownInProgress: self.isAccountTeardownInProgress,
+                    wasSelected: wasSelected,
+                    isStillSelected: self.selectedChatId == chatId
+                        && self.chatSelectionFence.generation == selectionGeneration,
+                    wasMutating: wasMutating,
+                    isMutating: self.chatMutationGate.activeChatIds.contains(chatId),
+                    identityExists: identityExists
+                        && !DeletedChatsTracker.shared.isDeleted(chatId),
+                    isStreaming: self.streamingTracker.isStreaming(chatId)
+                )
                 else {
                     return
                 }
@@ -1057,67 +1085,72 @@ class ChatViewModel: ObservableObject {
         // Create timer that fires at regular intervals
         autoSyncTimer = Timer.scheduledTimer(withTimeInterval: Constants.Sync.chatSyncIntervalSeconds, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self = self else { return }
-                
-                // Gate auto-sync if no encryption key is set
-                if !EncryptionService.shared.hasEncryptionKey() {
-                    return
-                }
+                guard let self, self.acceptsChatSaves else { return }
+                self.autoSyncTask?.cancel()
+                self.autoSyncTask = Task { @MainActor in
 
-                // Only sync if authenticated
-                guard self.authManager?.isAuthenticated == true else {
-                    return
-                }
-                
-                // Skip auto-sync if actively sending a message or streaming
-                if !self.streamState.activeChatIds.isEmpty {
-                    return
-                }
-                
-                // Skip if current chat has active stream
-                if let currentChat = self.currentChat, 
-                   (currentChat.hasActiveStream || self.streamingTracker.isStreaming(currentChat.id)) {
-                    return
-                }
-
-                guard let syncContext = await self.retryPendingAnonymousChatReencryptionForCurrentAccount()
-                else {
-                    return
-                }
-                
-                
-                // Perform sync in background
-                // Use smart sync for periodic sync (checks if sync is needed first)
-                let syncResult = await self.cloudSync.smartSync()
-                guard self.isCurrentSignIn(syncContext.token, userId: syncContext.userId) else { return }
-
-                // Update last sync date after successful sync
-                self.lastSyncDate = Date()
-
-                // If chats were downloaded or deleted remotely, reload the chat list
-                if syncResult.downloaded > 0 || syncResult.deleted > 0 {
-                    // Use intelligent update that preserves pagination
-                    await self.updateChatsAfterSync()
-
-                    // Force UI update
-                    self.objectWillChange.send()
-
-                    // Restore current chat selection if it still exists
-                    if let currentChatId = self.currentChat?.id,
-                       let location = self.findChatLocation(currentChatId) {
-                        self.currentChat = self.chat(at: location)
+                    // Gate auto-sync if no encryption key is set
+                    if !EncryptionService.shared.hasEncryptionKey() {
+                        return
                     }
 
-                }
-                // Also backup current chat if it has changes
-                if let currentChat = await MainActor.run(body: { self.currentChat }),
-                   !currentChat.messages.isEmpty,
-                   !currentChat.hasActiveStream {
-                    await self.cloudSync.backupChat(currentChat.id)
-                }
+                    // Only sync if authenticated
+                    guard self.authManager?.isAuthenticated == true else {
+                        return
+                    }
 
-                // Sync profile settings periodically
-                await ProfileManager.shared.syncFromCloud()
+                    // Skip auto-sync if actively sending a message or streaming
+                    if !self.streamState.activeChatIds.isEmpty {
+                        return
+                    }
+
+                    // Skip if current chat has active stream
+                    if let currentChat = self.currentChat,
+                       (currentChat.hasActiveStream || self.streamingTracker.isStreaming(currentChat.id)) {
+                        return
+                    }
+
+                    guard let syncContext = await self.retryPendingAnonymousChatReencryptionForCurrentAccount()
+                    else {
+                        return
+                    }
+
+
+                    // Perform sync in background
+                    // Use smart sync for periodic sync (checks if sync is needed first)
+                    let syncResult = await self.cloudSync.smartSync()
+                    guard !Task.isCancelled,
+                          self.isCurrentSignIn(syncContext.token, userId: syncContext.userId)
+                    else { return }
+
+                    // Update last sync date after successful sync
+                    self.lastSyncDate = Date()
+
+                    // If chats were downloaded or deleted remotely, reload the chat list
+                    if syncResult.downloaded > 0 || syncResult.deleted > 0 {
+                        // Use intelligent update that preserves pagination
+                        await self.updateChatsAfterSync()
+
+                        // Force UI update
+                        self.objectWillChange.send()
+
+                        // Restore current chat selection if it still exists
+                        if let currentChatId = self.currentChat?.id,
+                           let location = self.findChatLocation(currentChatId) {
+                            self.currentChat = self.chat(at: location)
+                        }
+
+                    }
+                    // Also backup current chat if it has changes
+                    if let currentChat = await MainActor.run(body: { self.currentChat }),
+                       !currentChat.messages.isEmpty,
+                       !currentChat.hasActiveStream {
+                        await self.cloudSync.backupChat(currentChat.id)
+                    }
+
+                    // Sync profile settings periodically
+                    await ProfileManager.shared.syncFromCloud()
+                }
             }
         }
         // Ensure the timer fires during UI interactions (scrolling, modal sheets)
@@ -1748,53 +1781,79 @@ class ChatViewModel: ObservableObject {
     /// conversation keeps its documents and instructions, and root
     /// chats leave any active project first.
     func openSearchResult(_ chat: Chat) {
-        if let projectId = chat.projectId {
-            beginSelection(id: chat.id)
-            let selectionGeneration = chatSelectionFence.generation
-            pendingSearchResultChatId = chat.id
-            chatSelectionTask = Task {
-                if activeProject?.id != projectId {
+        guard let userId = currentUserId else { return }
+        beginSelection(id: chat.id)
+        let selectionGeneration = chatSelectionFence.generation
+        pendingSearchResultChatId = chat.id
+        let loadingService = chatLoadingService
+        chatSelectionTask = Task { [weak self, loadingService] in
+            let persisted: Chat
+            do {
+                persisted = try await RemoteSearchPersistence.resolve(
+                    chat,
+                    userId: userId,
+                    loadingService: loadingService,
+                    validateOperation: { [weak self] in
+                        guard let self,
+                              !Task.isCancelled,
+                              self.currentUserId == userId,
+                              self.chatSelectionFence.accepts(
+                                  id: chat.id,
+                                  generation: selectionGeneration
+                              ) else {
+                            throw CancellationError()
+                        }
+                    }
+                )
+            } catch {
+                guard let self,
+                      self.currentUserId == userId,
+                      self.chatSelectionFence.accepts(
+                          id: chat.id,
+                          generation: selectionGeneration
+                      ) else { return }
+                self.failSelection(id: chat.id, generation: selectionGeneration)
+                return
+            }
+            guard let self,
+                  !Task.isCancelled,
+                  self.currentUserId == userId,
+                  self.pendingSearchResultChatId == chat.id,
+                  self.chatSelectionFence.accepts(
+                      id: chat.id,
+                      generation: selectionGeneration
+                  ) else { return }
+
+            if let projectId = persisted.projectId {
+                if self.activeProject?.id != projectId {
                     // loadActiveProject (not enterProject) so no blank chat is
                     // selected along the way, which would clear the pending
                     // token below before it could be checked.
-                    let loaded = await loadActiveProject(projectId: projectId)
+                    let loaded = await self.loadActiveProject(projectId: projectId)
                     guard !Task.isCancelled, loaded else {
-                        failSelection(id: chat.id, generation: selectionGeneration)
+                        self.failSelection(id: chat.id, generation: selectionGeneration)
                         return
                     }
                 }
-                // A newer selection during the load supersedes this one
-                // and remains in charge.
-                guard !Task.isCancelled,
-                      pendingSearchResultChatId == chat.id else {
-                    failSelection(id: chat.id, generation: selectionGeneration)
+                guard self.currentUserId == userId,
+                      self.pendingSearchResultChatId == chat.id,
+                      self.chatSelectionFence.accepts(
+                          id: chat.id,
+                          generation: selectionGeneration
+                      ),
+                      self.activeProject?.id == projectId else {
+                    self.failSelection(id: chat.id, generation: selectionGeneration)
                     return
                 }
-                // The load can also fail (e.g. a deleted project), leaving
-                // some other context in place; never open the chat under
-                // the wrong project or none at all.
-                guard !Task.isCancelled, activeProject?.id == projectId else {
-                    failSelection(id: chat.id, generation: selectionGeneration)
-                    return
-                }
-                chatSelectionTask = nil
-                selectChat(chat)
-                guard !Task.isCancelled else {
-                    failSelection(id: chat.id, generation: selectionGeneration)
-                    return
-                }
-                isViewingProjectChat = true
+                self.isViewingProjectChat = true
+            } else if self.activeProject != nil {
+                self.activeProject = nil
+                self.projectDocuments = []
+                self.projectError = nil
+                self.isViewingProjectChat = false
             }
-        } else {
-            beginSelection(id: chat.id)
-            pendingSearchResultChatId = nil
-            if activeProject != nil {
-                activeProject = nil
-                projectDocuments = []
-                projectError = nil
-                isViewingProjectChat = false
-            }
-            selectChat(chat)
+            self.chatSelectionTask = nil
+            self.installSelectedChat(persisted, generation: selectionGeneration)
         }
     }
 
@@ -2586,10 +2645,52 @@ class ChatViewModel: ObservableObject {
 
     private func reconcileSummaries(
         _ indexed: [ChatListSummary],
-        storage: ChatStorageTab
+        storage: ChatStorageTab,
+        authoritativeIds: Set<String>? = nil
     ) {
         switch storage {
         case .cloud:
+            if let authoritativeIds {
+                let result = AuthoritativeCloudIndexReconciliation.reconcile(
+                    indexedSummaries: indexed,
+                    authoritativeIds: authoritativeIds,
+                    materializedChats: chats,
+                    selectedId: selectedChatId,
+                    streamingIds: streamState.activeChatIds,
+                    recoveryIds: activeRecoveryChatIds(),
+                    operationIds: materializationOperationIds
+                        .union(chatMutationGate.activeChatIds)
+                )
+                chats = result.materializedChats
+                cloudSidebarSummaries = result.summaries
+                if result.removedSelectedChat {
+                    if let selectedChatId {
+                        discardMessageQueue(chatId: selectedChatId)
+                    }
+                    chatSelectionFence.invalidate()
+                    chatSelectionTask?.cancel()
+                    chatSelectionTask = nil
+                    selectedChatImageTask?.cancel()
+                    selectedChatImageTask = nil
+                    selectedChatId = nil
+                    hydratingChatId = nil
+                    currentChat = nil
+                    let replacementSummaries = activeProject == nil
+                        ? cloudSidebarSummaries
+                        : activeProjectChats
+                    if let next = replacementSummaries.first(where: { !$0.isBlankChat })
+                        ?? replacementSummaries.first(where: \.isBlankChat) {
+                        _ = selectChat(id: next.id, isLocalOnly: false)
+                    } else {
+                        createNewChat(
+                            isLocalOnly: false,
+                            projectId: activeProject?.id,
+                            focusInput: false
+                        )
+                    }
+                }
+                return
+            }
             let transient = chats.map(ChatListSummary.init(from:))
             cloudSidebarSummaries = ChatSummaryState.reconcilingIndex(indexed, withTransient: transient)
         case .local:
@@ -5789,7 +5890,14 @@ class ChatViewModel: ObservableObject {
     /// the user can retry without partial-deletion side effects.
     @MainActor
     func deleteAllChats() async throws {
-        let localIds = chats.map(\.id) + localChats.map(\.id)
+        guard let userId = currentUserId else { return }
+        let allChatIds = Set(
+            cloudSidebarSummaries.map(\.id)
+                + localSidebarSummaries.map(\.id)
+                + chats.map(\.id)
+                + localChats.map(\.id)
+                + [currentChat?.id].compactMap { $0 }
+        )
 
         // When the cloud backup is in play (key present, or sync enabled but
         // the key is missing) this must succeed or throw: skipping it would
@@ -5798,23 +5906,76 @@ class ChatViewModel: ObservableObject {
         // wipe.
         let isAuthenticated = authManager?.isAuthenticated == true
         let hasKey = EncryptionService.shared.hasEncryptionKey()
-        if isAuthenticated && (hasKey || SettingsManager.shared.isCloudSyncEnabled) {
-            try await cloudSync.deleteAllFromCloud()
-        }
+        let shouldDeleteCloud = isAuthenticated
+            && (hasKey || SettingsManager.shared.isCloudSyncEnabled)
+        try await DeleteAllChatsCoordinator.quiesceAndDeleteCloud(
+            closeSaveAdmission: {
+                self.acceptsChatSaves = false
+            },
+            stopProducers: {
+                self.autoSyncTimer?.invalidate()
+                self.autoSyncTimer = nil
+                let autoSyncTask = self.autoSyncTask
+                self.autoSyncTask = nil
+                autoSyncTask?.cancel()
+                self.recoveryScanTimer?.invalidate()
+                self.recoveryScanTimer = nil
+                let streamTasks = self.cancelAllGenerations()
+                await self.accountOperationTracker.closeAndWait()
+                await autoSyncTask?.value
+                await self.suspendRecoveryScans()
+                await self.drainStreamTasks(streamTasks)
+                let cleanupTasks = Array(self.recoverySessionCleanupTasks.values)
+                self.recoverySessionCleanupTasks.values.forEach { $0.cancel() }
+                self.recoverySessionCleanupTasks.removeAll()
+                for task in cleanupTasks {
+                    await task.value
+                }
+            },
+            drainSavesAndBackups: {
+                await self.drainPendingSaves()
+            },
+            quiesceUploads: {
+                guard shouldDeleteCloud else { return }
+                try await self.cloudSync.quiesceUploadsForBulkDelete(userId: userId)
+            },
+            deleteCloud: {
+                guard shouldDeleteCloud else { return }
+                try await self.cloudSync.deleteAllFromCloud(userId: userId)
+            },
+            recoverFromFailure: {
+                await self.cloudSync.resumeUploadsAfterBulkDelete(userId: userId)
+                guard self.currentUserId == userId else { return }
+                self.acceptsChatSaves = true
+                self.accountOperationTracker.reopen()
+                self.recoveryScansSuspended = false
+                self.setupAutoSyncTimer()
+            }
+        )
 
         clearHydratedFavorites()
         ProfileManager.shared.clearPinnedChats()
 
         // Tombstone so an in-flight sync pass can't resurrect wiped chats
-        for id in localIds {
+        for id in allChatIds {
             DeletedChatsTracker.shared.markAsDeleted(id)
         }
 
-        await clearAllChatsFromDevice()
+        await clearAllChatsFromDevice(
+            resumeRecoveryScans: false,
+            reopenAccountOperations: false
+        )
+        try await EncryptedFileStorage.local.deleteAllChats(userId: userId)
+        try await EncryptedFileStorage.cloud.deleteAllChats(userId: userId)
+        await cloudSync.resumeUploadsAfterBulkDelete(userId: userId)
+        acceptsChatSaves = true
+        accountOperationTracker.reopen()
         // The device wipe clears the in-memory key reference; restore it so
         // newly created chats keep syncing.
         reloadEncryptionKey()
         createNewChat()
+        recoveryScansSuspended = false
+        setupAutoSyncTimer()
     }
 
     /// Removes all cloud (non-local) chats from the device
@@ -6005,7 +6166,11 @@ class ChatViewModel: ObservableObject {
         )
         guard currentUserId == userId else { throw CancellationError() }
         loadedCloudRootSummaryIds.formUnion(result.firstPageIds)
-        reconcileSummaries(result.summaries, storage: .cloud)
+        reconcileSummaries(
+            result.summaries,
+            storage: .cloud,
+            authoritativeIds: Set(index.map(\.id))
+        )
         return result.totalRootEntries
     }
 
@@ -6107,20 +6272,20 @@ class ChatViewModel: ObservableObject {
             loadingService: chatLoadingService
         )
         guard !Task.isCancelled, currentUserId == userId else { return }
-        for chat in persisted.saved {
+        for summary in persisted.summaries {
             cloudSidebarSummaries = ChatSummaryState.upserting(
-                ChatListSummary(from: chat),
+                summary,
                 into: cloudSidebarSummaries
             )
-            if chat.projectId == nil {
-                loadedCloudRootSummaryIds.insert(chat.id)
+            if summary.projectId == nil {
+                loadedCloudRootSummaryIds.insert(summary.id)
             }
         }
 
         let allRowsPersisted = !result.failed
             && conversionFailures == 0
             && persisted.failedIds.isEmpty
-            && persisted.saved.count == result.chats.count
+            && persisted.summaries.count == result.chats.count
         let pageState = ChatPaginationCoordinator.state(
             original: originalPageState,
             next: ChatPaginationPageState(token: result.nextToken, hasMore: result.hasMore),

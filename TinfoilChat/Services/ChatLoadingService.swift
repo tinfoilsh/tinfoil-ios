@@ -47,6 +47,12 @@ protocol ChatLoadingService {
     func loadIndex(userId: String, storage: ChatStorageTab) async throws -> [ChatIndexEntry]
     func loadChat(id: String, userId: String, storage: ChatStorageTab) async throws -> Chat
     func saveChat(_ chat: Chat, userId: String, storage: ChatStorageTab) async throws
+    func applyRemoteChatIfFreshResult(
+        _ chat: Chat,
+        userId: String,
+        expectedLocalUpdatedAt: Date?,
+        allowLocallyModified: Bool
+    ) async throws -> RevisionApplyResult
     func deleteChat(id: String, userId: String, storage: ChatStorageTab) async throws
 }
 
@@ -66,6 +72,20 @@ struct FileChatLoadingService: ChatLoadingService {
         try await fileStorage(for: storage).saveChat(chat, userId: userId)
     }
 
+    func applyRemoteChatIfFreshResult(
+        _ chat: Chat,
+        userId: String,
+        expectedLocalUpdatedAt: Date?,
+        allowLocallyModified: Bool
+    ) async throws -> RevisionApplyResult {
+        try await EncryptedFileStorage.cloud.applyRemoteChatIfFreshResult(
+            chat,
+            userId: userId,
+            expectedLocalUpdatedAt: expectedLocalUpdatedAt,
+            allowLocallyModified: allowLocallyModified
+        )
+    }
+
     func deleteChat(id: String, userId: String, storage: ChatStorageTab) async throws {
         try await fileStorage(for: storage).deleteChat(chatId: id, userId: userId)
     }
@@ -79,26 +99,137 @@ struct FileChatLoadingService: ChatLoadingService {
 }
 
 enum ChatPaginationPersistence {
+    struct Result {
+        let summaries: [ChatListSummary]
+        let failedIds: [String]
+    }
+
     @MainActor
     static func saveCloudChats(
         _ chats: [Chat],
         userId: String,
         loadingService: any ChatLoadingService
-    ) async -> (saved: [Chat], failedIds: [String]) {
-        var saved: [Chat] = []
+    ) async -> Result {
+        let localEntries: [ChatIndexEntry]
+        do {
+            localEntries = try await loadingService.loadIndex(userId: userId, storage: .cloud)
+        } catch {
+            return Result(summaries: [], failedIds: chats.map(\.id))
+        }
+        let localById = Dictionary(
+            localEntries.map { ($0.id, $0) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+        var summaries: [ChatListSummary] = []
         var failedIds: [String] = []
         for chat in chats {
             guard !Task.isCancelled else { break }
             do {
-                try await loadingService.saveChat(chat, userId: userId, storage: .cloud)
+                let result = try await loadingService.applyRemoteChatIfFreshResult(
+                    chat,
+                    userId: userId,
+                    expectedLocalUpdatedAt: localById[chat.id]?.updatedAt,
+                    allowLocallyModified: false
+                )
                 guard !Task.isCancelled else { break }
-                saved.append(chat)
+                if result == .applied {
+                    summaries.append(ChatListSummary(from: chat))
+                } else if let existing = localById[chat.id] {
+                    summaries.append(ChatListSummary(from: existing))
+                } else {
+                    failedIds.append(chat.id)
+                }
             } catch {
                 guard !Task.isCancelled else { break }
                 failedIds.append(chat.id)
             }
         }
-        return (saved, failedIds)
+        return Result(summaries: summaries, failedIds: failedIds)
+    }
+}
+
+enum RemoteSearchPersistence {
+    @MainActor
+    static func resolve(
+        _ remoteChat: Chat,
+        userId: String,
+        loadingService: any ChatLoadingService,
+        validateOperation: @MainActor () throws -> Void = {}
+    ) async throws -> Chat {
+        try validateOperation()
+        let index = try await loadingService.loadIndex(userId: userId, storage: .cloud)
+        try validateOperation()
+        if index.contains(where: { $0.id == remoteChat.id }) {
+            let local = try await loadingService.loadChat(
+                id: remoteChat.id,
+                userId: userId,
+                storage: .cloud
+            )
+            try validateOperation()
+            return local
+        }
+
+        let result = try await loadingService.applyRemoteChatIfFreshResult(
+            remoteChat,
+            userId: userId,
+            expectedLocalUpdatedAt: nil,
+            allowLocallyModified: false
+        )
+        try validateOperation()
+        if result == .applied {
+            return remoteChat
+        }
+        let local = try await loadingService.loadChat(
+            id: remoteChat.id,
+            userId: userId,
+            storage: .cloud
+        )
+        try validateOperation()
+        return local
+    }
+}
+
+enum DeleteAllChatsCoordinator {
+    @MainActor
+    static func quiesceAndDeleteCloud(
+        closeSaveAdmission: () -> Void,
+        stopProducers: () async -> Void,
+        drainSavesAndBackups: () async -> Void,
+        quiesceUploads: () async throws -> Void,
+        deleteCloud: () async throws -> Void,
+        recoverFromFailure: () async -> Void
+    ) async throws {
+        closeSaveAdmission()
+        await stopProducers()
+        await drainSavesAndBackups()
+        do {
+            try await quiesceUploads()
+            try await deleteCloud()
+        } catch {
+            await recoverFromFailure()
+            throw error
+        }
+    }
+}
+
+struct RecoveryUpdateAdmission {
+    static func accepts(
+        accountIsCurrent: Bool,
+        isAccountTeardownInProgress: Bool,
+        wasSelected: Bool,
+        isStillSelected: Bool,
+        wasMutating: Bool,
+        isMutating: Bool,
+        identityExists: Bool,
+        isStreaming: Bool
+    ) -> Bool {
+        accountIsCurrent
+            && !isAccountTeardownInProgress
+            && (!wasSelected || isStillSelected)
+            && !wasMutating
+            && !isMutating
+            && identityExists
+            && !isStreaming
     }
 }
 
@@ -301,5 +432,44 @@ enum MaterializedChatWorkingSet {
                 || recoveryIds.contains(chat.id)
                 || operationIds.contains(chat.id)
         }
+    }
+}
+
+enum AuthoritativeCloudIndexReconciliation {
+    struct Result {
+        let summaries: [ChatListSummary]
+        let materializedChats: [Chat]
+        let removedSelectedChat: Bool
+    }
+
+    static func reconcile(
+        indexedSummaries: [ChatListSummary],
+        authoritativeIds: Set<String>,
+        materializedChats: [Chat],
+        selectedId: String?,
+        streamingIds: Set<String>,
+        recoveryIds: Set<String>,
+        operationIds: Set<String>
+    ) -> Result {
+        let retained = materializedChats.filter { chat in
+            authoritativeIds.contains(chat.id)
+                || chat.isBlankChat
+                || chat.isTemporary
+                || chat.locallyModified
+                || chat.hasActiveStream
+                || streamingIds.contains(chat.id)
+                || recoveryIds.contains(chat.id)
+                || operationIds.contains(chat.id)
+        }
+        let transient = retained.map(ChatListSummary.init(from:))
+        let selectedWasRemoved = selectedId.map { selectedId in
+            !authoritativeIds.contains(selectedId)
+                && !retained.contains { $0.id == selectedId }
+        } == true
+        return Result(
+            summaries: ChatSummaryState.reconcilingIndex(indexedSummaries, withTransient: transient),
+            materializedChats: retained,
+            removedSelectedChat: selectedWasRemoved
+        )
     }
 }

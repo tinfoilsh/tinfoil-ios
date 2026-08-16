@@ -6,6 +6,19 @@ private enum LazyHydrationTestError: Error, Sendable {
     case corrupt
 }
 
+@MainActor
+private final class DeleteAllEventRecorder {
+    private var events: [String] = []
+
+    func append(_ event: String) {
+        events.append(event)
+    }
+
+    func recorded() -> [String] {
+        events
+    }
+}
+
 private actor RecordingChatLoadingService: ChatLoadingService {
     private var indexes: [ChatStorageTab: [ChatIndexEntry]] = [:]
     private var storedChats: [ChatStorageTab: [String: Chat]] = [:]
@@ -15,6 +28,7 @@ private actor RecordingChatLoadingService: ChatLoadingService {
     private var shouldThrowCorrupt = false
     private var failingSaveIds: Set<String> = []
     private var failingDeleteIds: [ChatStorageTab: Set<String>] = [:]
+    private var applyResults: [String: RevisionApplyResult] = [:]
 
     func setIndex(_ entries: [ChatIndexEntry], storage: ChatStorageTab) {
         indexes[storage] = entries
@@ -36,6 +50,10 @@ private actor RecordingChatLoadingService: ChatLoadingService {
         failingDeleteIds[storage] = ids
     }
 
+    func setApplyResult(_ result: RevisionApplyResult, chatId: String) {
+        applyResults[chatId] = result
+    }
+
     func loadIndex(userId: String, storage: ChatStorageTab) async throws -> [ChatIndexEntry] {
         indexes[storage] ?? []
     }
@@ -53,6 +71,31 @@ private actor RecordingChatLoadingService: ChatLoadingService {
         saveCalls.append((chat.id, storage))
         if failingSaveIds.contains(chat.id) { throw LazyHydrationTestError.corrupt }
         storedChats[storage, default: [:]][chat.id] = chat
+    }
+
+    func applyRemoteChatIfFreshResult(
+        _ chat: Chat,
+        userId: String,
+        expectedLocalUpdatedAt: Date?,
+        allowLocallyModified: Bool
+    ) async throws -> RevisionApplyResult {
+        saveCalls.append((chat.id, .cloud))
+        if failingSaveIds.contains(chat.id) { throw LazyHydrationTestError.corrupt }
+        let existing = indexes[.cloud]?.first { $0.id == chat.id }
+        let result = applyResults[chat.id] ?? RevisionApplyPolicy.contentResult(
+            existing: existing,
+            expectedUpdatedAt: expectedLocalUpdatedAt,
+            allowLocallyModified: allowLocallyModified
+        )
+        if result == .applied {
+            storedChats[.cloud, default: [:]][chat.id] = chat
+            if let index = indexes[.cloud]?.firstIndex(where: { $0.id == chat.id }) {
+                indexes[.cloud]?[index] = ChatIndexEntry(from: chat)
+            } else {
+                indexes[.cloud, default: []].append(ChatIndexEntry(from: chat))
+            }
+        }
+        return result
     }
 
     func deleteChat(id: String, userId: String, storage: ChatStorageTab) async throws {
@@ -198,10 +241,32 @@ struct LazyChatHydrationTests {
             loadingService: service
         )
 
-        #expect(result.saved.map(\.id) == [saved.id])
+        #expect(result.summaries.map(\.id) == [saved.id])
         #expect(result.failedIds == [failed.id])
         #expect(await service.savedChat(id: saved.id, storage: .cloud) != nil)
         #expect(await service.savedChat(id: failed.id, storage: .cloud) == nil)
+    }
+
+    @Test
+    func paginationConflictKeepsLocallyModifiedContentAndSummary() async {
+        let service = RecordingChatLoadingService()
+        var local = makeChat(id: "conflict", updatedAt: Date(timeIntervalSince1970: 1))
+        local.title = "Local edit"
+        local.locallyModified = true
+        var remote = makeChat(id: local.id, updatedAt: Date(timeIntervalSince1970: 2))
+        remote.title = "Remote edit"
+        await service.setIndex([ChatIndexEntry(from: local)], storage: .cloud)
+        await service.setChat(local, storage: .cloud)
+
+        let result = await ChatPaginationPersistence.saveCloudChats(
+            [remote],
+            userId: "user",
+            loadingService: service
+        )
+
+        #expect(result.failedIds.isEmpty)
+        #expect(result.summaries.first?.title == local.title)
+        #expect(await service.savedChat(id: local.id, storage: .cloud)?.title == local.title)
     }
 
     @Test
@@ -430,6 +495,113 @@ struct LazyChatHydrationTests {
         )
 
         #expect(Set(retained.map(\.id)) == [current.id, stream.id, recovery.id, dirty.id])
+    }
+
+    @Test
+    @MainActor
+    func deleteAllQuiescesBeforeCloudDeletion() async throws {
+        let recorder = DeleteAllEventRecorder()
+
+        try await DeleteAllChatsCoordinator.quiesceAndDeleteCloud(
+            closeSaveAdmission: { recorder.append("close") },
+            stopProducers: { recorder.append("stop") },
+            drainSavesAndBackups: { recorder.append("drain") },
+            quiesceUploads: { recorder.append("quiesce") },
+            deleteCloud: { recorder.append("delete") },
+            recoverFromFailure: { recorder.append("recover") }
+        )
+
+        #expect(recorder.recorded() == ["close", "stop", "drain", "quiesce", "delete"])
+    }
+
+    @Test
+    func recoveryUpdateRejectsStaleOrUnsafeIdentity() {
+        #expect(!RecoveryUpdateAdmission.accepts(
+            accountIsCurrent: false,
+            isAccountTeardownInProgress: false,
+            wasSelected: true,
+            isStillSelected: true,
+            wasMutating: false,
+            isMutating: false,
+            identityExists: true,
+            isStreaming: false
+        ))
+        #expect(!RecoveryUpdateAdmission.accepts(
+            accountIsCurrent: true,
+            isAccountTeardownInProgress: false,
+            wasSelected: true,
+            isStillSelected: true,
+            wasMutating: false,
+            isMutating: true,
+            identityExists: true,
+            isStreaming: false
+        ))
+        #expect(!RecoveryUpdateAdmission.accepts(
+            accountIsCurrent: true,
+            isAccountTeardownInProgress: false,
+            wasSelected: true,
+            isStillSelected: true,
+            wasMutating: false,
+            isMutating: false,
+            identityExists: false,
+            isStreaming: false
+        ))
+    }
+
+    @Test
+    func authoritativeIndexRemovesCleanSelectionButRetainsDirtyAndStreamingChats() {
+        let clean = makeChat(id: "clean", updatedAt: Date())
+        var dirty = makeChat(id: "dirty", updatedAt: Date())
+        dirty.locallyModified = true
+        var streaming = makeChat(id: "streaming", updatedAt: Date())
+        streaming.hasActiveStream = true
+
+        let result = AuthoritativeCloudIndexReconciliation.reconcile(
+            indexedSummaries: [],
+            authoritativeIds: [],
+            materializedChats: [clean, dirty, streaming],
+            selectedId: clean.id,
+            streamingIds: [streaming.id],
+            recoveryIds: [],
+            operationIds: []
+        )
+
+        #expect(result.removedSelectedChat)
+        #expect(Set(result.materializedChats.map(\.id)) == [dirty.id, streaming.id])
+        #expect(Set(result.summaries.map(\.id)) == [dirty.id, streaming.id])
+    }
+
+    @Test
+    @MainActor
+    func remoteSearchPersistsNewChatAndUsesLocalContentOnFreshnessConflict() async throws {
+        let service = RecordingChatLoadingService()
+        let remote = makeChat(id: "remote-search", updatedAt: Date())
+
+        let persisted = try await RemoteSearchPersistence.resolve(
+            remote,
+            userId: "user",
+            loadingService: service
+        )
+        let reopened = try await service.loadChat(
+            id: remote.id,
+            userId: "user",
+            storage: .cloud
+        )
+        #expect(persisted.id == remote.id)
+        #expect(reopened.id == remote.id)
+
+        let conflictService = RecordingChatLoadingService()
+        var local = remote
+        local.title = "Local authority"
+        local.locallyModified = true
+        await conflictService.setChat(local, storage: .cloud)
+        await conflictService.setApplyResult(.locallyModified, chatId: remote.id)
+        let resolved = try await RemoteSearchPersistence.resolve(
+            remote,
+            userId: "user",
+            loadingService: conflictService
+        )
+        #expect(resolved.title == local.title)
     }
 
     @Test

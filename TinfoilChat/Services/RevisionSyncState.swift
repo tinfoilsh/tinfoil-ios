@@ -291,7 +291,7 @@ enum ProjectMetadataUploadPolicy {
     }
 }
 
-enum RevisionApplyResult: Equatable {
+enum RevisionApplyResult: Equatable, Sendable {
     case applied
     case locallyModified
     case refused
