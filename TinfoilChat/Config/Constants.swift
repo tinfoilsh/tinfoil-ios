@@ -521,7 +521,7 @@ enum Constants {
     }
 
     enum Attachments {
-        static let maxImageDimension: CGFloat = 768
+        static let maxImageDimension: CGFloat = 1536
         static let imageCompressionQuality: CGFloat = 0.85
         static let maxFileSizeBytes = SharedImportConfiguration.maximumDocumentSizeBytes
         static let maxImageSizeBytes = SharedImportConfiguration.maximumImageSizeBytes
