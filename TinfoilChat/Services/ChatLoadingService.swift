@@ -69,6 +69,10 @@ struct FileChatLoadingService: ChatLoadingService {
     }
 
     func saveChat(_ chat: Chat, userId: String, storage: ChatStorageTab) async throws {
+        if storage == .cloud,
+           await MainActor.run(body: { DeletedChatsTracker.shared.isDeleted(chat.id) }) {
+            throw EncryptedFileStorage.SaveError.remotelyDeleted
+        }
         try await fileStorage(for: storage).saveChat(chat, userId: userId)
     }
 
@@ -209,6 +213,18 @@ enum DeleteAllChatsCoordinator {
             await recoverFromFailure()
             throw error
         }
+    }
+}
+
+struct DeleteAllOperationalRestoration: Equatable {
+    let reloadEncryptionKey: Bool
+    let ensureUsableChat: Bool
+
+    static func resolve(inMemoryWasCleared: Bool, hasCurrentChat: Bool) -> Self {
+        Self(
+            reloadEncryptionKey: inMemoryWasCleared,
+            ensureUsableChat: inMemoryWasCleared || !hasCurrentChat
+        )
     }
 }
 
@@ -440,36 +456,49 @@ enum AuthoritativeCloudIndexReconciliation {
         let summaries: [ChatListSummary]
         let materializedChats: [Chat]
         let removedSelectedChat: Bool
+        let removedCurrentChat: Bool
     }
 
     static func reconcile(
         indexedSummaries: [ChatListSummary],
         authoritativeIds: Set<String>,
+        tombstonedIds: Set<String> = [],
         materializedChats: [Chat],
         selectedId: String?,
+        currentId: String? = nil,
         streamingIds: Set<String>,
         recoveryIds: Set<String>,
         operationIds: Set<String>
     ) -> Result {
         let retained = materializedChats.filter { chat in
-            authoritativeIds.contains(chat.id)
+            !tombstonedIds.contains(chat.id)
+                && (authoritativeIds.contains(chat.id)
                 || chat.isBlankChat
                 || chat.isTemporary
                 || chat.locallyModified
                 || chat.hasActiveStream
                 || streamingIds.contains(chat.id)
                 || recoveryIds.contains(chat.id)
-                || operationIds.contains(chat.id)
+                || operationIds.contains(chat.id))
         }
         let transient = retained.map(ChatListSummary.init(from:))
-        let selectedWasRemoved = selectedId.map { selectedId in
-            !authoritativeIds.contains(selectedId)
-                && !retained.contains { $0.id == selectedId }
-        } == true
+        let indexed = indexedSummaries.filter { !tombstonedIds.contains($0.id) }
+        func shouldRemoveIdentity(_ id: String?) -> Bool {
+            guard let id, !retained.contains(where: { $0.id == id }) else { return false }
+            let materialized = materializedChats.first { $0.id == id }
+            let summary = indexedSummaries.first { $0.id == id }
+            let isProtectedTransient = materialized?.isBlankChat == true
+                || materialized?.isTemporary == true
+                || summary?.isBlankChat == true
+                || summary?.isTemporary == true
+            guard !isProtectedTransient else { return false }
+            return tombstonedIds.contains(id) || !authoritativeIds.contains(id)
+        }
         return Result(
-            summaries: ChatSummaryState.reconcilingIndex(indexedSummaries, withTransient: transient),
+            summaries: ChatSummaryState.reconcilingIndex(indexed, withTransient: transient),
             materializedChats: retained,
-            removedSelectedChat: selectedWasRemoved
+            removedSelectedChat: shouldRemoveIdentity(selectedId),
+            removedCurrentChat: shouldRemoveIdentity(currentId)
         )
     }
 }

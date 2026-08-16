@@ -442,6 +442,7 @@ class ChatViewModel: ObservableObject {
     private var willResignActiveObserver: NSObjectProtocol?
     private var sharedSettingsObserver: NSObjectProtocol?
     private var chatRecoveryObserver: NSObjectProtocol?
+    private var cloudRemoteDeleteObserver: NSObjectProtocol?
     private var networkStatusCancellable: AnyCancellable?
     private var streamUpdateTimers: [String: Timer] = [:]
     private var pendingStreamUpdates: [String: Chat] = [:]
@@ -902,6 +903,7 @@ class ChatViewModel: ObservableObject {
         setupAppLifecycleObservers()
         setupSharedSettingsObserver()
         setupChatRecoveryObserver()
+        setupCloudRemoteDeleteObserver()
 
         // Setup network status observer for automatic retry on reconnection
         setupNetworkStatusObserver()
@@ -965,6 +967,41 @@ class ChatViewModel: ObservableObject {
         }
         if let observer = chatRecoveryObserver {
             NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = cloudRemoteDeleteObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    private func setupCloudRemoteDeleteObserver() {
+        cloudRemoteDeleteObserver = NotificationCenter.default.addObserver(
+            forName: .cloudChatRemoteDeleteCompleted,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in
+                guard let self,
+                      let chatId = notification.userInfo?[
+                          CloudRemoteDeleteNotificationKey.chatId
+                      ] as? String,
+                      let userId = notification.userInfo?[
+                          CloudRemoteDeleteNotificationKey.userId
+                      ] as? String,
+                      self.currentUserId == userId,
+                      DeletedChatsTracker.shared.isDeleted(chatId)
+                else {
+                    return
+                }
+                let authoritativeIds = Set(
+                    self.cloudSidebarSummaries.map(\.id) + self.chats.map(\.id)
+                        + [self.currentChat?.id, self.selectedChatId].compactMap { $0 }
+                )
+                self.reconcileSummaries(
+                    self.cloudSidebarSummaries,
+                    storage: .cloud,
+                    authoritativeIds: authoritativeIds
+                )
+            }
         }
     }
 
@@ -2211,6 +2248,9 @@ class ChatViewModel: ObservableObject {
         let fallbackSource = isLocalOnly ? chats : localChats
         if let chat = preferredSource.first(where: { $0.id == id })
             ?? fallbackSource.first(where: { $0.id == id }) {
+            guard chat.isLocalOnly || !DeletedChatsTracker.shared.isDeleted(id) else {
+                return false
+            }
             selectChat(chat)
             return true
         }
@@ -2222,6 +2262,9 @@ class ChatViewModel: ObservableObject {
         } else if fallbackSummaries.contains(where: { $0.id == id }) {
             storage = isLocalOnly ? .cloud : .local
         } else {
+            return false
+        }
+        guard storage == .local || !DeletedChatsTracker.shared.isDeleted(id) else {
             return false
         }
         guard let userId = currentUserId else {
@@ -2263,6 +2306,7 @@ class ChatViewModel: ObservableObject {
     }
 
     func selectChat(_ chat: Chat) {
+        guard chat.isLocalOnly || !DeletedChatsTracker.shared.isDeleted(chat.id) else { return }
         projectLoadGeneration += 1
         failedChatHydration = nil
         let generation = chatSelectionFence.begin(id: chat.id)
@@ -2309,6 +2353,7 @@ class ChatViewModel: ObservableObject {
 
     private func installSelectedChat(_ chat: Chat, generation: Int) {
         guard chatSelectionFence.accepts(id: chat.id, generation: generation),
+              chat.isLocalOnly || !DeletedChatsTracker.shared.isDeleted(chat.id),
               selectedChatId == chat.id else { return }
         selectedChatImageTask?.cancel()
         // Any explicit selection supersedes a search hit whose project
@@ -2651,11 +2696,20 @@ class ChatViewModel: ObservableObject {
         switch storage {
         case .cloud:
             if let authoritativeIds {
+                let candidateIds = Set(
+                    indexed.map(\.id) + chats.map(\.id)
+                        + [currentChat?.id, selectedChatId].compactMap { $0 }
+                )
+                let tombstonedIds = Set(candidateIds.filter {
+                    DeletedChatsTracker.shared.isDeleted($0)
+                })
                 let result = AuthoritativeCloudIndexReconciliation.reconcile(
                     indexedSummaries: indexed,
                     authoritativeIds: authoritativeIds,
+                    tombstonedIds: tombstonedIds,
                     materializedChats: chats,
                     selectedId: selectedChatId,
+                    currentId: currentChat?.id,
                     streamingIds: streamState.activeChatIds,
                     recoveryIds: activeRecoveryChatIds(),
                     operationIds: materializationOperationIds
@@ -2663,9 +2717,14 @@ class ChatViewModel: ObservableObject {
                 )
                 chats = result.materializedChats
                 cloudSidebarSummaries = result.summaries
-                if result.removedSelectedChat {
-                    if let selectedChatId {
-                        discardMessageQueue(chatId: selectedChatId)
+                if result.removedSelectedChat || result.removedCurrentChat {
+                    let removedIds = Set([
+                        result.removedSelectedChat ? selectedChatId : nil,
+                        result.removedCurrentChat ? currentChat?.id : nil
+                    ].compactMap { $0 })
+                    for chatId in removedIds {
+                        discardMessageQueue(chatId: chatId)
+                        _ = cancelGeneration(chatId: chatId, announce: false)
                     }
                     chatSelectionFence.invalidate()
                     chatSelectionTask?.cancel()
@@ -2752,6 +2811,8 @@ class ChatViewModel: ObservableObject {
     /// Replaces a chat in whichever array (localChats or chats) it belongs to.
     /// If the chat isn't in either array, inserts it into the appropriate one.
     private func replaceChat(_ updatedChat: Chat) {
+        guard updatedChat.isLocalOnly
+            || !DeletedChatsTracker.shared.isDeleted(updatedChat.id) else { return }
         if let favoriteIndex = favoriteChats.firstIndex(where: { $0.id == updatedChat.id }) {
             if ChatFavorites.isPinnable(updatedChat) {
                 favoriteChats[favoriteIndex] = updatedChat
@@ -5087,6 +5148,7 @@ class ChatViewModel: ObservableObject {
     /// Saves a single chat to per-chat file storage and triggers cloud backup
     private func saveChat(_ chat: Chat, shouldBackup: Bool = true) {
         guard acceptsChatSaves else { return }
+        guard chat.isLocalOnly || !DeletedChatsTracker.shared.isDeleted(chat.id) else { return }
         guard !chat.isTemporary else { return }
         guard hasChatAccess else { return }
         guard !chat.messages.isEmpty || chat.decryptionFailed else { return }
@@ -5120,6 +5182,7 @@ class ChatViewModel: ObservableObject {
     ) async {
         guard acceptsChatSaves else { return }
         guard isCurrentSignIn(token, userId: userId) else { return }
+        guard chat.isLocalOnly || !DeletedChatsTracker.shared.isDeleted(chat.id) else { return }
         guard !chat.isTemporary else { return }
         guard !chat.messages.isEmpty || chat.decryptionFailed else { return }
 
@@ -5154,7 +5217,13 @@ class ChatViewModel: ObservableObject {
         storage: ChatRecoveryStorage,
         turnId: String
     ) async throws {
+        if storage == .cloud, DeletedChatsTracker.shared.isDeleted(chat.id) {
+            throw ChatRecoverySyncError.chatMissing
+        }
         await drainPendingSaves()
+        if storage == .cloud, DeletedChatsTracker.shared.isDeleted(chat.id) {
+            throw ChatRecoverySyncError.chatMissing
+        }
         if try await storage.fileStorage.containsRecoverySnapshot(
             chatId: chat.id,
             userId: userId,
@@ -5944,36 +6013,67 @@ class ChatViewModel: ObservableObject {
                 try await self.cloudSync.deleteAllFromCloud(userId: userId)
             },
             recoverFromFailure: {
-                await self.cloudSync.resumeUploadsAfterBulkDelete(userId: userId)
-                guard self.currentUserId == userId else { return }
-                self.acceptsChatSaves = true
-                self.accountOperationTracker.reopen()
-                self.recoveryScansSuspended = false
-                self.setupAutoSyncTimer()
+                await self.restoreDeleteAllOperationalState(
+                    userId: userId,
+                    inMemoryWasCleared: false
+                )
             }
         )
 
         clearHydratedFavorites()
         ProfileManager.shared.clearPinnedChats()
 
-        // Tombstone so an in-flight sync pass can't resurrect wiped chats
-        for id in allChatIds {
-            DeletedChatsTracker.shared.markAsDeleted(id)
+        var inMemoryWasCleared = false
+        var cleanupError: Error?
+        do {
+            // Tombstone so an in-flight sync pass can't resurrect wiped chats
+            for id in allChatIds {
+                DeletedChatsTracker.shared.markAsDeleted(id)
+            }
+
+            await clearAllChatsFromDevice(
+                resumeRecoveryScans: false,
+                reopenAccountOperations: false
+            )
+            inMemoryWasCleared = true
+            try await EncryptedFileStorage.local.deleteAllChats(userId: userId)
+            try await EncryptedFileStorage.cloud.deleteAllChats(userId: userId)
+        } catch {
+            cleanupError = error
         }
 
-        await clearAllChatsFromDevice(
-            resumeRecoveryScans: false,
-            reopenAccountOperations: false
+        await restoreDeleteAllOperationalState(
+            userId: userId,
+            inMemoryWasCleared: inMemoryWasCleared
         )
-        try await EncryptedFileStorage.local.deleteAllChats(userId: userId)
-        try await EncryptedFileStorage.cloud.deleteAllChats(userId: userId)
+        if let cleanupError {
+            throw cleanupError
+        }
+    }
+
+    private func restoreDeleteAllOperationalState(
+        userId: String,
+        inMemoryWasCleared: Bool
+    ) async {
         await cloudSync.resumeUploadsAfterBulkDelete(userId: userId)
+        guard currentUserId == userId else { return }
+
+        let restoration = DeleteAllOperationalRestoration.resolve(
+            inMemoryWasCleared: inMemoryWasCleared,
+            hasCurrentChat: currentChat != nil
+        )
         acceptsChatSaves = true
         accountOperationTracker.reopen()
-        // The device wipe clears the in-memory key reference; restore it so
-        // newly created chats keep syncing.
-        reloadEncryptionKey()
-        createNewChat()
+        if restoration.reloadEncryptionKey {
+            reloadEncryptionKey()
+        }
+        if restoration.ensureUsableChat {
+            if currentChat == nil {
+                createNewChat()
+            } else {
+                ensureBlankChatAtTop()
+            }
+        }
         recoveryScansSuspended = false
         setupAutoSyncTimer()
     }

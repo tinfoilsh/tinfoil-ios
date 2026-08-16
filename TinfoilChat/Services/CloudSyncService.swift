@@ -9,6 +9,15 @@ import Foundation
 import Combine
 import ClerkKit
 
+extension Notification.Name {
+    static let cloudChatRemoteDeleteCompleted = Notification.Name("cloudChatRemoteDeleteCompleted")
+}
+
+enum CloudRemoteDeleteNotificationKey {
+    static let chatId = "chatId"
+    static let userId = "userId"
+}
+
 // MARK: - Helper Functions
 
 /// Create properly configured ISO8601DateFormatter that handles JavaScript's toISOString() format
@@ -1896,6 +1905,14 @@ class CloudSyncService: ObservableObject {
         )
         guard pending.generation == accountGeneration else { throw CancellationError() }
         deferredRemoteDeletes.removeValue(forKey: chatId)
+        NotificationCenter.default.post(
+            name: .cloudChatRemoteDeleteCompleted,
+            object: nil,
+            userInfo: [
+                CloudRemoteDeleteNotificationKey.chatId: chatId,
+                CloudRemoteDeleteNotificationKey.userId: pending.userId
+            ]
+        )
         return true
     }
 

@@ -572,6 +572,47 @@ struct LazyChatHydrationTests {
     }
 
     @Test
+    func tombstoneExcludesDirtyStreamingSelectionAndRequiresReplacement() {
+        var tombstoned = makeChat(id: "tombstoned", updatedAt: Date())
+        tombstoned.locallyModified = true
+        tombstoned.hasActiveStream = true
+
+        let result = AuthoritativeCloudIndexReconciliation.reconcile(
+            indexedSummaries: [ChatListSummary(from: tombstoned)],
+            authoritativeIds: [tombstoned.id],
+            tombstonedIds: [tombstoned.id],
+            materializedChats: [tombstoned],
+            selectedId: tombstoned.id,
+            currentId: tombstoned.id,
+            streamingIds: [tombstoned.id],
+            recoveryIds: [tombstoned.id],
+            operationIds: [tombstoned.id]
+        )
+
+        #expect(result.summaries.isEmpty)
+        #expect(result.materializedChats.isEmpty)
+        #expect(result.removedSelectedChat)
+        #expect(result.removedCurrentChat)
+    }
+
+    @Test
+    func deleteAllRestorationRecoversOperationalStateAfterClearedMemory() {
+        let afterCleanupFailure = DeleteAllOperationalRestoration.resolve(
+            inMemoryWasCleared: true,
+            hasCurrentChat: false
+        )
+        let afterCloudFailure = DeleteAllOperationalRestoration.resolve(
+            inMemoryWasCleared: false,
+            hasCurrentChat: true
+        )
+
+        #expect(afterCleanupFailure.reloadEncryptionKey)
+        #expect(afterCleanupFailure.ensureUsableChat)
+        #expect(!afterCloudFailure.reloadEncryptionKey)
+        #expect(!afterCloudFailure.ensureUsableChat)
+    }
+
+    @Test
     @MainActor
     func remoteSearchPersistsNewChatAndUsesLocalContentOnFreshnessConflict() async throws {
         let service = RecordingChatLoadingService()
