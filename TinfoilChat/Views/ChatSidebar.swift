@@ -502,6 +502,7 @@ struct ChatSidebar: View {
                             syncFailed: syncHealth.failedChats[chat.id] != nil,
                             isGenerating: viewModel.isChatStreaming(chat.id),
                             isPinned: true,
+                            showPinnedIndicator: false,
                             onSelect: { viewModel.openSearchResult(chat) },
                             onEdit: {
                                 if editingChatId == chat.id {
@@ -862,6 +863,7 @@ struct ChatListItem: View {
     var syncFailed: Bool = false
     var isGenerating: Bool = false
     var isPinned: Bool = false
+    var showPinnedIndicator: Bool = true
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -901,7 +903,7 @@ struct ChatListItem: View {
                                     .foregroundColor(.secondary)
                                     .accessibilityHidden(true)
                             }
-                            if isPinned {
+                            if isPinned && showPinnedIndicator {
                                 Image(systemName: "pin.fill")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
