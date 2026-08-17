@@ -9,6 +9,13 @@ import SwiftUI
 import ClerkKit
 import RevenueCatUI
 
+func shouldDismissGatedPaywall(
+    subscriptionRefreshSucceeded: Bool,
+    hasActiveSubscription: Bool
+) -> Bool {
+    subscriptionRefreshSucceeded && hasActiveSubscription
+}
+
 /// Wraps the RevenueCat paywall and blocks it until the current Clerk user
 /// is logged in to RevenueCat. Purchases made while the SDK is still
 /// anonymous produce webhooks without a user identifier that the backend
@@ -96,7 +103,11 @@ struct GatedPaywallView: View {
             return
         }
 
-        if authManager.hasActiveSubscription {
+        let refreshedSubscription = await authManager.fetchSubscriptionStatus()
+        if shouldDismissGatedPaywall(
+            subscriptionRefreshSucceeded: refreshedSubscription,
+            hasActiveSubscription: authManager.hasActiveSubscription
+        ) {
             dismiss()
             return
         }
