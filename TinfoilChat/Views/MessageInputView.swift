@@ -34,6 +34,10 @@ func shouldShowMessageStopAction(
         || (isStreaming && (!hasSubmittableContent || isMessageQueueFull))
 }
 
+func hasNonWhitespaceContent(_ text: String) -> Bool {
+    text.contains { !$0.isWhitespace }
+}
+
 /// Input area for typing messages, including attachments and send button
 struct MessageInputView: View {
     // MARK: - Constants
@@ -56,6 +60,7 @@ struct MessageInputView: View {
     @EnvironmentObject private var authManager: AuthManager
     @ObservedObject private var recoveryPhaseTracker = ChatRecoveryPhaseTracker.shared
     @State private var textHeight: CGFloat = Layout.defaultHeight
+    @State private var messageTextHasNonWhitespace = false
     /// Reflects whether the editor has grown beyond a single line, so callers
     /// can hide content that would otherwise be pushed off-screen.
     var isInputExpanded: Binding<Bool>? = nil
@@ -106,7 +111,7 @@ struct MessageInputView: View {
     /// offers a send that would be rejected.
     private var hasSubmittableContent: Bool {
         guard attachmentsAreReadyToSend(viewModel.pendingAttachments) else { return false }
-        return !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return messageTextHasNonWhitespace
             || !viewModel.pendingAttachments.isEmpty
     }
 
@@ -146,7 +151,7 @@ struct MessageInputView: View {
             return .voice
         }
         if showAudioButton,
-           messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !messageTextHasNonWhitespace,
            viewModel.pendingAttachments.isEmpty {
             return .voice
         }
@@ -234,6 +239,12 @@ struct MessageInputView: View {
     @ViewBuilder
     var body: some View {
         inputContent
+            .onAppear {
+                messageTextHasNonWhitespace = hasNonWhitespaceContent(messageText)
+            }
+            .onChange(of: messageText) { _, newValue in
+                messageTextHasNonWhitespace = hasNonWhitespaceContent(newValue)
+            }
             .onChange(of: textHeight) { _, newHeight in
                 guard let isInputExpanded else { return }
                 let expanded = newHeight > Layout.minimumHeight + 1
@@ -804,7 +815,7 @@ struct MessageInputView: View {
 
     private func stopRecordingAndInsertTranscription() async {
         if let transcription = await viewModel.stopAudioRecordingAndTranscribe() {
-            if messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !hasNonWhitespaceContent(messageText) {
                 messageText = transcription
             } else {
                 messageText += " " + transcription
@@ -1414,6 +1425,7 @@ struct CustomTextEditor: UIViewRepresentable {
         textView.accessibilityLabel = "Message"
 
         context.coordinator.textView = textView
+        context.coordinator.currentTextSnapshot = text
         handle?.coordinator = context.coordinator
 
         // Initialize with placeholder or actual text
@@ -1471,22 +1483,28 @@ struct CustomTextEditor: UIViewRepresentable {
         if text.isEmpty && !isCurrentlyEditing && uiView.textColor != .lightGray {
             uiView.text = placeholderText
             uiView.textColor = .lightGray
+            context.coordinator.currentTextSnapshot = ""
         } else if text.isEmpty && isCurrentlyEditing {
             if uiView.text.isEmpty && uiView.textColor == .lightGray {
                 uiView.text = ""
+                context.coordinator.currentTextSnapshot = ""
                 uiView.textColor = UIColor { traitCollection in
                     return traitCollection.userInterfaceStyle == .dark ? .white : .black
                 }
             } else if !uiView.text.isEmpty && uiView.textColor != .lightGray {
-                self.text = uiView.text
+                let snapshot = context.coordinator.immutableTextSnapshot(from: uiView)
+                context.coordinator.currentTextSnapshot = snapshot
+                self.text = snapshot
             }
         } else if !text.isEmpty && uiView.textColor == .lightGray {
             uiView.text = text
+            context.coordinator.currentTextSnapshot = text
             uiView.textColor = UIColor { traitCollection in
                 return traitCollection.userInterfaceStyle == .dark ? .white : .black
             }
-        } else if !text.isEmpty && uiView.text != text && uiView.textColor != .lightGray {
+        } else if !text.isEmpty && context.coordinator.currentTextSnapshot != text && uiView.textColor != .lightGray {
             uiView.text = text
+            context.coordinator.currentTextSnapshot = text
         }
 
         uiView.isEditable = true
@@ -1510,6 +1528,7 @@ struct CustomTextEditor: UIViewRepresentable {
         var isEditing = false
         var hasFocusedFromFlag = false
         weak var textView: UITextView?
+        var currentTextSnapshot = ""
         /// The draft text at the moment `clearDraft` ran. While streaming, the
         /// view model publishes on every token, so a render transaction whose
         /// state snapshot predates the send can reach `updateUIView` after the
@@ -1531,7 +1550,7 @@ struct CustomTextEditor: UIViewRepresentable {
         /// text gets resynced right back into it.
         func clearDraft() {
             guard let textView else { return }
-            clearedDraft = textView.text
+            clearedDraft = immutableTextSnapshot(from: textView)
             if isEditing {
                 textView.text = ""
                 textView.textColor = UIColor { traitCollection in
@@ -1542,6 +1561,7 @@ struct CustomTextEditor: UIViewRepresentable {
                 textView.textColor = .lightGray
             }
             parent.text = ""
+            currentTextSnapshot = ""
             parent.textHeight = MessageInputView.Layout.defaultHeight
             refreshAccessibility(textView)
         }
@@ -1552,7 +1572,7 @@ struct CustomTextEditor: UIViewRepresentable {
         /// draft, and drafts that trivially exceed the height cap skip
         /// measurement entirely.
         func measuredHeight(for textView: UITextView) -> CGFloat {
-            let text = textView.text ?? ""
+            let text = currentTextSnapshot
             let width = textView.frame.width
             let pointSize = textView.font?.pointSize ?? 0
 
@@ -1589,10 +1609,21 @@ struct CustomTextEditor: UIViewRepresentable {
         func refreshAccessibility(_ textView: UITextView) {
             textView.accessibilityLabel = "Message"
             let isShowingPlaceholder = textView.textColor == .lightGray
-            textView.accessibilityValue = isShowingPlaceholder ? "" : textView.text
+            if isShowingPlaceholder {
+                textView.accessibilityValue = ""
+            } else if UIAccessibility.isVoiceOverRunning {
+                textView.accessibilityValue = immutableTextSnapshot(from: textView)
+            } else {
+                textView.accessibilityValue = nil
+            }
         }
 
-        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        func immutableTextSnapshot(from textView: UITextView) -> String {
+            let copiedText = (textView.text as NSString).copy() as! NSString
+            return copiedText as String
+        }
+
+        func textView(_ textView: UITextView, shouldChangeTextIn _: NSRange, replacementText text: String) -> Bool {
             // Check if Enter key was pressed (without Shift)
             if text == "\n" {
                 // Check if this is running on Mac (iOS app on Mac)
@@ -1614,24 +1645,15 @@ struct CustomTextEditor: UIViewRepresentable {
                 }
             }
             
-            // Check if the text will be empty after this change
-            let currentText = textView.text as NSString
-            let newText = currentText.replacingCharacters(in: range, with: text)
-            
-            // If text is becoming empty but we're still editing, don't show placeholder
-            if newText.isEmpty && isEditing {
-                // Let the deletion happen, but don't show placeholder yet
-                // The placeholder will be shown in textViewDidEndEditing when focus is lost
-                return true
-            }
-            
             return true
         }
         
         func textViewDidChange(_ textView: UITextView) {
             // Only update if the text is not the placeholder
             if textView.textColor != .lightGray {
-                parent.text = textView.text
+                let snapshot = immutableTextSnapshot(from: textView)
+                currentTextSnapshot = snapshot
+                parent.text = snapshot
                 
                 // Calculate and update the height
                 let newHeight = measuredHeight(for: textView)
@@ -1648,6 +1670,7 @@ struct CustomTextEditor: UIViewRepresentable {
             // Clear placeholder when editing begins
             if textView.textColor == .lightGray {
                 textView.text = ""
+                currentTextSnapshot = ""
                 textView.textColor = UIColor { traitCollection in
                     return traitCollection.userInterfaceStyle == .dark ? .white : .black
                 }
