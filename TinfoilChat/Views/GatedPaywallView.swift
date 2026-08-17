@@ -95,6 +95,11 @@ struct GatedPaywallView: View {
             showAuthentication = true
             return
         }
+
+        if authManager.hasActiveSubscription {
+            dismiss()
+            return
+        }
         gateState = await RevenueCatManager.shared.ensureLoggedIn(clerkUserId) ? .ready : .failed
     }
 }
