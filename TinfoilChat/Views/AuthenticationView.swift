@@ -10,8 +10,10 @@ import ClerkKit
 
 // Forward to the modular implementation
 struct AuthenticationView: View {
+    var onAuthenticated: (() -> Void)? = nil
+
     var body: some View {
-        ModularAuthenticationView()
+        ModularAuthenticationView(onAuthenticated: onAuthenticated)
     }
 }
 

@@ -20,10 +20,11 @@ struct GatedPaywallView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var gateState: GateState = .preparing
     @State private var showAuthentication = false
+    @State private var authenticationCompleted = false
 
     private enum GateState: Equatable {
         case preparing
-        case signInRequired
+        case awaitingAuthentication
         case ready
         case failed
     }
@@ -38,20 +39,9 @@ struct GatedPaywallView: View {
             case .ready:
                 PaywallView(displayCloseButton: true)
                     .onPurchaseCompleted { _ in onPurchaseCompleted() }
-            case .signInRequired:
-                VStack(spacing: 16) {
-                    Text("Sign in to view subscription options and continue chatting.")
-                        .font(.subheadline)
-                        .multilineTextAlignment(.center)
-                    Button("Sign In") { showAuthentication = true }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Color.accentPrimary)
-                        .foregroundStyle(.black)
-                    Button("Close") { dismiss() }
-                        .buttonStyle(.plain)
-                        .foregroundColor(.secondary)
-                }
-                .padding(32)
+            case .awaitingAuthentication:
+                ProgressView()
+                    .controlSize(.large)
             case .failed:
                 VStack(spacing: 16) {
                     Text("Unable to load subscription options. Please try again.")
@@ -69,22 +59,40 @@ struct GatedPaywallView: View {
             }
         }
         .sheet(isPresented: $showAuthentication, onDismiss: {
-            gateState = .preparing
+            if authenticationCompleted {
+                authenticationCompleted = false
+                gateState = .preparing
+            } else {
+                dismiss()
+            }
         }) {
-            AuthenticationView()
+            AuthenticationView {
+                authenticationCompleted = true
+                showAuthentication = false
+            }
                 .environment(Clerk.shared)
                 .environmentObject(authManager)
-        }
-        .onChange(of: authManager.localUserId) { _, userId in
-            if userId != nil && gateState == .signInRequired {
-                gateState = .preparing
-            }
         }
     }
 
     private func prepare() async {
-        guard let clerkUserId = authManager.localUserId else {
-            gateState = .signInRequired
+        if !Clerk.shared.isLoaded {
+            do {
+                try await Clerk.shared.refreshClient()
+            } catch {
+                gateState = .failed
+                return
+            }
+        }
+
+        guard Clerk.shared.isLoaded else {
+            gateState = .failed
+            return
+        }
+
+        guard let clerkUserId = Clerk.shared.user?.id else {
+            gateState = .awaitingAuthentication
+            showAuthentication = true
             return
         }
         gateState = await RevenueCatManager.shared.ensureLoggedIn(clerkUserId) ? .ready : .failed

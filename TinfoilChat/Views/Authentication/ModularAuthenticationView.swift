@@ -10,6 +10,8 @@ import ClerkKit
 import UIKit
 
 struct ModularAuthenticationView: View {
+  var onAuthenticated: (() -> Void)? = nil
+
   @Environment(Clerk.self) private var clerk
   @Environment(\.dismiss) private var dismiss
   @EnvironmentObject private var authManager: AuthManager
@@ -20,6 +22,8 @@ struct ModularAuthenticationView: View {
   @State private var isSignUp = false
   @State private var isInVerificationMode = false
   @State private var isKeyboardVisible = false
+  @State private var hasCompletedAuthentication = false
+  @State private var notificationObservers: [NSObjectProtocol] = []
   
   var body: some View {
     NavigationView {
@@ -125,7 +129,7 @@ struct ModularAuthenticationView: View {
       authenticationForms
     }
     .onChange(of: clerk.user != nil) { _, isSignedIn in
-      if isSignedIn {
+      if isSignedIn && onAuthenticated == nil {
         dismiss()
       }
     }
@@ -138,7 +142,7 @@ struct ModularAuthenticationView: View {
           errorMessage: $errorMessage,
           isLoading: $isLoading,
           isSignUp: $isSignUp,
-          onDismiss: { DispatchQueue.main.async { self.dismiss() } }
+          onDismiss: { DispatchQueue.main.async { completeAuthentication() } }
         )
         .onPreferenceChange(VerificationModePreferenceKey.self) { inVerificationMode in
           isInVerificationMode = inVerificationMode
@@ -156,7 +160,7 @@ struct ModularAuthenticationView: View {
         SignInView(
           errorMessage: $errorMessage,
           isLoading: $isLoading,
-          onDismiss: { DispatchQueue.main.async { self.dismiss() } }
+          onDismiss: { DispatchQueue.main.async { completeAuthentication() } }
         )
         .onPreferenceChange(VerificationModePreferenceKey.self) { inVerificationMode in
           isInVerificationMode = inVerificationMode
@@ -286,7 +290,7 @@ struct ModularAuthenticationView: View {
       await authManager.initializeAuthState()
       // Post notification to close sidebar and go to main chat view
       NotificationCenter.default.post(name: NSNotification.Name("AuthenticationCompleted"), object: nil)
-      dismiss()
+      completeAuthentication()
     } else {
       errorMessage = "Sign-in could not be completed. Please try again."
     }
@@ -296,7 +300,7 @@ struct ModularAuthenticationView: View {
   
   private func setupNotifications() {
     // Listen for auth completion notification to close this view
-    NotificationCenter.default.addObserver(
+    notificationObservers.append(NotificationCenter.default.addObserver(
       forName: NSNotification.Name("DismissAuthView"),
       object: nil,
       queue: .main
@@ -304,10 +308,10 @@ struct ModularAuthenticationView: View {
       DispatchQueue.main.async {
         self.dismiss()
       }
-    }
+    })
     
     // Listen for auth state check notification
-    NotificationCenter.default.addObserver(
+    notificationObservers.append(NotificationCenter.default.addObserver(
       forName: NSNotification.Name("CheckAuthState"),
       object: nil,
       queue: .main
@@ -317,13 +321,13 @@ struct ModularAuthenticationView: View {
           await authManager.initializeAuthState()
           // Post notification to close sidebar and go to main chat view
           NotificationCenter.default.post(name: NSNotification.Name("AuthenticationCompleted"), object: nil)
-          self.dismiss()
+          completeAuthentication()
         }
       }
-    }
+    })
     
     // Keyboard appearance notifications
-    NotificationCenter.default.addObserver(
+    notificationObservers.append(NotificationCenter.default.addObserver(
       forName: UIResponder.keyboardWillShowNotification,
       object: nil,
       queue: .main
@@ -331,9 +335,9 @@ struct ModularAuthenticationView: View {
       withAnimation(.easeOut(duration: 0.25)) {
         isKeyboardVisible = true
       }
-    }
+    })
     
-    NotificationCenter.default.addObserver(
+    notificationObservers.append(NotificationCenter.default.addObserver(
       forName: UIResponder.keyboardWillHideNotification,
       object: nil,
       queue: .main
@@ -341,35 +345,13 @@ struct ModularAuthenticationView: View {
       withAnimation(.easeIn(duration: 0.25)) {
         isKeyboardVisible = false
       }
-    }
+    })
   }
   
   private func cleanupNotifications() {
     // Remove notification observers
-    NotificationCenter.default.removeObserver(
-      self,
-      name: NSNotification.Name("DismissAuthView"),
-      object: nil
-    )
-    
-    NotificationCenter.default.removeObserver(
-      self,
-      name: NSNotification.Name("CheckAuthState"),
-      object: nil
-    )
-    
-    // Remove keyboard observers
-    NotificationCenter.default.removeObserver(
-      self,
-      name: UIResponder.keyboardWillShowNotification,
-      object: nil
-    )
-    
-    NotificationCenter.default.removeObserver(
-      self,
-      name: UIResponder.keyboardWillHideNotification,
-      object: nil
-    )
+    notificationObservers.forEach { NotificationCenter.default.removeObserver($0) }
+    notificationObservers.removeAll()
     
     // Ensure auth state is refreshed when this view disappears
     if clerk.user != nil && !authManager.isAuthenticated {
@@ -385,6 +367,17 @@ struct ModularAuthenticationView: View {
   // Function to dismiss keyboard
   private func dismissKeyboard() {
     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+  }
+
+  private func completeAuthentication() {
+    guard !hasCompletedAuthentication else { return }
+    hasCompletedAuthentication = true
+
+    if let onAuthenticated {
+      onAuthenticated()
+    } else {
+      dismiss()
+    }
   }
 }
 
