@@ -78,6 +78,162 @@ struct StreamingResponseProcessorTests {
     }
 }
 
+@Suite("Lazy streaming snapshot publication")
+struct LazyStreamingSnapshotPublisherTests {
+    @Test("fast stream cancels trailing and builds leading and final snapshots")
+    func fastStreamCancelsTrailingSnapshot() {
+        var latestValue = 0
+        var materializationCount = 0
+        let publisher = LazySnapshotPublisher(
+            interval: Constants.Streaming.uiUpdateInterval
+        ) {
+            materializationCount += 1
+            return latestValue
+        }
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+
+        for value in 1...100 {
+            latestValue = value
+            publisher.markDirty()
+            _ = publisher.acceptUpdate(
+                at: start.addingTimeInterval(TimeInterval(value - 1) / 10_000),
+                scheduleTrailing: true
+            )
+        }
+
+        publisher.cancelTrailing()
+        #expect(publisher.finish().snapshot == 100)
+        #expect(materializationCount == 2)
+    }
+
+    @Test("trailing publication materializes the latest state")
+    func latestStateWinsTrailingPublication() throws {
+        var latestValue = "first"
+        let start = Date(timeIntervalSinceReferenceDate: 2_000)
+
+        var materializationCount = 0
+        let countingPublisher = LazySnapshotPublisher(
+            interval: Constants.Streaming.uiUpdateInterval
+        ) {
+            materializationCount += 1
+            return latestValue
+        }
+
+        countingPublisher.markDirty()
+        #expect(countingPublisher.acceptUpdate(
+            at: start,
+            scheduleTrailing: true
+        ).materializedSnapshot?.snapshot == "first")
+        latestValue = "intermediate"
+        countingPublisher.markDirty()
+        let scheduled = countingPublisher.acceptUpdate(
+            at: start.addingTimeInterval(0.01),
+            scheduleTrailing: true
+        )
+        latestValue = "latest"
+        countingPublisher.markDirty()
+        _ = countingPublisher.acceptUpdate(
+            at: start.addingTimeInterval(0.02),
+            scheduleTrailing: true
+        )
+
+        let fireTime = try #require(scheduled.trailingFireTime)
+        #expect(countingPublisher.publishTrailing(scheduledFor: fireTime)?.snapshot == "latest")
+        #expect(materializationCount == 2)
+    }
+
+    @Test("cancellation flushes the latest dirty state once")
+    func cancellationFlushesOnce() {
+        var latestValue = 1
+        var materializationCount = 0
+        let publisher = LazySnapshotPublisher(
+            interval: Constants.Streaming.uiUpdateInterval
+        ) {
+            materializationCount += 1
+            return latestValue
+        }
+        let start = Date(timeIntervalSinceReferenceDate: 3_000)
+
+        publisher.markDirty()
+        _ = publisher.acceptUpdate(at: start, scheduleTrailing: true)
+        latestValue = 2
+        publisher.markDirty()
+        _ = publisher.acceptUpdate(
+            at: start.addingTimeInterval(0.01),
+            scheduleTrailing: true
+        )
+
+        #expect(publisher.flushIfDirty()?.snapshot == 2)
+        #expect(publisher.flushIfDirty() == nil)
+        #expect(materializationCount == 2)
+    }
+
+    @Test("recovery throttle skips intermediate builds and finishes exactly")
+    func recoveryThrottleSkipsIntermediateBuilds() {
+        var content = ""
+        var materializationCount = 0
+        let publisher = LazySnapshotPublisher(
+            interval: Constants.Streaming.uiUpdateInterval
+        ) {
+            materializationCount += 1
+            return content
+        }
+        let start = Date(timeIntervalSinceReferenceDate: 4_000)
+
+        let interval = Constants.Streaming.uiUpdateInterval
+        let updateTimes: [TimeInterval] = [
+            0,
+            interval / 2,
+            interval,
+            interval * 1.5,
+            interval * 2,
+        ]
+        for updateTime in updateTimes {
+            content += "x"
+            publisher.markDirty()
+            _ = publisher.acceptUpdate(
+                at: start.addingTimeInterval(updateTime),
+                scheduleTrailing: false
+            )
+        }
+
+        let finalContent = publisher.finish().snapshot
+        #expect(finalContent == String(repeating: "x", count: updateTimes.count))
+        #expect(materializationCount == 4)
+    }
+
+    @Test("publication fence rejects an older delayed snapshot")
+    func publicationFenceRejectsOlderSnapshot() throws {
+        var latestValue = 1
+        let publisher = LazySnapshotPublisher(
+            interval: Constants.Streaming.uiUpdateInterval
+        ) { latestValue }
+        let fence = SnapshotPublicationFence()
+        let start = Date(timeIntervalSinceReferenceDate: 5_000)
+
+        publisher.markDirty()
+        _ = publisher.acceptUpdate(at: start, scheduleTrailing: true)
+        latestValue = 2
+        publisher.markDirty()
+        let scheduled = publisher.acceptUpdate(
+            at: start.addingTimeInterval(0.01),
+            scheduleTrailing: true
+        )
+        let fireTime = try #require(scheduled.trailingFireTime)
+        let older = try #require(publisher.publishTrailing(scheduledFor: fireTime))
+        latestValue = 3
+        publisher.markDirty()
+        let newer = try #require(publisher.acceptUpdate(
+            at: start.addingTimeInterval(0.2),
+            scheduleTrailing: true
+        ).materializedSnapshot)
+
+        #expect(newer.id > older.id)
+        #expect(fence.accept(newer.id))
+        #expect(!fence.accept(older.id))
+    }
+}
+
 @Suite("Streaming thinking segments")
 struct StreamingThinkingSegmentTests {
 
