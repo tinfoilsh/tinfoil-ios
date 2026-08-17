@@ -111,6 +111,11 @@ enum Constants {
         /// content; users can still select large messages via the full-text
         /// selection sheet.
         static let maxInlineSelectionCharacters = 10_000
+        /// Parsed responses are retained only while they are likely to remain
+        /// visible, preventing long chat sessions from duplicating transcripts
+        /// in an unbounded render cache.
+        static let markdownCacheEntryLimit = 64
+        static let markdownCacheCostLimitBytes = 16 * 1_024 * 1_024
         /// Thinking/reasoning chunks larger than this are hard-split so no
         /// single Text view forces an unbounded CoreText layout pass.
         static let maxThinkingChunkCharacters = 8_000
