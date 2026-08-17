@@ -1619,8 +1619,7 @@ struct CustomTextEditor: UIViewRepresentable {
         }
 
         func immutableTextSnapshot(from textView: UITextView) -> String {
-            let copiedText = (textView.text as NSString).copy() as! NSString
-            return copiedText as String
+            NSString(string: textView.text ?? "") as String
         }
 
         func textView(_ textView: UITextView, shouldChangeTextIn _: NSRange, replacementText text: String) -> Bool {
