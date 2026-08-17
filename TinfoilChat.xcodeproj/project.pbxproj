@@ -757,8 +757,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tinfoilsh/textual";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.0.9;
+				kind = revision;
+				revision = 2d8e31a176e0531fc93421a8820521b645239979;
 			};
 		};
 		99EAB0022FC0000200EAB002 /* XCRemoteSwiftPackageReference "encrypted-http-body-protocol" */ = {
@@ -773,8 +773,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tinfoilsh/tinfoil-swift";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.7.0;
+				kind = revision;
+				revision = 457fbf7d5c2e0b2d8282cbc9e1e1d14810574b85;
 			};
 		};
 		99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
