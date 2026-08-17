@@ -222,6 +222,8 @@ actor EncryptedFileStorage {
     // MARK: - Index Operations
 
     func loadIndex(userId: String) async throws -> [ChatIndexEntry] {
+        let performanceToken = PerformanceInstrumentation.shared.begin(.chatIndexLoad)
+        defer { PerformanceInstrumentation.shared.end(performanceToken) }
         if let cached = indexCache[userId] {
             if !contentIntegrityCheckedUserIds.contains(userId) {
                 try detectMissingChatContent(in: cached, userId: userId)
@@ -1328,6 +1330,8 @@ actor EncryptedFileStorage {
     // MARK: - Private Helpers
 
     private func loadChatFromFile(_ fileURL: URL, isRaw: Bool) async throws -> Chat? {
+        let performanceToken = PerformanceInstrumentation.shared.begin(.fullChatLoad)
+        defer { PerformanceInstrumentation.shared.end(performanceToken) }
         let data = try Data(contentsOf: fileURL)
 
         if isRaw {
