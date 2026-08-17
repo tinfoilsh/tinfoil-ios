@@ -130,6 +130,9 @@ struct MessageTableView: UIViewRepresentable {
                 context.coordinator.lastUsesStreamingLayout = usesStreamingLayout
                 context.coordinator.messageWrappers.removeAll()
                 context.coordinator.shownMessageIds.removeAll()
+                context.coordinator.heightCache.removeAll()
+                context.coordinator.messageHeightCache.removeAll()
+                context.coordinator.contentEstimateCache.removeAll()
 
                 // Drop any streaming inset left behind by the previous chat,
                 // and reset a blank chat to the top since no scroll trigger
@@ -1149,4 +1152,3 @@ extension UITableViewCell {
         }
     }
 }
-
