@@ -3,6 +3,17 @@ import Foundation
 @preconcurrency import OpenAI
 import Security
 
+func shouldRetryRecoveryResponse(statusCode: Int) -> Bool {
+    (500..<600).contains(statusCode)
+}
+
+func shouldRetryRecoveryError(_ error: Error) -> Bool {
+    guard case ChatRecoveryClientError.httpStatus(let statusCode) = error else {
+        return false
+    }
+    return shouldRetryRecoveryResponse(statusCode: statusCode)
+}
+
 struct ChatRecoveryAttempt: Sendable {
     let chatId: String
     let turnId: String
@@ -825,6 +836,13 @@ actor ChatRecoveryCoordinator {
                         return
                     }
                     if !(200..<300).contains(recovered.statusCode) {
+                        if shouldRetryRecoveryResponse(statusCode: recovered.statusCode) {
+                            guard attempt < Constants.ChatRecovery.maxResponseRetryAttempts else {
+                                return
+                            }
+                            try await waitForRecoveryRetry(attempt: attempt)
+                            continue
+                        }
                         for try await _ in recovered.stream {}
                         guard scanIsCurrent(
                             accountGeneration: accountGeneration,
@@ -940,10 +958,20 @@ actor ChatRecoveryCoordinator {
                         userId: userId
                     ),
                           !cancelledTurns.contains(key),
-                          !(await isChatStreaming(chatId)),
-                          let retryStatus = try? await ChatRecoveryClient.shared.status(
-                              sessionId: payload.sessionId
-                          )
+                          !(await isChatStreaming(chatId))
+                    else {
+                        return
+                    }
+                    if shouldRetryRecoveryError(error) {
+                        guard attempt < Constants.ChatRecovery.maxResponseRetryAttempts else {
+                            return
+                        }
+                        try await waitForRecoveryRetry(attempt: attempt)
+                        continue
+                    }
+                    guard let retryStatus = try? await ChatRecoveryClient.shared.status(
+                        sessionId: payload.sessionId
+                    )
                     else {
                         return
                     }

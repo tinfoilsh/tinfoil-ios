@@ -5,6 +5,33 @@ import Testing
 
 @Suite("Chat recovery client")
 struct ChatRecoveryClientTests {
+    @Test("transient server responses remain recoverable", arguments: [500, 502, 503, 504, 599])
+    func transientServerResponse(statusCode: Int) {
+        #expect(shouldRetryRecoveryResponse(statusCode: statusCode))
+    }
+
+    @Test("terminal client responses do not retry", arguments: [400, 401, 404, 409, 429])
+    func terminalClientResponse(statusCode: Int) {
+        #expect(!shouldRetryRecoveryResponse(statusCode: statusCode))
+    }
+
+    @Test("plain gateway failures retain their retryable status")
+    func plainGatewayFailure() throws {
+        let response = try #require(HTTPURLResponse(
+            url: URL(string: "https://example.com/recovery/session")!,
+            statusCode: 502,
+            httpVersion: nil,
+            headerFields: nil
+        ))
+
+        do {
+            _ = try recoveryResponseNonce(from: response)
+            Issue.record("Expected a plain gateway failure to fail")
+        } catch {
+            #expect(shouldRetryRecoveryError(error))
+        }
+    }
+
     @Test("status decodes persisted encrypted bytes")
     func statusBytes() throws {
         let status = try JSONDecoder().decode(
