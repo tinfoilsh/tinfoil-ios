@@ -69,7 +69,335 @@ private actor UploadRetryProbe {
     }
 }
 
+private actor UploadConcurrencyGate {
+    struct Snapshot: Sendable {
+        let started: [String]
+        let active: Int
+        let maximumActive: Int
+    }
+
+    private var started: [String] = []
+    private var active = 0
+    private var maximumActive = 0
+    private var startWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    private var releases: [String: CheckedContinuation<Void, Never>] = [:]
+
+    func enter(_ chatId: String) async {
+        active += 1
+        maximumActive = max(maximumActive, active)
+        started.append(chatId)
+        let readyWaiters = startWaiters.filter { started.count >= $0.0 }
+        startWaiters.removeAll { started.count >= $0.0 }
+        readyWaiters.forEach { $0.1.resume() }
+        await withCheckedContinuation { continuation in
+            releases[chatId] = continuation
+        }
+        active -= 1
+    }
+
+    func waitForStarts(_ count: Int) async {
+        guard started.count < count else { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append((count, continuation))
+        }
+    }
+
+    func release(_ chatId: String) {
+        releases.removeValue(forKey: chatId)?.resume()
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(started: started, active: active, maximumActive: maximumActive)
+    }
+}
+
+private actor PendingChatBackupProbe {
+    private var pendingRequests = 0
+    private var authoritativeReads: [String] = []
+
+    func pendingChatIds() -> [String] {
+        pendingRequests += 1
+        return ["dirty-one", "dirty-two", "dirty-three"]
+    }
+
+    func upload(_ chatId: String) throws -> Bool {
+        authoritativeReads.append(chatId)
+        if chatId == "dirty-two" {
+            throw UploadRetryTestError.terminal
+        }
+        return true
+    }
+
+    func snapshot() -> (Int, [String]) {
+        (pendingRequests, authoritativeReads)
+    }
+}
+
+private actor StartGate {
+    private var released = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !released else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func release() {
+        released = true
+        waiters.forEach { $0.resume() }
+        waiters.removeAll()
+    }
+}
+
+private actor SequentialBatchCancellationGate {
+    private var started: [String] = []
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var uploadContinuation: CheckedContinuation<Bool, Error>?
+
+    func upload(_ chatId: String) async throws -> Bool {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                started.append(chatId)
+                uploadContinuation = continuation
+                startWaiters.forEach { $0.resume() }
+                startWaiters.removeAll()
+            }
+        } onCancel: {
+            Task { await self.cancelUpload() }
+        }
+    }
+
+    func waitForUploadStart() async {
+        guard started.isEmpty else { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func startedChatIds() -> [String] {
+        started
+    }
+
+    private func cancelUpload() {
+        uploadContinuation?.resume(throwing: CancellationError())
+        uploadContinuation = nil
+    }
+}
+
 struct CloudSyncUploadRetryTests {
+    @Test
+    func chatUploadsUseBoundedFIFOQueue() async {
+        #expect(Constants.Sync.maxConcurrentChatUploads == 2)
+        let gate = UploadConcurrencyGate()
+        let coalescer = UploadCoalescer(
+            prepareUpload: { chatId, _, _ in
+                await gate.enter(chatId)
+                return { .uploaded }
+            },
+            waitBeforeRetry: { _ in }
+        )
+
+        await coalescer.enqueue("one")
+        await coalescer.enqueue("two")
+        await coalescer.enqueue("three")
+        await coalescer.enqueue("four")
+        await gate.waitForStarts(Constants.Sync.maxConcurrentChatUploads)
+        var snapshot = await gate.snapshot()
+        #expect(snapshot.started.count == Constants.Sync.maxConcurrentChatUploads)
+        #expect(snapshot.maximumActive == Constants.Sync.maxConcurrentChatUploads)
+
+        await gate.release("one")
+        await gate.waitForStarts(3)
+        snapshot = await gate.snapshot()
+        #expect(snapshot.started[2] == "three")
+
+        await gate.release("two")
+        await gate.waitForStarts(4)
+        snapshot = await gate.snapshot()
+        #expect(snapshot.started[3] == "four")
+        #expect(snapshot.maximumActive == Constants.Sync.maxConcurrentChatUploads)
+
+        await gate.release("three")
+        await gate.release("four")
+        await coalescer.waitForUpload("four")
+    }
+
+    @Test
+    func sameChatEditsStayCoalescedInOneWorker() async {
+        let gate = UploadConcurrencyGate()
+        let coalescer = UploadCoalescer(
+            prepareUpload: { chatId, _, _ in
+                await gate.enter(chatId)
+                return { .uploaded }
+            },
+            waitBeforeRetry: { _ in }
+        )
+
+        await coalescer.enqueue("chat")
+        await gate.waitForStarts(1)
+        await coalescer.enqueue("chat")
+        await coalescer.enqueue("chat")
+        await gate.release("chat")
+        await gate.waitForStarts(2)
+        var snapshot = await gate.snapshot()
+        #expect(snapshot.started == ["chat", "chat"])
+        #expect(snapshot.maximumActive == 1)
+
+        await gate.release("chat")
+        await coalescer.waitForUpload("chat")
+        snapshot = await gate.snapshot()
+        #expect(snapshot.started.count == 2)
+    }
+
+    @Test
+    func cancellingWaiterDoesNotCancelSharedUpload() async {
+        let gate = UploadConcurrencyGate()
+        let coalescer = UploadCoalescer(
+            prepareUpload: { chatId, _, _ in
+                await gate.enter(chatId)
+                return { .uploaded }
+            },
+            waitBeforeRetry: { _ in }
+        )
+        let waiter = Task { try await coalescer.enqueueAndWait("chat") }
+        await gate.waitForStarts(1)
+
+        waiter.cancel()
+        do {
+            _ = try await waiter.value
+            Issue.record("Expected waiter cancellation")
+        } catch is CancellationError {
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+
+        var snapshot = await gate.snapshot()
+        #expect(snapshot.active == 1)
+        await gate.release("chat")
+        await coalescer.waitForUpload("chat")
+        snapshot = await gate.snapshot()
+        #expect(snapshot.active == 0)
+    }
+
+    @Test
+    func cancellationBeforeWaiterRegistrationDoesNotStartUpload() async {
+        let startGate = StartGate()
+        let uploadGate = UploadConcurrencyGate()
+        let coalescer = UploadCoalescer(
+            prepareUpload: { chatId, _, _ in
+                await uploadGate.enter(chatId)
+                return { .uploaded }
+            },
+            waitBeforeRetry: { _ in }
+        )
+        let waiter = Task {
+            await startGate.wait()
+            return try await coalescer.enqueueAndWait("chat")
+        }
+
+        waiter.cancel()
+        await startGate.release()
+        do {
+            _ = try await waiter.value
+            Issue.record("Expected waiter cancellation")
+        } catch is CancellationError {
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+
+        let snapshot = await uploadGate.snapshot()
+        #expect(snapshot.started.isEmpty)
+        #expect(snapshot.active == 0)
+    }
+
+    @Test
+    func clearImmediatelyProvidesFreshWorkerBudget() async {
+        let gate = UploadConcurrencyGate()
+        let coalescer = UploadCoalescer(
+            prepareUpload: { chatId, _, _ in
+                await gate.enter(chatId)
+                return { .uploaded }
+            },
+            waitBeforeRetry: { _ in }
+        )
+
+        let staleWaiter = Task { try await coalescer.enqueueAndWait("old-one") }
+        await coalescer.enqueue("old-two")
+        await gate.waitForStarts(2)
+        await coalescer.clear()
+        await coalescer.enqueue("new-one")
+        await coalescer.enqueue("new-two")
+        await coalescer.enqueue("new-three")
+        await gate.waitForStarts(4)
+        var snapshot = await gate.snapshot()
+        #expect(Set(snapshot.started) == Set(["old-one", "old-two", "new-one", "new-two"]))
+
+        await gate.release("old-one")
+        await gate.release("old-two")
+        await Task.yield()
+        snapshot = await gate.snapshot()
+        #expect(!snapshot.started.contains("new-three"))
+
+        await gate.release("new-one")
+        await gate.waitForStarts(5)
+        snapshot = await gate.snapshot()
+        #expect(snapshot.started.last == "new-three")
+
+        do {
+            _ = try await staleWaiter.value
+            Issue.record("Expected stale waiter cancellation")
+        } catch is CancellationError {
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+
+        await gate.release("new-two")
+        await gate.release("new-three")
+        await coalescer.waitForUpload("new-three")
+    }
+
+    @Test
+    func bulkBackupUsesPendingIdsAndAuthoritativePerChatReads() async throws {
+        let probe = PendingChatBackupProbe()
+
+        let result = try await PendingChatBackupBatch.run(
+            pendingChatIds: { await probe.pendingChatIds() },
+            upload: { try await probe.upload($0) }
+        )
+
+        let snapshot = await probe.snapshot()
+        #expect(snapshot.0 == 1)
+        #expect(snapshot.1 == ["dirty-one", "dirty-two", "dirty-three"])
+        #expect(result.uploaded == 2)
+        #expect(result.errors.count == 1)
+        #expect(result.failedChatIds == ["dirty-two"])
+    }
+
+    @Test
+    func bulkBackupCancellationStopsBeforeNextChat() async {
+        let gate = SequentialBatchCancellationGate()
+        let batch = Task {
+            try await PendingChatBackupBatch.run(
+                pendingChatIds: { ["one", "two", "three"] },
+                upload: { try await gate.upload($0) }
+            )
+        }
+        await gate.waitForUploadStart()
+
+        batch.cancel()
+        do {
+            _ = try await batch.value
+            Issue.record("Expected batch cancellation")
+        } catch is CancellationError {
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+
+        #expect(await gate.startedChatIds() == ["one"])
+    }
+
     @Test
     func dirtyWriteDoesNotReplacePreparedRetry() async throws {
         let backoff = RetryBackoffGate()

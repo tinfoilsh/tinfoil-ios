@@ -150,6 +150,10 @@ class ChatViewModel: ObservableObject {
     @Published var localChats: [Chat] = []
     @Published var currentChat: Chat? {
         didSet {
+            if currentChat?.id != oldValue?.id {
+                selectedChatImageTask?.cancel()
+                selectedChatImageTask = nil
+            }
             let enabled = currentChat?.webSearchEnabled
                 ?? SettingsManager.shared.webSearchAvailable
             if isWebSearchEnabled != enabled {
@@ -407,6 +411,7 @@ class ChatViewModel: ObservableObject {
     private var autoSyncTimer: Timer?
     private var recoveryScanTimer: Timer?
     private var recoveryScanTask: Task<Void, Never>?
+    private var selectedChatImageTask: Task<Void, Never>?
     private var recoveryScanGeneration = 0
     private var recoveryScanLastProgressAt: Date?
     private var recoveryScansSuspended = false
@@ -892,6 +897,7 @@ class ChatViewModel: ObservableObject {
         recoveryScanTimer?.invalidate()
         recoveryScanTimer = nil
         recoveryScanTask?.cancel()
+        selectedChatImageTask?.cancel()
 
         // Stop stream update timers
         streamUpdateTimers.values.forEach { $0.invalidate() }
@@ -1988,6 +1994,7 @@ class ChatViewModel: ObservableObject {
 
     /// Selects a chat as the current chat
     func selectChat(_ chat: Chat) {
+        selectedChatImageTask?.cancel()
         // Any explicit selection supersedes a search hit whose project
         // is still loading.
         pendingSearchResultChatId = nil
@@ -2039,16 +2046,25 @@ class ChatViewModel: ObservableObject {
         }
         if hasUnfetchedImages {
             let chatId = chatToSelect.id
-            Task {
+            selectedChatImageTask = Task { [weak self] in
                 let performanceToken = PerformanceInstrumentation.shared.begin(
                     .selectedChatImageHydration
                 )
                 defer { PerformanceInstrumentation.shared.end(performanceToken) }
-                let loadedImages = await CloudStorageService.shared.loadImages(in: chatToSelect.messages)
-                guard !loadedImages.isEmpty, self.currentChat?.id == chatId else { return }
+                let loadedImages: [String: String]
+                do {
+                    loadedImages = try await CloudStorageService.shared.loadImages(
+                        in: chatToSelect.messages
+                    )
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
+                guard !loadedImages.isEmpty, self?.currentChat?.id == chatId else { return }
                 // Merge loaded base64 data into the current messages by attachment ID,
                 // rather than replacing the whole array with a stale snapshot.
-                self.applyLoadedImages(loadedImages, toChatId: chatId)
+                self?.applyLoadedImages(loadedImages, toChatId: chatId)
             }
         }
     }
