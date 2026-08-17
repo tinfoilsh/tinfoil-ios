@@ -837,11 +837,11 @@ actor ChatRecoveryCoordinator {
                     }
                     if !(200..<300).contains(recovered.statusCode) {
                         if shouldRetryRecoveryResponse(statusCode: recovered.statusCode) {
-                            guard attempt < Constants.ChatRecovery.maxResponseRetryAttempts else {
-                                return
+                            if attempt < Constants.ChatRecovery.maxResponseRetryAttempts {
+                                try await waitForRecoveryRetry(attempt: attempt)
+                                continue
                             }
-                            try await waitForRecoveryRetry(attempt: attempt)
-                            continue
+                            throw ChatRecoveryClientError.httpStatus(recovered.statusCode)
                         }
                         for try await _ in recovered.stream {}
                         guard scanIsCurrent(
@@ -963,11 +963,10 @@ actor ChatRecoveryCoordinator {
                         return
                     }
                     if shouldRetryRecoveryError(error) {
-                        guard attempt < Constants.ChatRecovery.maxResponseRetryAttempts else {
-                            return
+                        if attempt < Constants.ChatRecovery.maxResponseRetryAttempts {
+                            try await waitForRecoveryRetry(attempt: attempt)
+                            continue
                         }
-                        try await waitForRecoveryRetry(attempt: attempt)
-                        continue
                     }
                     guard let retryStatus = try? await ChatRecoveryClient.shared.status(
                         sessionId: payload.sessionId
