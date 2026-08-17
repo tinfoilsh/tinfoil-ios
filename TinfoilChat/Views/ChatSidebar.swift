@@ -12,12 +12,21 @@ import SafariServices
 /// Search results, unlike the root list, do surface project chats (the
 /// index covers every synced chat and the webapp shows them too); only
 /// temporary and undecryptable chats are excluded.
-func isSearchResultSidebarChat(_ chat: Chat) -> Bool {
+func isSearchResultSidebarChat(_ chat: ChatListSummary) -> Bool {
     !chat.isTemporary && !chat.decryptionFailed
 }
 
-func isRootSidebarChat(_ chat: Chat) -> Bool {
+func isRootSidebarChat(_ chat: ChatListSummary) -> Bool {
     isSearchResultSidebarChat(chat) && chat.projectId == nil
+}
+
+func resolveSidebarSearchChat(
+    id: String,
+    remoteResults: [Chat],
+    loadedChats: [Chat]
+) -> Chat? {
+    remoteResults.first(where: { $0.id == id })
+        ?? loadedChats.first(where: { $0.id == id })
 }
 
 func isSidebarChatSearchEnabled(
@@ -54,18 +63,18 @@ struct ChatSidebar: View {
         viewModel.activeStorageTab
     }
 
-    private var filteredChats: [Chat] {
-        let source: [Chat]
+    private var filteredChats: [ChatListSummary] {
+        let source: [ChatListSummary]
         if authManager.isAuthenticated && settings.isCloudSyncEnabled {
             switch activeTab {
             case .cloud:
-                source = viewModel.chats
+                source = viewModel.cloudSidebarSummaries
             case .local:
-                source = viewModel.localChats
+                source = viewModel.localSidebarSummaries
             }
         } else {
             // When cloud sync is off, all chats are local
-            source = viewModel.localChats
+            source = viewModel.localSidebarSummaries
         }
         // Temporary and project chats are never listed in the root chat
         // sidebar. Chats that failed to decrypt are hidden entirely; they
@@ -90,7 +99,7 @@ struct ChatSidebar: View {
             && !chatSearchTerm.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private var searchResultChats: [Chat] {
+    private var searchResultChats: [ChatListSummary] {
         guard isChatSearchActive else { return [] }
         // Enclave unavailable (older deploy, no eligible key): degrade
         // to filtering the locally loaded titles so the box still does
@@ -101,16 +110,18 @@ struct ChatSidebar: View {
             let needle = chatSearchTerm
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
-            return viewModel.chats.filter {
+            return viewModel.cloudSidebarSummaries.filter {
                 isSearchResultSidebarChat($0)
                     && !$0.isBlankChat
                     && $0.title.lowercased().contains(needle)
             }
         }
-        return chatSearch.results.filter(isSearchResultSidebarChat)
+        return chatSearch.results
+            .map { ChatListSummary(from: $0) }
+            .filter(isSearchResultSidebarChat)
     }
 
-    private var displayedChats: [Chat] {
+    private var displayedChats: [ChatListSummary] {
         isChatSearchActive ? searchResultChats : filteredChats
     }
 
@@ -149,7 +160,7 @@ struct ChatSidebar: View {
 
     /// Empty when the updated time would read the same as the created
     /// time, so rows don't repeat "14m ago · Updated 14m ago".
-    private func updatedTimeString(for chat: Chat) -> String {
+    private func updatedTimeString(for chat: ChatListSummary) -> String {
         let created = relativeTimeString(from: chat.createdAt)
         let updated = relativeTimeString(from: chat.updatedAt)
         guard updated != created else { return "" }
@@ -395,9 +406,14 @@ struct ChatSidebar: View {
                     isPinned: profileManager.isChatPinned(chat.id),
                     onSelect: {
                         if isChatSearchActive {
-                            viewModel.openSearchResult(chat)
+                            guard let fullChat = resolveSidebarSearchChat(
+                                id: chat.id,
+                                remoteResults: chatSearch.results,
+                                loadedChats: viewModel.chats
+                            ) else { return }
+                            viewModel.openSearchResult(fullChat)
                         } else {
-                            viewModel.selectChat(chat)
+                            viewModel.selectChat(id: chat.id, isLocalOnly: chat.isLocalOnly)
                         }
                     },
                     onEdit: {
@@ -828,12 +844,12 @@ struct ChatSidebar: View {
         }
     }
 
-    private func startEditing(_ chat: Chat) {
+    private func startEditing(_ chat: ChatListSummary) {
         editingChatId = chat.id
         editingTitle = chat.title
     }
     
-    private func confirmDelete(_ chat: Chat) {
+    private func confirmDelete(_ chat: ChatListSummary) {
         deletingChatId = chat.id
         showDeleteAlert = true
     }
@@ -853,7 +869,7 @@ private extension View {
 }
 
 struct ChatListItem: View {
-    let chat: Chat
+    let chat: ChatListSummary
     let isSelected: Bool
     let isEditing: Bool
     @Binding var editingTitle: String

@@ -176,14 +176,47 @@ struct ChatSearchControllerTests {
         temporary.isTemporary = true
         var encrypted = ChatSearchServiceTests.makeChat(id: "encrypted", title: "Encrypted")
         encrypted.decryptionFailed = true
+        let blank = ChatSearchServiceTests.makeChat(id: "blank", title: "New Chat")
 
-        let visible = [root, project, temporary, encrypted]
+        let summaries = [root, project, temporary, encrypted, blank]
+            .map { ChatListSummary(from: $0) }
+        let visible = summaries
             .filter(isSearchResultSidebarChat)
             .map(\.id)
-        #expect(visible == ["root", "project"])
+        #expect(visible == ["root", "project", "blank"])
 
         // The root chat list itself still excludes project chats.
-        #expect([root, project].filter(isRootSidebarChat).map(\.id) == ["root"])
+        #expect(summaries.filter(isRootSidebarChat).map(\.id) == ["root", "blank"])
+        #expect(summaries.first(where: { $0.id == "blank" })?.isBlankChat == true)
+    }
+
+    @Test
+    func sidebarSearchSelectionPrefersRemoteResultsThenLoadedChats() {
+        let loaded = ChatSearchServiceTests.makeChat(id: "loaded", title: "Loaded")
+        let remote = ChatSearchServiceTests.makeChat(id: "remote", title: "Remote")
+        let staleLoadedCopy = ChatSearchServiceTests.makeChat(id: "remote", title: "Stale")
+
+        #expect(
+            resolveSidebarSearchChat(
+                id: "remote",
+                remoteResults: [remote],
+                loadedChats: [loaded, staleLoadedCopy]
+            )?.title == "Remote"
+        )
+        #expect(
+            resolveSidebarSearchChat(
+                id: "loaded",
+                remoteResults: [],
+                loadedChats: [loaded]
+            )?.title == "Loaded"
+        )
+        #expect(
+            resolveSidebarSearchChat(
+                id: "missing",
+                remoteResults: [remote],
+                loadedChats: [loaded]
+            ) == nil
+        )
     }
 
     @Test
