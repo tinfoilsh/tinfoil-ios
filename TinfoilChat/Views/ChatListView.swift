@@ -170,13 +170,21 @@ struct ChatListView: View {
             }
         }
         .onAppear {
-            setupKeyboardObservers()
             refreshArchivedMessagesStartIndex()
             pruneRecoveryDrafts()
         }
         .onDisappear {
-            removeKeyboardObservers()
             viewModel.isScrollInteractionActive = false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
+            if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                isKeyboardVisible = true
+                keyboardHeight = keyboardFrame.height
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            isKeyboardVisible = false
+            keyboardHeight = 0
         }
         .onChange(of: viewModel.currentModel.id) { _, _ in
             refreshArchivedMessagesStartIndex()
@@ -235,25 +243,6 @@ struct ChatListView: View {
             viewModel.isScrollInteractionActive = false
             scrollToUserTrigger = UUID()
         }
-    }
-
-    private func setupKeyboardObservers() {
-        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { notification in
-            if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
-                isKeyboardVisible = true
-                self.keyboardHeight = keyboardFrame.height
-            }
-        }
-
-        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
-            isKeyboardVisible = false
-            keyboardHeight = 0
-        }
-    }
-
-    private func removeKeyboardObservers() {
-        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
-        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
     }
 
     private func pruneRecoveryDrafts() {
