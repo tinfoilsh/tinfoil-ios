@@ -92,10 +92,19 @@ private struct SegmentView: View {
 private class MarkdownRenderCache: @unchecked Sendable {
     static let shared = MarkdownRenderCache()
 
-    private var cache: [String: [ContentSegment]] = [:]
-    private let queue = DispatchQueue(label: "com.tinfoil.markdown-cache", attributes: .concurrent)
+    private final class Entry: NSObject {
+        let segments: [ContentSegment]
+
+        init(segments: [ContentSegment]) {
+            self.segments = segments
+        }
+    }
+
+    private let cache = NSCache<NSString, Entry>()
 
     init() {
+        cache.countLimit = Constants.Rendering.markdownCacheEntryLimit
+        cache.totalCostLimit = Constants.Rendering.markdownCacheCostLimitBytes
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleMemoryWarning),
@@ -112,22 +121,16 @@ private class MarkdownRenderCache: @unchecked Sendable {
         clear()
     }
 
-    func get(for key: String) -> [ContentSegment]? {
-        queue.sync {
-            cache[key]
-        }
+    func get(for content: String) -> [ContentSegment]? {
+        cache.object(forKey: content as NSString)?.segments
     }
 
-    func set(_ segments: [ContentSegment], for key: String) {
-        queue.async(flags: .barrier) {
-            self.cache[key] = segments
-        }
+    func set(_ segments: [ContentSegment], for content: String, cost: Int) {
+        cache.setObject(Entry(segments: segments), forKey: content as NSString, cost: cost)
     }
 
     func clear() {
-        queue.async(flags: .barrier) {
-            self.cache.removeAll()
-        }
+        cache.removeAllObjects()
     }
 }
 
@@ -176,8 +179,7 @@ struct LaTeXMarkdownView: View, Equatable {
         // the fallback view and then never recalculating after the async
         // .task swaps in the parsed segments.
         if !isStreaming {
-            let cacheKey = "\(content.hashValue)"
-            if let cached = MarkdownRenderCache.shared.get(for: cacheKey) {
+            if let cached = MarkdownRenderCache.shared.get(for: content) {
                 _segments = State(initialValue: cached)
             }
         }
@@ -209,14 +211,25 @@ struct LaTeXMarkdownView: View, Equatable {
         }
         .task(id: content) {
             guard !isStreaming else { return }
-            let cacheKey = "\(content.hashValue)"
-            if let cached = MarkdownRenderCache.shared.get(for: cacheKey) {
+            if let cached = MarkdownRenderCache.shared.get(for: content) {
                 segments = cached
                 return
             }
             let contentToProcess = content
-            let parsed = Self.parseContent(contentToProcess)
-            MarkdownRenderCache.shared.set(parsed, for: cacheKey)
+            let parsingTask = Task.detached(priority: .userInitiated) {
+                Self.parseContent(contentToProcess)
+            }
+            let parsed = await withTaskCancellationHandler {
+                await parsingTask.value
+            } onCancel: {
+                parsingTask.cancel()
+            }
+            guard !Task.isCancelled else { return }
+            MarkdownRenderCache.shared.set(
+                parsed,
+                for: contentToProcess,
+                cost: contentToProcess.utf8.count
+            )
             segments = parsed
         }
     }
@@ -447,6 +460,7 @@ struct LaTeXMarkdownView: View, Equatable {
 
     /// Parse content into segments of markdown and LaTeX
     private nonisolated static func parseContent(_ content: String) -> [ContentSegment] {
+        guard !Task.isCancelled else { return [] }
         if content.count > Constants.Rendering.maxFullParsingCharacters {
             return splitLargeContent(content)
         }
@@ -467,6 +481,8 @@ struct LaTeXMarkdownView: View, Equatable {
                 excludedRanges.append(match.range)
             }
         }
+
+        guard !Task.isCancelled else { return [] }
 
         let tableSegments = Self.findMarkdownTables(in: content)
         excludedRanges.append(contentsOf: tableSegments.map(\.range))
@@ -496,6 +512,8 @@ struct LaTeXMarkdownView: View, Equatable {
                 }
             }
         }
+
+        guard !Task.isCancelled else { return [] }
 
         latexRanges.sort { $0.range.location < $1.range.location }
 
@@ -1363,4 +1381,3 @@ struct MathView: UIViewRepresentable {
         uiView.sizeToFit()
     }
 }
-
