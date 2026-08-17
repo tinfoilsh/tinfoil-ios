@@ -130,7 +130,7 @@ struct ModularAuthenticationView: View {
     }
     .onChange(of: clerk.user != nil) { _, isSignedIn in
       if isSignedIn && onAuthenticated == nil {
-        dismiss()
+        completeAuthentication()
       }
     }
   }
