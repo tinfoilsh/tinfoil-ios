@@ -13,6 +13,7 @@ struct ChatListSummary: Identifiable, Equatable, Sendable {
     let projectId: String?
     let isLocalOnly: Bool
     let decryptionFailed: Bool
+    let dataCorrupted: Bool
     let isBlankChat: Bool
     let isTemporary: Bool
 
@@ -24,6 +25,7 @@ struct ChatListSummary: Identifiable, Equatable, Sendable {
         projectId = chat.projectId
         isLocalOnly = chat.isLocalOnly
         decryptionFailed = chat.decryptionFailed
+        dataCorrupted = chat.dataCorrupted
         isBlankChat = chat.isBlankChat
         isTemporary = chat.isTemporary
     }
@@ -36,6 +38,7 @@ struct ChatListSummary: Identifiable, Equatable, Sendable {
         projectId = entry.projectId
         isLocalOnly = entry.isLocalOnly
         decryptionFailed = entry.decryptionFailed
+        dataCorrupted = entry.dataCorrupted
         isBlankChat = entry.messageCount == 0 && !entry.decryptionFailed
         isTemporary = false
     }

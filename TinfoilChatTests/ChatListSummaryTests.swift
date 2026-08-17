@@ -17,6 +17,7 @@ struct ChatListSummaryTests {
             projectId: "project-1"
         )
         chat.decryptionFailed = true
+        chat.dataCorrupted = true
         chat.isTemporary = true
 
         let summary = ChatListSummary(from: chat)
@@ -28,6 +29,7 @@ struct ChatListSummaryTests {
         #expect(summary.projectId == "project-1")
         #expect(summary.isLocalOnly)
         #expect(summary.decryptionFailed)
+        #expect(summary.dataCorrupted)
         #expect(!summary.isBlankChat)
         #expect(summary.isTemporary)
     }
@@ -46,6 +48,7 @@ struct ChatListSummaryTests {
             projectId: "project-2"
         )
         chat.decryptionFailed = true
+        chat.dataCorrupted = true
         let entry = ChatIndexEntry(from: chat)
 
         let summary = ChatListSummary(from: entry)
@@ -57,6 +60,7 @@ struct ChatListSummaryTests {
         #expect(summary.projectId == "project-2")
         #expect(summary.isLocalOnly)
         #expect(summary.decryptionFailed)
+        #expect(summary.dataCorrupted)
         #expect(!summary.isBlankChat)
         #expect(!summary.isTemporary)
     }

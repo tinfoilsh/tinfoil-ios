@@ -561,19 +561,33 @@ class ChatViewModel: ObservableObject {
         ChatFavorites.isPinnable(chat)
     }
 
+    func canPinChat(_ chat: ChatListSummary) -> Bool {
+        ChatFavorites.isPinnable(chat)
+    }
+
     func toggleChatPin(_ chat: Chat) {
+        updateChatPin(id: chat.id, pinnable: canPinChat(chat), hydratedChat: chat)
+    }
+
+    func toggleChatPin(_ chat: ChatListSummary) {
+        updateChatPin(id: chat.id, pinnable: canPinChat(chat), hydratedChat: nil)
+    }
+
+    private func updateChatPin(id: String, pinnable: Bool, hydratedChat: Chat?) {
         favoriteLoadGeneration += 1
-        if isChatPinned(chat.id) {
-            ProfileManager.shared.unpinChat(chat.id)
-            favoriteChats.removeAll { $0.id == chat.id }
+        if isChatPinned(id) {
+            ProfileManager.shared.unpinChat(id)
+            favoriteChats.removeAll { $0.id == id }
         } else {
-            guard canPinChat(chat) else { return }
-            ProfileManager.shared.pinChat(chat.id)
-            favoriteChats = ChatFavorites.resolve(
-                ids: ProfileManager.shared.pinnedChatIds ?? [],
-                from: [chat] + favoriteChats,
-                id: \.id
-            )
+            guard pinnable else { return }
+            ProfileManager.shared.pinChat(id)
+            if let hydratedChat {
+                favoriteChats = ChatFavorites.resolve(
+                    ids: ProfileManager.shared.pinnedChatIds ?? [],
+                    from: [hydratedChat] + favoriteChats,
+                    id: \.id
+                )
+            }
         }
         Task { await refreshFavoriteChats() }
     }

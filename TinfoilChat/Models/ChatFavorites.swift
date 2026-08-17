@@ -48,4 +48,12 @@ enum ChatFavorites {
             && !chat.decryptionFailed
             && !chat.dataCorrupted
     }
+
+    static func isPinnable(_ chat: ChatListSummary) -> Bool {
+        !chat.isLocalOnly
+            && !chat.isTemporary
+            && !chat.isBlankChat
+            && !chat.decryptionFailed
+            && !chat.dataCorrupted
+    }
 }

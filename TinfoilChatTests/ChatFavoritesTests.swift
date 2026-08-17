@@ -89,4 +89,21 @@ struct ChatFavoritesTests {
         #expect(!ChatFavorites.operationIsCurrent("stale", currentToken: "current"))
         #expect(!ChatFavorites.operationIsCurrent("stale", currentToken: nil as String?))
     }
+
+    @Test("summary pin eligibility matches hydrated chats")
+    func matchesSummaryPinnability() {
+        let eligible = Chat(
+            id: "eligible",
+            title: "Eligible",
+            messages: [Message(role: .user, content: "Hello")],
+            modelType: ChatSearchServiceTests.testModel
+        )
+        var corrupted = eligible
+        corrupted.dataCorrupted = true
+
+        #expect(ChatFavorites.isPinnable(eligible))
+        #expect(ChatFavorites.isPinnable(ChatListSummary(from: eligible)))
+        #expect(!ChatFavorites.isPinnable(corrupted))
+        #expect(!ChatFavorites.isPinnable(ChatListSummary(from: corrupted)))
+    }
 }
