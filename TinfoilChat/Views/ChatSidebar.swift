@@ -395,7 +395,7 @@ struct ChatSidebar: View {
             ForEach(Array(displayedChats.enumerated()), id: \.element.id) { _, chat in
                 ChatListItem(
                     chat: chat,
-                    isSelected: viewModel.currentChat?.id == chat.id,
+                    isSelected: viewModel.selectedChatId == chat.id,
                     isEditing: editingChatId == chat.id,
                     editingTitle: $editingTitle,
                     createdTimeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
@@ -406,6 +406,14 @@ struct ChatSidebar: View {
                     isPinned: profileManager.isChatPinned(chat.id),
                     onSelect: {
                         if isChatSearchActive {
+                            if !chatSearch.available {
+                                viewModel.openSummaryChat(
+                                    id: chat.id,
+                                    projectId: chat.projectId,
+                                    isLocalOnly: chat.isLocalOnly
+                                )
+                                return
+                            }
                             guard let fullChat = resolveSidebarSearchChat(
                                 id: chat.id,
                                 remoteResults: chatSearch.results,
@@ -418,8 +426,14 @@ struct ChatSidebar: View {
                     },
                     onEdit: {
                         if editingChatId == chat.id {
-                            viewModel.updateChatTitle(chat.id, newTitle: editingTitle)
-                            editingChatId = nil
+                            let editedChatId = chat.id
+                            let editedTitle = editingTitle
+                            Task {
+                                await viewModel.updateChatTitle(editedChatId, newTitle: editedTitle)
+                                if editingChatId == editedChatId {
+                                    editingChatId = nil
+                                }
+                            }
                         } else {
                             startEditing(chat)
                         }

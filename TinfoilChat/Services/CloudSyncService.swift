@@ -9,6 +9,15 @@ import Foundation
 import Combine
 import ClerkKit
 
+extension Notification.Name {
+    static let cloudChatRemoteDeleteCompleted = Notification.Name("cloudChatRemoteDeleteCompleted")
+}
+
+enum CloudRemoteDeleteNotificationKey {
+    static let chatId = "chatId"
+    static let userId = "userId"
+}
+
 // MARK: - Helper Functions
 
 /// Create properly configured ISO8601DateFormatter that handles JavaScript's toISOString() format
@@ -370,7 +379,7 @@ actor UploadCoalescer {
         return .failed(lastError ?? UploadCoalescerError.requiredUploadNotPrepared)
     }
 
-    func clear() {
+    func clear() async {
         generation += 1
         let waiters = states.values.flatMap(\.waiters)
         let throwingWaiters = states.values.flatMap(\.throwingWaiters)
@@ -388,6 +397,9 @@ actor UploadCoalescer {
         tasks.forEach { $0.cancel() }
         waiters.forEach { $0.resume() }
         throwingWaiters.forEach { $0.continuation.resume(throwing: CancellationError()) }
+        for task in tasks {
+            await task.value
+        }
     }
 }
 
@@ -512,6 +524,8 @@ class CloudSyncService: ObservableObject {
     /// failed removal is retried on the next sync cycle.
     private var deferredRemoteDeletes: [String: DeferredRemoteDelete] = [:]
     private var accountGeneration = 0
+    private var uploadsSuspended = false
+    private var bulkDeleteAccount: UploadAccount?
     private let cloudStorage = CloudStorageService.shared
     private let encryptionService = EncryptionService.shared
     private let deletedChatsTracker = DeletedChatsTracker.shared
@@ -712,6 +726,7 @@ class CloudSyncService: ObservableObject {
         ensureLatestUpload: Bool = false,
         allowWhileStreaming: Bool = false
     ) async {
+        guard !uploadsSuspended else { return }
         let generation = accountGeneration
 
         beginPendingUpload(chatId)
@@ -733,6 +748,7 @@ class CloudSyncService: ObservableObject {
         _ chatId: String,
         allowWhileStreaming: Bool
     ) async throws {
+        guard !uploadsSuspended else { throw CancellationError() }
         let generation = accountGeneration
         beginPendingUpload(chatId)
         defer { endPendingUpload(chatId, generation: generation) }
@@ -746,6 +762,7 @@ class CloudSyncService: ObservableObject {
     }
 
     func backupChatAndWait(_ chatId: String, requiredTurnId: String) async throws {
+        guard !uploadsSuspended else { throw CancellationError() }
         let generation = accountGeneration
         _ = try CloudUploadGate.allowsWrite(required: true)
         guard let userId = await getCurrentUserId(),
@@ -885,6 +902,7 @@ class CloudSyncService: ObservableObject {
         idempotencyKey: String,
         allowWhileStreaming: Bool
     ) async throws -> UploadAttempt? {
+        guard !uploadsSuspended else { throw CancellationError() }
         let generation = accountGeneration
         // Direct backupChat calls reach here without going through
         // syncAllChats, so the upgrade gate must be enforced in this
@@ -1298,14 +1316,14 @@ class CloudSyncService: ObservableObject {
                     continuationToken: continuationToken
                 )
                 guard generation == accountGeneration else {
-                    return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+                    return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
                 }
                 return result
             }
-            return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+            return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, failed: true)
         }
         guard generation == accountGeneration else {
-            return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+            return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
         }
         
         do {
@@ -1317,7 +1335,7 @@ class CloudSyncService: ObservableObject {
                 includeContent: true
             )
             guard generation == accountGeneration else {
-                return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+                return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
             }
             
             // Process remote chats in parallel
@@ -1328,13 +1346,13 @@ class CloudSyncService: ObservableObject {
             // fetch metadata and store encrypted placeholders. Decryption will be attempted per-chat.
             _ = try? await encryptionService.initialize()
             guard generation == accountGeneration else {
-                return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+                return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
             }
 
             // Process chats sequentially to avoid connection exhaustion
             for remoteChat in chatsToProcess {
                 guard generation == accountGeneration else {
-                    return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+                    return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
                 }
                 // Skip recently deleted chats
                 if deletedChatsTracker.isDeleted(remoteChat.id) {
@@ -1352,12 +1370,12 @@ class CloudSyncService: ObservableObject {
 
                 if let decrypted = await decryptRemoteChat(remoteChat, content: content) {
                     guard generation == accountGeneration else {
-                        return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+                        return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
                     }
                     downloadedChats.append(decrypted.chat)
                 } else {
                     guard generation == accountGeneration else {
-                        return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+                        return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
                     }
                     let placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
                     downloadedChats.append(placeholder)
@@ -1382,11 +1400,11 @@ class CloudSyncService: ObservableObject {
                     continuationToken: continuationToken
                 )
                 guard generation == accountGeneration else {
-                    return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+                    return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
                 }
                 return result
             }
-            return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil)
+            return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, failed: true)
         }
     }
     
@@ -1488,6 +1506,7 @@ class CloudSyncService: ObservableObject {
     
     /// Sync all chats (upload local changes, download remote changes)
     func syncAllChats() async -> SyncResult {
+        guard !uploadsSuspended else { return SyncResult() }
         let generation = accountGeneration
         guard !isSyncing else {
             return SyncResult()
@@ -1877,7 +1896,6 @@ class CloudSyncService: ObservableObject {
             )
             guard pending.generation == accountGeneration else { throw CancellationError() }
             deferredRemoteDeletes.removeValue(forKey: chatId)
-            deletedChatsTracker.removeFromDeleted(chatId)
             return false
         }
         try await EncryptedFileStorage.cloud.clearRemoteDeleteTombstone(
@@ -1886,6 +1904,14 @@ class CloudSyncService: ObservableObject {
         )
         guard pending.generation == accountGeneration else { throw CancellationError() }
         deferredRemoteDeletes.removeValue(forKey: chatId)
+        NotificationCenter.default.post(
+            name: .cloudChatRemoteDeleteCompleted,
+            object: nil,
+            userInfo: [
+                CloudRemoteDeleteNotificationKey.chatId: chatId,
+                CloudRemoteDeleteNotificationKey.userId: pending.userId
+            ]
+        )
         return true
     }
 
@@ -2176,6 +2202,8 @@ class CloudSyncService: ObservableObject {
     /// revision checkpoint — or none at all.
     func clearSyncStatus(forUser userId: String?) async {
         await handleLocalStoreWipe(forUser: userId)
+        uploadsSuspended = false
+        bulkDeleteAccount = nil
         lastSyncDate = nil
         // The health gate is per-account state: key problems and even the
         // sticky upgradeRequired gate must not block the NEXT account
@@ -2215,17 +2243,58 @@ class CloudSyncService: ObservableObject {
     }
 
     // MARK: - Delete Operations
+
+    func quiesceUploadsForBulkDelete(userId: String) async throws {
+        guard await cloudStorage.isAuthenticated(),
+              await getCurrentUserId() == userId else {
+            throw CloudStorageError.authenticationRequired
+        }
+        uploadsSuspended = true
+        accountGeneration += 1
+        let account = UploadAccount(generation: accountGeneration, userId: userId)
+        bulkDeleteAccount = account
+        emptyRemoteRegistration?.cancel()
+        emptyRemoteRegistration = nil
+        isSyncing = false
+        syncStatus = ""
+        pendingUploadCounts.removeAll()
+        pendingUploadChatIds.removeAll()
+        await uploadCoalescer.clear()
+        guard bulkDeleteAccount == account,
+              await getCurrentUserId() == userId else {
+            uploadsSuspended = false
+            bulkDeleteAccount = nil
+            throw CancellationError()
+        }
+    }
+
+    func resumeUploadsAfterBulkDelete(userId: String) async {
+        guard bulkDeleteAccount?.userId == userId,
+              await getCurrentUserId() == userId else { return }
+        uploadsSuspended = false
+        bulkDeleteAccount = nil
+    }
     
     /// Delete a chat from cloud storage
     /// Bulk-delete every chat the user owns from cloud storage. Returns the
     /// number of rows deleted. Callers are responsible for tombstoning local
     /// IDs only after this succeeds, mirroring the webapp's ordering.
     @discardableResult
-    func deleteAllFromCloud() async throws -> Int {
-        guard await cloudStorage.isAuthenticated() else {
+    func deleteAllFromCloud(userId: String) async throws -> Int {
+        guard let account = bulkDeleteAccount,
+              account.userId == userId,
+              account.generation == accountGeneration,
+              await getCurrentUserId() == userId,
+              await cloudStorage.isAuthenticated() else {
             throw CloudStorageError.authenticationRequired
         }
-        return try await cloudStorage.deleteAllChats()
+        let deleted = try await cloudStorage.deleteAllChats()
+        guard bulkDeleteAccount == account,
+              account.generation == accountGeneration,
+              await getCurrentUserId() == userId else {
+            throw CancellationError()
+        }
+        return deleted
     }
 
     func deleteFromCloud(_ chatId: String) async throws {
@@ -2348,7 +2417,6 @@ class CloudSyncService: ObservableObject {
             userId: userId
         )
         deferredRemoteDeletes.removeValue(forKey: chatId)
-        deletedChatsTracker.removeFromDeleted(chatId)
     }
 
     private func uploadAndMarkSynced(_ upload: PreparedChatUpload) async throws {

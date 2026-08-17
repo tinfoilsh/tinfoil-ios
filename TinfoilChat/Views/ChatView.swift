@@ -371,6 +371,7 @@ struct ChatContainer: View {
                         )
                     }
                     .accessibilityLabel(viewModel.isTemporaryMode ? "Exit temporary chat" : "Start temporary chat")
+                    .disabled(!viewModel.canUseCurrentChatActions)
                     .accessibleHitTarget()
                 }
             }
@@ -383,6 +384,7 @@ struct ChatContainer: View {
                             .foregroundColor(toolbarContentColor)
                     }
                     .accessibilityLabel("New chat")
+                    .disabled(!viewModel.canUseCurrentChatActions)
                     .accessibleHitTarget()
                 }
             }

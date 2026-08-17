@@ -243,6 +243,28 @@ struct ChatListView: View {
             viewModel.isScrollInteractionActive = false
             scrollToUserTrigger = UUID()
         }
+        .overlay {
+            if viewModel.hydratingChatId != nil || viewModel.chatHydrationError != nil {
+                VStack(spacing: 12) {
+                    if viewModel.hydratingChatId != nil {
+                        ProgressView()
+                    }
+                    Text(viewModel.chatHydrationError ?? "Loading conversation...")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    if viewModel.chatHydrationError != nil && viewModel.canRetryFailedChatHydration {
+                        Button("Try Again") {
+                            viewModel.retryFailedChatHydration()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.chatBackground(isDarkMode: isDarkMode))
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(viewModel.chatHydrationError ?? "Loading conversation")
+            }
+        }
     }
 
     private func pruneRecoveryDrafts() {
