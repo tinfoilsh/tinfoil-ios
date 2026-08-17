@@ -292,15 +292,16 @@ class AuthManager: ObservableObject {
     }
     
     /// Fetches subscription status directly from the API
-    func fetchSubscriptionStatus() async {
-        guard let clerk = clerk else { return }
-        guard let session = clerk.session else { return }
-        guard let token = try? await session.getToken() ?? session.lastActiveToken?.jwt else { return }
+    @discardableResult
+    func fetchSubscriptionStatus() async -> Bool {
+        guard let clerk = clerk else { return false }
+        guard let session = clerk.session else { return false }
+        guard let token = try? await session.getToken() ?? session.lastActiveToken?.jwt else { return false }
         
         do {
             let apiURL = "\(Constants.API.baseURL)/api/app/user-metadata"
             
-            guard let url = URL(string: apiURL) else { return }
+            guard let url = URL(string: apiURL) else { return false }
             
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
@@ -310,7 +311,7 @@ class AuthManager: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             
             guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else { return }
+                  httpResponse.statusCode == 200 else { return false }
             
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let publicMetadata = json["public_metadata"] as? [String: Any],
@@ -350,9 +351,12 @@ class AuthManager: ObservableObject {
                         }
                     }
                 }
+                return true
             }
+            return false
         } catch {
             // Handle error silently - subscription status will remain unchanged
+            return false
         }
     }
     
