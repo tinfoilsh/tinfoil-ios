@@ -324,15 +324,21 @@ private struct RecipeCardView: View {
                 Image(systemName: checked ? "checkmark.square.fill" : "square")
                     .foregroundColor(checked ? recipeAccent : GenUIStyle.mutedText(isDarkMode))
                     .font(.subheadline)
-                ingredientText(ingredient, checked: checked)
-                .font(.subheadline)
-                .strikethrough(checked)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if let note = ingredient.note, !note.isEmpty {
-                    Text("(\(note))")
-                        .font(.caption)
-                        .foregroundColor(GenUIStyle.mutedText(isDarkMode))
+                VStack(alignment: .leading, spacing: 2) {
+                    ingredientText(ingredient, checked: checked)
+                        .font(.subheadline)
+                        .strikethrough(checked)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let note = ingredient.note, !note.isEmpty {
+                        Text("(\(note))")
+                            .font(.caption)
+                            .foregroundColor(GenUIStyle.mutedText(isDarkMode))
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .buttonStyle(.plain)
