@@ -952,13 +952,14 @@ actor ChatRecoveryCoordinator {
                     response = recoveredResponse
                     break
                 } catch {
+                    let chatIsStreaming = await isChatStreaming(chatId)
                     guard scanIsCurrent(
                         accountGeneration: accountGeneration,
                         scanGeneration: scanGeneration,
                         userId: userId
                     ),
                           !cancelledTurns.contains(key),
-                          !(await isChatStreaming(chatId))
+                          !chatIsStreaming
                     else {
                         return
                     }
