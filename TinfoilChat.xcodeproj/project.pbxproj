@@ -757,8 +757,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tinfoilsh/textual";
 			requirement = {
-				kind = revision;
-				revision = 2d8e31a176e0531fc93421a8820521b645239979;
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.0.11;
 			};
 		};
 		99EAB0022FC0000200EAB002 /* XCRemoteSwiftPackageReference "encrypted-http-body-protocol" */ = {
