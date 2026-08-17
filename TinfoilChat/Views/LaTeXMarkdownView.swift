@@ -610,7 +610,8 @@ struct LaTeXMarkdownView: View, Equatable {
     /// measurement pass. Fenced code blocks never have a fence split
     /// open; oversized ones are re-fenced per chunk.
     private nonisolated static func splitLargeContent(_ content: String) -> [ContentSegment] {
-        splitFencePreservingSegment(content, baseId: "md")
+        guard !Task.isCancelled else { return [] }
+        return splitFencePreservingSegment(content, baseId: "md")
     }
 
     /// Splits oversized markdown without ever leaving an opening and
@@ -636,9 +637,11 @@ struct LaTeXMarkdownView: View, Equatable {
         let nsContent = content as NSString
         let fullRange = NSRange(location: 0, length: nsContent.length)
         let codeMatches = Self.codeBlockRegex?.matches(in: content, options: [], range: fullRange) ?? []
+        guard !Task.isCancelled else { return [] }
 
         var lastIndex = content.startIndex
         for match in codeMatches {
+            guard !Task.isCancelled else { return [] }
             guard let swiftRange = Range(match.range, in: content) else { continue }
             if lastIndex < swiftRange.lowerBound {
                 appendMarkdown(String(content[lastIndex..<swiftRange.lowerBound]), at: match.range.location)
@@ -682,6 +685,7 @@ struct LaTeXMarkdownView: View, Equatable {
         while let capIndex = remainder.index(
             remainder.startIndex, offsetBy: cap, limitedBy: remainder.endIndex
         ), capIndex != remainder.endIndex {
+            guard !Task.isCancelled else { return [] }
             // Prefer splitting after the last newline inside the window so
             // chunks break between lines instead of mid-line.
             let window = remainder[..<capIndex]
@@ -709,6 +713,7 @@ struct LaTeXMarkdownView: View, Equatable {
         var subIndex = 0
 
         for (_, paragraph) in paragraphs.enumerated() {
+            guard !Task.isCancelled else { return [] }
             let candidate = current.isEmpty ? paragraph : current + "\n\n" + paragraph
             if candidate.count > Constants.Rendering.maxMarkdownSegmentCharacters && !current.isEmpty {
                 result.append(ContentSegment(
@@ -728,6 +733,7 @@ struct LaTeXMarkdownView: View, Equatable {
                 kind: .markdown(current)
             ))
         }
+        guard !Task.isCancelled else { return [] }
 
         // A single paragraph with no blank lines can still exceed the cap;
         // hard-split it so no segment stays unbounded.
@@ -749,6 +755,7 @@ struct LaTeXMarkdownView: View, Equatable {
         var subIndex = 0
 
         while remainder.count > cap {
+            guard !Task.isCancelled else { return [] }
             let capIndex = remainder.index(remainder.startIndex, offsetBy: cap)
             let window = remainder[..<capIndex]
             let splitIndex = window.lastIndex(of: "\n").map { remainder.index(after: $0) } ?? capIndex
