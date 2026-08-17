@@ -28,7 +28,7 @@ struct CloudSyncSettingsView: View {
                         Task { await viewModel.performFullSync() }
                     } else {
                         Task {
-                            let result = await passkeyManager.retryPasskeySetup()
+                            let result = await viewModel.retryPasskeySetup()
                             switch result {
                             case .manualSetupRequired:
                                 await MainActor.run {
@@ -393,21 +393,21 @@ struct CloudSyncSettingsView: View {
                         title: "Set Up Passkey on This Device",
                         subtitle: "Your other devices use a passkey already. Add one here for one-tap access."
                     ) {
-                        await passkeyManager.createPasskeyBackup()
+                        await viewModel.createPasskeyBackup()
                     }
                 } else if passkeyManager.passkeySetupAvailable && EncryptionService.shared.hasEncryptionKey() {
                     passkeyActionButton(
                         title: "Add Passkey for seamless sync",
                         subtitle: "Use Face ID or Touch ID to sync chats across devices"
                     ) {
-                        await passkeyManager.createPasskeyBackup()
+                        await viewModel.createPasskeyBackup()
                     }
                 } else if passkeyManager.passkeySetupAvailable && !EncryptionService.shared.hasEncryptionKey() {
                     passkeyActionButton(
                         title: "Add Passkey for seamless sync",
                         subtitle: "Create a passkey to sync chats across devices"
                     ) {
-                        let result = await passkeyManager.retryPasskeySetup()
+                        let result = await viewModel.retryPasskeySetup()
                         switch result {
                         case .manualSetupRequired:
                             await MainActor.run {

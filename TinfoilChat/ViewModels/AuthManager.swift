@@ -27,6 +27,8 @@ class AuthManager: ObservableObject {
     private var clerk: Clerk?
     private var hasTriggeredSignIn = false
     private var accountSwitchTask: Task<Void, Never>?
+    private var accountTeardownTask: Task<Void, Never>?
+    private var accountTeardownId: UUID?
     
     // UserDefaults keys
     private let authStateKey = Constants.StorageKeys.Auth.state
@@ -241,6 +243,26 @@ class AuthManager: ObservableObject {
     }
     
     private func clearAuthState() async {
+        if let accountTeardownTask {
+            await accountTeardownTask.value
+            return
+        }
+
+        let teardownId = UUID()
+        let teardownTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performAccountTeardown()
+            self.chatViewModel?.completeAccountTeardown()
+        }
+        accountTeardownId = teardownId
+        accountTeardownTask = teardownTask
+        await teardownTask.value
+        guard accountTeardownId == teardownId else { return }
+        accountTeardownTask = nil
+        accountTeardownId = nil
+    }
+
+    private func performAccountTeardown() async {
         // Handle chat state BEFORE clearing auth so the view model can still
         // save the current chat (hasChatAccess depends on isAuthenticated).
         await chatViewModel?.handleSignOut()
@@ -276,7 +298,6 @@ class AuthManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: authStateKey)
         UserDefaults.standard.removeObject(forKey: userDataKey)
         UserDefaults.standard.removeObject(forKey: subscriptionKey)
-
     }
     
     func signOut() async {
@@ -284,11 +305,9 @@ class AuthManager: ObservableObject {
             // If we have a Clerk instance, use it, otherwise fall back to Clerk.shared
             let clerk = self.clerk ?? Clerk.shared
             try await clerk.auth.signOut()
-            
-            await clearAuthState()
-            
         } catch {
         }
+        await clearAuthState()
     }
     
     /// Fetches subscription status directly from the API

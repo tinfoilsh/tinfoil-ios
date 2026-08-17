@@ -64,6 +64,8 @@ final class PasskeyManager: ObservableObject {
     // MARK: - Private
 
     private var syncCheckTask: Task<Void, Never>?
+    private var accountOperationsEnabled = true
+    private let accountOperationTracker = AccountOperationTracker()
     private let passkeyService = PasskeyService.shared
 
     /// Remote keyId currently surfaced in the recovery-choice sheet,
@@ -108,7 +110,14 @@ final class PasskeyManager: ObservableObject {
 
     // MARK: - Sign-Out Reset
 
-    func reset() {
+    func reset() async {
+        accountOperationsEnabled = false
+        await accountOperationTracker.closeAndWait()
+        let canceledSyncCheckTask = syncCheckTask
+        canceledSyncCheckTask?.cancel()
+        syncCheckTask = nil
+        await canceledSyncCheckTask?.value
+
         passkeyActive = false
         passkeySetupAvailable = false
         passkeyAddDeviceAvailable = false
@@ -117,11 +126,14 @@ final class PasskeyManager: ObservableObject {
         setDismissedRecoveryKeyId(nil)
         onRecoveryComplete = nil
         onKeyRefreshedFromBackup = nil
-        syncCheckTask?.cancel()
-        syncCheckTask = nil
         passkeyService.clearCachedPrfResult()
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId)
+    }
+
+    func resumeAccountOperations() {
+        accountOperationsEnabled = true
+        accountOperationTracker.reopen()
     }
 
     // MARK: - Recovery Flow
@@ -132,9 +144,11 @@ final class PasskeyManager: ObservableObject {
         do {
             state = try await SyncEnclaveAPI.keyCurrent()
         } catch {
+            guard canMutateAccountKey else { return .recoveryFailed }
             surfaceRecoveryChoice(forKeyId: nil)
             return .recoveryFailed
         }
+        guard canMutateAccountKey else { return .recoveryFailed }
 
         // When the enclave already has a usable v2 bundle, unlock
         // straight from the server. Use a silent ceremony so a device
@@ -142,6 +156,7 @@ final class PasskeyManager: ObservableObject {
         // of detouring through the cross-device QR sheet.
         if state.keyId != nil, !state.bundles.isEmpty {
             let serverResult = await PasskeyKeyFlow.unlockFromServer(silent: true)
+            guard canMutateAccountKey else { return .recoveryFailed }
             if case .success = serverResult {
                 return await applyUnlockResult(serverResult)
             }
@@ -155,6 +170,7 @@ final class PasskeyManager: ObservableObject {
                     entries: legacy,
                     enclaveKeyId: state.keyId
                 )
+                guard canMutateAccountKey else { return .recoveryFailed }
                 if case .success = legacyResult {
                     return await applyUnlockResult(legacyResult)
                 }
@@ -169,6 +185,7 @@ final class PasskeyManager: ObservableObject {
         // exclude them here and let them fall through to recovery — a
         // fresh key would strand their un-migrated data.
         let remoteState = await CloudKeyPreflightValidator.shared.inspectRemoteState()
+        guard canMutateAccountKey else { return .recoveryFailed }
         if state.keyId == nil, !state.hasData, remoteState == .empty {
             let created = await attemptNewUserPasskeySetup()
             if !created {
@@ -191,6 +208,7 @@ final class PasskeyManager: ObservableObject {
                 entries: legacy,
                 enclaveKeyId: state.keyId
             )
+            guard canMutateAccountKey else { return .recoveryFailed }
             switch legacyResult {
             case .success:
                 return await applyUnlockResult(legacyResult)
@@ -224,6 +242,7 @@ final class PasskeyManager: ObservableObject {
               remoteKeyId != localKeyId else {
             return .noMismatch
         }
+        guard canMutateAccountKey else { return .noMismatch }
 
         guard !state.bundles.isEmpty else {
             return .manualRecoveryRequired
@@ -235,13 +254,16 @@ final class PasskeyManager: ObservableObject {
             ),
             silent: true
         )
+        guard canMutateAccountKey else { return .noMismatch }
         if case .success(let recoveredCek, let keyIdHex, _, _) = result {
             do {
                 try await applyRecoveredCek(cek: recoveredCek)
             } catch {
+                guard canMutateAccountKey else { return .noMismatch }
                 surfaceRecoveryChoice(forKeyId: remoteKeyId)
                 return .passkeyPromptShown
             }
+            guard canMutateAccountKey else { return .noMismatch }
             persistEnclaveKeyId(keyIdHex)
             activatePasskey()
             onKeyRefreshedFromBackup?()
@@ -257,14 +279,17 @@ final class PasskeyManager: ObservableObject {
     private func applyUnlockResult(
         _ result: PasskeyFlowResult
     ) async -> PasskeyRecoveryResult {
+        guard canMutateAccountKey else { return .recoveryFailed }
         switch result {
         case .success(let cek, let keyIdHex, _, _):
             do {
                 try await applyRecoveredCek(cek: cek)
             } catch {
+                guard canMutateAccountKey else { return .recoveryFailed }
                 surfaceRecoveryChoice(forKeyId: keyIdHex)
                 return .recoveryFailed
             }
+            guard canMutateAccountKey else { return .recoveryFailed }
             persistEnclaveKeyId(keyIdHex)
             activatePasskey()
             return .success
@@ -288,10 +313,12 @@ final class PasskeyManager: ObservableObject {
             user: user,
             createdVia: createdVia
         )
+        guard canMutateAccountKey else { return false }
         switch result {
         case .success(let cek, let keyIdHex, _, _):
             do {
                 try await applyFreshCek(cek: cek)
+                guard canMutateAccountKey else { throw CancellationError() }
                 guard CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: authorizationMode) else {
                     EncryptionService.shared.clearKey()
                     throw CloudKeyAuthorizationError.authorizationUnavailable
@@ -374,9 +401,11 @@ final class PasskeyManager: ObservableObject {
         } catch {
             return false
         }
+        guard canMutateAccountKey else { return false }
         guard state.keyId != nil, !state.bundles.isEmpty else { return false }
 
         let result = await PasskeyKeyFlow.unlockFromServer()
+        guard canMutateAccountKey else { return false }
         switch result {
         case .success(let cek, let keyIdHex, _, _):
             do {
@@ -384,6 +413,7 @@ final class PasskeyManager: ObservableObject {
             } catch {
                 return false
             }
+            guard canMutateAccountKey else { return false }
             persistEnclaveKeyId(keyIdHex)
             activatePasskey()
             showPasskeyRecoveryChoice = false
@@ -415,7 +445,7 @@ final class PasskeyManager: ObservableObject {
                 passkeySetupAvailable = true
                 return .manualRecoveryRequired
             }
-            await createPasskeyBackup()
+            guard await createPasskeyBackup() else { return .recoveryFailed }
             return .success
         }
         return await attemptPasskeyKeyRecovery()
@@ -425,6 +455,7 @@ final class PasskeyManager: ObservableObject {
     func checkPasskeyStateForExistingKey() async {
         do {
             let state = try await SyncEnclaveAPI.keyCurrent()
+            guard canMutateAccountKey else { return }
             if let remoteKeyId = state.keyId, !state.bundles.isEmpty {
                 // Derive the local key id so we can tell whether this
                 // device is actually on the current key or is holding a
@@ -487,6 +518,7 @@ final class PasskeyManager: ObservableObject {
             // state is stale and must not survive the transition.
             passkeyActive = false
         } catch {
+            guard canMutateAccountKey else { return }
             // fall through to "setup available"
         }
         passkeySetupAvailable = true
@@ -498,6 +530,7 @@ final class PasskeyManager: ObservableObject {
     /// may have changed (e.g. legacy-blob migration completed,
     /// another device just added a bundle).
     func refreshBundleState() async {
+        guard accountOperationsEnabled else { return }
         guard EncryptionService.shared.hasEncryptionKey() else { return }
         await checkPasskeyStateForExistingKey()
     }
@@ -513,32 +546,47 @@ final class PasskeyManager: ObservableObject {
     /// Remove a passkey bundle from the enclave's current key, then
     /// re-evaluate the local passkey state.
     func removePasskeyBundle(credentialId: String) async throws {
-        let cek = try EncryptionService.shared.getKeyBytesOrThrow()
-        let keyIdHex = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
-        try await PasskeyKeyFlow.removeBundleFromCurrentKey(
-            cek: cek,
-            keyIdHex: keyIdHex,
-            credentialId: credentialId
-        )
-        await refreshBundleState()
+        guard accountOperationsEnabled else { throw CancellationError() }
+        let operationTask = Task {
+            try Task.checkCancellation()
+            let cek = try EncryptionService.shared.getKeyBytesOrThrow()
+            let keyIdHex = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+            try await PasskeyKeyFlow.removeBundleFromCurrentKey(
+                cek: cek,
+                keyIdHex: keyIdHex,
+                credentialId: credentialId
+            )
+            try Task.checkCancellation()
+            guard accountOperationsEnabled else { throw CancellationError() }
+            await refreshBundleState()
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            throw CancellationError()
+        }
+        defer { accountOperationTracker.end(operationToken) }
+
+        try await operationTask.value
     }
 
     /// Create a passkey bundle for the user's existing CEK. Used by
     /// "Add this device to passkey backup" in Settings.
-    func createPasskeyBackup() async {
-        guard let user = userInfo() else { return }
-        guard await ensureCurrentPrimaryKeyAuthorized() else { return }
+    func createPasskeyBackup() async -> Bool {
+        guard canMutateAccountKey else { return false }
+        guard let user = userInfo() else { return false }
+        guard await ensureCurrentPrimaryKeyAuthorized() else { return false }
+        guard canMutateAccountKey else { return false }
         let cek: Data
         do {
             cek = try EncryptionService.shared.getKeyBytesOrThrow()
         } catch {
-            return
+            return false
         }
         let keyIdHex: String
         do {
             keyIdHex = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
         } catch {
-            return
+            return false
         }
 
         // Determine whether to register-key or add-bundle by probing
@@ -549,26 +597,20 @@ final class PasskeyManager: ObservableObject {
         // existing key.
         do {
             let state = try await SyncEnclaveAPI.keyCurrent()
+            guard canMutateAccountKey else { return false }
             if state.keyId == nil {
                 let result = await PasskeyKeyFlow.registerExistingKeyWithPasskey(
                     existingCek: cek,
                     user: user,
                     createdVia: .recovery
                 )
+                guard canMutateAccountKey else { return false }
                 if case .success = result {
                     persistEnclaveKeyId(keyIdHex)
                     activatePasskey()
-                    // Adopting the existing CEK just registered it as
-                    // the current key, so the migration gate that the
-                    // launch-time pass tripped over now clears. Re-seal
-                    // any legacy rows now instead of waiting for the
-                    // next launch.
-                    Task.detached(priority: .background) {
-                        _ = await LegacyBlobMigration.runAndFinalize()
-                        await PasskeyManager.shared.refreshBundleState()
-                    }
+                    return true
                 }
-                return
+                return false
             }
 
             // Existing key — enroll a new passkey for it.
@@ -577,13 +619,16 @@ final class PasskeyManager: ObservableObject {
                 keyIdHex: keyIdHex,
                 user: user
             )
+            guard canMutateAccountKey else { return false }
             if case .success = result {
                 persistEnclaveKeyId(keyIdHex)
                 activatePasskey()
+                return true
             }
         } catch {
             // Non-fatal — leave state unchanged.
         }
+        return false
     }
 
     /// No-op shim retained for compatibility with views that still
@@ -604,10 +649,19 @@ final class PasskeyManager: ObservableObject {
         startSyncCheck()
     }
 
+    private var canMutateAccountKey: Bool {
+        accountOperationsEnabled && !Task.isCancelled
+    }
+
     private func applyRecoveredCek(cek: Data) async throws {
+        guard canMutateAccountKey else { throw CancellationError() }
         let bytes = try await snapshotCurrentKeys()
+        guard canMutateAccountKey else { throw CancellationError() }
         do {
             try await EncryptionService.shared.setKeyBytes(cek)
+            guard canMutateAccountKey else {
+                throw CancellationError()
+            }
         } catch {
             try EncryptionService.shared.replaceKeyBundle(
                 primary: bytes.primary,
@@ -616,15 +670,28 @@ final class PasskeyManager: ObservableObject {
             throw error
         }
 
+        guard canMutateAccountKey else { throw CancellationError() }
         let mode = try await CloudKeyAuthorizationStore.shared
             .authorizeCurrentPrimaryKeyAfterValidation(rollbackTo: bytes)
+        guard canMutateAccountKey else {
+            try EncryptionService.shared.replaceKeyBundle(
+                primary: bytes.primary,
+                alternatives: bytes.alternatives
+            )
+            throw CancellationError()
+        }
         _ = mode
     }
 
     private func applyFreshCek(cek: Data) async throws {
+        guard canMutateAccountKey else { throw CancellationError() }
         let bytes = try await snapshotCurrentKeys()
+        guard canMutateAccountKey else { throw CancellationError() }
         do {
             try await EncryptionService.shared.setKeyBytes(cek)
+            guard canMutateAccountKey else {
+                throw CancellationError()
+            }
         } catch {
             try EncryptionService.shared.replaceKeyBundle(
                 primary: bytes.primary,
@@ -685,6 +752,7 @@ final class PasskeyManager: ObservableObject {
     /// changes, the local CEK is invalidated and a fresh recovery
     /// flow is required.
     func startSyncCheck() {
+        guard accountOperationsEnabled else { return }
         syncCheckTask?.cancel()
         syncCheckTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -696,8 +764,10 @@ final class PasskeyManager: ObservableObject {
     }
 
     private func refreshKeyFromEnclave() async {
+        guard canMutateAccountKey else { return }
         do {
             let state = try await SyncEnclaveAPI.keyCurrent()
+            guard canMutateAccountKey else { return }
             guard let remoteKeyId = state.keyId else { return }
             let storedKeyId = cachedKeyIdHex()
             if let storedKeyId, storedKeyId == remoteKeyId {
@@ -724,13 +794,16 @@ final class PasskeyManager: ObservableObject {
                 prefer: UserDefaults.standard.string(forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId),
                 silent: true
             )
+            guard canMutateAccountKey else { return }
             switch result {
             case .success(let cek, let keyIdHex, _, _):
                 do {
                     try await applyRecoveredCek(cek: cek)
+                    guard canMutateAccountKey else { return }
                     persistEnclaveKeyId(keyIdHex)
                     onKeyRefreshedFromBackup?()
                 } catch {
+                    guard canMutateAccountKey else { return }
                     surfaceRecoveryChoice(forKeyId: remoteKeyId)
                 }
             case .failure(.enclaveUnavailable, _):

@@ -60,6 +60,7 @@ enum LegacyBlobMigration {
     /// local loop — the enclave job keeps draining and the next
     /// launch resumes polling against the same coordinator entry.
     static func run() async -> MigrationReport {
+        guard !Task.isCancelled else { return .empty }
         let targetKeyB64: String
         do {
             targetKeyB64 = try CEKEncoding.requirePrimaryKeyB64()
@@ -77,7 +78,9 @@ enum LegacyBlobMigration {
         do {
             let cek = try EncryptionService.shared.getKeyBytesOrThrow()
             let localKeyId = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+            guard !Task.isCancelled else { return .empty }
             var current = try await SyncEnclaveAPI.keyCurrent()
+            guard !Task.isCancelled else { return .empty }
             // A v1->v2 user can hold legacy data and a local CEK without
             // ever registering it as the current key — e.g. they have no
             // passkey, or only an un-promoted legacy passkey, so none of
@@ -94,10 +97,15 @@ enum LegacyBlobMigration {
             // they diverge the helper returns nil and adoption is skipped,
             // so the gate below defers this sweep until the ceremony lands.
             if current.keyId == nil, current.hasData,
-                let safeKey = committedKeyIfActiveMatches(),
-                await adoptLocalKeyForMigration(keyB64: dataToBase64(safeKey))
+                let safeKey = committedKeyIfActiveMatches()
             {
-                current = try await SyncEnclaveAPI.keyCurrent()
+                guard !Task.isCancelled else { return .empty }
+                let adopted = await adoptLocalKeyForMigration(keyB64: dataToBase64(safeKey))
+                guard !Task.isCancelled else { return .empty }
+                if adopted {
+                    current = try await SyncEnclaveAPI.keyCurrent()
+                    guard !Task.isCancelled else { return .empty }
+                }
             }
             guard current.keyId == localKeyId else {
                 #if DEBUG
@@ -117,7 +125,9 @@ enum LegacyBlobMigration {
         // newly recovered key has a different fingerprint), so a
         // genuinely actionable retry still runs. Mirrors the webapp's
         // migration key-set gate; the server 24h cooldown is the backstop.
+        guard !Task.isCancelled else { return .empty }
         let activeUserId = await Clerk.shared.user?.id
+        guard !Task.isCancelled else { return .empty }
         let keysetFingerprint = candidateKeySetFingerprint()
         if let activeUserId, let keysetFingerprint,
             loadExhaustedKeyset(activeUserId) == keysetFingerprint
@@ -135,12 +145,15 @@ enum LegacyBlobMigration {
 
         var lastResponse: EnclaveMigrateAllResponse?
         do {
-            lastResponse = try await SyncEnclaveAPI.migrateAll(
+            guard !Task.isCancelled else { return .empty }
+            let kickoffResponse = try await SyncEnclaveAPI.migrateAll(
                 EnclaveMigrateAllRequest(
                     keys: keys,
                     target: EnclaveMigrateRequestTarget(key: targetKeyB64)
                 )
             )
+            guard !Task.isCancelled else { return .empty }
+            lastResponse = kickoffResponse
         } catch {
             #if DEBUG
             print("[LegacyBlobMigration] migrate-all kickoff failed: \(error)")
@@ -149,15 +162,27 @@ enum LegacyBlobMigration {
         }
 
         while shouldKeepPolling(lastResponse) {
+            guard !Task.isCancelled else { return .empty }
             if Date().timeIntervalSince(startedAt) > pollTimeout {
                 #if DEBUG
                 print("[LegacyBlobMigration] poll timeout — bailing")
                 #endif
                 break
             }
-            try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
+            guard !Task.isCancelled else { return .empty }
             do {
-                lastResponse = try await SyncEnclaveAPI.migrateStatus()
+                try await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
+            } catch is CancellationError {
+                return .empty
+            } catch {
+                return .empty
+            }
+            guard !Task.isCancelled else { return .empty }
+            do {
+                guard !Task.isCancelled else { return .empty }
+                let statusResponse = try await SyncEnclaveAPI.migrateStatus()
+                guard !Task.isCancelled else { return .empty }
+                lastResponse = statusResponse
             } catch {
                 #if DEBUG
                 print("[LegacyBlobMigration] migrate-status poll failed: \(error)")
@@ -166,6 +191,7 @@ enum LegacyBlobMigration {
             }
         }
 
+        guard !Task.isCancelled else { return .empty }
         let snapshot = lastResponse.map { snapshotScopes($0.scopes) } ?? [:]
         var report = toReport(snapshot)
         // A failed coordinator job can report partial=false: the flag
@@ -191,6 +217,7 @@ enum LegacyBlobMigration {
                     totalBlocked: 0,
                     fullyMigrated: true
                 )
+                guard !Task.isCancelled else { return .empty }
                 recordKeysetOutcome(
                     userId: activeUserId,
                     fingerprint: keysetFingerprint,
@@ -201,6 +228,7 @@ enum LegacyBlobMigration {
             }
             return .empty
         }
+        guard !Task.isCancelled else { return .empty }
         recordKeysetOutcome(
             userId: activeUserId,
             fingerprint: keysetFingerprint,
@@ -214,6 +242,7 @@ enum LegacyBlobMigration {
     /// report confirms every observed row has been re-sealed.
     @discardableResult
     static func finalizeAlternativesIfMigrated(_ report: MigrationReport) async -> Bool {
+        guard !Task.isCancelled else { return false }
         guard report.fullyMigrated else { return false }
         guard let userId = await Clerk.shared.user?.id,
               let primary = try? EncryptionService.shared.getKeyBytesOrThrow(),
@@ -221,34 +250,43 @@ enum LegacyBlobMigration {
         else {
             return false
         }
+        guard !Task.isCancelled else { return false }
         guard let entries = try? await EncryptedFileStorage.cloud.loadIndex(userId: userId)
         else {
             return false
         }
+        guard !Task.isCancelled else { return false }
         for entry in entries {
+            guard !Task.isCancelled else { return false }
             guard let chat = try? await EncryptedFileStorage.cloud.loadChat(
                 chatId: entry.id,
                 userId: userId
             ) else {
                 return false
             }
+            guard !Task.isCancelled else { return false }
             if chat.pendingRecoveries?.contains(where: { $0.keyId != primaryKeyId }) == true {
                 return false
             }
         }
+        guard !Task.isCancelled else { return false }
         guard await remoteRecoveriesUseOnlyPrimary(
             userId: userId,
             primaryKeyId: primaryKeyId
         ) else {
             return false
         }
+        guard !Task.isCancelled else { return false }
         EncryptionService.shared.clearFallbackKeys()
         return true
     }
 
     static func runAndFinalize() async -> MigrationReport {
+        guard !Task.isCancelled else { return .empty }
         let report = await run()
+        guard !Task.isCancelled else { return .empty }
         _ = await finalizeAlternativesIfMigrated(report)
+        guard !Task.isCancelled else { return .empty }
         return report
     }
 
@@ -261,6 +299,7 @@ enum LegacyBlobMigration {
         var cursor: String?
         var seenCursors: Set<String> = []
         repeat {
+            guard !Task.isCancelled else { return false }
             guard await Clerk.shared.user?.id == userId,
                   let page = try? await CloudStorageService.shared.listChats(
                       limit: Constants.SyncEnclave.listStatusPageLimit,
@@ -270,7 +309,9 @@ enum LegacyBlobMigration {
             else {
                 return false
             }
+            guard !Task.isCancelled else { return false }
             for remote in page.conversations {
+                guard !Task.isCancelled else { return false }
                 guard let content = remote.content,
                       let data = content.data(using: .utf8),
                       let chat = try? JSONDecoder().decode(StoredChat.self, from: data)
@@ -396,8 +437,11 @@ enum LegacyBlobMigration {
     /// user adopts their key on their next write instead of deferring
     /// forever while they wait for the out-of-band migration kick.
     static func adoptLocalKeyForMigration(keyB64: String) async -> Bool {
+        guard !Task.isCancelled else { return false }
         let initialBundle = await initialBundleFromCachedPrf()
+        guard !Task.isCancelled else { return false }
         do {
+            guard !Task.isCancelled else { return false }
             _ = try await SyncEnclaveAPI.registerKey(
                 EnclaveKeyRegisterRequest(
                     key: keyB64,
@@ -407,6 +451,7 @@ enum LegacyBlobMigration {
                     initialBundle: initialBundle
                 )
             )
+            guard !Task.isCancelled else { return false }
         } catch {
             #if DEBUG
             print("[LegacyBlobMigration] local key adoption failed: \(error)")
@@ -430,10 +475,13 @@ enum LegacyBlobMigration {
     /// or re-created) must not attach an unopenable bundle, which would
     /// make the account look passkey-recoverable when it is not.
     private static func initialBundleFromCachedPrf() async -> EnclaveKeyRegisterBundleInput? {
+        guard !Task.isCancelled else { return nil }
         guard let cached = await PasskeyService.shared.getCachedPrfResult() else {
             return nil
         }
+        guard !Task.isCancelled else { return nil }
         let entries = await LegacyPasskeyCredentials.fetch()
+        guard !Task.isCancelled else { return nil }
         guard entries.contains(where: { $0.id == cached.credentialId }) else {
             return nil
         }

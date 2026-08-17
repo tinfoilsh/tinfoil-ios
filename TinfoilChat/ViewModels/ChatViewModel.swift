@@ -264,6 +264,13 @@ class ChatViewModel: ObservableObject {
     private let streamingTracker = StreamingTracker.shared
     private let projectStorage = ProjectStorageService.shared
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
+    private var signInTask: Task<Void, Never>?
+    private var legacyMigrationTask: Task<Void, Never>?
+    private var accountOperationFence = AccountOperationFence()
+    private let accountOperationTracker = AccountOperationTracker()
+    private var activeSignInToken: AccountOperationFence.Token?
+    private var isAccountTeardownInProgress = false
+    private var acceptsChatSaves = true
     private var hasPerformedInitialSync: Bool = false  // Track if initial sync has been done
     private var hasAnonymousChatsToSync: Bool = false  // Track if we have anonymous chats to sync
     
@@ -412,6 +419,8 @@ class ChatViewModel: ObservableObject {
     private var streamUpdateTimers: [String: Timer] = [:]
     private var pendingStreamUpdates: [String: Chat] = [:]
     private var pendingSaveTask: Task<Void, Never>?
+    private var pendingBackupTasks: [UUID: Task<Void, Never>] = [:]
+    private var activeFullSyncId: UUID?
     private var lastKnownAuthState: Bool?
     @Published private var genUIRetryStates: [GenUIRetryKey: GenUIRetryState] = [:]
     private var activeGenUIRetryIds: [GenUIRetryKey: UUID] = [:]
@@ -744,6 +753,10 @@ class ChatViewModel: ObservableObject {
     
     private func loadPersistedPaginationState() {
         guard let userId = currentUserId else { return }
+        loadPersistedPaginationState(userId: userId)
+    }
+
+    private func loadPersistedPaginationState(userId: String) {
         if let token = UserDefaults.standard.string(forKey: Constants.StorageKeys.Sync.paginationToken(userId: userId)) {
             paginationToken = token
         }
@@ -870,6 +883,9 @@ class ChatViewModel: ObservableObject {
     }
     
     deinit {
+        signInTask?.cancel()
+        legacyMigrationTask?.cancel()
+
         // Stop sync timers
         autoSyncTimer?.invalidate()
         autoSyncTimer = nil
@@ -4208,51 +4224,28 @@ class ChatViewModel: ObservableObject {
 
     /// Resume the sign-in flow after the user completes manual key setup via CloudSyncOnboardingView.
     func resumeAfterManualKeySetup() {
-        Task {
-            do {
-                let key = try await EncryptionService.shared.initialize()
-                self.encryptionKey = key
-
-                await self.passkeyManager.checkPasskeyStateForExistingKey()
-
-                await retryDecryptionAndReloadChats()
-
-                if SettingsManager.shared.isCloudSyncEnabled {
-                    await initializeCloudSync()
-                    await ProfileManager.shared.performFullSync()
-                }
-
-                await MainActor.run {
-                    let activeList = SettingsManager.shared.isCloudSyncEnabled ? self.chats : self.localChats
-                    if activeList.isEmpty {
-                        self.createNewChat()
-                    } else {
-                        self.ensureBlankChatAtTop()
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.showEncryptionSetup = true
-                }
-            }
-        }
+        handleSignIn()
     }
     
     // MARK: - Private Methods
 
     private func retryDecryptionAndReloadChats() async {
-        let decryptedCount = await cloudSync.retryDecryptionWithNewKey(onProgress: nil)
-        guard decryptedCount > 0 else { return }
+        guard let userId = currentUserId else { return }
+        await retryDecryptionAndReloadChats(userId: userId)
+    }
 
-        let result = await loadFirstPageOfChats(userId: self.currentUserId, filter: \.isCloudDisplayable)
-        await MainActor.run {
-            self.chats = result.chats
-            if let currentId = self.currentChat?.id,
-               let refreshed = result.chats.first(where: { $0.id == currentId }) {
-                self.currentChat = refreshed
-            }
-            normalizeChatsArray()
+    private func retryDecryptionAndReloadChats(userId: String) async {
+        let decryptedCount = await cloudSync.retryDecryptionWithNewKey(onProgress: nil)
+        guard currentUserId == userId, decryptedCount > 0 else { return }
+
+        let result = await loadFirstPageOfChats(userId: userId, filter: \.isCloudDisplayable)
+        guard currentUserId == userId else { return }
+        chats = result.chats
+        if let currentId = currentChat?.id,
+           let refreshed = result.chats.first(where: { $0.id == currentId }) {
+            currentChat = refreshed
         }
+        normalizeChatsArray()
     }
 
     private func endStreamingAndBackup(chatId: String) {
@@ -4435,6 +4428,7 @@ class ChatViewModel: ObservableObject {
     
     /// Saves a single chat to per-chat file storage and triggers cloud backup
     private func saveChat(_ chat: Chat, shouldBackup: Bool = true) {
+        guard acceptsChatSaves else { return }
         guard !chat.isTemporary else { return }
         guard hasChatAccess else { return }
         guard !chat.messages.isEmpty || chat.decryptionFailed else { return }
@@ -4450,15 +4444,50 @@ class ChatViewModel: ObservableObject {
         // has messages, and no active stream.
         if shouldBackup && SettingsManager.shared.isCloudSyncEnabled && !chat.isLocalOnly && !chat.messages.isEmpty && !chat.hasActiveStream {
             let saveTask = pendingSaveTask
-            Task {
+            let backupId = UUID()
+            let backupTask = Task { [weak self] in
+                defer { self?.pendingBackupTasks[backupId] = nil }
                 await saveTask?.value
-                await cloudSync.backupChat(chat.id)
+                guard let self, self.acceptsChatSaves else { return }
+                await self.cloudSync.backupChat(chat.id, ensureLatestUpload: true)
+            }
+            pendingBackupTasks[backupId] = backupTask
+        }
+    }
+
+    private func saveChatForSignIn(
+        _ chat: Chat,
+        userId: String,
+        token: AccountOperationFence.Token
+    ) async {
+        guard acceptsChatSaves else { return }
+        guard isCurrentSignIn(token, userId: userId) else { return }
+        guard !chat.isTemporary else { return }
+        guard !chat.messages.isEmpty || chat.decryptionFailed else { return }
+
+        await Chat.saveChat(chat, userId: userId)
+        guard acceptsChatSaves,
+              isCurrentSignIn(token, userId: userId)
+        else {
+            return
+        }
+
+        if SettingsManager.shared.isCloudSyncEnabled && !chat.isLocalOnly && !chat.messages.isEmpty && !chat.hasActiveStream {
+            await cloudSync.backupChat(chat.id)
+            guard acceptsChatSaves,
+                  isCurrentSignIn(token, userId: userId)
+            else {
+                return
             }
         }
     }
 
     private func drainPendingSaves() async {
         await pendingSaveTask?.value
+        let backupTasks = Array(pendingBackupTasks.values)
+        for backupTask in backupTasks {
+            await backupTask.value
+        }
     }
 
     private func persistRecoveryCriticalSnapshot(
@@ -4506,6 +4535,95 @@ class ChatViewModel: ObservableObject {
     }
     
     // MARK: - Authentication & Model Access
+
+    private func isCurrentAccountOperation(
+        _ token: AccountOperationFence.Token,
+        userId: String
+    ) -> Bool {
+        token.userId == userId
+            && accountOperationFence.isCurrent(token, currentUserId: currentUserId)
+    }
+
+    private func isCurrentSignIn(
+        _ token: AccountOperationFence.Token,
+        userId: String
+    ) -> Bool {
+        !Task.isCancelled && isCurrentAccountOperation(token, userId: userId)
+    }
+
+    private func currentAccountOperationToken(userId: String) -> AccountOperationFence.Token {
+        if let activeSignInToken,
+           accountOperationFence.isCurrent(activeSignInToken, currentUserId: userId) {
+            return activeSignInToken
+        }
+        let token = accountOperationFence.begin(userId: userId)
+        activeSignInToken = token
+        return token
+    }
+
+    private func startLegacyMigration(
+        token: AccountOperationFence.Token,
+        userId: String
+    ) {
+        let previousTask = legacyMigrationTask
+        previousTask?.cancel()
+        legacyMigrationTask = Task { [weak self] in
+            await previousTask?.value
+            guard !Task.isCancelled,
+                  self?.isCurrentAccountOperation(token, userId: userId) == true
+            else {
+                return
+            }
+            _ = await LegacyBlobMigration.runAndFinalize()
+            guard let self,
+                  !Task.isCancelled,
+                  self.isCurrentAccountOperation(token, userId: userId)
+            else {
+                return
+            }
+            await self.passkeyManager.refreshBundleState()
+            guard !Task.isCancelled,
+                  self.isCurrentAccountOperation(token, userId: userId)
+            else {
+                return
+            }
+        }
+    }
+
+    @discardableResult
+    private func cancelLegacyMigration() -> Task<Void, Never>? {
+        let canceledTask = legacyMigrationTask
+        canceledTask?.cancel()
+        legacyMigrationTask = nil
+        return canceledTask
+    }
+
+    @discardableResult
+    private func cancelSignInOperation() -> Task<Void, Never>? {
+        let canceledTask = signInTask
+        canceledTask?.cancel()
+        signInTask = nil
+        activeSignInToken = nil
+        accountOperationFence.invalidate()
+        isSignInInProgress = false
+        hasAnonymousChatsToSync = false
+        return canceledTask
+    }
+
+    func completeAccountTeardown() {
+        acceptsChatSaves = true
+        isAccountTeardownInProgress = false
+        accountOperationTracker.reopen()
+    }
+
+    private func finishSignIn(
+        _ token: AccountOperationFence.Token,
+        userId: String
+    ) {
+        guard isCurrentSignIn(token, userId: userId) else { return }
+        isSignInInProgress = false
+        signInTask = nil
+    }
     
     /// Updates the current model if needed based on auth status changes
     func updateModelBasedOnAuthStatus(isAuthenticated: Bool, hasActiveSubscription: Bool) {
@@ -4561,12 +4679,17 @@ class ChatViewModel: ObservableObject {
         let signingOutUserId = currentUserId
 
         clearHydratedFavorites()
+        isAccountTeardownInProgress = true
         clearProjectState()
-
-        // Allow a new sign-in flow after sign-out
-        isSignInInProgress = false
+        activeFullSyncId = nil
+        isSyncing = false
+        let canceledSignInTask = cancelSignInOperation()
+        let canceledLegacyMigrationTask = cancelLegacyMigration()
         hasPerformedInitialSync = false
         let canceledStreamTasks = cancelAllGenerations()
+        await accountOperationTracker.closeAndWait()
+        await canceledSignInTask?.value
+        await canceledLegacyMigrationTask?.value
         await drainStreamTasks(canceledStreamTasks)
 
         // Stop sync timers when signing out
@@ -4588,10 +4711,13 @@ class ChatViewModel: ObservableObject {
             }
         }
 
+        acceptsChatSaves = false
+        await drainPendingSaves()
+
         // Clear sync caches so stale state doesn't leak into the next session
         await cloudSync.clearSyncStatus(forUser: signingOutUserId)
         DeletedChatsTracker.shared.clear()
-        CloudKeyAuthorizationStore.shared.clearAuthorization(userId: currentUserId)
+        CloudKeyAuthorizationStore.shared.clearAuthorization(userId: signingOutUserId)
 
         // Reset to the default model when signing out
         let allModels = AppConfig.shared.filteredModelTypes()
@@ -4608,7 +4734,7 @@ class ChatViewModel: ObservableObject {
         hasAttemptedLoadMore = false
 
         // Reset passkey state
-        passkeyManager.reset()
+        await passkeyManager.reset()
 
         // Clear cloud chats and create a new empty one with the free model.
         // On-disk local chats are wiped immediately after this by clearAuthState's
@@ -4623,22 +4749,31 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Clear all local chats and reset to fresh state
-    func clearAllChatsFromDevice(resumeRecoveryScans: Bool = true) async {
+    func clearAllChatsFromDevice(
+        resumeRecoveryScans: Bool = true,
+        reopenAccountOperations: Bool = true
+    ) async {
         clearHydratedFavorites()
+        acceptsChatSaves = false
+        let canceledSignInTask = cancelSignInOperation()
+        let canceledLegacyMigrationTask = cancelLegacyMigration()
         let canceledStreamTasks = cancelAllGenerations()
+        let userId = currentUserId
+        await accountOperationTracker.closeAndWait()
+        await canceledSignInTask?.value
+        await canceledLegacyMigrationTask?.value
         await suspendRecoveryScans()
+        await drainStreamTasks(canceledStreamTasks)
+        await drainPendingSaves()
 
         // Clear all chats from memory
         ChatRecoveryDraftStore.shared.clearAll()
         chats.removeAll()
         localChats.removeAll()
         currentChat = nil
-        
+
         // Clear from file storage (both local and cloud stores),
         // fencing in-flight sync before the deletion.
-        let userId = currentUserId
-        await drainStreamTasks(canceledStreamTasks)
-        await drainPendingSaves()
         await cloudSync.handleLocalStoreWipe(forUser: userId)
         await Chat.deleteAllChatsFromStorage(userId: userId)
         
@@ -4657,8 +4792,12 @@ class ChatViewModel: ObservableObject {
         
         // Clear encryption key reference
         encryptionKey = nil
-        if resumeRecoveryScans {
+        if resumeRecoveryScans && !isAccountTeardownInProgress {
             recoveryScansSuspended = false
+        }
+        if !isAccountTeardownInProgress && reopenAccountOperations {
+            acceptsChatSaves = true
+            accountOperationTracker.reopen()
         }
     }
 
@@ -4668,10 +4807,9 @@ class ChatViewModel: ObservableObject {
     /// manager clears its authenticated state so currentUserId still resolves.
     func wipeLocalChatsForSignOut() async {
         clearHydratedFavorites()
-        // Drain the queued disk saves first; the queue is chained, so
-        // awaiting the latest task flushes every earlier one. Otherwise a
-        // detached save kicked off by handleSignOut could land after the
-        // wipe and resurrect the signed-out user's chat files.
+        acceptsChatSaves = false
+        // Save admission remains closed throughout auth cleanup. Drain the
+        // queued chain defensively before deleting the signed-out user's files.
         await drainPendingSaves()
         await Chat.deleteAllChatsFromStorage(userId: currentUserId)
     }
@@ -4681,7 +4819,21 @@ class ChatViewModel: ObservableObject {
     /// Routes the manual setup / recovery outcomes to the onboarding
     /// sheet, matching the sign-in flow.
     func reattemptPasskeyRecovery() async {
-        let result = await passkeyManager.reenableRecoveryPrompt()
+        guard let operationUserId = currentUserId else { return }
+        let operationTask = Task { [passkeyManager] in
+            guard !Task.isCancelled else { return nil as PasskeyRecoveryResult? }
+            let result = await passkeyManager.reenableRecoveryPrompt()
+            guard !Task.isCancelled else { return nil }
+            return result
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            return
+        }
+        defer { accountOperationTracker.end(operationToken) }
+
+        guard let result = await operationTask.value else { return }
+        guard currentUserId == operationUserId else { return }
         switch result {
         case .manualSetupRequired:
             cloudSyncOnboardingMode = .setup
@@ -4702,10 +4854,16 @@ class ChatViewModel: ObservableObject {
 
     /// Handle sign-in by loading user's saved chats and triggering sync
     func handleSignIn() {
-        recoveryScansSuspended = false
-        #if DEBUG
-        print("handleSignIn called")
-        #endif
+        guard !isAccountTeardownInProgress, acceptsChatSaves else { return }
+
+        guard hasChatAccess, let userId = currentUserId else {
+            if let canceledTask = cancelSignInOperation() {
+                signInTask = canceledTask
+            }
+            return
+        }
+
+        passkeyManager.resumeAccountOperations()
 
         // Wire up passkey recovery callback
         passkeyManager.onRecoveryComplete = { [weak self] in
@@ -4716,266 +4874,250 @@ class ChatViewModel: ObservableObject {
         // another device updates the key bundle
         passkeyManager.onKeyRefreshedFromBackup = { [weak self] in
             Task { @MainActor in
-                await self?.retryDecryptionWithNewKey()
+                self?.handleSignIn()
             }
         }
 
-        // Prevent duplicate sign-in flows
-        guard !isSignInInProgress else {
-            #if DEBUG
-            print("handleSignIn: Already in progress, skipping")
-            #endif
+        if let activeSignInToken,
+           signInTask != nil,
+           accountOperationFence.isCurrent(activeSignInToken, currentUserId: userId) {
             return
         }
 
-        #if DEBUG
-        print("handleSignIn: hasChatAccess=\(hasChatAccess), userId=\(currentUserId ?? "nil")")
-        #endif
-        
-        if hasChatAccess, let userId = currentUserId {
-            isProjectAccountActive = true
-            isSignInInProgress = true
-            #if DEBUG
-            print("handleSignIn: Starting sign-in flow for user \(userId)")
-            #endif
-            
-            // Restore pagination state immediately for better UX on cold start
-            loadPersistedPaginationState()
-            
-            // Check if we have any anonymous chats to migrate
-            let anonymousChats = (chats + localChats).filter { chat in
-                chat.userId == nil && !chat.messages.isEmpty
+        if activeSignInToken?.userId != userId {
+            hasAnonymousChatsToSync = false
+        }
+        isProjectAccountActive = true
+        let previousSignInTask = signInTask
+        previousSignInTask?.cancel()
+        legacyMigrationTask?.cancel()
+        let token = accountOperationFence.begin(userId: userId)
+        activeSignInToken = token
+        isSignInInProgress = true
+        recoveryScansSuspended = false
+        signInTask = Task { [weak self] in
+            guard let self,
+                  self.isCurrentSignIn(token, userId: userId)
+            else {
+                return
             }
-            
-            if !anonymousChats.isEmpty {
-                #if DEBUG
-                print("Found \(anonymousChats.count) anonymous chats to migrate")
-                #endif
-                // Migrate anonymous chats to the current user
-                for var chat in anonymousChats {
-                    chat.userId = userId
+            await previousSignInTask?.value
+            guard self.isCurrentSignIn(token, userId: userId) else { return }
+            await self.performSignIn(token: token, userId: userId)
+            guard self.isCurrentAccountOperation(token, userId: userId) else { return }
+        }
+    }
+
+    private func performSignIn(
+        token: AccountOperationFence.Token,
+        userId: String
+    ) async {
+        guard isCurrentSignIn(token, userId: userId) else { return }
+
+        // Restore pagination state immediately for better UX on cold start
+        loadPersistedPaginationState(userId: userId)
+
+        // Check if we have any anonymous chats to migrate
+        let anonymousChats = (chats + localChats).filter { chat in
+            chat.userId == nil && !chat.messages.isEmpty
+        }
+
+        if !anonymousChats.isEmpty {
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            await drainPendingSaves()
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            // Migrate anonymous chats to the current user
+            for var chat in anonymousChats {
+                guard isCurrentSignIn(token, userId: userId) else { return }
+                chat.userId = userId
+                chat.locallyModified = true
+                chat.syncVersion = 0  // Reset sync version to force upload
+                replaceChat(chat)
+                guard isCurrentSignIn(token, userId: userId) else { return }
+                await saveChatForSignIn(chat, userId: userId, token: token)
+                guard isCurrentSignIn(token, userId: userId) else { return }
+            }
+
+            // Mark that we have anonymous chats that need to be synced after encryption setup
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            hasAnonymousChatsToSync = true
+        }
+
+        // Start auto-sync timer now that user is authenticated
+        // (This also handles the case where someone signs in after app launch)
+        guard isCurrentSignIn(token, userId: userId) else { return }
+        setupAutoSyncTimer()
+
+        // One-shot legacy cleanup for users who sign in after launch;
+        // the launch-time pass only covers an already-signed-in user.
+        // Flag-gated per user, so re-running is cheap.
+        Task.detached(priority: .background) {
+            await LegacyChatEviction.runIfNeeded(userId: userId)
+        }
+
+        // Check if we need to set up encryption first
+        // IMPORTANT: Do NOT auto-generate a key here; allow UI to prompt the user
+        do {
+            // Sign-out clears account-bound token providers, so restore them
+            // before passkey recovery or any other enclave request.
+            try await cloudSync.initialize()
+            guard isCurrentSignIn(token, userId: userId) else { return }
+
+            // Always load local chats first — they use the device key,
+            // not the cloud encryption key, so they're available regardless
+            // of cloud sync setup state.
+            let allLocal = await loadAllLocalChats(userId: userId)
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            localChats = allLocal
+            normalizeLocalChatsArray()
+            if currentChat == nil, let first = localChats.first {
+                currentChat = first
+            }
+            // Auto-enable local-only mode when local chats with messages exist,
+            // but only if the user has never explicitly set the preference
+            let hasNonEmptyLocalChats = localChats.contains { !$0.messages.isEmpty }
+            let userHasSetPreference = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.localOnlyModeEnabled) != nil
+            if hasNonEmptyLocalChats && !userHasSetPreference {
+                SettingsManager.shared.isLocalOnlyModeEnabled = true
+            }
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            scanPendingRecoveries()
+
+            // If no cloud key exists, try passkey recovery before falling back
+            if !EncryptionService.shared.hasEncryptionKey() {
+                let passkeyResult = await passkeyManager.attemptPasskeyKeyRecovery()
+                guard isCurrentSignIn(token, userId: userId) else { return }
+                switch passkeyResult {
+                case .success, .newUserSetupDone:
+                    break
+                case .manualSetupRequired:
+                    cloudSyncOnboardingMode = .setup
+                    showCloudSyncOnboarding = true
+                    finishSignIn(token, userId: userId)
+                    return
+                case .manualRecoveryRequired:
+                    cloudSyncOnboardingMode = .recovery
+                    showCloudSyncOnboarding = true
+                    finishSignIn(token, userId: userId)
+                    return
+                case .recoveryFailed:
+                    finishSignIn(token, userId: userId)
+                    return
+                }
+            }
+
+            // Initialize encryption - this will load existing key from keychain
+            let key = try await EncryptionService.shared.initialize()
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            encryptionKey = key
+
+            // Ensure the current key is authorized for cloud writes.
+            // Existing users upgrading may have a valid key but no
+            // authorization record yet.
+            if !CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey(userId: userId) {
+                let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
+                guard isCurrentSignIn(token, userId: userId) else { return }
+                if validation.canWrite {
+                    _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated, userId: userId)
+                }
+            }
+
+            // A local key that mismatches the enclave's registered
+            // key can never sync or migrate. Converge silently via
+            // passkey when possible; otherwise prompt the user to
+            // recover so this stale device enters v2.
+            if SettingsManager.shared.isCloudSyncEnabled {
+                let mismatchResult = await passkeyManager.resolveKeyMismatchAtLaunch()
+                guard isCurrentSignIn(token, userId: userId) else { return }
+                if mismatchResult == .manualRecoveryRequired {
+                    cloudSyncOnboardingMode = .recovery
+                    showCloudSyncOnboarding = true
+                }
+            }
+
+            // Check passkey state for users who already have keys
+            await passkeyManager.checkPasskeyStateForExistingKey()
+            guard isCurrentSignIn(token, userId: userId) else { return }
+
+            // Rewrap any legacy rows under the current primary key, then
+            // refresh passkey state in case migration added a device bundle.
+            startLegacyMigration(token: token, userId: userId)
+
+            // Retry decryption for any previously failed chats now that key is loaded
+            let decryptedCount = await cloudSync.retryDecryptionWithNewKey(onProgress: nil)
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            if decryptedCount > 0 {
+                let result = await loadFirstPageOfChats(userId: userId, filter: \.isCloudDisplayable)
+                guard isCurrentSignIn(token, userId: userId) else { return }
+                chats = result.chats
+                // Refresh currentChat to show decrypted content
+                if let currentId = currentChat?.id,
+                   let refreshed = result.chats.first(where: { $0.id == currentId }) {
+                    currentChat = refreshed
+                }
+                normalizeChatsArray()
+            }
+
+            // If we have anonymous chats to sync, force re-encryption with proper key
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            if hasAnonymousChatsToSync {
+                // Force all cloud chats to be marked for sync
+                let cloudChats = (try? await EncryptedFileStorage.cloud.loadAllChats(userId: userId)) ?? []
+                guard isCurrentSignIn(token, userId: userId) else { return }
+                for var chat in cloudChats {
+                    guard isCurrentSignIn(token, userId: userId) else { return }
                     chat.locallyModified = true
-                    chat.syncVersion = 0  // Reset sync version to force upload
-                    replaceChat(chat)
-                    saveChat(chat)
+                    chat.syncVersion = 0
+                    try? await EncryptedFileStorage.cloud.saveChat(chat, userId: userId)
+                    guard isCurrentSignIn(token, userId: userId) else { return }
                 }
-                
-                // Mark that we have anonymous chats that need to be synced after encryption setup
-                Task { @MainActor in
-                    self.hasAnonymousChatsToSync = true
+                guard isCurrentSignIn(token, userId: userId) else { return }
+                hasAnonymousChatsToSync = false
+            }
+
+            // Local chats were already loaded above the early return.
+
+            // Only proceed with cloud sync if cloud sync is enabled
+            if SettingsManager.shared.isCloudSyncEnabled {
+                await initializeCloudSync(token: token, userId: userId)
+                guard isCurrentSignIn(token, userId: userId) else { return }
+
+                // Restore persisted tab preference now that cloud chats are loaded
+                if let savedTab = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.cloudSyncActiveTab),
+                   let tab = ChatStorageTab(rawValue: savedTab) {
+                    activeStorageTab = tab
                 }
+
+                // Sync user profile settings
+                guard isCurrentSignIn(token, userId: userId) else { return }
+                await ProfileManager.shared.performFullSync()
+                guard isCurrentSignIn(token, userId: userId) else { return }
+            } else {
+                guard isCurrentSignIn(token, userId: userId) else { return }
+                chats = []
+                hasMoreChats = false
+                activeStorageTab = .local
             }
-            
-            // Start auto-sync timer now that user is authenticated
-            // (This also handles the case where someone signs in after app launch)
-            setupAutoSyncTimer()
 
-            // One-shot legacy cleanup for users who sign in after launch;
-            // the launch-time pass only covers an already-signed-in user.
-            // Flag-gated per user, so re-running is cheap.
-            Task.detached(priority: .background) {
-                await LegacyChatEviction.runIfNeeded(userId: userId)
+            // Update last sync date
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            lastSyncDate = Date()
+
+            // After sync completes, ensure we have proper chat setup
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            let activeList = SettingsManager.shared.isCloudSyncEnabled ? chats : localChats
+            if activeList.isEmpty {
+                createNewChat()
+            } else {
+                ensureBlankChatAtTop()
             }
-            
-            // Check if we need to set up encryption first
-            // IMPORTANT: Do NOT auto-generate a key here; allow UI to prompt the user
-            Task {
-                do {
-                    // Sign-out clears account-bound token providers, so restore them
-                    // before passkey recovery or any other enclave request.
-                    try await self.cloudSync.initialize()
-                    guard self.currentUserId == userId,
-                          self.hasChatAccess,
-                          self.isProjectAccountActive else {
-                        if self.currentUserId == userId {
-                            self.isSignInInProgress = false
-                        }
-                        return
-                    }
-
-                    // Always load local chats first — they use the device key,
-                    // not the cloud encryption key, so they're available regardless
-                    // of cloud sync setup state.
-                    let allLocal = await loadAllLocalChats(userId: userId)
-                    guard self.currentUserId == userId,
-                          self.isSignInInProgress,
-                          self.isProjectAccountActive else { return }
-                    await MainActor.run {
-                        self.localChats = allLocal
-                        normalizeLocalChatsArray()
-                        if self.currentChat == nil, let first = self.localChats.first {
-                            self.currentChat = first
-                        }
-                        // Auto-enable local-only mode when local chats with messages exist,
-                        // but only if the user has never explicitly set the preference
-                        let hasNonEmptyLocalChats = self.localChats.contains { !$0.messages.isEmpty }
-                        let userHasSetPreference = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.localOnlyModeEnabled) != nil
-                        if hasNonEmptyLocalChats && !userHasSetPreference {
-                            SettingsManager.shared.isLocalOnlyModeEnabled = true
-                        }
-                    }
-                    self.scanPendingRecoveries()
-
-                    // If no cloud key exists, try passkey recovery before falling back
-                    if !EncryptionService.shared.hasEncryptionKey() {
-                        let passkeyResult = await self.passkeyManager.attemptPasskeyKeyRecovery()
-                        guard self.currentUserId == userId,
-                              self.isSignInInProgress,
-                              self.isProjectAccountActive else { return }
-                        switch passkeyResult {
-                        case .success, .newUserSetupDone:
-                            break
-                        case .manualSetupRequired:
-                            await MainActor.run {
-                                self.cloudSyncOnboardingMode = .setup
-                                self.showCloudSyncOnboarding = true
-                                self.isSignInInProgress = false
-                            }
-                            return
-                        case .manualRecoveryRequired:
-                            await MainActor.run {
-                                self.cloudSyncOnboardingMode = .recovery
-                                self.showCloudSyncOnboarding = true
-                                self.isSignInInProgress = false
-                            }
-                            return
-                        case .recoveryFailed:
-                            await MainActor.run {
-                                self.isSignInInProgress = false
-                            }
-                            return
-                        }
-                    }
-
-                    // Initialize encryption - this will load existing key from keychain
-                    let key = try await EncryptionService.shared.initialize()
-                    guard self.currentUserId == userId,
-                          self.isSignInInProgress,
-                          self.isProjectAccountActive else { return }
-                    self.encryptionKey = key
-
-                    // Ensure the current key is authorized for cloud writes.
-                    // Existing users upgrading may have a valid key but no
-                    // authorization record yet.
-                    if !CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey(userId: userId) {
-                        let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
-                        guard self.currentUserId == userId,
-                              self.isSignInInProgress,
-                              self.isProjectAccountActive else { return }
-                        if validation.canWrite {
-                            _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated, userId: userId)
-                        }
-                    }
-
-                    // A local key that mismatches the enclave's registered
-                    // key can never sync or migrate. Converge silently via
-                    // passkey when possible; otherwise prompt the user to
-                    // recover so this stale device enters v2.
-                    if SettingsManager.shared.isCloudSyncEnabled {
-                        let mismatchResult = await self.passkeyManager.resolveKeyMismatchAtLaunch()
-                        guard self.currentUserId == userId,
-                              self.isSignInInProgress,
-                              self.isProjectAccountActive else { return }
-                        if mismatchResult == .manualRecoveryRequired {
-                            await MainActor.run {
-                                self.cloudSyncOnboardingMode = .recovery
-                                self.showCloudSyncOnboarding = true
-                            }
-                        }
-                    }
-
-                    // Check passkey state for users who already have keys
-                    await self.passkeyManager.checkPasskeyStateForExistingKey()
-                    guard self.currentUserId == userId,
-                          self.isSignInInProgress,
-                          self.isProjectAccountActive else { return }
-
-                    // Retry decryption for any previously failed chats now that key is loaded
-                    let decryptedCount = await cloudSync.retryDecryptionWithNewKey(onProgress: nil)
-                    guard self.currentUserId == userId,
-                          self.isSignInInProgress,
-                          self.isProjectAccountActive else { return }
-                    if decryptedCount > 0 {
-                        let result = await loadFirstPageOfChats(userId: userId, filter: \.isCloudDisplayable)
-                        guard self.currentUserId == userId,
-                              self.isSignInInProgress,
-                              self.isProjectAccountActive else { return }
-                        await MainActor.run {
-                            self.chats = result.chats
-                            // Refresh currentChat to show decrypted content
-                            if let currentId = self.currentChat?.id,
-                               let refreshed = result.chats.first(where: { $0.id == currentId }) {
-                                self.currentChat = refreshed
-                            }
-                            normalizeChatsArray()
-                        }
-                    }
-
-                    // If we have anonymous chats to sync, force re-encryption with proper key
-                    if self.hasAnonymousChatsToSync {
-                        // Force all cloud chats to be marked for sync
-                        if let userId = self.currentUserId {
-                            let cloudChats = (try? await EncryptedFileStorage.cloud.loadAllChats(userId: userId)) ?? []
-                            for var chat in cloudChats {
-                                chat.locallyModified = true
-                                chat.syncVersion = 0
-                                try? await EncryptedFileStorage.cloud.saveChat(chat, userId: userId)
-                            }
-                        }
-                        self.hasAnonymousChatsToSync = false
-                    }
-
-                    // Local chats were already loaded above the early return.
-
-                    // Only proceed with cloud sync if cloud sync is enabled
-                    if SettingsManager.shared.isCloudSyncEnabled {
-                        await initializeCloudSync()
-
-                        // Restore persisted tab preference now that cloud chats are loaded
-                        if let savedTab = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.cloudSyncActiveTab),
-                           let tab = ChatStorageTab(rawValue: savedTab) {
-                            await MainActor.run {
-                                self.activeStorageTab = tab
-                            }
-                        }
-
-                        // Sync user profile settings
-                        await ProfileManager.shared.performFullSync()
-                    } else {
-                        await MainActor.run {
-                            self.chats = []
-                            self.hasMoreChats = false
-                            self.activeStorageTab = .local
-                        }
-                    }
-                    
-                    // Update last sync date
-                    await MainActor.run {
-                        self.lastSyncDate = Date()
-                    }
-                    
-                    // After sync completes, ensure we have proper chat setup
-                    await MainActor.run {
-                        let activeList = SettingsManager.shared.isCloudSyncEnabled ? self.chats : self.localChats
-                        if activeList.isEmpty {
-                            self.createNewChat()
-                        } else {
-                            self.ensureBlankChatAtTop()
-                        }
-                        self.isSignInInProgress = false
-                    }
-                } catch {
-                    // If key initialization fails, fall back to showing setup modal
-                    await MainActor.run {
-                        self.isFirstTimeUser = true
-                        self.showEncryptionSetup = true
-                        self.isSignInInProgress = false
-                    }
-                }
-            }
-        } else {
-            // User doesn't have chat access, reset flag
-            isSignInInProgress = false
+            finishSignIn(token, userId: userId)
+        } catch {
+            // If key initialization fails, fall back to showing setup modal
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            isFirstTimeUser = true
+            showEncryptionSetup = true
+            finishSignIn(token, userId: userId)
         }
     }
     
@@ -5037,129 +5179,103 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    /// Initialize cloud sync when user signs in
-    private func initializeCloudSync() async {
+    private func initializeCloudSync(
+        token: AccountOperationFence.Token,
+        userId: String
+    ) async {
+        guard isCurrentSignIn(token, userId: userId) else { return }
         do {
             // Mark that initial sync has been done to avoid duplicate
             hasPerformedInitialSync = true
-            
+
             // Initialize cloud sync service
             try await cloudSync.initialize()
-            
+            guard isCurrentSignIn(token, userId: userId) else { return }
+
             // Perform sync
             let _ = await cloudSync.syncAllChats()
-            
+            guard isCurrentSignIn(token, userId: userId) else { return }
+
             // Load and display synced chats from file index (cloud chats only, paginated)
             let result = await loadFirstPageOfChats(
-                userId: currentUserId,
+                userId: userId,
                 filter: \.isCloudDisplayable
             )
+            guard isCurrentSignIn(token, userId: userId) else { return }
 
-            await MainActor.run {
-                self.chats = result.chats
-                normalizeChatsArray()
+            chats = result.chats
+            normalizeChatsArray()
 
-                // Only select the first chat if we don't have a current chat selected
-                if self.currentChat == nil, let first = self.chats.first {
-                    self.currentChat = first
-                }
-
-                // Mark that we've loaded the initial page
-                self.hasLoadedInitialPage = true
-                self.isPaginationActive = result.totalEntries > 0
-
-                // Set hasMoreChats based on total count
-                self.hasMoreChats = result.totalEntries > Constants.Pagination.chatsPerPage
+            // Only select the first chat if we don't have a current chat selected
+            if currentChat == nil, let first = chats.first {
+                currentChat = first
             }
-            if let userId = currentUserId {
-                await refreshCurrentCloudChatFromStorage(userId: userId)
-            }
-            
+
+            // Mark that we've loaded the initial page
+            hasLoadedInitialPage = true
+            isPaginationActive = result.totalEntries > 0
+
+            // Set hasMoreChats based on total count
+            hasMoreChats = result.totalEntries > Constants.Pagination.chatsPerPage
+
+            await refreshCurrentCloudChatFromStorage(userId: userId)
+            guard isCurrentSignIn(token, userId: userId) else { return }
+
             // Setup pagination token
-            await setupPaginationForAppRestart()
+            await setupPaginationForAppRestart(userId: userId, token: token)
+            guard isCurrentSignIn(token, userId: userId) else { return }
+
             await loadProjects()
+            guard isCurrentSignIn(token, userId: userId) else { return }
             scanPendingRecoveries()
         } catch {
-            await MainActor.run {
-                self.syncErrors.append(error.localizedDescription)
-            }
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            syncErrors.append(error.localizedDescription)
         }
     }
 
-    /// Continues the sign-in flow (encryption, cloud sync, profile sync) after migration decision
-    private func startEncryptedSyncFlow() async {
-        // Avoid double starts
-        if isSignInInProgress { return }
-        isSignInInProgress = true
-        
-        // Ensure auto-sync timer is scheduled (will no-op if gated)
-        setupAutoSyncTimer()
-        
-        do {
-            // Ensure an encryption key exists before proceeding
-            guard EncryptionService.shared.hasEncryptionKey() else {
-                await MainActor.run {
-                    self.isFirstTimeUser = true
-                    self.isSignInInProgress = false
-                }
-                return
-            }
-
-            // Initialize encryption with the existing key
-            let key = try await EncryptionService.shared.initialize()
-            await MainActor.run { self.encryptionKey = key }
-            
-            // Initialize cloud sync service and perform initial sync
-            await initializeCloudSync()
-
-            // Sync user profile settings
-            await ProfileManager.shared.performFullSync()
-            
-            await MainActor.run {
-                self.lastSyncDate = Date()
-                // After sync completes, ensure we have proper chat setup
-                if self.chats.isEmpty {
-                    self.createNewChat()
-                } else {
-                    self.ensureBlankChatAtTop()
-                }
-                self.isSignInInProgress = false
-            }
-        } catch {
-            await MainActor.run {
-                self.isFirstTimeUser = true
-                self.showEncryptionSetup = true
-                self.isSignInInProgress = false
-            }
-        }
-    }
-    
     // MARK: - Pagination Methods
     
-    /// Setup pagination state for app restart (when already authenticated)
-    private func setupPaginationForAppRestart() async {
+    private func setupPaginationForAppRestart(
+        userId: String,
+        token: AccountOperationFence.Token? = nil
+    ) async {
+        guard isCurrentPaginationOperation(userId: userId, token: token) else { return }
         // Try to get pagination token from cloud to enable Load More
-        do {
-            // Get the list result to check if there are more pages
-            if let listResult = try? await CloudStorageService.shared.listChats(
-                limit: Constants.Pagination.chatsPerPage,
-                continuationToken: nil,
-                includeContent: false
-            ) {
-                await MainActor.run {
-                    self.paginationToken = listResult.nextContinuationToken
-                    self.hasMoreChats = listResult.hasMore
-                    self.isPaginationActive = true
-                    self.hasLoadedInitialPage = true
-                }
-            }
+        let listResult = try? await CloudStorageService.shared.listChats(
+            limit: Constants.Pagination.chatsPerPage,
+            continuationToken: nil,
+            includeContent: false
+        )
+        guard isCurrentPaginationOperation(userId: userId, token: token) else { return }
+        if let listResult {
+            paginationToken = listResult.nextContinuationToken
+            hasMoreChats = listResult.hasMore
+            isPaginationActive = true
+            hasLoadedInitialPage = true
         }
+    }
+
+    private func isCurrentPaginationOperation(
+        userId: String,
+        token: AccountOperationFence.Token?
+    ) -> Bool {
+        guard !Task.isCancelled,
+              !isAccountTeardownInProgress,
+              currentUserId == userId
+        else {
+            return false
+        }
+        guard let token else { return true }
+        return isCurrentSignIn(token, userId: userId)
     }
     
     /// Perform initial sync if it hasn't been done yet
     private func performInitialSyncIfNeeded() async {
         guard !hasPerformedInitialSync else { return }
         guard hasChatAccess else { return }
+        guard let userId = currentUserId else { return }
+        let token = currentAccountOperationToken(userId: userId)
         
         hasPerformedInitialSync = true
         
@@ -5182,11 +5298,11 @@ class ChatViewModel: ObservableObject {
             }
             
             // Setup pagination after sync
-            await setupPaginationForAppRestart()
+            await setupPaginationForAppRestart(userId: userId, token: token)
             
             // Load and display cloud chats after sync from file index
             let result = await loadFirstPageOfChats(
-                userId: currentUserId,
+                userId: userId,
                 filter: \.isCloudDisplayable
             )
             await MainActor.run {
@@ -5349,8 +5465,14 @@ class ChatViewModel: ObservableObject {
     
     /// Intelligently update chats after sync without resetting pagination
     @MainActor
-    private func updateChatsAfterSync() async {
-        guard let userId = currentUserId else { return }
+    private func updateChatsAfterSync(
+        token: AccountOperationFence.Token? = nil,
+        userId expectedUserId: String? = nil
+    ) async {
+        guard let userId = expectedUserId ?? currentUserId else { return }
+        if let token {
+            guard isCurrentSignIn(token, userId: userId) else { return }
+        }
 
         // IMPORTANT: Preserve pagination token before updating
         let savedPaginationToken = self.paginationToken
@@ -5363,6 +5485,9 @@ class ChatViewModel: ObservableObject {
         // Load first page of cloud chats from files, excluding locally modified ones
         let result = await loadFirstPageOfChats(userId: userId, excluding: initiallyProtectedIds, filter: \.isCloudDisplayable)
         guard currentUserId == userId else { return }
+        if let token {
+            guard isCurrentSignIn(token, userId: userId) else { return }
+        }
 
         // Re-read protected state after the storage await so a new edit or stream
         // that started while loading cannot be replaced by the disk snapshot.
@@ -5463,6 +5588,9 @@ class ChatViewModel: ObservableObject {
             self.isPaginationActive = savedIsPaginationActive
         }
         await refreshCurrentCloudChatFromStorage(userId: userId)
+        if let token {
+            guard isCurrentSignIn(token, userId: userId) else { return }
+        }
         scanPendingRecoveries()
     }
     
@@ -5480,6 +5608,8 @@ class ChatViewModel: ObservableObject {
     
     /// Perform a full sync with the cloud
     func performFullSync() async {
+        guard let userId = currentUserId else { return }
+        let token = currentAccountOperationToken(userId: userId)
         // Gate sync when cloud sync is disabled
         if !SettingsManager.shared.isCloudSyncEnabled {
             return
@@ -5490,40 +5620,52 @@ class ChatViewModel: ObservableObject {
             return
         }
 
-        await MainActor.run {
-            self.isSyncing = true
-            self.syncErrors = []
+        guard isCurrentSignIn(token, userId: userId) else { return }
+        let syncId = UUID()
+        activeFullSyncId = syncId
+        isSyncing = true
+        syncErrors = []
+        defer {
+            if activeFullSyncId == syncId {
+                activeFullSyncId = nil
+                if isCurrentAccountOperation(token, userId: userId) {
+                    isSyncing = false
+                }
+            }
         }
         
         let result = await cloudSync.syncAllChats()
+        guard isCurrentSignIn(token, userId: userId) else { return }
         
         // Update chats if there were changes (await this before marking sync complete)
         if result.downloaded > 0 || result.uploaded > 0 || result.deleted > 0 {
-            await self.updateChatsAfterSync()
+            await updateChatsAfterSync(token: token, userId: userId)
+            guard isCurrentSignIn(token, userId: userId) else { return }
         }
         
         // Always refresh pagination token and hasMore state from the server after a sync
         // This guards against cold-start races where the token wasn't available yet
-        await self.setupPaginationForAppRestart()
+        await setupPaginationForAppRestart(userId: userId, token: token)
+        guard isCurrentSignIn(token, userId: userId) else { return }
         
         // Also sync profile settings
         await ProfileManager.shared.performFullSync()
+        guard isCurrentSignIn(token, userId: userId) else { return }
 
         // Project metadata is synced separately from chat revisions.
         await loadProjects()
+        guard isCurrentSignIn(token, userId: userId) else { return }
         
         // Re-load localChats from the local-only store
-        let freshLocal = await loadAllLocalChats(userId: self.currentUserId)
+        let freshLocal = await loadAllLocalChats(userId: userId)
+        guard isCurrentSignIn(token, userId: userId) else { return }
 
-        await MainActor.run {
-            self.localChats = freshLocal
-            self.isSyncing = false
-            self.lastSyncDate = Date()
-            self.ensureBlankChatAtTop()
-            
-            if !result.errors.isEmpty {
-                self.syncErrors = result.errors
-            }
+        localChats = freshLocal
+        lastSyncDate = Date()
+        ensureBlankChatAtTop()
+
+        if !result.errors.isEmpty {
+            syncErrors = result.errors
         }
     }
     
@@ -5536,16 +5678,67 @@ class ChatViewModel: ObservableObject {
     func reloadEncryptionKey() {
         encryptionKey = EncryptionService.shared.getKey()
     }
+
+    func initializeExistingEncryptionKeyIfAvailable() async {
+        guard let operationUserId = currentUserId else { return }
+        guard EncryptionService.shared.hasEncryptionKey() else { return }
+        let operationTask = Task {
+            guard !Task.isCancelled else { return }
+            _ = try? await EncryptionService.shared.initialize()
+            guard !Task.isCancelled else { return }
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            return
+        }
+        defer { accountOperationTracker.end(operationToken) }
+
+        await operationTask.value
+        guard currentUserId == operationUserId else { return }
+    }
     
     /// Set encryption key (for key rotation)
     func setEncryptionKey(
         _ key: String,
         mode: CloudKeyActivationMode = .recoverExisting
     ) async throws {
+        guard let operationUserId = currentUserId else {
+            throw CancellationError()
+        }
+        let operationTask = Task {
+            try await self.performSetEncryptionKey(
+                key,
+                mode: mode,
+                operationUserId: operationUserId
+            )
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            throw CancellationError()
+        }
+        defer { accountOperationTracker.end(operationToken) }
+
+        try await operationTask.value
+        try ensureCurrentAccount(operationUserId)
+        // A v1 user activating their key on a fresh device has legacy
+        // cloud data but no registered key. Re-kick migration now that
+        // a key is active so adoption happens in-session.
+        let migrationToken = currentAccountOperationToken(userId: operationUserId)
+        startLegacyMigration(token: migrationToken, userId: operationUserId)
+    }
+
+    private func performSetEncryptionKey(
+        _ key: String,
+        mode: CloudKeyActivationMode,
+        operationUserId: String
+    ) async throws {
+        try Task.checkCancellation()
+
         do {
             switch mode {
             case .recoverExisting:
                 _ = try await CloudKeyAuthorizationStore.shared.applyPrimaryKeyWithValidation(key)
+                try ensureCurrentAccount(operationUserId)
             case .explicitStartFresh:
                 // Stage the key in memory so the enclave handshake runs
                 // against it without writing it to the Keychain first. Only
@@ -5554,12 +5747,17 @@ class ChatViewModel: ObservableObject {
                 // do we persist it. If the enclave can't be reached we throw
                 // and discard the staged key, so a new key is never stranded
                 // locally while the enclave keeps the old one.
-                try await EncryptionService.shared.setKey(key, persist: false)
+                var remoteRegistrationCommitted = false
                 do {
+                    try await EncryptionService.shared.setKey(key, persist: false)
+                    try ensureCurrentAccount(operationUserId)
                     try await CloudKeyAuthorizationStore.shared.registerStartFreshKeyIfNeeded()
+                    remoteRegistrationCommitted = true
                     try EncryptionService.shared.persistCurrentKeyState()
                 } catch {
-                    EncryptionService.shared.discardStagedKeyState()
+                    if !remoteRegistrationCommitted {
+                        EncryptionService.shared.discardStagedKeyState()
+                    }
                     throw error
                 }
                 // The enclave has already rebound the account to this key
@@ -5570,55 +5768,141 @@ class ChatViewModel: ObservableObject {
                 _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh)
             }
 
-            await MainActor.run {
-                self.encryptionKey = EncryptionService.shared.getKey()
-                self.showEncryptionSetup = false
-            }
-
-            // A v1 user activating their key on a fresh device has legacy
-            // cloud data but no registered key: the launch-time migration
-            // pass ran before any key existed, so without a re-kick the
-            // key is never adopted and cloud writes stay deferred for the
-            // whole session. Run the migration again now that a key is
-            // active so adoption happens in-session.
-            Task.detached(priority: .background) {
-                _ = await LegacyBlobMigration.runAndFinalize()
-                await PasskeyManager.shared.refreshBundleState()
-            }
+            try ensureCurrentAccount(operationUserId)
+            encryptionKey = EncryptionService.shared.getKey()
+            showEncryptionSetup = false
 
             await ProfileManager.shared.retryDecryptionWithNewKey()
-            await retryDecryptionAndReloadChats()
+            try ensureCurrentAccount(operationUserId)
+            await retryDecryptionAndReloadChats(userId: operationUserId)
+            try ensureCurrentAccount(operationUserId)
 
             // If this was first-time setup, initialize cloud sync and load chats
             if isFirstTimeUser {
-                await MainActor.run {
-                    self.isFirstTimeUser = false
-                }
+                try ensureCurrentAccount(operationUserId)
+                isFirstTimeUser = false
                 try await cloudSync.initialize()
+                try ensureCurrentAccount(operationUserId)
                 await performFullSync()
-                
+                try ensureCurrentAccount(operationUserId)
+
                 // After first-time sync, check if we have chats
-                await MainActor.run {
-                    if self.chats.isEmpty {
-                        self.createNewChat()
-                    } else {
-                        // Select the most recent chat
-                        if let mostRecent = self.chats.first {
-                            self.currentChat = mostRecent
-                        }
+                if chats.isEmpty {
+                    createNewChat()
+                } else {
+                    // Select the most recent chat
+                    if let mostRecent = chats.first {
+                        currentChat = mostRecent
                     }
                 }
             }
 
             // If passkey is active, re-encrypt the backup with the updated key bundle
             if passkeyManager.passkeyActive {
+                try ensureCurrentAccount(operationUserId)
                 await passkeyManager.updatePasskeyBackup()
+                try ensureCurrentAccount(operationUserId)
             }
         } catch {
-            await MainActor.run {
-                self.syncErrors.append(error.localizedDescription)
+            guard currentUserId == operationUserId else {
+                throw CancellationError()
+            }
+            if !(error is CancellationError) {
+                syncErrors.append(error.localizedDescription)
             }
             throw error  // Re-throw to let caller handle it
+        }
+    }
+
+    func retryPasskeyRecovery() async -> Bool {
+        guard let operationUserId = currentUserId else { return false }
+        let operationTask = Task { [passkeyManager] in
+            guard !Task.isCancelled else { return false }
+            let succeeded = await passkeyManager.retryPasskeyRecovery()
+            guard !Task.isCancelled else { return false }
+            return succeeded
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            return false
+        }
+        defer { accountOperationTracker.end(operationToken) }
+
+        let succeeded = await operationTask.value
+        guard currentUserId == operationUserId else { return false }
+        return succeeded
+    }
+
+    func startFreshWithNewKey() async -> Bool {
+        guard let operationUserId = currentUserId else { return false }
+        let operationTask = Task { [passkeyManager] in
+            guard !Task.isCancelled else { return false }
+            let succeeded = await passkeyManager.startFreshWithNewKey()
+            guard !Task.isCancelled else { return false }
+            return succeeded
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            return false
+        }
+        defer { accountOperationTracker.end(operationToken) }
+
+        let succeeded = await operationTask.value
+        guard currentUserId == operationUserId else { return false }
+        return succeeded
+    }
+
+    func retryPasskeySetup() async -> PasskeyRecoveryResult {
+        guard let operationUserId = currentUserId else { return .recoveryFailed }
+        let operationTask = Task { [passkeyManager] in
+            guard !Task.isCancelled else { return PasskeyRecoveryResult.recoveryFailed }
+            let result = await passkeyManager.retryPasskeySetup()
+            guard !Task.isCancelled else { return .recoveryFailed }
+            return result
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            return .recoveryFailed
+        }
+        defer { accountOperationTracker.end(operationToken) }
+
+        let result = await operationTask.value
+        guard currentUserId == operationUserId else { return .recoveryFailed }
+        switch result {
+        case .success, .newUserSetupDone:
+            let migrationToken = currentAccountOperationToken(userId: operationUserId)
+            startLegacyMigration(token: migrationToken, userId: operationUserId)
+        default:
+            break
+        }
+        return result
+    }
+
+    func createPasskeyBackup() async {
+        guard let operationUserId = currentUserId else { return }
+        let operationTask = Task { [passkeyManager] in
+            guard !Task.isCancelled else { return false }
+            let succeeded = await passkeyManager.createPasskeyBackup()
+            guard !Task.isCancelled else { return false }
+            return succeeded
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            return
+        }
+        defer { accountOperationTracker.end(operationToken) }
+
+        let succeeded = await operationTask.value
+        guard currentUserId == operationUserId else { return }
+        guard succeeded else { return }
+        let migrationToken = currentAccountOperationToken(userId: operationUserId)
+        startLegacyMigration(token: migrationToken, userId: operationUserId)
+    }
+
+    private func ensureCurrentAccount(_ userId: String) throws {
+        try Task.checkCancellation()
+        guard currentUserId == userId else {
+            throw CancellationError()
         }
     }
     
