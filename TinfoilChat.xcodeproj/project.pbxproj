@@ -774,7 +774,7 @@
 			repositoryURL = "https://github.com/tinfoilsh/tinfoil-swift";
 			requirement = {
 				kind = revision;
-				revision = ef6e0ddd139837d970cd7bcf2f6f423226a32ca8;
+				revision = 4f98ba4281e56cf2428ba094237be5a691ba89ed;
 			};
 		};
 		99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
