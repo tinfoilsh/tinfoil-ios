@@ -121,6 +121,11 @@ enum Constants {
         static let maxThinkingChunkCharacters = 8_000
     }
 
+    enum Observability {
+        static let traceSampleRate = 0.1
+        static let profileSessionSampleRate: Float = 0.1
+    }
+
     enum MessageMetadata {
         static let encryptedFontSize: CGFloat = 10
         static let iconSize: CGFloat = 10

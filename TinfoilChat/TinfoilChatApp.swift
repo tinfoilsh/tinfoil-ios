@@ -178,7 +178,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // Configure Sentry
         SentrySDK.start { options in
             options.dsn = "https://6f1fb6f77a16359e4d05acd52bbb2b93@o4509288836694016.ingest.us.sentry.io/4509290148069376"
-            options.tracesSampleRate = 1.0
+            options.tracesSampleRate = NSNumber(value: Constants.Observability.traceSampleRate)
             options.enableAutoSessionTracking = true
             // Disable PII collection for privacy
             // For more information, visit: https://docs.sentry.io/platforms/apple/data-management/data-collected/
@@ -186,7 +186,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
             // Configure profiling. Visit https://docs.sentry.io/platforms/apple/profiling/ to learn more.
             options.configureProfiling = { profileOptions in
-                profileOptions.sessionSampleRate = 1.0
+                profileOptions.sessionSampleRate = Constants.Observability.profileSessionSampleRate
                 profileOptions.lifecycle = .trace
             }
 
