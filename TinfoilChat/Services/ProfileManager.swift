@@ -357,20 +357,26 @@ class ProfileManager: ObservableObject {
         $nickname
             .dropFirst()
             .filter { [weak self] _ in !(self?.isApplyingProfile ?? false) }
+            .compactMap { [weak self] _ in self?.accountGeneration }
             .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
-            .sink { [weak self] _ in
-                guard !(self?.isApplyingProfile ?? false) else { return }
-                self?.saveToKeychain()
+            .sink { [weak self] generation in
+                guard let self,
+                      generation == self.accountGeneration,
+                      !self.isApplyingProfile else { return }
+                self.saveToKeychain()
             }
             .store(in: &cancellables)
         
         $profession
             .dropFirst()
             .filter { [weak self] _ in !(self?.isApplyingProfile ?? false) }
+            .compactMap { [weak self] _ in self?.accountGeneration }
             .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
-            .sink { [weak self] _ in
-                guard !(self?.isApplyingProfile ?? false) else { return }
-                self?.saveToKeychain()
+            .sink { [weak self] generation in
+                guard let self,
+                      generation == self.accountGeneration,
+                      !self.isApplyingProfile else { return }
+                self.saveToKeychain()
             }
             .store(in: &cancellables)
         
@@ -385,10 +391,13 @@ class ProfileManager: ObservableObject {
         $additionalContext
             .dropFirst()
             .filter { [weak self] _ in !(self?.isApplyingProfile ?? false) }
+            .compactMap { [weak self] _ in self?.accountGeneration }
             .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
-            .sink { [weak self] _ in
-                guard !(self?.isApplyingProfile ?? false) else { return }
-                self?.saveToKeychain()
+            .sink { [weak self] generation in
+                guard let self,
+                      generation == self.accountGeneration,
+                      !self.isApplyingProfile else { return }
+                self.saveToKeychain()
             }
             .store(in: &cancellables)
         
@@ -411,10 +420,13 @@ class ProfileManager: ObservableObject {
         $customSystemPrompt
             .dropFirst()
             .filter { [weak self] _ in !(self?.isApplyingProfile ?? false) }
+            .compactMap { [weak self] _ in self?.accountGeneration }
             .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
-            .sink { [weak self] _ in
-                guard !(self?.isApplyingProfile ?? false) else { return }
-                self?.saveToKeychain()
+            .sink { [weak self] generation in
+                guard let self,
+                      generation == self.accountGeneration,
+                      !self.isApplyingProfile else { return }
+                self.saveToKeychain()
             }
             .store(in: &cancellables)
 

@@ -240,7 +240,10 @@ struct ProfileMergeTests {
         let reconciled = try #require(
             ProfileMerge.reconcileDirtyProfileWithoutBaseline(
                 local: ProfileData(pinnedChatIds: []),
-                remote: ProfileData(nickname: "Remote")
+                remote: ProfileData(
+                    nickname: "Remote",
+                    pinnedChatIds: ["remote-chat"]
+                )
             )
         )
 
