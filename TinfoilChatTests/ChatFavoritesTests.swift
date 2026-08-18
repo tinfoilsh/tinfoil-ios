@@ -31,6 +31,8 @@ struct ChatFavoritesTests {
         #expect(normalized.count == Constants.ChatFavorites.maxPinnedChats)
         #expect(normalized.first == ids[0])
         #expect(Set(normalized).count == normalized.count)
+        #expect(ChatFavorites.normalizedID(" \(ids[0]) ") == ids[0])
+        #expect(ChatFavorites.normalizedID("\n") == nil)
     }
 
     @Test("resolution follows pin order and skips unavailable ids")

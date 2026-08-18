@@ -545,8 +545,14 @@ struct ChatSidebar: View {
             onSelect: { viewModel.openSearchResult(chat) },
             onEdit: {
                 if editingChatId == chat.id {
-                    viewModel.updateChatTitle(chat.id, newTitle: editingTitle)
-                    editingChatId = nil
+                    let editedChatId = chat.id
+                    let editedTitle = editingTitle
+                    Task {
+                        await viewModel.updateChatTitle(editedChatId, newTitle: editedTitle)
+                        if editingChatId == editedChatId {
+                            editingChatId = nil
+                        }
+                    }
                 } else {
                     startEditing(summary)
                 }

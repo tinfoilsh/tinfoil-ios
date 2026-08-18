@@ -573,7 +573,8 @@ class ChatViewModel: ObservableObject {
         updateChatPin(id: chat.id, pinnable: canPinChat(chat), hydratedChat: nil)
     }
 
-    private func updateChatPin(id: String, pinnable: Bool, hydratedChat: Chat?) {
+    private func updateChatPin(id rawID: String, pinnable: Bool, hydratedChat: Chat?) {
+        guard let id = ChatFavorites.normalizedID(rawID) else { return }
         favoriteLoadGeneration += 1
         if isChatPinned(id) {
             ProfileManager.shared.unpinChat(id)
