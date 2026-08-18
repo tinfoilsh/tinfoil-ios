@@ -270,11 +270,11 @@ class SettingsManager: ObservableObject {
     
     // Reset all personalization settings
     func resetPersonalization() {
-        nickname = ""
-        profession = ""
-        selectedTraits = []
-        additionalContext = ""
-        isPersonalizationEnabled = false
+        nickname = ProfileDefaults.nickname
+        profession = ProfileDefaults.profession
+        selectedTraits = ProfileDefaults.traits
+        additionalContext = ProfileDefaults.additionalContext
+        isPersonalizationEnabled = ProfileDefaults.isUsingPersonalization
     }
 }
 
