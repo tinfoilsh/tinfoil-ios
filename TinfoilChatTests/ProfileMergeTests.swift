@@ -265,19 +265,28 @@ struct ProfileMergeTests {
         let reconciled = try #require(
             ProfileMerge.reconcileDirtyProfileWithoutBaseline(
                 local: ProfileData(
-                    isDarkMode: true,
-                    language: "English",
-                    reasoningEffort: ReasoningEffort.medium.rawValue,
-                    thinkingEnabled: true,
-                    webSearchAvailable: true,
-                    genUIEnabled: true,
+                    isDarkMode: ProfileDefaults.isDarkMode,
+                    language: ProfileDefaults.language,
+                    isUsingPersonalization: ProfileDefaults.isUsingPersonalization,
+                    reasoningEffort: ProfileDefaults.reasoningEffort,
+                    thinkingEnabled: ProfileDefaults.thinkingEnabled,
+                    webSearchAvailable: ProfileDefaults.webSearchAvailable,
+                    genUIEnabled: ProfileDefaults.genUIEnabled,
                     pinnedChatIds: ["chat-a"]
                 ),
-                remote: ProfileData(webSearchAvailable: false)
+                remote: ProfileData(
+                    webSearchAvailable: !ProfileDefaults.webSearchAvailable
+                )
             )
         )
 
-        #expect(reconciled.webSearchAvailable == false)
+        #expect(reconciled.webSearchAvailable == !ProfileDefaults.webSearchAvailable)
+        #expect(reconciled.isDarkMode == nil)
+        #expect(reconciled.language == nil)
+        #expect(reconciled.isUsingPersonalization == nil)
+        #expect(reconciled.reasoningEffort == nil)
+        #expect(reconciled.thinkingEnabled == nil)
+        #expect(reconciled.genUIEnabled == nil)
         #expect(reconciled.pinnedChatIds == ["chat-a"])
     }
 

@@ -32,24 +32,6 @@ enum ProfileMerge {
         "projectUploadPreference", "pinnedChatIds",
     ]
 
-    private static let bootstrapDefaults = ProfileData(
-        isDarkMode: true,
-        language: "English",
-        nickname: "",
-        profession: "",
-        traits: [],
-        additionalContext: "",
-        isUsingPersonalization: false,
-        isUsingCustomPrompt: false,
-        customSystemPrompt: "",
-        customPromptPresets: [],
-        favoritePromptPresetIds: [],
-        reasoningEffort: ReasoningEffort.medium.rawValue,
-        thinkingEnabled: true,
-        webSearchAvailable: true,
-        genUIEnabled: true
-    )
-
     private static let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -123,7 +105,7 @@ enum ProfileMerge {
         guard
             let localDict = try? dictionary(from: local),
             var mergedDict = try? dictionary(from: remote),
-            let defaultDict = try? dictionary(from: bootstrapDefaults),
+            let defaultDict = try? dictionary(from: ProfileDefaults.profile),
             localDict["pinnedChatIds"] != nil
         else {
             return nil
