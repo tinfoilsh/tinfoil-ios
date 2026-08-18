@@ -736,6 +736,7 @@ actor ChatRecoveryCoordinator {
         ) else {
             return
         }
+        let turnId = envelope.turnId
         var locallyRecoveredResponse: Message?
         var generatedTitle: String?
         do {
@@ -758,7 +759,6 @@ actor ChatRecoveryCoordinator {
             ) else {
                 return
             }
-            let turnId = envelope.turnId
             switch initialStatus.state {
             case .processing:
                 await MainActor.run {
@@ -1084,7 +1084,7 @@ actor ChatRecoveryCoordinator {
                     isCurrent: {
                         await self.recoveryScanCanMutate(
                             chatId: chatId,
-                            turnId: envelope.turnId,
+                            turnId: turnId,
                             storage: storage,
                             accountGeneration: accountGeneration,
                             scanGeneration: scanGeneration,

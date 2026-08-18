@@ -521,63 +521,68 @@ struct ChatSidebar: View {
                         .padding(.horizontal, 14)
                 } else {
                     ForEach(viewModel.favoriteChats) { chat in
-                        ChatListItem(
-                            chat: chat,
-                            isSelected: viewModel.currentChat?.id == chat.id,
-                            isEditing: editingChatId == chat.id,
-                            editingTitle: $editingTitle,
-                            createdTimeString: relativeTimeString(from: chat.createdAt),
-                            updatedTimeString: updatedTimeString(for: chat),
-                            isSyncing: cloudSync.pendingUploadChatIds.contains(chat.id),
-                            syncFailed: syncHealth.failedChats[chat.id] != nil,
-                            isGenerating: viewModel.isChatStreaming(chat.id),
-                            isPinned: true,
-                            showPinnedIndicator: false,
-                            onSelect: { viewModel.openSearchResult(chat) },
-                            onEdit: {
-                                if editingChatId == chat.id {
-                                    viewModel.updateChatTitle(chat.id, newTitle: editingTitle)
-                                    editingChatId = nil
-                                } else {
-                                    startEditing(chat)
-                                }
-                            },
-                            onDelete: { confirmDelete(chat) },
-                            showEditDelete: true
-                        )
-                        .contextMenu {
-                            Button {
-                                viewModel.toggleChatPin(chat)
-                            } label: {
-                                Label("Unpin", systemImage: "pin.slash")
-                            }
-
-                            if chat.projectId != nil {
-                                Button {
-                                    Task {
-                                        await viewModel.removeChatFromProject(chatId: chat.id)
-                                    }
-                                } label: {
-                                    Label("Remove from Project", systemImage: "arrow.uturn.left")
-                                }
-                            }
-
-                            ForEach(viewModel.projects.filter {
-                                $0.decryptionFailed != true && $0.id != chat.projectId
-                            }) { project in
-                                Button {
-                                    Task {
-                                        await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
-                                    }
-                                } label: {
-                                    Label(
-                                        chat.projectId == nil ? "Add to \(project.name)" : "Move to \(project.name)",
-                                        systemImage: "folder"
-                                    )
-                                }
-                            }
-                        }
+                        favoriteChatRow(chat)
                     }
+                }
+            }
+        }
+    }
+
+    private func favoriteChatRow(_ chat: Chat) -> some View {
+        let summary = ChatListSummary(from: chat)
+        return ChatListItem(
+            chat: summary,
+            isSelected: viewModel.currentChat?.id == chat.id,
+            isEditing: editingChatId == chat.id,
+            editingTitle: $editingTitle,
+            createdTimeString: relativeTimeString(from: chat.createdAt),
+            updatedTimeString: updatedTimeString(for: summary),
+            isSyncing: cloudSync.pendingUploadChatIds.contains(chat.id),
+            syncFailed: syncHealth.failedChats[chat.id] != nil,
+            isGenerating: viewModel.isChatStreaming(chat.id),
+            isPinned: true,
+            showPinnedIndicator: false,
+            onSelect: { viewModel.openSearchResult(chat) },
+            onEdit: {
+                if editingChatId == chat.id {
+                    viewModel.updateChatTitle(chat.id, newTitle: editingTitle)
+                    editingChatId = nil
+                } else {
+                    startEditing(summary)
+                }
+            },
+            onDelete: { confirmDelete(summary) },
+            showEditDelete: true
+        )
+        .contextMenu {
+            Button {
+                viewModel.toggleChatPin(chat)
+            } label: {
+                Label("Unpin", systemImage: "pin.slash")
+            }
+
+            if chat.projectId != nil {
+                Button {
+                    Task {
+                        await viewModel.removeChatFromProject(chatId: chat.id)
+                    }
+                } label: {
+                    Label("Remove from Project", systemImage: "arrow.uturn.left")
+                }
+            }
+
+            ForEach(viewModel.projects.filter {
+                $0.decryptionFailed != true && $0.id != chat.projectId
+            }) { project in
+                Button {
+                    Task {
+                        await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
+                    }
+                } label: {
+                    Label(
+                        chat.projectId == nil ? "Add to \(project.name)" : "Move to \(project.name)",
+                        systemImage: "folder"
+                    )
                 }
             }
         }
