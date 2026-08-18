@@ -114,11 +114,11 @@ enum ProfileMerge {
         for field in mergeFields {
             guard let localValue = localDict[field] else { continue }
             if field == "pinnedChatIds" {
-                if let remoteValue = mergedDict[field] {
-                    guard valuesEqual(localValue, remoteValue) else { return nil }
-                } else {
-                    mergedDict[field] = localValue
-                }
+                let pinCandidates = (local.pinnedChatIds ?? []) + (remote.pinnedChatIds ?? [])
+                let uniquePinCount = Set(pinCandidates.compactMap(ChatFavorites.normalizedID)).count
+                guard uniquePinCount <= Constants.ChatFavorites.maxPinnedChats else { return nil }
+                let combinedPinnedChatIds = ChatFavorites.normalize(pinCandidates)
+                mergedDict[field] = combinedPinnedChatIds
                 continue
             }
 

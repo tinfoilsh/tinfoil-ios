@@ -5396,6 +5396,11 @@ class ChatViewModel: ObservableObject {
         accountOperationTracker.reopen()
     }
 
+    func resetSharedProfileSettingsForAccountTeardown() {
+        reasoningEffort = ReasoningEffort(rawValue: ProfileDefaults.reasoningEffort) ?? .medium
+        thinkingEnabled = ProfileDefaults.thinkingEnabled
+    }
+
     private func finishSignIn(
         _ token: AccountOperationFence.Token,
         userId: String

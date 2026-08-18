@@ -308,15 +308,32 @@ struct ProfileMergeTests {
             ),
             remote: ProfileData(nickname: "Remote")
         )
-        let conflictingPins = ProfileMerge.reconcileDirtyProfileWithoutBaseline(
-            local: ProfileData(pinnedChatIds: ["local-chat"]),
-            remote: ProfileData(pinnedChatIds: ["remote-chat"])
-        )
-
         #expect(missingLocal == nil)
         #expect(conflictingSetting == nil)
         #expect(localOnlySetting == nil)
-        #expect(conflictingPins == nil)
+    }
+
+    @Test("dirty profile without baseline combines divergent pins")
+    func combinesDivergentPinsWithoutBaseline() throws {
+        let reconciled = try #require(
+            ProfileMerge.reconcileDirtyProfileWithoutBaseline(
+                local: ProfileData(pinnedChatIds: ["local-chat", "shared-chat"]),
+                remote: ProfileData(pinnedChatIds: ["remote-chat", "shared-chat"])
+            )
+        )
+
+        #expect(reconciled.pinnedChatIds == ["local-chat", "shared-chat", "remote-chat"])
+    }
+
+    @Test("dirty profile without baseline rejects pin overflow")
+    func rejectsPinOverflowWithoutBaseline() {
+        let localPins = (0..<Constants.ChatFavorites.maxPinnedChats).map { "local-\($0)" }
+        let reconciled = ProfileMerge.reconcileDirtyProfileWithoutBaseline(
+            local: ProfileData(pinnedChatIds: localPins),
+            remote: ProfileData(pinnedChatIds: ["remote-chat"])
+        )
+
+        #expect(reconciled == nil)
     }
 
     @Test("adopts populated remote fields when local stayed empty")

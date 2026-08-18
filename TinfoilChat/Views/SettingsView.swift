@@ -206,6 +206,8 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.webSearchEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.webSearchAvailable)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.genUIEnabled)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.reasoningEffort)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.thinkingEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.cloudSyncEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.localOnlyModeEnabled)
 

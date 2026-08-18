@@ -92,25 +92,29 @@ class ProfileManager: ObservableObject {
     
     /// Load profile from Keychain
     private func loadFromKeychain() {
-        guard let data = keychainHelper.load(for: keychainKey, service: keychainService),
-              let profile = try? JSONDecoder().decode(ProfileData.self, from: data) else {
-            // No profile in keychain, use defaults
-            return
+        var loadedProfile: ProfileData?
+        if let data = keychainHelper.load(for: keychainKey, service: keychainService),
+           let profile = try? JSONDecoder().decode(ProfileData.self, from: data) {
+            loadedProfile = profile
+            applyProfile(profile)
+
+            // Also update last synced version if profile has one
+            if let version = profile.version {
+                lastSyncedVersion = version
+            }
         }
-        
-        applyProfile(profile)
-        
-        // Also update last synced version if profile has one
-        if let version = profile.version {
-            lastSyncedVersion = version
-        }
+
         if let baselineData = keychainHelper.load(
             for: profileBaselineKey,
             service: keychainService
         ), let baseline = try? JSONDecoder().decode(ProfileData.self, from: baselineData) {
             lastSyncedProfile = baseline
             lastSyncedVersion = baseline.version ?? lastSyncedVersion
-        } else if !hasPendingLocalProfileChanges {
+            if loadedProfile == nil {
+                applyProfile(baseline)
+                persistProfileToKeychain(baseline)
+            }
+        } else if let profile = loadedProfile, !hasPendingLocalProfileChanges {
             lastSyncedProfile = profile
             persistBaselineToKeychain(profile)
         }
@@ -352,6 +356,7 @@ class ProfileManager: ObservableObject {
         
         $nickname
             .dropFirst()
+            .filter { [weak self] _ in !(self?.isApplyingProfile ?? false) }
             .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard !(self?.isApplyingProfile ?? false) else { return }
@@ -361,6 +366,7 @@ class ProfileManager: ObservableObject {
         
         $profession
             .dropFirst()
+            .filter { [weak self] _ in !(self?.isApplyingProfile ?? false) }
             .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard !(self?.isApplyingProfile ?? false) else { return }
@@ -378,6 +384,7 @@ class ProfileManager: ObservableObject {
         
         $additionalContext
             .dropFirst()
+            .filter { [weak self] _ in !(self?.isApplyingProfile ?? false) }
             .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard !(self?.isApplyingProfile ?? false) else { return }
@@ -403,6 +410,7 @@ class ProfileManager: ObservableObject {
         
         $customSystemPrompt
             .dropFirst()
+            .filter { [weak self] _ in !(self?.isApplyingProfile ?? false) }
             .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard !(self?.isApplyingProfile ?? false) else { return }
