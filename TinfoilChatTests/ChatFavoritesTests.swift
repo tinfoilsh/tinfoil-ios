@@ -31,6 +31,7 @@ struct ChatFavoritesTests {
         #expect(normalized.count == Constants.ChatFavorites.maxPinnedChats)
         #expect(normalized.first == ids[0])
         #expect(Set(normalized).count == normalized.count)
+        #expect(ChatFavorites.canonicalID(" \(ids[0]) ") == ids[0])
         #expect(ChatFavorites.normalizedID(" \(ids[0]) ") == ids[0])
         #expect(ChatFavorites.normalizedID("\n") == nil)
     }
@@ -49,6 +50,22 @@ struct ChatFavoritesTests {
         )
 
         #expect(resolved == [Favorite(id: "chat-a"), Favorite(id: "chat-b")])
+    }
+
+    @Test("resolution can key values by canonical chat ids")
+    func resolvesCanonicalChatIds() {
+        struct Favorite: Equatable {
+            let id: String
+        }
+        let favorite = Favorite(id: " chat-a ")
+
+        let resolved = ChatFavorites.resolve(
+            ids: ["chat-a"],
+            from: [favorite],
+            id: { ChatFavorites.canonicalID($0.id) }
+        )
+
+        #expect(resolved == [favorite])
     }
 
     @Test("pruning removes only authoritatively missing ids")

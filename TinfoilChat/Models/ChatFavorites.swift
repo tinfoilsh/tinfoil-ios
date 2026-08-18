@@ -1,8 +1,12 @@
 import Foundation
 
 enum ChatFavorites {
+    static func canonicalID(_ id: String) -> String {
+        id.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static func normalizedID(_ id: String) -> String? {
-        let normalizedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedID = canonicalID(id)
         return normalizedID.isEmpty ? nil : normalizedID
     }
 

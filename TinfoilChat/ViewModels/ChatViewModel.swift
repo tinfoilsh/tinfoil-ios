@@ -578,7 +578,7 @@ class ChatViewModel: ObservableObject {
         favoriteLoadGeneration += 1
         if isChatPinned(id) {
             ProfileManager.shared.unpinChat(id)
-            favoriteChats.removeAll { $0.id == id }
+            favoriteChats.removeAll { ChatFavorites.canonicalID($0.id) == id }
         } else {
             guard pinnable else { return }
             ProfileManager.shared.pinChat(id)
@@ -586,7 +586,7 @@ class ChatViewModel: ObservableObject {
                 favoriteChats = ChatFavorites.resolve(
                     ids: ProfileManager.shared.pinnedChatIds ?? [],
                     from: [hydratedChat] + favoriteChats,
-                    id: \.id
+                    id: { ChatFavorites.canonicalID($0.id) }
                 )
             }
         }
