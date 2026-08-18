@@ -425,14 +425,6 @@ class ProfileManager: ObservableObject {
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
-
-        $pinnedChatIds
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard !(self?.isApplyingProfile ?? false) else { return }
-                self?.saveToKeychain()
-            }
-            .store(in: &cancellables)
     }
 
     // MARK: - Prompt Presets
@@ -528,24 +520,29 @@ class ProfileManager: ObservableObject {
         pinnedChatIds?.contains(id) == true
     }
 
+    private func updatePinnedChatIds(_ ids: [String]) {
+        pinnedChatIds = ids
+        saveToKeychain()
+    }
+
     func pinChat(_ id: String) {
         guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        pinnedChatIds = ChatFavorites.normalize([id] + (pinnedChatIds ?? []))
+        updatePinnedChatIds(ChatFavorites.normalize([id] + (pinnedChatIds ?? [])))
     }
 
     func unpinChat(_ id: String) {
-        guard pinnedChatIds?.contains(id) == true else { return }
-        pinnedChatIds = pinnedChatIds?.filter { $0 != id }
+        guard let pinnedChatIds, pinnedChatIds.contains(id) else { return }
+        updatePinnedChatIds(pinnedChatIds.filter { $0 != id })
     }
 
     func removePinnedChats(_ ids: Set<String>) {
         guard let pinnedChatIds,
               pinnedChatIds.contains(where: { ids.contains($0) }) else { return }
-        self.pinnedChatIds = ChatFavorites.removing(pinnedChatIds, confirmedMissing: ids)
+        updatePinnedChatIds(ChatFavorites.removing(pinnedChatIds, confirmedMissing: ids))
     }
 
     func clearPinnedChats() {
-        pinnedChatIds = []
+        updatePinnedChatIds([])
     }
 
     /// Duplicate a built-in or user preset into a new editable user preset.
@@ -672,9 +669,18 @@ class ProfileManager: ObservableObject {
                         clearLocalProfileChanged()
                     }
                 } else if hasPendingLocalProfileChanges {
-                    throw ProfileSyncError.unresolvedConflicts(
-                        ProfileMerge.changedProfileFields(local: localProfile, baseline: nil)
-                    )
+                    guard let reconciled = ProfileMerge.reconcileDirtyProfileWithoutBaseline(
+                        local: localProfile,
+                        remote: cloudProfile
+                    ) else {
+                        throw ProfileSyncError.unresolvedConflicts(
+                            ProfileMerge.changedProfileFields(local: localProfile, baseline: nil)
+                        )
+                    }
+                    applyProfile(reconciled)
+                    persistProfileToKeychain(createProfileData())
+                    commitSyncedBaseline(cloudProfile, version: cloudVersion)
+                    markLocalProfileChanged()
                 } else {
                     applyProfile(cloudProfile)
                     persistProfileToKeychain(createProfileData())

@@ -98,6 +98,33 @@ enum ProfileMerge {
         return changed
     }
 
+    static func reconcileDirtyProfileWithoutBaseline(
+        local: ProfileData,
+        remote: ProfileData
+    ) -> ProfileData? {
+        guard
+            let localDict = try? dictionary(from: local),
+            var mergedDict = try? dictionary(from: remote),
+            localDict["pinnedChatIds"] != nil
+        else {
+            return nil
+        }
+
+        for field in mergeFields {
+            guard let localValue = localDict[field] else { continue }
+            if let remoteValue = mergedDict[field] {
+                guard valuesEqual(localValue, remoteValue) else { return nil }
+            } else {
+                guard field == "pinnedChatIds" else { return nil }
+                mergedDict[field] = localValue
+            }
+        }
+
+        // Only the migration-safe favorites field may be missing remotely. Any
+        // other difference remains blocked until a baseline exists.
+        return try? profile(from: mergedDict)
+    }
+
     static func mergeProfiles(
         baseline: ProfileData,
         local: ProfileData,
