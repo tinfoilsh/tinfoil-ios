@@ -32,6 +32,24 @@ enum ProfileMerge {
         "projectUploadPreference", "pinnedChatIds",
     ]
 
+    private static let bootstrapDefaults = ProfileData(
+        isDarkMode: true,
+        language: "English",
+        nickname: "",
+        profession: "",
+        traits: [],
+        additionalContext: "",
+        isUsingPersonalization: false,
+        isUsingCustomPrompt: false,
+        customSystemPrompt: "",
+        customPromptPresets: [],
+        favoritePromptPresetIds: [],
+        reasoningEffort: ReasoningEffort.medium.rawValue,
+        thinkingEnabled: true,
+        webSearchAvailable: true,
+        genUIEnabled: true
+    )
+
     private static let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -105,6 +123,7 @@ enum ProfileMerge {
         guard
             let localDict = try? dictionary(from: local),
             var mergedDict = try? dictionary(from: remote),
+            let defaultDict = try? dictionary(from: bootstrapDefaults),
             localDict["pinnedChatIds"] != nil
         else {
             return nil
@@ -112,16 +131,24 @@ enum ProfileMerge {
 
         for field in mergeFields {
             guard let localValue = localDict[field] else { continue }
-            if let remoteValue = mergedDict[field] {
-                guard valuesEqual(localValue, remoteValue) else { return nil }
-            } else {
-                guard field == "pinnedChatIds" else { return nil }
-                mergedDict[field] = localValue
+            if field == "pinnedChatIds" {
+                if let remoteValue = mergedDict[field] {
+                    guard valuesEqual(localValue, remoteValue) else { return nil }
+                } else {
+                    mergedDict[field] = localValue
+                }
+                continue
             }
+
+            if let remoteValue = mergedDict[field] {
+                if valuesEqual(localValue, remoteValue) { continue }
+            }
+            guard let defaultValue = defaultDict[field],
+                  valuesEqual(localValue, defaultValue) else { return nil }
         }
 
-        // Only the migration-safe favorites field may be missing remotely. Any
-        // other difference remains blocked until a baseline exists.
+        // Local defaults carry no unsynced user intent, so remote values or
+        // omissions can safely win while the favorites field is recovered.
         return try? profile(from: mergedDict)
     }
 

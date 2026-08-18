@@ -260,6 +260,27 @@ struct ProfileMergeTests {
         #expect(reconciled.pinnedChatIds == ["chat-a"])
     }
 
+    @Test("dirty profile without baseline ignores omitted local defaults")
+    func reconcilesPinnedChatsWithOmittedDefaults() throws {
+        let reconciled = try #require(
+            ProfileMerge.reconcileDirtyProfileWithoutBaseline(
+                local: ProfileData(
+                    isDarkMode: true,
+                    language: "English",
+                    reasoningEffort: ReasoningEffort.medium.rawValue,
+                    thinkingEnabled: true,
+                    webSearchAvailable: true,
+                    genUIEnabled: true,
+                    pinnedChatIds: ["chat-a"]
+                ),
+                remote: ProfileData(webSearchAvailable: false)
+            )
+        )
+
+        #expect(reconciled.webSearchAvailable == false)
+        #expect(reconciled.pinnedChatIds == ["chat-a"])
+    }
+
     @Test("dirty profile without baseline rejects ambiguous changes")
     func rejectsAmbiguousChangesWithoutBaseline() {
         let missingLocal = ProfileMerge.reconcileDirtyProfileWithoutBaseline(

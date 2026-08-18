@@ -517,7 +517,8 @@ class ProfileManager: ObservableObject {
     }
 
     func isChatPinned(_ id: String) -> Bool {
-        pinnedChatIds?.contains(id) == true
+        guard let normalizedID = ChatFavorites.normalizedID(id) else { return false }
+        return pinnedChatIds?.contains(normalizedID) == true
     }
 
     private func updatePinnedChatIds(_ ids: [String]) {
@@ -531,8 +532,10 @@ class ProfileManager: ObservableObject {
     }
 
     func unpinChat(_ id: String) {
-        guard let pinnedChatIds, pinnedChatIds.contains(id) else { return }
-        updatePinnedChatIds(pinnedChatIds.filter { $0 != id })
+        guard let normalizedID = ChatFavorites.normalizedID(id),
+              let pinnedChatIds,
+              pinnedChatIds.contains(normalizedID) else { return }
+        updatePinnedChatIds(pinnedChatIds.filter { $0 != normalizedID })
     }
 
     func removePinnedChats(_ ids: Set<String>) {
