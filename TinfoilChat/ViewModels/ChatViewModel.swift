@@ -1532,11 +1532,15 @@ class ChatViewModel: ObservableObject {
     }
 
     func createNewRootChat() {
+        leaveProjectContext()
+        createNewChat()
+    }
+
+    private func leaveProjectContext() {
         activeProject = nil
         projectDocuments = []
         projectError = nil
         isViewingProjectChat = false
-        createNewChat()
     }
 
     /// Creates a new chat and sets it as the current chat
@@ -1790,10 +1794,7 @@ class ChatViewModel: ObservableObject {
     }
 
     func exitProject() {
-        activeProject = nil
-        projectDocuments = []
-        projectError = nil
-        isViewingProjectChat = false
+        leaveProjectContext()
         shouldExpandProjectsInSidebar = true
         createNewChat(isLocalOnly: false, focusInput: false)
     }
@@ -1815,10 +1816,7 @@ class ChatViewModel: ObservableObject {
                 beginSelection(id: id)
             }
             if projectId == nil, activeProject != nil {
-                activeProject = nil
-                projectDocuments = []
-                projectError = nil
-                isViewingProjectChat = false
+                leaveProjectContext()
             }
             _ = selectChat(id: id, isLocalOnly: isLocalOnly)
             if projectId != nil { isViewingProjectChat = true }
@@ -1942,10 +1940,7 @@ class ChatViewModel: ObservableObject {
                 }
                 self.isViewingProjectChat = true
             } else if self.activeProject != nil {
-                self.activeProject = nil
-                self.projectDocuments = []
-                self.projectError = nil
-                self.isViewingProjectChat = false
+                self.leaveProjectContext()
             }
             self.chatSelectionTask = nil
             self.installSelectedChat(persisted, generation: selectionGeneration)

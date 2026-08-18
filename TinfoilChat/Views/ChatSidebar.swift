@@ -230,17 +230,18 @@ struct ChatSidebar: View {
         scrollProxy: ScrollViewProxy
     ) {
         guard let request else { return }
+        guard request.destination != .chat else {
+            navigationRequest = nil
+            return
+        }
 
         withAnimation(.easeInOut(duration: 0.2)) {
-            switch request.destination {
-            case .projects:
+            if request.destination == .projects {
                 isFavoritesExpanded = false
                 isProjectsExpanded = true
-            case .favorites:
+            } else {
                 isFavoritesExpanded = true
                 isProjectsExpanded = false
-            case .chat:
-                break
             }
             scrollProxy.scrollTo(request.destination, anchor: .top)
         }
