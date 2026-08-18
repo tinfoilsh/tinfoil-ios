@@ -728,7 +728,7 @@ class ChatViewModel: ObservableObject {
         guard isCurrentFavoriteHydration(generation: generation, userId: userId) else { return }
 
         var resolved = (chats + stored).filter(ChatFavorites.isPinnable)
-        let resolvedIds = Set(resolved.map(\.id))
+        let resolvedIds = Set(resolved.map { ChatFavorites.canonicalID($0.id) })
         let missingIds = ids.filter { !resolvedIds.contains($0) }
         var confirmedMissingIds = Set<String>()
         for id in missingIds {
@@ -759,7 +759,11 @@ class ChatViewModel: ObservableObject {
 
         guard isCurrentFavoriteHydration(generation: generation, userId: userId) else { return }
         ProfileManager.shared.removePinnedChats(confirmedMissingIds)
-        let favorites = ChatFavorites.resolve(ids: ids, from: resolved, id: \.id)
+        let favorites = ChatFavorites.resolve(
+            ids: ids,
+            from: resolved,
+            id: { ChatFavorites.canonicalID($0.id) }
+        )
         for chat in favorites {
             replaceChat(chat)
         }
