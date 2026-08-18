@@ -1,12 +1,21 @@
 import Foundation
 
 enum ChatFavorites {
+    static func canonicalID(_ id: String) -> String {
+        id.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func normalizedID(_ id: String) -> String? {
+        let normalizedID = canonicalID(id)
+        return normalizedID.isEmpty ? nil : normalizedID
+    }
+
     static func normalize(_ ids: [String]) -> [String] {
         var seen = Set<String>()
         return ids.compactMap { id in
-            let normalizedId = id.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !normalizedId.isEmpty, seen.insert(normalizedId).inserted else { return nil }
-            return normalizedId
+            guard let normalizedID = Self.normalizedID(id),
+                  seen.insert(normalizedID).inserted else { return nil }
+            return normalizedID
         }
         .prefix(Constants.ChatFavorites.maxPinnedChats)
         .map { $0 }
@@ -42,10 +51,36 @@ enum ChatFavorites {
     }
 
     static func isPinnable(_ chat: Chat) -> Bool {
-        !chat.isLocalOnly
-            && !chat.isTemporary
-            && !chat.isBlankChat
-            && !chat.decryptionFailed
-            && !chat.dataCorrupted
+        isPinnable(
+            isLocalOnly: chat.isLocalOnly,
+            isTemporary: chat.isTemporary,
+            isBlankChat: chat.isBlankChat,
+            decryptionFailed: chat.decryptionFailed,
+            dataCorrupted: chat.dataCorrupted
+        )
+    }
+
+    static func isPinnable(_ chat: ChatListSummary) -> Bool {
+        isPinnable(
+            isLocalOnly: chat.isLocalOnly,
+            isTemporary: chat.isTemporary,
+            isBlankChat: chat.isBlankChat,
+            decryptionFailed: chat.decryptionFailed,
+            dataCorrupted: chat.dataCorrupted
+        )
+    }
+
+    private static func isPinnable(
+        isLocalOnly: Bool,
+        isTemporary: Bool,
+        isBlankChat: Bool,
+        decryptionFailed: Bool,
+        dataCorrupted: Bool
+    ) -> Bool {
+        !isLocalOnly
+            && !isTemporary
+            && !isBlankChat
+            && !decryptionFailed
+            && !dataCorrupted
     }
 }
