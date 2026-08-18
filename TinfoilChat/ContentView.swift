@@ -237,7 +237,7 @@ struct ContentView: View {
             // their single chat must finish streaming before the next prompt,
             // otherwise sendMessage's isLoading guard would drop it.
             return chatViewModel.hasChatAccess || !chatViewModel.isLoading
-        case .newChat, .startDictation:
+        case .newChat, .startDictation, .showProjects, .showFavorites:
             return true
         }
     }
@@ -251,7 +251,8 @@ struct ContentView: View {
             guard chatViewModel.currentChat != nil else { return }
             chatViewModel.sendMessage(text: prompt)
         case .newChat:
-            chatViewModel.createNewChat()
+            chatViewModel.createNewRootChat()
+            chatViewModel.requestNavigation(to: .chat)
         case .startDictation:
             if chatViewModel.canUseAudioInput {
                 chatViewModel.createNewChat(focusInput: false)
@@ -264,6 +265,10 @@ struct ContentView: View {
                 chatViewModel.createNewChat()
                 chatViewModel.shouldFocusInput = true
             }
+        case .showProjects:
+            chatViewModel.requestNavigation(to: .projects)
+        case .showFavorites:
+            chatViewModel.requestNavigation(to: .favorites)
         }
     }
 }

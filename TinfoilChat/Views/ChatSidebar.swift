@@ -41,6 +41,7 @@ struct ChatSidebar: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(Clerk.self) private var clerk
     @Binding var isOpen: Bool
+    @Binding var navigationRequest: ChatNavigationRequest?
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @ObservedObject var authManager: AuthManager
     @State private var editingChatId: String? = nil
@@ -223,6 +224,30 @@ struct ChatSidebar: View {
             }
         }
     }
+
+    private func applyNavigationRequest(
+        _ request: ChatNavigationRequest?,
+        scrollProxy: ScrollViewProxy
+    ) {
+        guard let request else { return }
+        guard request.destination != .chat else {
+            navigationRequest = nil
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            if request.destination == .projects {
+                isFavoritesExpanded = false
+                isProjectsExpanded = true
+            } else {
+                isFavoritesExpanded = true
+                isProjectsExpanded = false
+            }
+            scrollProxy.scrollTo(request.destination, anchor: .top)
+        }
+
+        navigationRequest = nil
+    }
     
     @ViewBuilder
     private var recoveryBanner: some View {
@@ -261,57 +286,67 @@ struct ChatSidebar: View {
     private var sidebarContent: some View {
         VStack(spacing: 0) {
             recoveryBanner
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if authManager.isAuthenticated && settings.isCloudSyncEnabled {
-                        favoritesSection
-                            .padding(.horizontal, 16)
-                            .padding(.top, 16)
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if authManager.isAuthenticated && settings.isCloudSyncEnabled {
+                            favoritesSection
+                                .padding(.horizontal, 16)
+                                .padding(.top, 16)
+                                .id(ChatNavigationDestination.favorites)
 
-                        projectsSection
-                            .padding(.horizontal, 16)
-                            .padding(.top, 8)
-                    }
-
-                    chatsSectionHeader
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-
-                    if isTabSwitching {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle())
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 24)
-                    } else if isChatsExpanded {
-                        if authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled {
-                            cloudLocalTabSwitcher
+                            projectsSection
                                 .padding(.horizontal, 16)
                                 .padding(.top, 8)
+                                .id(ChatNavigationDestination.projects)
                         }
 
-                        chatsDescription
+                        chatsSectionHeader
                             .padding(.horizontal, 16)
                             .padding(.top, 8)
 
-                        if isChatSearchEnabled {
-                            chatSearchField
+                        if isTabSwitching {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle())
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 24)
+                        } else if isChatsExpanded {
+                            if authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled {
+                                cloudLocalTabSwitcher
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, 8)
+                            }
+
+                            chatsDescription
                                 .padding(.horizontal, 16)
                                 .padding(.top, 8)
-                        }
 
-                        chatList
-                            .padding(.horizontal, 16)
-                            .padding(.top, 8)
-                            .padding(.bottom, 8)
+                            if isChatSearchEnabled {
+                                chatSearchField
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, 8)
+                            }
+
+                            chatList
+                                .padding(.horizontal, 16)
+                                .padding(.top, 8)
+                                .padding(.bottom, 8)
+                        }
                     }
                 }
+                .applyAlwaysBounceIfAvailable()
+                .refreshable {
+                    await authManager.initializeAuthState()
+                    await viewModel.performFullSync()
+                }
+                .frame(maxHeight: .infinity)
+                .onAppear {
+                    applyNavigationRequest(navigationRequest, scrollProxy: scrollProxy)
+                }
+                .onChange(of: navigationRequest) { _, request in
+                    applyNavigationRequest(request, scrollProxy: scrollProxy)
+                }
             }
-            .applyAlwaysBounceIfAvailable()
-            .refreshable {
-                await authManager.initializeAuthState()
-                await viewModel.performFullSync()
-            }
-            .frame(maxHeight: .infinity)
 
             Divider()
                 .background(Color.gray.opacity(0.3))

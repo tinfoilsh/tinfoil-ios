@@ -17,6 +17,17 @@ enum ChatStorageTab: String, Sendable, Hashable {
     case local
 }
 
+enum ChatNavigationDestination: Hashable {
+    case chat
+    case projects
+    case favorites
+}
+
+struct ChatNavigationRequest: Equatable {
+    let id = UUID()
+    let destination: ChatNavigationDestination
+}
+
 /// Graded reasoning effort exposed to the user. Maps directly onto the
 /// webapp vocabulary; per-model translation (e.g. DeepSeek's `low|medium →
 /// high`, `high → max`) is handled by `ChatQueryBuilder` via `effortMap`.
@@ -194,6 +205,7 @@ class ChatViewModel: ObservableObject {
     @Published var cloudSyncOnboardingMode: CloudSyncOnboardingMode = .setup
     @Published var shouldOpenCloudSync: Bool = false
     @Published var shouldExpandProjectsInSidebar: Bool = false
+    @Published private(set) var navigationRequest: ChatNavigationRequest?
     @Published var isViewingProjectChat: Bool = false
     @Published var scrollTargetMessageId: String? = nil 
     @Published var scrollTargetOffset: CGFloat = 0 
@@ -1510,6 +1522,27 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    func requestNavigation(to destination: ChatNavigationDestination) {
+        navigationRequest = ChatNavigationRequest(destination: destination)
+    }
+
+    func consumeNavigationRequest(id: UUID) {
+        guard navigationRequest?.id == id else { return }
+        navigationRequest = nil
+    }
+
+    func createNewRootChat() {
+        leaveProjectContext()
+        createNewChat()
+    }
+
+    private func leaveProjectContext() {
+        activeProject = nil
+        projectDocuments = []
+        projectError = nil
+        isViewingProjectChat = false
+    }
+
     /// Creates a new chat and sets it as the current chat
     func createNewChat(language: String? = nil, modelType: ModelType? = nil, isLocalOnly: Bool? = nil, projectId: String? = nil, focusInput: Bool = true) {
         // Allow creating new chats for all authenticated users
@@ -1761,10 +1794,7 @@ class ChatViewModel: ObservableObject {
     }
 
     func exitProject() {
-        activeProject = nil
-        projectDocuments = []
-        projectError = nil
-        isViewingProjectChat = false
+        leaveProjectContext()
         shouldExpandProjectsInSidebar = true
         createNewChat(isLocalOnly: false, focusInput: false)
     }
@@ -1786,10 +1816,7 @@ class ChatViewModel: ObservableObject {
                 beginSelection(id: id)
             }
             if projectId == nil, activeProject != nil {
-                activeProject = nil
-                projectDocuments = []
-                projectError = nil
-                isViewingProjectChat = false
+                leaveProjectContext()
             }
             _ = selectChat(id: id, isLocalOnly: isLocalOnly)
             if projectId != nil { isViewingProjectChat = true }
@@ -1913,10 +1940,7 @@ class ChatViewModel: ObservableObject {
                 }
                 self.isViewingProjectChat = true
             } else if self.activeProject != nil {
-                self.activeProject = nil
-                self.projectDocuments = []
-                self.projectError = nil
-                self.isViewingProjectChat = false
+                self.leaveProjectContext()
             }
             self.chatSelectionTask = nil
             self.installSelectedChat(persisted, generation: selectionGeneration)

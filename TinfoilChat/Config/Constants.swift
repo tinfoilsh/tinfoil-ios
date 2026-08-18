@@ -541,6 +541,12 @@ enum Constants {
         static let minimumLaunchCount = 5
     }
 
+    enum HomeScreenQuickActions {
+        static let newChat = "sh.tinfoil.TinfoilChat.new-chat"
+        static let projects = "sh.tinfoil.TinfoilChat.projects"
+        static let favorites = "sh.tinfoil.TinfoilChat.favorites"
+    }
+
     enum RateLimit {
         static let warningThreshold = 3
     }
