@@ -125,20 +125,20 @@ class SettingsManager: ObservableObject {
         self.selectedLanguage = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.selectedLanguage) ?? "System"
         
         // Initialize personalization settings
-        self.isPersonalizationEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled) as? Bool ?? false
-        self.nickname = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.nickname) ?? ""
-        self.profession = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.profession) ?? ""
-        self.additionalContext = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.additionalContext) ?? ""
+        self.isPersonalizationEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled) as? Bool ?? ProfileDefaults.isUsingPersonalization
+        self.nickname = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.nickname) ?? ProfileDefaults.nickname
+        self.profession = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.profession) ?? ProfileDefaults.profession
+        self.additionalContext = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.additionalContext) ?? ProfileDefaults.additionalContext
         
         if let traitsData = UserDefaults.standard.array(forKey: Constants.StorageKeys.UserPrefs.traits) as? [String] {
             self.selectedTraits = traitsData
         } else {
-            self.selectedTraits = []
+            self.selectedTraits = ProfileDefaults.traits
         }
         
         // Initialize custom system prompt settings
-        self.isUsingCustomPrompt = UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled) as? Bool ?? false
-        self.customSystemPrompt = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt) ?? ""
+        self.isUsingCustomPrompt = UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled) as? Bool ?? ProfileDefaults.isUsingCustomPrompt
+        self.customSystemPrompt = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt) ?? ProfileDefaults.customSystemPrompt
 
         if let storedValue = UserDefaults.standard.object(
             forKey: Constants.StorageKeys.Settings.webSearchAvailable
@@ -153,14 +153,14 @@ class SettingsManager: ObservableObject {
                 forKey: Constants.StorageKeys.Settings.webSearchAvailable
             )
         } else {
-            self.webSearchAvailable = true
+            self.webSearchAvailable = ProfileDefaults.webSearchAvailable
         }
         UserDefaults.standard.removeObject(
             forKey: Constants.StorageKeys.Settings.webSearchEnabled
         )
 
         // Initialize Generative UI setting (defaults to on)
-        self.genUIEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.genUIEnabled) as? Bool ?? true
+        self.genUIEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.genUIEnabled) as? Bool ?? ProfileDefaults.genUIEnabled
 
         // Initialize cloud sync setting
         // If no explicit value has been stored, auto-enable for existing users who already have an encryption key
@@ -184,7 +184,10 @@ class SettingsManager: ObservableObject {
             UserDefaults.standard.set("System", forKey: Constants.StorageKeys.Settings.selectedLanguage)
         }
         if UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled) == nil {
-            UserDefaults.standard.set(false, forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled)
+            UserDefaults.standard.set(
+                ProfileDefaults.isUsingPersonalization,
+                forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled
+            )
         }
     }
 
@@ -209,15 +212,15 @@ class SettingsManager: ObservableObject {
         // Reset in-memory state to defaults
         hapticFeedbackEnabled = true
         selectedLanguage = "System"
-        isPersonalizationEnabled = false
-        nickname = ""
-        profession = ""
-        selectedTraits = []
-        additionalContext = ""
-        isUsingCustomPrompt = false
-        customSystemPrompt = ""
-        webSearchAvailable = true
-        genUIEnabled = true
+        isPersonalizationEnabled = ProfileDefaults.isUsingPersonalization
+        nickname = ProfileDefaults.nickname
+        profession = ProfileDefaults.profession
+        selectedTraits = ProfileDefaults.traits
+        additionalContext = ProfileDefaults.additionalContext
+        isUsingCustomPrompt = ProfileDefaults.isUsingCustomPrompt
+        customSystemPrompt = ProfileDefaults.customSystemPrompt
+        webSearchAvailable = ProfileDefaults.webSearchAvailable
+        genUIEnabled = ProfileDefaults.genUIEnabled
         isCloudSyncEnabled = false
         isLocalOnlyModeEnabled = false
     }
@@ -267,11 +270,11 @@ class SettingsManager: ObservableObject {
     
     // Reset all personalization settings
     func resetPersonalization() {
-        nickname = ""
-        profession = ""
-        selectedTraits = []
-        additionalContext = ""
-        isPersonalizationEnabled = false
+        nickname = ProfileDefaults.nickname
+        profession = ProfileDefaults.profession
+        selectedTraits = ProfileDefaults.traits
+        additionalContext = ProfileDefaults.additionalContext
+        isPersonalizationEnabled = ProfileDefaults.isUsingPersonalization
     }
 }
 

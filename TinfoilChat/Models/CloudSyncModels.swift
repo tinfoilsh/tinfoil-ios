@@ -541,6 +541,42 @@ struct ProfileData: Codable {
     var clockVersion: Int?
 }
 
+enum ProfileDefaults {
+    static let isDarkMode = true
+    static let language = "English"
+    static let nickname = ""
+    static let profession = ""
+    static let traits: [String] = []
+    static let additionalContext = ""
+    static let isUsingPersonalization = false
+    static let isUsingCustomPrompt = false
+    static let customSystemPrompt = ""
+    static let customPromptPresets: [SyncedPromptPreset] = []
+    static let favoritePromptPresetIds: [String] = []
+    static let reasoningEffort = ReasoningEffort.medium.rawValue
+    static let thinkingEnabled = true
+    static let webSearchAvailable = true
+    static let genUIEnabled = true
+
+    static let profile = ProfileData(
+        isDarkMode: isDarkMode,
+        language: language,
+        nickname: nickname,
+        profession: profession,
+        traits: traits,
+        additionalContext: additionalContext,
+        isUsingPersonalization: isUsingPersonalization,
+        isUsingCustomPrompt: isUsingCustomPrompt,
+        customSystemPrompt: customSystemPrompt,
+        customPromptPresets: customPromptPresets,
+        favoritePromptPresetIds: favoritePromptPresetIds,
+        reasoningEffort: reasoningEffort,
+        thinkingEnabled: thinkingEnabled,
+        webSearchAvailable: webSearchAvailable,
+        genUIEnabled: genUIEnabled
+    )
+}
+
 /// Profile sync status from server (for efficient sync checking)
 struct ProfileSyncStatus: Codable {
     let exists: Bool

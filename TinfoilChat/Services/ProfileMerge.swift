@@ -98,6 +98,42 @@ enum ProfileMerge {
         return changed
     }
 
+    static func reconcileDirtyProfileWithoutBaseline(
+        local: ProfileData,
+        remote: ProfileData
+    ) -> ProfileData? {
+        guard
+            let localDict = try? dictionary(from: local),
+            var mergedDict = try? dictionary(from: remote),
+            let defaultDict = try? dictionary(from: ProfileDefaults.profile),
+            localDict["pinnedChatIds"] != nil
+        else {
+            return nil
+        }
+
+        for field in mergeFields {
+            guard let localValue = localDict[field] else { continue }
+            if field == "pinnedChatIds" {
+                if let remoteValue = mergedDict[field] {
+                    guard valuesEqual(localValue, remoteValue) else { return nil }
+                } else {
+                    mergedDict[field] = localValue
+                }
+                continue
+            }
+
+            if let remoteValue = mergedDict[field] {
+                if valuesEqual(localValue, remoteValue) { continue }
+            }
+            guard let defaultValue = defaultDict[field],
+                  valuesEqual(localValue, defaultValue) else { return nil }
+        }
+
+        // Local defaults carry no unsynced user intent, so remote values or
+        // omissions can safely win while the favorites field is recovered.
+        return try? profile(from: mergedDict)
+    }
+
     static func mergeProfiles(
         baseline: ProfileData,
         local: ProfileData,

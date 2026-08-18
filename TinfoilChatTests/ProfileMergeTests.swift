@@ -206,6 +206,119 @@ struct ProfileMergeTests {
         #expect(Set(fields) == Set(["nickname", "traits", "webSearchAvailable"]))
     }
 
+    @Test("dirty profile without baseline preserves local pins and remote settings")
+    func reconcilesPinnedChatsWithoutBaseline() throws {
+        let local = ProfileData(
+            themeMode: "light",
+            nickname: "Remote",
+            profession: "Researcher",
+            pinnedChatIds: ["chat-a"]
+        )
+        var remote = ProfileData(
+            themeMode: "light",
+            nickname: "Remote",
+            profession: "Researcher"
+        )
+        remote.version = 4
+
+        let reconciled = try #require(
+            ProfileMerge.reconcileDirtyProfileWithoutBaseline(
+                local: local,
+                remote: remote
+            )
+        )
+
+        #expect(reconciled.themeMode == "light")
+        #expect(reconciled.nickname == "Remote")
+        #expect(reconciled.profession == "Researcher")
+        #expect(reconciled.pinnedChatIds == ["chat-a"])
+        #expect(reconciled.version == 4)
+    }
+
+    @Test("dirty profile without baseline preserves an explicit pin clear")
+    func reconcilesExplicitPinnedChatClearWithoutBaseline() throws {
+        let reconciled = try #require(
+            ProfileMerge.reconcileDirtyProfileWithoutBaseline(
+                local: ProfileData(pinnedChatIds: []),
+                remote: ProfileData(nickname: "Remote")
+            )
+        )
+
+        #expect(reconciled.nickname == "Remote")
+        #expect(reconciled.pinnedChatIds == [])
+    }
+
+    @Test("dirty profile without baseline accepts matching remote pins")
+    func acceptsMatchingPinnedChatsWithoutBaseline() throws {
+        let reconciled = try #require(
+            ProfileMerge.reconcileDirtyProfileWithoutBaseline(
+                local: ProfileData(nickname: "Remote", pinnedChatIds: ["chat-a"]),
+                remote: ProfileData(nickname: "Remote", pinnedChatIds: ["chat-a"])
+            )
+        )
+
+        #expect(reconciled.pinnedChatIds == ["chat-a"])
+    }
+
+    @Test("dirty profile without baseline ignores omitted local defaults")
+    func reconcilesPinnedChatsWithOmittedDefaults() throws {
+        let reconciled = try #require(
+            ProfileMerge.reconcileDirtyProfileWithoutBaseline(
+                local: ProfileData(
+                    isDarkMode: ProfileDefaults.isDarkMode,
+                    language: ProfileDefaults.language,
+                    isUsingPersonalization: ProfileDefaults.isUsingPersonalization,
+                    reasoningEffort: ProfileDefaults.reasoningEffort,
+                    thinkingEnabled: ProfileDefaults.thinkingEnabled,
+                    webSearchAvailable: ProfileDefaults.webSearchAvailable,
+                    genUIEnabled: ProfileDefaults.genUIEnabled,
+                    pinnedChatIds: ["chat-a"]
+                ),
+                remote: ProfileData(
+                    webSearchAvailable: !ProfileDefaults.webSearchAvailable
+                )
+            )
+        )
+
+        #expect(reconciled.webSearchAvailable == !ProfileDefaults.webSearchAvailable)
+        #expect(reconciled.isDarkMode == nil)
+        #expect(reconciled.language == nil)
+        #expect(reconciled.isUsingPersonalization == nil)
+        #expect(reconciled.reasoningEffort == nil)
+        #expect(reconciled.thinkingEnabled == nil)
+        #expect(reconciled.genUIEnabled == nil)
+        #expect(reconciled.pinnedChatIds == ["chat-a"])
+    }
+
+    @Test("dirty profile without baseline rejects ambiguous changes")
+    func rejectsAmbiguousChangesWithoutBaseline() {
+        let missingLocal = ProfileMerge.reconcileDirtyProfileWithoutBaseline(
+            local: ProfileData(nickname: "Local"),
+            remote: ProfileData(nickname: "Remote")
+        )
+        let conflictingSetting = ProfileMerge.reconcileDirtyProfileWithoutBaseline(
+            local: ProfileData(nickname: "Local", pinnedChatIds: ["chat-a"]),
+            remote: ProfileData(nickname: "Remote")
+        )
+        let localOnlySetting = ProfileMerge.reconcileDirtyProfileWithoutBaseline(
+            local: ProfileData(
+                nickname: "Remote",
+                profession: "Researcher",
+                pinnedChatIds: ["chat-a"]
+            ),
+            remote: ProfileData(nickname: "Remote")
+        )
+        let conflictingPins = ProfileMerge.reconcileDirtyProfileWithoutBaseline(
+            local: ProfileData(pinnedChatIds: ["local-chat"]),
+            remote: ProfileData(pinnedChatIds: ["remote-chat"])
+        )
+
+        #expect(missingLocal == nil)
+        #expect(conflictingSetting == nil)
+        #expect(localOnlySetting == nil)
+        #expect(conflictingPins == nil)
+    }
+
     @Test("adopts populated remote fields when local stayed empty")
     func staleEmptyAdoptsRemote() {
         let baseline = ProfileData(nickname: "", customSystemPrompt: "")
