@@ -33,6 +33,7 @@ struct ChatContainer: View {
     @State private var shouldCreateNewChatAfterSubscription = false
     @State private var showPremiumModal = false
     @State private var isVerificationBadgeExpanded = false
+    @State private var sidebarNavigationRequest: ChatNavigationRequest?
 
     private var isAnySheetPresented: Bool {
         viewModel.showVerifierSheet || viewModel.showAddSheet || viewModel.showModelSelectorSheet || viewModel.showRateLimitPaywall || viewModel.showDocumentPicker || viewModel.showPhotoPicker || viewModel.showCamera || viewModel.showMessageSheet || viewModel.showImageViewer || viewModel.showSidebarSettings || showAuthView || showSettings || showPremiumModal
@@ -90,6 +91,10 @@ struct ChatContainer: View {
             setupNavigationBarAppearance()
 
             dragOffset = 0
+            handleNavigationRequest(viewModel.navigationRequest)
+        }
+        .onChange(of: viewModel.navigationRequest) { _, request in
+            handleNavigationRequest(request)
         }
         .onChange(of: colorScheme) { _, _ in
             setupNavigationBarAppearance()
@@ -491,7 +496,12 @@ struct ChatContainer: View {
 
     @ViewBuilder
     private var activeSidebar: some View {
-        ChatSidebar(isOpen: $isSidebarOpen, viewModel: viewModel, authManager: authManager)
+        ChatSidebar(
+            isOpen: $isSidebarOpen,
+            navigationRequest: $sidebarNavigationRequest,
+            viewModel: viewModel,
+            authManager: authManager
+        )
     }
 
     private var isShowingProjectLanding: Bool {
@@ -513,6 +523,29 @@ struct ChatContainer: View {
     }
     
     // MARK: - Helper Methods
+
+    private func handleNavigationRequest(_ request: ChatNavigationRequest?) {
+        guard let request else { return }
+
+        switch request.destination {
+        case .chat:
+            sidebarNavigationRequest = nil
+            messageText = ""
+            withAnimation(.easeInOut(duration: 0.3)) {
+                isSidebarOpen = false
+                dragOffset = 0
+            }
+        case .projects, .favorites:
+            sidebarNavigationRequest = request
+            dismissKeyboard()
+            withAnimation(.easeInOut(duration: 0.3)) {
+                isSidebarOpen = true
+                dragOffset = 0
+            }
+        }
+
+        viewModel.consumeNavigationRequest(id: request.id)
+    }
     
     /// Checks if enough time has passed since the app went to background and creates a new chat if needed
     private func checkAndCreateNewChatIfNeeded() {

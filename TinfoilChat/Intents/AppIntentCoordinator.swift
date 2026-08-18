@@ -18,6 +18,8 @@ final class AppIntentCoordinator: ObservableObject {
         case askQuestion(String)
         case newChat
         case startDictation
+        case showProjects
+        case showFavorites
     }
 
     @Published private(set) var pendingActions: [Action] = []

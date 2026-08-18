@@ -17,6 +17,17 @@ enum ChatStorageTab: String, Sendable, Hashable {
     case local
 }
 
+enum ChatNavigationDestination: Hashable {
+    case chat
+    case projects
+    case favorites
+}
+
+struct ChatNavigationRequest: Equatable {
+    let id = UUID()
+    let destination: ChatNavigationDestination
+}
+
 /// Graded reasoning effort exposed to the user. Maps directly onto the
 /// webapp vocabulary; per-model translation (e.g. DeepSeek's `low|medium →
 /// high`, `high → max`) is handled by `ChatQueryBuilder` via `effortMap`.
@@ -194,6 +205,7 @@ class ChatViewModel: ObservableObject {
     @Published var cloudSyncOnboardingMode: CloudSyncOnboardingMode = .setup
     @Published var shouldOpenCloudSync: Bool = false
     @Published var shouldExpandProjectsInSidebar: Bool = false
+    @Published private(set) var navigationRequest: ChatNavigationRequest?
     @Published var isViewingProjectChat: Bool = false
     @Published var scrollTargetMessageId: String? = nil 
     @Published var scrollTargetOffset: CGFloat = 0 
@@ -1508,6 +1520,23 @@ class ChatViewModel: ObservableObject {
         } else {
             createNewChat(isLocalOnly: shouldBeLocal, focusInput: false)
         }
+    }
+
+    func requestNavigation(to destination: ChatNavigationDestination) {
+        navigationRequest = ChatNavigationRequest(destination: destination)
+    }
+
+    func consumeNavigationRequest(id: UUID) {
+        guard navigationRequest?.id == id else { return }
+        navigationRequest = nil
+    }
+
+    func createNewRootChat() {
+        activeProject = nil
+        projectDocuments = []
+        projectError = nil
+        isViewingProjectChat = false
+        createNewChat()
     }
 
     /// Creates a new chat and sets it as the current chat
