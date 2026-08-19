@@ -8,6 +8,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct DocumentPickerView: UIViewControllerRepresentable {
+    enum PickerError: LocalizedError {
+        case accessDenied
+
+        var errorDescription: String? {
+            "Tinfoil could not access the selected file."
+        }
+    }
+
     var onDocumentPicked: (ManagedStagedFile, String) -> Void
     var onError: (Error) -> Void
 
@@ -41,12 +49,12 @@ struct DocumentPickerView: UIViewControllerRepresentable {
     class Coordinator: NSObject, UIDocumentPickerDelegate {
         let onDocumentPicked: (ManagedStagedFile, String) -> Void
         let onError: (Error) -> Void
-        private let stageDocument: (URL) throws -> ManagedStagedFile
+        private let stageDocument: @Sendable (URL) throws -> ManagedStagedFile
 
         init(
             onDocumentPicked: @escaping (ManagedStagedFile, String) -> Void,
             onError: @escaping (Error) -> Void,
-            stageDocument: @escaping (URL) throws -> ManagedStagedFile = {
+            stageDocument: @escaping @Sendable (URL) throws -> ManagedStagedFile = {
                 try ManagedFileStore.shared.stage(
                     sourceURL: $0,
                     maximumSize: Constants.Attachments.maxFileSizeBytes
@@ -62,18 +70,25 @@ struct DocumentPickerView: UIViewControllerRepresentable {
             guard let sourceURL = urls.first else { return }
 
             guard sourceURL.startAccessingSecurityScopedResource() else {
+                onError(PickerError.accessDenied)
                 return
             }
-            defer { sourceURL.stopAccessingSecurityScopedResource() }
-
-            stageDocument(at: sourceURL)
+            Task {
+                await stageDocument(at: sourceURL)
+            }
         }
 
-        func stageDocument(at sourceURL: URL) {
-            do {
-                let stagedFile = try stageDocument(sourceURL)
-                onDocumentPicked(stagedFile, sourceURL.lastPathComponent)
-            } catch {
+        func stageDocument(at sourceURL: URL) async {
+            let fileName = sourceURL.lastPathComponent
+            let stageDocument = stageDocument
+            let result = await Task.detached(priority: .userInitiated) {
+                defer { sourceURL.stopAccessingSecurityScopedResource() }
+                return Result { try stageDocument(sourceURL) }
+            }.value
+            switch result {
+            case .success(let stagedFile):
+                onDocumentPicked(stagedFile, fileName)
+            case .failure(let error):
                 onError(error)
             }
         }

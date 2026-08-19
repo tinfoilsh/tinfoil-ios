@@ -202,9 +202,4 @@ struct SyncEnclaveProjectStore {
         guard let etag, let value = Int(etag), value > 0 else { return 1 }
         return value
     }
-
-    private func hasNextCursor(_ cursor: String?) -> Bool {
-        guard let cursor else { return false }
-        return !cursor.isEmpty
-    }
 }

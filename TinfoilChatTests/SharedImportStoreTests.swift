@@ -46,7 +46,7 @@ struct SharedImportStoreTests {
         #expect(fixture.store.pendingRequests() == [request])
         #expect(try Data(contentsOf: fixture.store.payloadURL(for: request)) == sourceData)
 
-        fixture.store.removeRequest(id: request.id)
+        try fixture.store.removeRequest(id: request.id)
         #expect(fixture.store.pendingRequests().isEmpty)
     }
 
@@ -158,7 +158,7 @@ struct SharedImportStoreTests {
 
         let publicationBegan = DispatchSemaphore(value: 0)
         let allowPublication = DispatchSemaphore(value: 0)
-        let purgeBegan = DispatchSemaphore(value: 0)
+        let purgeAttempted = DispatchSemaphore(value: 0)
         let publicationStore = try SharedImportStore(
             inboxURL: inboxURL,
             publicationDidBegin: {
@@ -166,10 +166,7 @@ struct SharedImportStoreTests {
                 allowPublication.wait()
             }
         )
-        let purgeStore = try SharedImportStore(
-            inboxURL: inboxURL,
-            purgeDidBegin: { purgeBegan.signal() }
-        )
+        let purgeStore = try SharedImportStore(inboxURL: inboxURL)
 
         let publication = Task.detached {
             _ = try publicationStore.enqueue(
@@ -179,14 +176,41 @@ struct SharedImportStoreTests {
             )
         }
         publicationBegan.wait()
-        let purge = Task.detached { purgeStore.purgeAllRequests() }
+        let purge = Task.detached {
+            purgeAttempted.signal()
+            try purgeStore.purgeAllRequests()
+        }
 
-        #expect(purgeBegan.wait(timeout: .now() + 0.1) == .timedOut)
+        purgeAttempted.wait()
         allowPublication.signal()
         try await publication.value
-        await purge.value
+        try await purge.value
 
         #expect(purgeStore.pendingRequests().isEmpty)
+    }
+
+    @Test("Purge blocks publication until the next account is ready")
+    func purgeFencesPublication() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+
+        try fixture.store.purgeAllRequests()
+
+        #expect(throws: SharedImportError.self) {
+            try fixture.store.enqueue(
+                data: Data("Shared text".utf8),
+                typeIdentifier: UTType.plainText.identifier,
+                originalFileName: "Notes.txt"
+            )
+        }
+
+        try fixture.store.allowPublications()
+        let request = try fixture.store.enqueue(
+            data: Data("Shared text".utf8),
+            typeIdentifier: UTType.plainText.identifier,
+            originalFileName: "Notes.txt"
+        )
+        #expect(fixture.store.pendingRequests() == [request])
     }
 
     private func makeFixture() throws -> (

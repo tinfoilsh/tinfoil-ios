@@ -1538,15 +1538,18 @@ class ChatViewModel: ObservableObject {
         navigationRequest = nil
     }
 
-    func createNewRootChat() async {
-        guard await leaveProjectContext() else { return }
+    @discardableResult
+    func createNewRootChat() async -> Bool {
+        guard hasChatAccess, await leaveProjectContext() else { return false }
         createNewChat()
+        return activeProject == nil && currentChat != nil
     }
 
     private func leaveProjectContext(validateOperation: () -> Bool = { true }) async -> Bool {
         let projectId = activeProject?.id
         projectUploadBarrierCount += 1
         defer { projectUploadBarrierCount -= 1 }
+        projectLoadGeneration += 1
         await cancelAndAwaitProjectUploads()
         guard validateOperation(), activeProject?.id == projectId else { return false }
         activeProject = nil
@@ -1731,7 +1734,10 @@ class ChatViewModel: ObservableObject {
     /// resources load.
     @discardableResult
     func loadActiveProject(projectId: String) async -> Bool {
-        guard hasChatAccess, isProjectAccountActive, !Task.isCancelled else { return false }
+        guard hasChatAccess,
+              isProjectAccountActive,
+              projectUploadBarrierCount == 0,
+              !Task.isCancelled else { return false }
         let accountGeneration = projectListAccountGeneration
         let activeProjectId = activeProject?.id
         let isSwitchingProjects = activeProjectId != nil && activeProjectId != projectId
@@ -1746,6 +1752,7 @@ class ChatViewModel: ObservableObject {
         if isSwitchingProjects {
             await cancelAndAwaitProjectUploads()
             guard !Task.isCancelled,
+                  projectUploadBarrierCount == 1,
                   isCurrentProjectAccount(accountGeneration),
                   activeProject?.id == activeProjectId else { return false }
         }
@@ -1823,10 +1830,12 @@ class ChatViewModel: ObservableObject {
         return loaded
     }
 
-    func exitProject() async {
-        guard await leaveProjectContext() else { return }
+    @discardableResult
+    func exitProject() async -> Bool {
+        guard await leaveProjectContext() else { return false }
         shouldExpandProjectsInSidebar = true
         createNewChat(isLocalOnly: false, focusInput: false)
+        return true
     }
 
     func returnToProjectLanding() {
@@ -1842,11 +1851,17 @@ class ChatViewModel: ObservableObject {
 
     func openSummaryChat(id: String, projectId: String?, isLocalOnly: Bool) async {
         guard let projectId, activeProject?.id != projectId else {
+            var selectionGeneration: Int?
             if projectId == nil {
                 beginSelection(id: id)
+                selectionGeneration = chatSelectionFence.generation
             }
             if projectId == nil, activeProject != nil {
-                guard await leaveProjectContext() else { return }
+                guard await leaveProjectContext(validateOperation: {
+                    guard let selectionGeneration else { return false }
+                    return !Task.isCancelled
+                        && chatSelectionFence.accepts(id: id, generation: selectionGeneration)
+                }) else { return }
             }
             _ = selectChat(id: id, isLocalOnly: isLocalOnly)
             if projectId != nil { isViewingProjectChat = true }
@@ -5647,7 +5662,7 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Handle sign-out by clearing current chats but preserving them in storage
-    func handleSignOut() async {
+    func handleSignOut() async throws {
         // Capture the signing-out user's id up front. Later steps (and
         // the auth manager's cleanup) clear the authenticated state, after
         // which currentUserId no longer resolves this user.
@@ -5664,7 +5679,7 @@ class ChatViewModel: ObservableObject {
         for chatId in Array(messageQueues.keys) {
             discardMessageQueue(chatId: chatId)
         }
-        SharedImportCoordinator.shared.discardAllPending()
+        try await SharedImportCoordinator.shared.discardAllPending()
         let canceledProjectUploadTasks = Array(projectUploadTasks.values)
         clearHydratedFavorites()
         clearProjectState()
@@ -6023,6 +6038,15 @@ class ChatViewModel: ObservableObject {
         token: AccountOperationFence.Token,
         userId: String
     ) async {
+        guard isCurrentSignIn(token, userId: userId) else { return }
+
+        do {
+            try await SharedImportCoordinator.shared.allowPublications()
+        } catch {
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            attachmentError = error.localizedDescription
+            return
+        }
         guard isCurrentSignIn(token, userId: userId) else { return }
 
         // Restore pagination state immediately for better UX on cold start

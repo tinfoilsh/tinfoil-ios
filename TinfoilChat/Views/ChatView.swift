@@ -265,7 +265,7 @@ struct ChatContainer: View {
                             viewModel.returnToProjectLanding()
                         } else {
                             Task {
-                                await viewModel.exitProject()
+                                guard await viewModel.exitProject() else { return }
                                 withAnimation {
                                     isSidebarOpen = true
                                 }

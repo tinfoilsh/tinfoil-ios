@@ -57,8 +57,8 @@ struct ManagedFileStoreTests {
         #expect(consumed == Data(repeating: 1, count: 4))
     }
 
-    @Test("Startup sweep removes only owned staging files")
-    func startupSweepRemovesOnlyOwnedStagingFiles() throws {
+    @Test("Startup sweep removes every file in the managed root")
+    func startupSweepRemovesEveryManagedFile() throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
         let file = try fixture.store.stage(
@@ -69,10 +69,10 @@ struct ManagedFileStoreTests {
         let unrelatedURL = fixture.stagingURL.appendingPathComponent("keep.txt")
         try Data("keep".utf8).write(to: unrelatedURL)
 
-        fixture.store.sweepOnStartup()
+        try fixture.store.sweepOnStartup()
 
         #expect(!FileManager.default.fileExists(atPath: file.url.path))
-        #expect(FileManager.default.fileExists(atPath: unrelatedURL.path))
+        #expect(!FileManager.default.fileExists(atPath: unrelatedURL.path))
     }
 
     @Test("Staged files use protection and backup exclusion")

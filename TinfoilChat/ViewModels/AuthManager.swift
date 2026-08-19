@@ -8,6 +8,7 @@
 import SwiftUI
 import ClerkKit
 import Combine
+import Sentry
 
 @MainActor
 class AuthManager: ObservableObject {
@@ -251,8 +252,13 @@ class AuthManager: ObservableObject {
         let teardownId = UUID()
         let teardownTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.performAccountTeardown()
-            self.chatViewModel?.completeAccountTeardown()
+            do {
+                try await self.performAccountTeardown()
+                self.chatViewModel?.completeAccountTeardown()
+            } catch {
+                SentrySDK.capture(error: error)
+                self.isLoading = false
+            }
         }
         accountTeardownId = teardownId
         accountTeardownTask = teardownTask
@@ -262,10 +268,14 @@ class AuthManager: ObservableObject {
         accountTeardownId = nil
     }
 
-    private func performAccountTeardown() async {
+    private func performAccountTeardown() async throws {
         // Handle chat state BEFORE clearing auth so the view model can still
         // save the current chat (hasChatAccess depends on isAuthenticated).
-        await chatViewModel?.handleSignOut()
+        if let chatViewModel {
+            try await chatViewModel.handleSignOut()
+        } else {
+            try await SharedImportCoordinator.shared.discardAllPending()
+        }
         await ChatRecoveryCoordinator.shared.reset(accountId: nil)
 
         // Sign-out performs a full local wipe so that no content, encryption

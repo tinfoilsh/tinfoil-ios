@@ -1775,19 +1775,32 @@ final class PastingTextView: UITextView {
     /// pipeline can read it after the pasteboard's access window closes.
     /// Oversized files are rejected up front: the pipeline would refuse them
     /// anyway, and copying or reading them first would waste disk and memory.
-    private func importPastedFile(url: URL, onPasteFile: (ManagedStagedFile, String) -> Void) {
+    private func importPastedFile(url: URL, onPasteFile: @escaping (ManagedStagedFile, String) -> Void) {
         let fileName = url.lastPathComponent
         let didAccess = url.startAccessingSecurityScopedResource()
-        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
-
-        do {
-            let file = try ManagedFileStore.shared.stage(
-                sourceURL: url,
-                maximumSize: Constants.Attachments.maxFileSizeBytes
-            )
-            onPasteFile(file, fileName)
-        } catch {
-            onPasteFileError?("Couldn't read the pasted file. Try attaching it with the + button instead.")
+        Task { @MainActor [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+                return Result {
+                    try ManagedFileStore.shared.stage(
+                        sourceURL: url,
+                        maximumSize: Constants.Attachments.maxFileSizeBytes
+                    )
+                }
+            }.value
+            switch result {
+            case .success(let file):
+                onPasteFile(file, fileName)
+            case .failure(let error):
+                if let boundedError = error as? BoundedFileIOError,
+                   case .fileTooLarge(let size, _) = boundedError {
+                    self?.onPasteFileError?(
+                        DocumentProcessingService.ProcessingError.fileTooLarge(size).localizedDescription
+                    )
+                } else {
+                    self?.onPasteFileError?("Couldn't read the pasted file. Try attaching it with the + button instead.")
+                }
+            }
         }
     }
 } 

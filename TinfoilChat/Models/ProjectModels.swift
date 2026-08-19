@@ -71,7 +71,7 @@ struct ProjectDocumentPayload: Codable, Equatable {
     var sizeBytes: Int? = nil
 
     var resolvedSizeBytes: Int {
-        sizeBytes ?? content.data(using: .utf8)?.count ?? content.count
+        sizeBytes ?? content.utf8.count
     }
 }
 
@@ -142,4 +142,3 @@ struct ProjectSyncStatus: Codable, Equatable {
 
 typealias ProjectChatSyncStatus = ProjectSyncStatus
 typealias ProjectDocumentSyncStatus = ProjectSyncStatus
-

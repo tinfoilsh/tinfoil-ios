@@ -39,12 +39,13 @@ final class DocumentProcessingService {
             throw ProcessingError.unsupportedFormat(fileExtension)
         }
 
-        let fileSize = try BoundedFileIO.validatedSize(
-            of: url,
-            maximumSize: Constants.Attachments.maxFileSizeBytes
-        )
-        guard fileSize <= Constants.Attachments.maxFileSizeBytes else {
-            throw ProcessingError.fileTooLarge(fileSize)
+        do {
+            _ = try BoundedFileIO.validatedSize(
+                of: url,
+                maximumSize: Constants.Attachments.maxFileSizeBytes
+            )
+        } catch BoundedFileIOError.fileTooLarge(let size, _) {
+            throw ProcessingError.fileTooLarge(size)
         }
 
         switch fileExtension {
@@ -104,11 +105,18 @@ final class DocumentProcessingService {
 
     private func readPlainText(at url: URL) throws -> String {
         try Task.checkCancellation()
-        guard let data = try? BoundedFileIO.read(
+        let data: Data
+        do {
+            data = try BoundedFileIO.read(
                 from: url,
                 maximumSize: Constants.Attachments.maxFileSizeBytes
-              ),
-              let text = String(data: data, encoding: .utf8) else {
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw ProcessingError.fileReadFailed
+        }
+        guard let text = String(data: data, encoding: .utf8) else {
             throw ProcessingError.fileReadFailed
         }
         try Task.checkCancellation()

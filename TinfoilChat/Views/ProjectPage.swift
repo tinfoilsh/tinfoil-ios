@@ -395,6 +395,14 @@ struct ProjectDocumentsView: View {
                 }
             )
         }
+        .alert("Project Error", isPresented: Binding(
+            get: { viewModel.projectError != nil },
+            set: { if !$0 { viewModel.projectError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.projectError ?? "An error occurred")
+        }
     }
 
     private func documentRow(_ document: ProjectDocument) -> some View {

@@ -84,6 +84,7 @@ enum SharedImportError: LocalizedError {
     case invalidFile
     case fileTooLarge(kind: SharedImportKind, size: Int64)
     case invalidRequest
+    case publicationBlocked
 
     var errorDescription: String? {
         switch self {
@@ -104,6 +105,8 @@ enum SharedImportError: LocalizedError {
             )
         case .invalidRequest:
             return "The shared file request is invalid."
+        case .publicationBlocked:
+            return "Tinfoil cannot accept shared files during account changes. Try again after signing in."
         }
     }
 }

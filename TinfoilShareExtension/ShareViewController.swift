@@ -110,25 +110,11 @@ final class ShareViewController: UIViewController {
             guard let self else { return }
 
             if let url {
-                do {
-                    guard let kind = SharedImportClassifier.kind(
-                        typeIdentifier: typeIdentifier,
-                        fileName: provider.suggestedName
-                    ) else {
-                        throw SharedImportError.unsupportedType
-                    }
-                    let data = try BoundedFileIO.read(
-                        from: url,
-                        maximumSize: kind.maximumSizeBytes
-                    )
-                    saveSharedItem(
-                        data: data,
-                        provider: provider,
-                        typeIdentifier: typeIdentifier
-                    )
-                } catch {
-                    showError(error)
-                }
+                saveSharedItem(
+                    sourceURL: url,
+                    provider: provider,
+                    typeIdentifier: typeIdentifier
+                )
             } else {
                 loadDataFallback(
                     provider: provider,
@@ -156,6 +142,29 @@ final class ShareViewController: UIViewController {
                 provider: provider,
                 typeIdentifier: typeIdentifier
             )
+        }
+    }
+
+    private func saveSharedItem(
+        sourceURL: URL,
+        provider: NSItemProvider,
+        typeIdentifier: String
+    ) {
+        do {
+            let store = try SharedImportStore()
+            _ = try store.enqueue(
+                sourceURL: sourceURL,
+                typeIdentifier: typeIdentifier,
+                originalFileName: sharedFileName(
+                    provider: provider,
+                    typeIdentifier: typeIdentifier
+                )
+            )
+            DispatchQueue.main.async { [weak self] in
+                self?.extensionContext?.completeRequest(returningItems: nil)
+            }
+        } catch {
+            showError(error)
         }
     }
 

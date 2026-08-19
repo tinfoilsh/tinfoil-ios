@@ -16,12 +16,18 @@ final class ManagedStagedFile: @unchecked Sendable {
         self.store = store
     }
 
-    func discard() {
+    deinit {
+        discard()
+    }
+
+    @discardableResult
+    func discard() -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard !isDiscarded else { return }
+        guard !isDiscarded else { return true }
+        guard store.discard(id: id, url: url) else { return false }
         isDiscarded = true
-        store.discard(id: id, url: url)
+        return true
     }
 }
 
@@ -46,7 +52,6 @@ final class ManagedFileStore: @unchecked Sendable {
                 isDirectory: true
             )
         }
-        try? prepareRoot()
     }
 
     func stage(sourceURL: URL, maximumSize: Int64) throws -> ManagedStagedFile {
@@ -101,13 +106,22 @@ final class ManagedFileStore: @unchecked Sendable {
         }
     }
 
-    func sweepOnStartup() {
-        guard let entries = try? fileManager.contentsOfDirectory(
+    func sweepOnStartup() throws {
+        guard fileManager.fileExists(atPath: rootURL.path) else { return }
+        let entries = try fileManager.contentsOfDirectory(
             at: rootURL,
             includingPropertiesForKeys: nil
-        ) else { return }
-        for entry in entries where owns(entry) {
-            try? fileManager.removeItem(at: entry)
+        )
+        var firstError: Error?
+        for entry in entries {
+            do {
+                try fileManager.removeItem(at: entry)
+            } catch {
+                firstError = firstError ?? error
+            }
+        }
+        if let firstError {
+            throw firstError
         }
     }
 
@@ -118,11 +132,18 @@ final class ManagedFileStore: @unchecked Sendable {
         return UUID(uuidString: stem) != nil
     }
 
-    fileprivate func discard(id: UUID, url: URL) {
+    fileprivate func discard(id: UUID, url: URL) -> Bool {
         guard owns(url), url.deletingPathExtension().lastPathComponent == id.uuidString.lowercased() else {
-            return
+            return false
         }
-        try? fileManager.removeItem(at: url)
+        do {
+            try fileManager.removeItem(at: url)
+            return true
+        } catch CocoaError.fileNoSuchFile {
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func fileURL(id: UUID, fileExtension: String?) -> URL {
