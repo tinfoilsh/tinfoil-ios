@@ -382,6 +382,7 @@ class ChatViewModel: ObservableObject {
     @Published var pendingImageThumbnails: [String: String] = [:]
     private var attachmentProcessingTasks: [String: Task<Void, Never>] = [:]
     private var managedAttachmentFiles: [String: ManagedStagedFile] = [:]
+    private var attachmentProcessingGeneration = 0
     var isProcessingAttachment: Bool {
         pendingAttachments.contains { $0.processingState == .processing }
     }
@@ -414,6 +415,7 @@ class ChatViewModel: ObservableObject {
     @Published var isUploadingProjectDocument: Bool = false
     @Published var projectError: String?
     private var projectUploadTasks: [UUID: Task<Void, Never>] = [:]
+    private var projectUploadBarrierCount = 0
     private var projectListLoadGeneration = 0
     private var latestAppliedProjectListLoadGeneration = 0
     private var projectListAccountGeneration = 0
@@ -1534,16 +1536,22 @@ class ChatViewModel: ObservableObject {
         navigationRequest = nil
     }
 
-    func createNewRootChat() {
-        leaveProjectContext()
+    func createNewRootChat() async {
+        guard await leaveProjectContext() else { return }
         createNewChat()
     }
 
-    private func leaveProjectContext() {
+    private func leaveProjectContext() async -> Bool {
+        let projectId = activeProject?.id
+        projectUploadBarrierCount += 1
+        defer { projectUploadBarrierCount -= 1 }
+        await cancelAndAwaitProjectUploads()
+        guard activeProject?.id == projectId else { return false }
         activeProject = nil
         projectDocuments = []
         projectError = nil
         isViewingProjectChat = false
+        return true
     }
 
     /// Creates a new chat and sets it as the current chat
@@ -1723,6 +1731,22 @@ class ChatViewModel: ObservableObject {
     func loadActiveProject(projectId: String) async -> Bool {
         guard hasChatAccess, isProjectAccountActive, !Task.isCancelled else { return false }
         let accountGeneration = projectListAccountGeneration
+        let activeProjectId = activeProject?.id
+        let isSwitchingProjects = activeProjectId != nil && activeProjectId != projectId
+        if isSwitchingProjects {
+            projectUploadBarrierCount += 1
+        }
+        defer {
+            if isSwitchingProjects {
+                projectUploadBarrierCount -= 1
+            }
+        }
+        if isSwitchingProjects {
+            await cancelAndAwaitProjectUploads()
+            guard !Task.isCancelled,
+                  isCurrentProjectAccount(accountGeneration),
+                  activeProject?.id == activeProjectId else { return false }
+        }
 
         projectLoadGeneration += 1
         let generation = projectLoadGeneration
@@ -1797,8 +1821,8 @@ class ChatViewModel: ObservableObject {
         return loaded
     }
 
-    func exitProject() {
-        leaveProjectContext()
+    func exitProject() async {
+        guard await leaveProjectContext() else { return }
         shouldExpandProjectsInSidebar = true
         createNewChat(isLocalOnly: false, focusInput: false)
     }
@@ -1814,13 +1838,13 @@ class ChatViewModel: ObservableObject {
         isViewingProjectChat = true
     }
 
-    func openSummaryChat(id: String, projectId: String?, isLocalOnly: Bool) {
+    func openSummaryChat(id: String, projectId: String?, isLocalOnly: Bool) async {
         guard let projectId, activeProject?.id != projectId else {
             if projectId == nil {
                 beginSelection(id: id)
             }
             if projectId == nil, activeProject != nil {
-                leaveProjectContext()
+                guard await leaveProjectContext() else { return }
             }
             _ = selectChat(id: id, isLocalOnly: isLocalOnly)
             if projectId != nil { isViewingProjectChat = true }
@@ -1944,7 +1968,10 @@ class ChatViewModel: ObservableObject {
                 }
                 self.isViewingProjectChat = true
             } else if self.activeProject != nil {
-                self.leaveProjectContext()
+                guard await self.leaveProjectContext() else {
+                    self.failSelection(id: chat.id, generation: selectionGeneration)
+                    return
+                }
             }
             self.chatSelectionTask = nil
             self.installSelectedChat(persisted, generation: selectionGeneration)
@@ -1990,6 +2017,10 @@ class ChatViewModel: ObservableObject {
     func deleteAllProjects() async throws {
         guard isProjectAccountActive else { return }
         let accountGeneration = projectListAccountGeneration
+        projectUploadBarrierCount += 1
+        defer { projectUploadBarrierCount -= 1 }
+        await cancelAndAwaitProjectUploads()
+        guard isCurrentProjectAccount(accountGeneration) else { return }
         _ = try await projectStorage.deleteAllProjects()
         guard isCurrentProjectAccount(accountGeneration) else { return }
         projectListLoadGeneration += 1
@@ -2009,11 +2040,17 @@ class ChatViewModel: ObservableObject {
         let accountGeneration = projectListAccountGeneration
 
         projectError = nil
+        projectUploadBarrierCount += 1
+        defer { projectUploadBarrierCount -= 1 }
         do {
+            await cancelAndAwaitProjectUploads()
+            guard isCurrentProjectAccount(accountGeneration),
+                  activeProject?.id == project.id else { return }
             try await projectStorage.deleteProject(project.id)
-            guard isCurrentProjectAccount(accountGeneration) else { return }
+            guard isCurrentProjectAccount(accountGeneration),
+                  activeProject?.id == project.id else { return }
             projects.removeAll { $0.id == project.id }
-            exitProject()
+            await exitProject()
         } catch {
             guard isCurrentProjectAccount(accountGeneration) else { return }
             projectError = error.localizedDescription
@@ -2021,11 +2058,14 @@ class ChatViewModel: ObservableObject {
     }
 
     func uploadProjectDocument(file: ManagedStagedFile, filename: String) {
-        guard let project = activeProject else {
+        guard projectUploadBarrierCount == 0,
+              !isAccountTeardownInProgress,
+              let project = activeProject else {
             file.discard()
             return
         }
         let accountGeneration = projectListAccountGeneration
+        let projectId = project.id
         let operationID = UUID()
 
         isUploadingProjectDocument = true
@@ -2052,21 +2092,24 @@ class ChatViewModel: ObservableObject {
                     filename: filename
                 )
                 try Task.checkCancellation()
-                guard isCurrentProjectAccount(accountGeneration) else { return }
+                guard isCurrentProjectAccount(accountGeneration),
+                      activeProject?.id == projectId else { return }
                 let contentType = DocumentConversionService.mimeType(for: filename)
                 let document = try await projectStorage.uploadDocument(
-                    projectId: project.id,
+                    projectId: projectId,
                     filename: filename,
                     contentType: contentType,
                     content: markdown,
                     sizeBytes: file.originalSize
                 )
                 try Task.checkCancellation()
-                guard isCurrentProjectAccount(accountGeneration) else { return }
+                guard isCurrentProjectAccount(accountGeneration),
+                      activeProject?.id == projectId else { return }
                 projectDocuments.append(document)
             } catch is CancellationError {
             } catch {
-                guard isCurrentProjectAccount(accountGeneration) else { return }
+                guard isCurrentProjectAccount(accountGeneration),
+                      activeProject?.id == projectId else { return }
                 projectError = error.localizedDescription
             }
         }
@@ -2075,9 +2118,13 @@ class ChatViewModel: ObservableObject {
 
     private func cancelProjectUploads() {
         let tasks = Array(projectUploadTasks.values)
-        projectUploadTasks.removeAll()
         for task in tasks { task.cancel() }
-        isUploadingProjectDocument = false
+    }
+
+    private func cancelAndAwaitProjectUploads() async {
+        let tasks = Array(projectUploadTasks.values)
+        for task in tasks { task.cancel() }
+        for task in tasks { await task.value }
     }
 
     func deleteProjectDocument(_ documentId: String) async {
@@ -3192,7 +3239,12 @@ class ChatViewModel: ObservableObject {
         fileName: String,
         sharedImportRequestID: UUID? = nil
     ) {
+        guard !isAccountTeardownInProgress else {
+            file.discard()
+            return
+        }
         attachmentError = nil
+        let processingGeneration = attachmentProcessingGeneration
 
         let attachmentId = UUID().uuidString.lowercased()
         var attachment = Attachment(
@@ -3218,6 +3270,8 @@ class ChatViewModel: ObservableObject {
             do {
                 let text = try await DocumentProcessingService.shared.extractText(from: file.url)
                 try Task.checkCancellation()
+                guard processingGeneration == attachmentProcessingGeneration,
+                      pendingAttachments.contains(where: { $0.id == attachmentId }) else { return }
 
                 attachment.textContent = text
                 attachment.fileSize = Int64(file.originalSize)
@@ -3228,6 +3282,8 @@ class ChatViewModel: ObservableObject {
                 }
             } catch is CancellationError {
             } catch {
+                guard processingGeneration == attachmentProcessingGeneration,
+                      pendingAttachments.contains(where: { $0.id == attachmentId }) else { return }
                 attachment.processingState = .failed
                 if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
                     pendingAttachments[index] = attachment
@@ -3264,7 +3320,9 @@ class ChatViewModel: ObservableObject {
         fileName: String,
         sharedImportRequestID: UUID? = nil
     ) {
+        guard !isAccountTeardownInProgress else { return }
         attachmentError = nil
+        let processingGeneration = attachmentProcessingGeneration
 
         let attachmentId = UUID().uuidString.lowercased()
         var attachment = Attachment(
@@ -3283,6 +3341,8 @@ class ChatViewModel: ObservableObject {
             do {
                 let processed = try await ImageProcessingService.shared.processImage(data: data)
                 try Task.checkCancellation()
+                guard processingGeneration == attachmentProcessingGeneration,
+                      pendingAttachments.contains(where: { $0.id == attachmentId }) else { return }
 
                 attachment.mimeType = Constants.Attachments.defaultImageMimeType
                 attachment.base64 = processed.base64
@@ -3300,6 +3360,8 @@ class ChatViewModel: ObservableObject {
                 pendingImageThumbnails[attachmentId] = processed.thumbnailBase64
             } catch is CancellationError {
             } catch {
+                guard processingGeneration == attachmentProcessingGeneration,
+                      pendingAttachments.contains(where: { $0.id == attachmentId }) else { return }
                 attachment.processingState = .failed
                 if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
                     pendingAttachments[index] = attachment
@@ -3311,8 +3373,11 @@ class ChatViewModel: ObservableObject {
     }
 
     func removePendingAttachment(id: String) {
-        attachmentProcessingTasks.removeValue(forKey: id)?.cancel()
-        managedAttachmentFiles.removeValue(forKey: id)?.discard()
+        if let task = attachmentProcessingTasks[id] {
+            task.cancel()
+        } else {
+            managedAttachmentFiles.removeValue(forKey: id)?.discard()
+        }
         let removed = pendingAttachments.filter { $0.id == id }
         pendingAttachments.removeAll { $0.id == id }
         pendingImageThumbnails.removeValue(forKey: id)
@@ -3323,12 +3388,16 @@ class ChatViewModel: ObservableObject {
     }
 
     func clearPendingAttachments(acknowledgeSharedImports: Bool = true) {
+        attachmentProcessingGeneration += 1
         let tasks = Array(attachmentProcessingTasks.values)
-        attachmentProcessingTasks.removeAll()
         for task in tasks { task.cancel() }
-        let files = Array(managedAttachmentFiles.values)
-        managedAttachmentFiles.removeAll()
-        for file in files { file.discard() }
+        let processingAttachmentIds = Set(attachmentProcessingTasks.keys)
+        let unownedAttachmentIds = managedAttachmentFiles.keys.filter {
+            !processingAttachmentIds.contains($0)
+        }
+        for id in unownedAttachmentIds {
+            managedAttachmentFiles.removeValue(forKey: id)?.discard()
+        }
         let removed = pendingAttachments
         pendingAttachments.removeAll()
         pendingImageThumbnails.removeAll()
@@ -5548,6 +5617,7 @@ class ChatViewModel: ObservableObject {
         hydratingChatId = nil
         chatHydrationError = nil
 
+        isAccountTeardownInProgress = true
         let canceledAttachmentTasks = Array(attachmentProcessingTasks.values)
         clearPendingAttachments()
         for chatId in Array(messageQueues.keys) {
@@ -5556,7 +5626,6 @@ class ChatViewModel: ObservableObject {
         SharedImportCoordinator.shared.discardAllPending()
         let canceledProjectUploadTasks = Array(projectUploadTasks.values)
         clearHydratedFavorites()
-        isAccountTeardownInProgress = true
         clearProjectState()
         activeFullSyncId = nil
         isSyncing = false

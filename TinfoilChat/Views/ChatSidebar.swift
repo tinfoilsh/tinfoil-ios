@@ -442,11 +442,13 @@ struct ChatSidebar: View {
                     onSelect: {
                         if isChatSearchActive {
                             if !chatSearch.available {
-                                viewModel.openSummaryChat(
-                                    id: chat.id,
-                                    projectId: chat.projectId,
-                                    isLocalOnly: chat.isLocalOnly
-                                )
+                                Task {
+                                    await viewModel.openSummaryChat(
+                                        id: chat.id,
+                                        projectId: chat.projectId,
+                                        isLocalOnly: chat.isLocalOnly
+                                    )
+                                }
                                 return
                             }
                             guard let fullChat = resolveSidebarSearchChat(

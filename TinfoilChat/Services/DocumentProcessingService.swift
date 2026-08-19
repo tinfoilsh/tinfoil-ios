@@ -49,19 +49,32 @@ final class DocumentProcessingService {
 
         switch fileExtension {
         case "pdf":
-            return try await Task.detached(priority: .userInitiated) {
+            let extractionTask = Task.detached(priority: .userInitiated) {
+                try Task.checkCancellation()
                 try self.extractTextFromPDF(at: url)
-            }.value
+            }
+            return try await withTaskCancellationHandler {
+                try await extractionTask.value
+            } onCancel: {
+                extractionTask.cancel()
+            }
         case "txt", "md", "csv", "html", "json", "xml":
-            return try await Task.detached(priority: .userInitiated) {
+            let extractionTask = Task.detached(priority: .userInitiated) {
+                try Task.checkCancellation()
                 try self.readPlainText(at: url)
-            }.value
+            }
+            return try await withTaskCancellationHandler {
+                try await extractionTask.value
+            } onCancel: {
+                extractionTask.cancel()
+            }
         default:
             return try await DocumentConversionService.shared.convertToMarkdown(url: url, filename: url.lastPathComponent)
         }
     }
 
     private func extractTextFromPDF(at url: URL) throws -> String {
+        try Task.checkCancellation()
         let data = try BoundedFileIO.read(
             from: url,
             maximumSize: Constants.Attachments.maxFileSizeBytes
@@ -72,6 +85,7 @@ final class DocumentProcessingService {
 
         var fullText = ""
         for pageIndex in 0..<document.pageCount {
+            try Task.checkCancellation()
             guard let page = document.page(at: pageIndex) else { continue }
             if let pageText = page.string {
                 if !fullText.isEmpty {
@@ -89,6 +103,7 @@ final class DocumentProcessingService {
     }
 
     private func readPlainText(at url: URL) throws -> String {
+        try Task.checkCancellation()
         guard let data = try? BoundedFileIO.read(
                 from: url,
                 maximumSize: Constants.Attachments.maxFileSizeBytes
@@ -96,6 +111,7 @@ final class DocumentProcessingService {
               let text = String(data: data, encoding: .utf8) else {
             throw ProcessingError.fileReadFailed
         }
+        try Task.checkCancellation()
 
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ProcessingError.textExtractionFailed

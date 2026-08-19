@@ -264,9 +264,11 @@ struct ChatContainer: View {
                         if isInProjectChat {
                             viewModel.returnToProjectLanding()
                         } else {
-                            viewModel.exitProject()
-                            withAnimation {
-                                isSidebarOpen = true
+                            Task {
+                                await viewModel.exitProject()
+                                withAnimation {
+                                    isSidebarOpen = true
+                                }
                             }
                         }
                     } label: {

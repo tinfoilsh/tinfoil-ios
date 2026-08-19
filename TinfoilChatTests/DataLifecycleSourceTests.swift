@@ -43,14 +43,51 @@ struct DataLifecycleSourceTests {
     func attachmentRemovalAndSignOutCancelProcessing() throws {
         let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
         let removal = try functionBody(named: "func removePendingAttachment", in: source)
+        let clearing = try functionBody(named: "func clearPendingAttachments", in: source)
         let signOut = try functionBody(named: "func handleSignOut()", in: source)
 
-        #expect(removal.contains("attachmentProcessingTasks.removeValue(forKey: id)?.cancel()"))
-        #expect(removal.contains("managedAttachmentFiles.removeValue(forKey: id)?.discard()"))
+        #expect(removal.contains("attachmentProcessingTasks[id]"))
+        #expect(removal.contains("task.cancel()"))
+        #expect(clearing.contains("attachmentProcessingGeneration += 1"))
+        #expect(clearing.contains("for task in tasks { task.cancel() }"))
         #expect(signOut.contains("clearPendingAttachments()"))
         #expect(signOut.contains("discardMessageQueue(chatId: chatId)"))
         #expect(signOut.contains("SharedImportCoordinator.shared.discardAllPending()"))
         #expect(signOut.contains("await task.value"))
+    }
+
+    @Test("Project uploads are canceled before context changes")
+    func projectUploadsAreCanceledBeforeContextChanges() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let bulkDelete = try functionBody(named: "func deleteAllProjects()", in: source)
+        let singleDelete = try functionBody(named: "func deleteActiveProject()", in: source)
+        let leaveProject = try functionBody(named: "func leaveProjectContext()", in: source)
+        let upload = try functionBody(named: "func uploadProjectDocument", in: source)
+
+        #expect(bulkDelete.contains("await cancelAndAwaitProjectUploads()"))
+        #expect(singleDelete.contains("await cancelAndAwaitProjectUploads()"))
+        #expect(leaveProject.contains("await cancelAndAwaitProjectUploads()"))
+        #expect(upload.contains("projectUploadBarrierCount == 0"))
+        #expect(upload.contains("activeProject?.id == projectId"))
+        #expect(upload.contains("isCurrentProjectAccount(accountGeneration)"))
+        #expect(upload.contains("file.discard()"))
+    }
+
+    @Test("Document cancellation waits for extraction before discard")
+    func documentCancellationWaitsForExtractionBeforeDiscard() throws {
+        let processingSource = try sourceFile("TinfoilChat/Services/DocumentProcessingService.swift")
+        let viewModelSource = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let extraction = try functionBody(named: "func extractText(from url", in: processingSource)
+        let attachment = try functionBody(named: "func addDocumentAttachment", in: viewModelSource)
+
+        #expect(extraction.contains("withTaskCancellationHandler"))
+        #expect(extraction.contains("extractionTask.cancel()"))
+        #expect(extraction.contains("try await extractionTask.value"))
+        let extractionCall = try #require(attachment.range(of: "extractText(from: file.url)"))
+        let deferredCleanup = try #require(attachment.range(of: "defer {"))
+        let cleanup = attachment[deferredCleanup.lowerBound..<extractionCall.lowerBound]
+        #expect(cleanup.contains("file.discard()"))
+        #expect(attachment.contains("processingGeneration == attachmentProcessingGeneration"))
     }
 
     private func sourceFile(_ relativePath: String) throws -> String {

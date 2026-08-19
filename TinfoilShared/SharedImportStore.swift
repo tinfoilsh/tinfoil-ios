@@ -1,12 +1,21 @@
 import Foundation
 import UniformTypeIdentifiers
 
-struct SharedImportStore {
+struct SharedImportStore: @unchecked Sendable {
     private let fileManager: FileManager
+    private let publicationDidBegin: (@Sendable () -> Void)?
+    private let purgeDidBegin: (@Sendable () -> Void)?
     let inboxURL: URL
 
-    init(fileManager: FileManager = .default, inboxURL: URL? = nil) throws {
+    init(
+        fileManager: FileManager = .default,
+        inboxURL: URL? = nil,
+        publicationDidBegin: (@Sendable () -> Void)? = nil,
+        purgeDidBegin: (@Sendable () -> Void)? = nil
+    ) throws {
         self.fileManager = fileManager
+        self.publicationDidBegin = publicationDidBegin
+        self.purgeDidBegin = purgeDidBegin
 
         if let inboxURL {
             self.inboxURL = inboxURL
@@ -104,38 +113,41 @@ struct SharedImportStore {
         )
         let requestDirectory = directoryURL(for: requestID)
 
-        try fileManager.createDirectory(
-            at: temporaryDirectory,
-            withIntermediateDirectories: false,
-            attributes: nil
-        )
-
-        do {
-            let stagedURL = temporaryDirectory.appendingPathComponent(stagedFileName)
-            try data.write(to: stagedURL, options: .atomic)
-
-            let copiedData = try BoundedFileIO.read(
-                from: stagedURL,
-                maximumSize: kind.maximumSizeBytes
+        return try withCoordinatedInboxWrite {
+            publicationDidBegin?()
+            try fileManager.createDirectory(
+                at: temporaryDirectory,
+                withIntermediateDirectories: false,
+                attributes: nil
             )
-            guard copiedData.count == data.count else {
-                throw SharedImportError.invalidFile
+
+            do {
+                let stagedURL = temporaryDirectory.appendingPathComponent(stagedFileName)
+                try data.write(to: stagedURL, options: .atomic)
+
+                let copiedData = try BoundedFileIO.read(
+                    from: stagedURL,
+                    maximumSize: kind.maximumSizeBytes
+                )
+                guard copiedData.count == data.count else {
+                    throw SharedImportError.invalidFile
+                }
+
+                let manifestURL = temporaryDirectory.appendingPathComponent(
+                    SharedImportConfiguration.manifestFileName
+                )
+                let encoder = JSONEncoder()
+                try encoder.encode(request).write(to: manifestURL, options: .atomic)
+
+                protectAndExcludeFromBackup(stagedURL)
+                protectAndExcludeFromBackup(manifestURL)
+                protectAndExcludeFromBackup(temporaryDirectory)
+                try fileManager.moveItem(at: temporaryDirectory, to: requestDirectory)
+                return request
+            } catch {
+                try? fileManager.removeItem(at: temporaryDirectory)
+                throw error
             }
-
-            let manifestURL = temporaryDirectory.appendingPathComponent(
-                SharedImportConfiguration.manifestFileName
-            )
-            let encoder = JSONEncoder()
-            try encoder.encode(request).write(to: manifestURL, options: .atomic)
-
-            protectAndExcludeFromBackup(stagedURL)
-            protectAndExcludeFromBackup(manifestURL)
-            protectAndExcludeFromBackup(temporaryDirectory)
-            try fileManager.moveItem(at: temporaryDirectory, to: requestDirectory)
-            return request
-        } catch {
-            try? fileManager.removeItem(at: temporaryDirectory)
-            throw error
         }
     }
 
@@ -224,7 +236,27 @@ struct SharedImportStore {
     }
 
     func removeRequest(id: UUID) {
-        try? fileManager.removeItem(at: directoryURL(for: id))
+        try? withCoordinatedInboxWrite {
+            try? fileManager.removeItem(at: directoryURL(for: id))
+        }
+    }
+
+    func purgeAllRequests() {
+        try? withCoordinatedInboxWrite {
+            purgeDidBegin?()
+            let entries = (try? fileManager.contentsOfDirectory(
+                at: inboxURL,
+                includingPropertiesForKeys: nil,
+                options: []
+            )) ?? []
+            for url in entries {
+                let name = url.lastPathComponent
+                if UUID(uuidString: name) != nil
+                    || (name.hasPrefix(".") && name.hasSuffix(".tmp")) {
+                    try? fileManager.removeItem(at: url)
+                }
+            }
+        }
     }
 
     static func sanitizedFileName(_ fileName: String) -> String {
@@ -297,6 +329,23 @@ struct SharedImportStore {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try? protectedURL.setResourceValues(values)
+    }
+
+    private func withCoordinatedInboxWrite<T>(_ operation: () throws -> T) throws -> T {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var result: Result<T, Error>?
+        coordinator.coordinate(
+            writingItemAt: inboxURL,
+            options: .forMerging,
+            error: &coordinationError
+        ) { _ in
+            result = Result { try operation() }
+        }
+        if let result {
+            return try result.get()
+        }
+        throw coordinationError ?? SharedImportError.invalidFile
     }
 
     private static func stagedFileName(

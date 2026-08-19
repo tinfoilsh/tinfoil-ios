@@ -42,8 +42,6 @@ final class SharedImportCoordinator {
 
     func discardAllPending() {
         guard let store = try? SharedImportStore() else { return }
-        for request in store.pendingRequests() {
-            store.removeRequest(id: request.id)
-        }
+        store.purgeAllRequests()
     }
 }

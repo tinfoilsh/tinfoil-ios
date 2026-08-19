@@ -251,8 +251,10 @@ struct ContentView: View {
             guard chatViewModel.currentChat != nil else { return }
             chatViewModel.sendMessage(text: prompt)
         case .newChat:
-            chatViewModel.createNewRootChat()
-            chatViewModel.requestNavigation(to: .chat)
+            Task {
+                await chatViewModel.createNewRootChat()
+                chatViewModel.requestNavigation(to: .chat)
+            }
         case .startDictation:
             if chatViewModel.canUseAudioInput {
                 chatViewModel.createNewChat(focusInput: false)

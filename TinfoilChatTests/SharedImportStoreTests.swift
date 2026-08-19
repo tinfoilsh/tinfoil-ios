@@ -148,6 +148,47 @@ struct SharedImportStoreTests {
         #expect(fixture.store.pendingRequests().isEmpty)
     }
 
+    @Test("Purge waits for publication and removes its request")
+    func purgeCoordinatesWithPublication() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString.lowercased(), isDirectory: true)
+        let inboxURL = rootURL.appendingPathComponent("ShareInbox", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let publicationBegan = DispatchSemaphore(value: 0)
+        let allowPublication = DispatchSemaphore(value: 0)
+        let purgeBegan = DispatchSemaphore(value: 0)
+        let publicationStore = try SharedImportStore(
+            inboxURL: inboxURL,
+            publicationDidBegin: {
+                publicationBegan.signal()
+                allowPublication.wait()
+            }
+        )
+        let purgeStore = try SharedImportStore(
+            inboxURL: inboxURL,
+            purgeDidBegin: { purgeBegan.signal() }
+        )
+
+        let publication = Task.detached {
+            _ = try publicationStore.enqueue(
+                data: Data("Shared text".utf8),
+                typeIdentifier: UTType.plainText.identifier,
+                originalFileName: "Notes.txt"
+            )
+        }
+        publicationBegan.wait()
+        let purge = Task.detached { purgeStore.purgeAllRequests() }
+
+        #expect(purgeBegan.wait(timeout: .now() + 0.1) == .timedOut)
+        allowPublication.signal()
+        try await publication.value
+        await purge.value
+
+        #expect(purgeStore.pendingRequests().isEmpty)
+    }
+
     private func makeFixture() throws -> (
         store: SharedImportStore,
         rootURL: URL,
