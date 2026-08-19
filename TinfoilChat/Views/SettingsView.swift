@@ -850,6 +850,8 @@ struct SettingsView: View {
             do {
                 try await delete()
                 dataActionMessage = "All \(itemsName) have been deleted."
+            } catch is CancellationError {
+                dataActionMessage = "Deletion cancelled before a request could be completed."
             } catch {
                 dataActionMessage = "Failed to delete all \(itemsName). Please try again."
             }
@@ -1073,7 +1075,7 @@ struct SettingsView: View {
         profileUpdateError = nil
         
         do {
-            var updateParams = User.UpdateParams()
+            var updateParams = ClerkKit.User.UpdateParams()
             updateParams.firstName = editingFirstName
             updateParams.lastName = editingLastName
             try await clerk.user?.update(updateParams)

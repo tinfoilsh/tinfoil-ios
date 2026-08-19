@@ -48,7 +48,7 @@ struct ClerkAuthenticatorMFAService: AuthenticatorMFAService {
         try ensureCurrentUser(userId)
     }
 
-    private func currentUser() throws -> (User, String) {
+    private func currentUser() throws -> (ClerkKit.User, String) {
         guard let user = Clerk.shared.user else {
             throw AuthenticatorMFAError.missingSession
         }

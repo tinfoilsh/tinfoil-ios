@@ -432,6 +432,10 @@ class ChatViewModel: ObservableObject {
     @Published var isUploadingProjectDocument: Bool = false
     @Published var projectError: String?
     @Published var projectDocumentError: String?
+    struct ProjectDocumentUploadDestination: Equatable {
+        let projectId: String
+        let accountGeneration: Int
+    }
     private var projectUploadTasks: [UUID: Task<Void, Never>] = [:]
     private var projectUploadTokens: [UUID: UUID] = [:]
     private var projectUploadBarrierCount = 0
@@ -2068,14 +2072,14 @@ class ChatViewModel: ObservableObject {
     /// leave local state untouched for a retry.
     @MainActor
     func deleteAllProjects() async throws {
-        guard isProjectAccountActive else { return }
+        guard isProjectAccountActive else { throw CancellationError() }
         let accountGeneration = projectListAccountGeneration
         projectUploadBarrierCount += 1
         defer { projectUploadBarrierCount -= 1 }
         await cancelAndAwaitProjectUploads()
-        guard isCurrentProjectAccount(accountGeneration) else { return }
+        guard isCurrentProjectAccount(accountGeneration) else { throw CancellationError() }
         _ = try await projectStorage.deleteAllProjects()
-        guard isCurrentProjectAccount(accountGeneration) else { return }
+        guard isCurrentProjectAccount(accountGeneration) else { throw CancellationError() }
         projectListLoadGeneration += 1
         latestAppliedProjectListLoadGeneration = projectListLoadGeneration
         projectLoadGeneration += 1
@@ -2110,15 +2114,28 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    func uploadProjectDocument(file: ManagedStagedFile, filename: String) {
+    var projectDocumentUploadDestination: ProjectDocumentUploadDestination? {
+        guard isProjectAccountActive, let projectId = activeProject?.id else { return nil }
+        return ProjectDocumentUploadDestination(
+            projectId: projectId,
+            accountGeneration: projectListAccountGeneration
+        )
+    }
+
+    func uploadProjectDocument(
+        file: ManagedStagedFile,
+        filename: String,
+        destination: ProjectDocumentUploadDestination
+    ) {
         guard projectUploadBarrierCount == 0,
               !isAccountTeardownInProgress,
-              let project = activeProject else {
+              isCurrentProjectAccount(destination.accountGeneration),
+              activeProject?.id == destination.projectId else {
             file.discard()
             return
         }
-        let accountGeneration = projectListAccountGeneration
-        let projectId = project.id
+        let accountGeneration = destination.accountGeneration
+        let projectId = destination.projectId
         let operationID = UUID()
         let operationToken = UUID()
 

@@ -3,6 +3,14 @@ import Testing
 
 @Suite("Data Lifecycle Source Tests")
 struct DataLifecycleSourceTests {
+    @Test("Sentry imports keep Clerk user types explicit")
+    func sentryImportsKeepClerkUserTypesExplicit() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+
+        #expect(source.contains("import Sentry"))
+        #expect(source.contains("from user: ClerkKit.User"))
+    }
+
     @Test("Both recovery flows confirm before starting fresh")
     func recoveryFlowsConfirmBeforeStartingFresh() throws {
         let onboarding = try sourceFile("TinfoilChat/Views/CloudSyncOnboardingView.swift")
@@ -39,6 +47,21 @@ struct DataLifecycleSourceTests {
         #expect(function.contains("createNewChat(isLocalOnly: false"))
     }
 
+    @Test("Bulk project deletion cancels instead of reporting a skipped request")
+    func bulkProjectDeletionCancelsWhenAccountChanges() throws {
+        let viewModelSource = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let settingsSource = try sourceFile("TinfoilChat/Views/SettingsView.swift")
+        let deletion = try functionBody(named: "func deleteAllProjects()", in: viewModelSource)
+        let confirmation = try functionBody(named: "private func confirmBulkDelete", in: settingsSource)
+
+        let cancellation = try #require(deletion.range(of: "await cancelAndAwaitProjectUploads()"))
+        let validation = try #require(deletion.range(of: "guard isCurrentProjectAccount(accountGeneration) else { throw CancellationError() }"))
+        let request = try #require(deletion.range(of: "try await projectStorage.deleteAllProjects()"))
+        #expect(cancellation.lowerBound < validation.lowerBound)
+        #expect(validation.lowerBound < request.lowerBound)
+        #expect(confirmation.contains("catch is CancellationError"))
+    }
+
     @Test("Attachment removal and sign-out cancel processing")
     func attachmentRemovalAndSignOutCancelProcessing() throws {
         let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
@@ -71,6 +94,44 @@ struct DataLifecycleSourceTests {
         #expect(upload.contains("activeProject?.id == projectId"))
         #expect(upload.contains("isCurrentProjectAccount(accountGeneration)"))
         #expect(upload.contains("file.discard()"))
+    }
+
+    @Test("Photo loading validates the captured account before publishing")
+    func photoLoadingValidatesCapturedAccount() throws {
+        let source = try sourceFile("TinfoilChat/Views/MessageInputView.swift")
+        let function = try functionBody(named: "private func processSelectedPhotos()", in: source)
+
+        let capture = try #require(function.range(of: "let accountGeneration = viewModel.accountLifecycleGeneration"))
+        let load = try #require(function.range(of: "await item.loadTransferable(type: Data.self)"))
+        let validation = try #require(function.range(of: "viewModel.isCurrentAccountLifecycle(accountGeneration)"))
+        let publish = try #require(function.range(of: "viewModel.addImageAttachment"))
+        #expect(capture.lowerBound < load.lowerBound)
+        #expect(load.lowerBound < validation.lowerBound)
+        #expect(validation.lowerBound < publish.lowerBound)
+    }
+
+    @Test("Project document staging preserves its upload destination")
+    func projectDocumentStagingPreservesDestination() throws {
+        let pageSource = try sourceFile("TinfoilChat/Views/ProjectPage.swift")
+        let viewModelSource = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let upload = try functionBody(named: "func uploadProjectDocument", in: viewModelSource)
+
+        #expect(pageSource.contains("uploadDestination = viewModel.projectDocumentUploadDestination"))
+        #expect(pageSource.contains("destination: uploadDestination"))
+        #expect(upload.contains("isCurrentProjectAccount(destination.accountGeneration)"))
+        #expect(upload.contains("activeProject?.id == destination.projectId"))
+        #expect(upload.contains("let projectId = destination.projectId"))
+        #expect(upload.contains("file.discard()"))
+    }
+
+    @Test("Share imports prefer file representations over in-memory data")
+    func shareImportsPreferFileRepresentations() throws {
+        let source = try sourceFile("TinfoilShareExtension/ShareViewController.swift")
+        let addToTinfoil = try functionBody(named: "private func addToTinfoil()", in: source)
+
+        let fileLoad = try #require(addToTinfoil.range(of: "provider.loadFileRepresentation"))
+        let fallback = try #require(addToTinfoil.range(of: "loadDataFallback("))
+        #expect(fileLoad.lowerBound < fallback.lowerBound)
     }
 
     @Test("Root selection is revalidated after project upload cancellation")

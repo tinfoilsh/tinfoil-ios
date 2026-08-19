@@ -144,7 +144,7 @@ class AuthManager: ObservableObject {
         }
     }
     
-    private func updateUserData(from user: User) {
+    private func updateUserData(from user: ClerkKit.User) {
         let wasAuthenticated = isAuthenticated
         
         // Store relevant user data

@@ -798,10 +798,12 @@ struct MessageInputView: View {
 
     private func processSelectedPhotos() {
         let items = selectedPhotoItems
+        let accountGeneration = viewModel.accountLifecycleGeneration
         selectedPhotoItems = []
         for (index, item) in items.enumerated() {
             Task {
                 if let data = try? await item.loadTransferable(type: Data.self) {
+                    guard viewModel.isCurrentAccountLifecycle(accountGeneration) else { return }
                     let fileName = items.count > 1 ? "Photo \(index + 1).jpg" : "Photo.jpg"
                     viewModel.addImageAttachment(data: data, fileName: fileName)
                 }

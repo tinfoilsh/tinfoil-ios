@@ -357,6 +357,7 @@ struct ProjectDocumentsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @State private var showDocumentPicker = false
+    @State private var uploadDestination: ChatViewModel.ProjectDocumentUploadDestination?
 
     var body: some View {
         Form {
@@ -393,7 +394,8 @@ struct ProjectDocumentsView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
-                    showDocumentPicker = true
+                    uploadDestination = viewModel.projectDocumentUploadDestination
+                    showDocumentPicker = uploadDestination != nil
                 } label: {
                     Image(systemName: "plus")
                 }
@@ -401,17 +403,23 @@ struct ProjectDocumentsView: View {
                 .accessibilityLabel("Add document")
             }
         }
-        .sheet(isPresented: $showDocumentPicker) {
-            DocumentPickerView(
-                onDocumentPicked: { file, fileName in
-                    viewModel.uploadProjectDocument(file: file, filename: fileName)
-                },
+        .sheet(isPresented: $showDocumentPicker, onDismiss: { uploadDestination = nil }) {
+            if let uploadDestination {
+                DocumentPickerView(
+                    onDocumentPicked: { file, fileName in
+                        viewModel.uploadProjectDocument(
+                            file: file,
+                            filename: fileName,
+                            destination: uploadDestination
+                        )
+                    },
                     onError: { error in
                         viewModel.projectDocumentError = error.localizedDescription
                     },
                     accountLifecycleGeneration: viewModel.accountLifecycleGeneration,
                     isAccountLifecycleCurrent: viewModel.isCurrentAccountLifecycle
                 )
+            }
         }
         .alert("Project Error", isPresented: Binding(
             get: { viewModel.projectDocumentError != nil },
