@@ -110,11 +110,25 @@ final class ShareViewController: UIViewController {
             guard let self else { return }
 
             if let url {
-                saveSharedItem(
-                    from: url,
-                    provider: provider,
-                    typeIdentifier: typeIdentifier
-                )
+                do {
+                    guard let kind = SharedImportClassifier.kind(
+                        typeIdentifier: typeIdentifier,
+                        fileName: provider.suggestedName
+                    ) else {
+                        throw SharedImportError.unsupportedType
+                    }
+                    let data = try BoundedFileIO.read(
+                        from: url,
+                        maximumSize: kind.maximumSizeBytes
+                    )
+                    saveSharedItem(
+                        data: data,
+                        provider: provider,
+                        typeIdentifier: typeIdentifier
+                    )
+                } catch {
+                    showError(error)
+                }
             } else {
                 loadDataFallback(
                     provider: provider,
@@ -137,31 +151,23 @@ final class ShareViewController: UIViewController {
                 return
             }
 
-            let temporaryURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString.lowercased())
-            do {
-                try data.write(to: temporaryURL, options: .atomic)
-                saveSharedItem(
-                    from: temporaryURL,
-                    provider: provider,
-                    typeIdentifier: typeIdentifier
-                )
-                try? FileManager.default.removeItem(at: temporaryURL)
-            } catch {
-                showError(error)
-            }
+            saveSharedItem(
+                data: data,
+                provider: provider,
+                typeIdentifier: typeIdentifier
+            )
         }
     }
 
     private func saveSharedItem(
-        from sourceURL: URL,
+        data: Data,
         provider: NSItemProvider,
         typeIdentifier: String
     ) {
         do {
             let store = try SharedImportStore()
             _ = try store.enqueue(
-                sourceURL: sourceURL,
+                data: data,
                 typeIdentifier: typeIdentifier,
                 originalFileName: sharedFileName(
                     provider: provider,

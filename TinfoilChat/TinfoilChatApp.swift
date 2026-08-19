@@ -23,6 +23,7 @@ struct TinfoilChatApp: App {
 
     init() {
         StorageKeysMigration.migrateIfNeeded()
+        ManagedFileStore.shared.sweepOnStartup()
         Clerk.configure(
             publishableKey: AppConfig.shared.clerkPublishableKey,
             options: Clerk.Options(telemetryEnabled: false)

@@ -39,7 +39,10 @@ final class DocumentProcessingService {
             throw ProcessingError.unsupportedFormat(fileExtension)
         }
 
-        let fileSize = try fileSize(at: url)
+        let fileSize = try BoundedFileIO.validatedSize(
+            of: url,
+            maximumSize: Constants.Attachments.maxFileSizeBytes
+        )
         guard fileSize <= Constants.Attachments.maxFileSizeBytes else {
             throw ProcessingError.fileTooLarge(fileSize)
         }
@@ -59,7 +62,11 @@ final class DocumentProcessingService {
     }
 
     private func extractTextFromPDF(at url: URL) throws -> String {
-        guard let document = PDFDocument(url: url) else {
+        let data = try BoundedFileIO.read(
+            from: url,
+            maximumSize: Constants.Attachments.maxFileSizeBytes
+        )
+        guard let document = PDFDocument(data: data) else {
             throw ProcessingError.textExtractionFailed
         }
 
@@ -82,7 +89,10 @@ final class DocumentProcessingService {
     }
 
     private func readPlainText(at url: URL) throws -> String {
-        guard let data = try? Data(contentsOf: url),
+        guard let data = try? BoundedFileIO.read(
+                from: url,
+                maximumSize: Constants.Attachments.maxFileSizeBytes
+              ),
               let text = String(data: data, encoding: .utf8) else {
             throw ProcessingError.fileReadFailed
         }
@@ -92,10 +102,5 @@ final class DocumentProcessingService {
         }
 
         return text
-    }
-
-    private func fileSize(at url: URL) throws -> Int64 {
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        return attributes[.size] as? Int64 ?? 0
     }
 }

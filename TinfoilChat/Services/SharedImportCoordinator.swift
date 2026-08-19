@@ -14,10 +14,9 @@ final class SharedImportCoordinator {
         )
         for request in store.pendingRequests() where !importedRequestIDs.contains(request.id) {
             do {
-                let payloadURL = try store.payloadURL(for: request)
+                let data = try store.payloadData(for: request)
                 switch request.item.kind {
                 case .image:
-                    let data = try Data(contentsOf: payloadURL, options: .mappedIfSafe)
                     viewModel.addImageAttachment(
                         data: data,
                         fileName: request.item.originalFileName,
@@ -25,7 +24,7 @@ final class SharedImportCoordinator {
                     )
                 case .document:
                     viewModel.addDocumentAttachment(
-                        url: payloadURL,
+                        data: data,
                         fileName: request.item.originalFileName,
                         sharedImportRequestID: request.id
                     )
@@ -39,5 +38,12 @@ final class SharedImportCoordinator {
     func acknowledge(requestID: UUID) {
         guard let store = try? SharedImportStore() else { return }
         store.removeRequest(id: requestID)
+    }
+
+    func discardAllPending() {
+        guard let store = try? SharedImportStore() else { return }
+        for request in store.pendingRequests() {
+            store.removeRequest(id: request.id)
+        }
     }
 }

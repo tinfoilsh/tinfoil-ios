@@ -102,6 +102,7 @@ final class ProjectStorageService: ObservableObject {
             description: payload.description,
             systemInstructions: payload.systemInstructions,
             memory: payload.memory,
+            color: payload.color,
             createdAt: now,
             updatedAt: now,
             syncVersion: syncVersion
@@ -124,6 +125,7 @@ final class ProjectStorageService: ObservableObject {
             description: decoded.description,
             systemInstructions: decoded.systemInstructions,
             memory: decoded.memory,
+            color: decoded.color,
             createdAt: now,
             updatedAt: now,
             syncVersion: syncVersion
@@ -142,6 +144,7 @@ final class ProjectStorageService: ObservableObject {
                 description: decoded.0.description,
                 systemInstructions: decoded.0.systemInstructions,
                 memory: decoded.0.memory,
+                color: decoded.0.color,
                 createdAt: now,
                 updatedAt: now,
                 syncVersion: decoded.1
@@ -223,6 +226,7 @@ final class ProjectStorageService: ObservableObject {
                 description: "",
                 systemInstructions: "",
                 memory: [],
+                color: nil,
                 createdAt: item.createdAt,
                 updatedAt: item.updatedAt,
                 syncVersion: item.syncVersion,
@@ -301,7 +305,8 @@ final class ProjectStorageService: ObservableObject {
         projectId: String,
         filename: String,
         contentType: String,
-        content: String
+        content: String,
+        sizeBytes: Int
     ) async throws -> ProjectDocument {
         let idResponse = try await generateDocumentId(projectId: projectId)
         let wireId = projectDocumentId(projectId: projectId, documentId: idResponse.documentId)
@@ -310,11 +315,12 @@ final class ProjectStorageService: ObservableObject {
             projectId: projectId,
             filename: filename,
             contentType: contentType,
-            content: content
+            content: content,
+            sizeBytes: sizeBytes
         )
 
         let now = isoNow()
-        let size = payload.content.data(using: .utf8)?.count ?? payload.content.count
+        let size = payload.resolvedSizeBytes
         return ProjectDocument(
             id: idResponse.documentId,
             projectId: projectId,
@@ -337,7 +343,7 @@ final class ProjectStorageService: ObservableObject {
             projectId: projectId,
             filename: decoded.filename,
             contentType: decoded.contentType,
-            sizeBytes: decoded.content.data(using: .utf8)?.count ?? decoded.content.count,
+            sizeBytes: decoded.resolvedSizeBytes,
             syncVersion: syncVersion,
             createdAt: now,
             updatedAt: now,
@@ -393,7 +399,7 @@ final class ProjectStorageService: ObservableObject {
                     projectId: projectId,
                     filename: decoded.0.filename,
                     contentType: decoded.0.contentType,
-                    sizeBytes: decoded.0.content.data(using: .utf8)?.count ?? decoded.0.content.count,
+                    sizeBytes: decoded.0.resolvedSizeBytes,
                     syncVersion: decoded.1,
                     createdAt: createdAtFromReverseId(docId),
                     updatedAt: update.updatedAt,

@@ -386,10 +386,8 @@ struct ProjectDocumentsView: View {
             }
         }
         .sheet(isPresented: $showDocumentPicker) {
-            DocumentPickerView { url, fileName in
-                Task {
-                    await viewModel.uploadProjectDocument(url: url, filename: fileName)
-                }
+            DocumentPickerView { file, fileName in
+                viewModel.uploadProjectDocument(file: file, filename: fileName)
             }
         }
     }

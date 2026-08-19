@@ -8,9 +8,11 @@ enum SharedImportConfiguration {
     static let maximumFileNameLength = 120
     static let maximumImageSizeBytes: Int64 = 10 * 1024 * 1024
     static let maximumDocumentSizeBytes: Int64 = 20 * 1024 * 1024
+    static let maximumManifestSizeBytes: Int64 = 64 * 1024
     /// Hidden staging directories older than this are treated as abandoned
     /// by an interrupted share and swept from the app-group inbox.
     static let staleStagingLifetimeSeconds: TimeInterval = 24 * 60 * 60
+    static let validRequestRetentionSeconds: TimeInterval = 30 * 24 * 60 * 60
     static let supportedDocumentExtensions: Set<String> = [
         "pdf", "docx", "pptx", "xlsx", "txt", "md", "csv", "html", "json", "xml",
     ]

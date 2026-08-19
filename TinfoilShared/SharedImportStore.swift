@@ -41,15 +41,38 @@ struct SharedImportStore {
         ) else {
             throw SharedImportError.unsupportedType
         }
-
-        let sourceValues = try sourceURL.resourceValues(
-            forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]
-        )
-        guard sourceValues.isRegularFile == true, sourceValues.isSymbolicLink != true else {
+        let data: Data
+        do {
+            data = try BoundedFileIO.read(
+                from: sourceURL,
+                maximumSize: kind.maximumSizeBytes
+            )
+        } catch BoundedFileIOError.fileTooLarge(let size, _) {
+            throw SharedImportError.fileTooLarge(kind: kind, size: size)
+        } catch {
             throw SharedImportError.invalidFile
         }
+        return try enqueue(
+            data: data,
+            typeIdentifier: typeIdentifier,
+            originalFileName: originalFileName
+        )
+    }
 
-        let byteCount = Int64(sourceValues.fileSize ?? 0)
+    @discardableResult
+    func enqueue(
+        data: Data,
+        typeIdentifier: String,
+        originalFileName: String
+    ) throws -> SharedImportRequest {
+        guard let kind = SharedImportClassifier.kind(
+            typeIdentifier: typeIdentifier,
+            fileName: originalFileName
+        ) else {
+            throw SharedImportError.unsupportedType
+        }
+
+        let byteCount = Int64(data.count)
         guard byteCount <= kind.maximumSizeBytes else {
             throw SharedImportError.fileTooLarge(kind: kind, size: byteCount)
         }
@@ -89,10 +112,13 @@ struct SharedImportStore {
 
         do {
             let stagedURL = temporaryDirectory.appendingPathComponent(stagedFileName)
-            try fileManager.copyItem(at: sourceURL, to: stagedURL)
+            try data.write(to: stagedURL, options: .atomic)
 
-            let copiedSize = try fileSize(at: stagedURL)
-            guard copiedSize == byteCount else {
+            let copiedData = try BoundedFileIO.read(
+                from: stagedURL,
+                maximumSize: kind.maximumSizeBytes
+            )
+            guard copiedData.count == data.count else {
                 throw SharedImportError.invalidFile
             }
 
@@ -114,7 +140,7 @@ struct SharedImportStore {
     }
 
     func pendingRequests() -> [SharedImportRequest] {
-        removeStaleTemporaryDirectories()
+        removeStaleEntries()
 
         let directories = (try? fileManager.contentsOfDirectory(
             at: inboxURL,
@@ -127,25 +153,39 @@ struct SharedImportStore {
             .sorted { $0.createdAt < $1.createdAt }
     }
 
-    /// Removes staging directories abandoned by an interrupted share (the
-    /// extension was killed between copy and publish), so they don't retain
-    /// app-group storage indefinitely. Only directories older than the
-    /// staging lifetime are removed, to never race a share in progress.
-    private func removeStaleTemporaryDirectories() {
-        let cutoff = Date().addingTimeInterval(
+    /// Removes abandoned hidden staging, stale malformed requests, and valid
+    /// requests past their retention window without racing an active share.
+    private func removeStaleEntries() {
+        let staleCutoff = Date().addingTimeInterval(
             -SharedImportConfiguration.staleStagingLifetimeSeconds
+        )
+        let retentionCutoff = Date().addingTimeInterval(
+            -SharedImportConfiguration.validRequestRetentionSeconds
         )
         let entries = (try? fileManager.contentsOfDirectory(
             at: inboxURL,
-            includingPropertiesForKeys: [.creationDateKey],
+            includingPropertiesForKeys: [.creationDateKey, .contentModificationDateKey],
             options: []
         )) ?? []
         for url in entries {
             let name = url.lastPathComponent
-            guard name.hasPrefix("."), name.hasSuffix(".tmp") else { continue }
-            let created = (try? url.resourceValues(forKeys: [.creationDateKey]))?
-                .creationDate ?? .distantPast
-            if created < cutoff {
+            let values = try? url.resourceValues(forKeys: [
+                .creationDateKey,
+                .contentModificationDateKey
+            ])
+            let entryDate = values?.contentModificationDate ?? values?.creationDate ?? .distantPast
+            if name.hasPrefix(".") && name.hasSuffix(".tmp") {
+                if entryDate < staleCutoff {
+                    try? fileManager.removeItem(at: url)
+                }
+                continue
+            }
+            guard UUID(uuidString: name) != nil else { continue }
+            if let request = loadRequest(from: url) {
+                if request.createdAt < retentionCutoff {
+                    try? fileManager.removeItem(at: url)
+                }
+            } else if entryDate < staleCutoff {
                 try? fileManager.removeItem(at: url)
             }
         }
@@ -174,6 +214,13 @@ struct SharedImportStore {
             throw SharedImportError.invalidRequest
         }
         return payloadURL
+    }
+
+    func payloadData(for request: SharedImportRequest) throws -> Data {
+        try BoundedFileIO.read(
+            from: payloadURL(for: request),
+            maximumSize: request.item.kind.maximumSizeBytes
+        )
     }
 
     func removeRequest(id: UUID) {
@@ -217,7 +264,10 @@ struct SharedImportStore {
         )
         let decoder = JSONDecoder()
 
-        guard let data = try? Data(contentsOf: manifestURL),
+        guard let data = try? BoundedFileIO.read(
+                  from: manifestURL,
+                  maximumSize: SharedImportConfiguration.maximumManifestSizeBytes
+              ),
               let request = try? decoder.decode(SharedImportRequest.self, from: data),
               directoryURL == self.directoryURL(for: request.id),
               (try? payloadURL(for: request)) != nil else {

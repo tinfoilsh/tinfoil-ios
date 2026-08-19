@@ -11,20 +11,26 @@ struct SyncEnclaveProjectStore {
             name: data.name,
             description: data.description,
             systemInstructions: data.systemInstructions,
-            memory: []
+            memory: [],
+            color: data.color
         )
         let response = try await pushProject(id: id, payload: payload, ifMatch: nil)
         return (payload, etagToSyncVersion(response.etag))
     }
 
     func updateProject(id: String, data: UpdateProjectData, existing: Project) async throws {
-        let payload = ProjectData(
+        let payload = Self.mergedProjectData(data, existing: existing)
+        _ = try await pushProject(id: id, payload: payload, ifMatch: String(existing.syncVersion))
+    }
+
+    static func mergedProjectData(_ data: UpdateProjectData, existing: Project) -> ProjectData {
+        ProjectData(
             name: data.name ?? existing.name,
             description: data.description ?? existing.description,
             systemInstructions: data.systemInstructions ?? existing.systemInstructions,
-            memory: data.memory ?? existing.memory
+            memory: data.memory ?? existing.memory,
+            color: data.color ?? existing.color
         )
-        _ = try await pushProject(id: id, payload: payload, ifMatch: String(existing.syncVersion))
     }
 
     func getProject(id: String) async throws -> (ProjectData, Int)? {
@@ -62,28 +68,14 @@ struct SyncEnclaveProjectStore {
     }
 
     func deleteAllProjects() async throws -> Int {
-        let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
-        var deleted = 0
-        var cursor: String? = nil
-        repeat {
-            let status = try await SyncEnclaveAPI.listStatus(
-                EnclaveListStatusRequest(scope: .project, cursor: cursor, limit: Constants.SyncEnclave.listStatusPageLimit, projectId: nil)
+        let response = try await SyncEnclaveAPI.deleteAllProjects(
+            EnclaveDeleteAllProjectsRequest(
+                key: try CEKEncoding.requirePrimaryKeyB64(),
+                idempotencyKey: newSyncEnclaveIdempotencyKey()
             )
-            for update in status.updates {
-                _ = try await SyncEnclaveAPI.deleteRow(
-                    EnclaveDeleteRequest(
-                        scope: .project,
-                        id: update.id,
-                        ifMatch: nil,
-                        idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                        key: keyB64
-                    )
-                )
-                deleted += 1
-            }
-            cursor = status.nextCursor
-        } while hasNextCursor(cursor)
-        return deleted
+        )
+        guard response.ok else { throw CloudStorageError.invalidResponse }
+        return response.deleted
     }
 
     func uploadDocument(
@@ -91,9 +83,15 @@ struct SyncEnclaveProjectStore {
         projectId: String,
         filename: String,
         contentType: String,
-        content: String
+        content: String,
+        sizeBytes: Int
     ) async throws -> (ProjectDocumentPayload, Int) {
-        let payload = ProjectDocumentPayload(content: content, filename: filename, contentType: contentType)
+        let payload = ProjectDocumentPayload(
+            content: content,
+            filename: filename,
+            contentType: contentType,
+            sizeBytes: sizeBytes
+        )
         let metadata: [String: AnyCodable] = [
             "filename": AnyCodable(filename),
             "contentType": AnyCodable(contentType),
