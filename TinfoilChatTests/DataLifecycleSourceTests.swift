@@ -41,7 +41,7 @@ struct DataLifecycleSourceTests {
         let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
         let function = try functionBody(named: "func deleteAllProjects()", in: source)
 
-        let request = try #require(function.range(of: "try await projectStorage.deleteAllProjects()"))
+        let request = try #require(function.range(of: "try await projectStorage.deleteAllProjects(requestProgress: requestProgress)"))
         let clearProjects = try #require(function.range(of: "projects = []"))
         #expect(request.lowerBound < clearProjects.lowerBound)
         #expect(function.contains("projectListLoadGeneration += 1"))
@@ -51,32 +51,48 @@ struct DataLifecycleSourceTests {
         #expect(function.contains("createNewChat(isLocalOnly: false"))
     }
 
-    @Test("Bulk project deletion distinguishes account changes around commit")
-    func bulkProjectDeletionDistinguishesAccountChanges() throws {
+    @Test("Bulk project deletion distinguishes cancellation around dispatch")
+    func bulkProjectDeletionDistinguishesCancellationAroundDispatch() throws {
         let viewModelSource = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
         let settingsSource = try sourceFile("TinfoilChat/Views/SettingsView.swift")
         let deletion = try functionBody(named: "func deleteAllProjects()", in: viewModelSource)
         let confirmation = try functionBody(named: "private func confirmBulkDelete", in: settingsSource)
 
         let cancellation = try #require(deletion.range(of: "await cancelAndAwaitProjectUploads()"))
-        let request = try #require(deletion.range(of: "try await projectStorage.deleteAllProjects()"))
-        let committedChange = try #require(deletion.range(of: "return .accountChangedAfterCommit"))
+        let request = try #require(deletion.range(of: "try await projectStorage.deleteAllProjects(requestProgress: requestProgress)"))
         let beforeRequest = deletion[cancellation.upperBound..<request.lowerBound]
-        let afterRequest = deletion[request.upperBound..<deletion.endIndex]
         #expect(beforeRequest.contains("throw CancellationError()"))
-        #expect(!afterRequest.contains("throw CancellationError()"))
-        #expect(request.lowerBound < committedChange.lowerBound)
+        #expect(deletion.contains("guard await requestProgress.requestStarted else { throw CancellationError() }"))
+        #expect(deletion.contains("return .accountChanged"))
+        #expect(deletion.contains("return .refreshRequired"))
         #expect(deletion.contains("currentUserId == accountUserId"))
         #expect(confirmation.contains("catch is CancellationError"))
-        #expect(confirmation.contains("if outcome == .deleted"))
+        #expect(confirmation.contains("Deletion may have completed. Refresh to confirm."))
+        #expect(confirmation.contains("case .accountChanged:"))
     }
 
-    @Test("Bulk chat deletion cancels without a current account")
-    func bulkChatDeletionRequiresCurrentAccount() throws {
+    @Test("Bulk chat deletion uses the same request outcome distinction")
+    func bulkChatDeletionDistinguishesCancellationAroundDispatch() throws {
         let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
         let deletion = try functionBody(named: "func deleteAllChats()", in: source)
 
         #expect(deletion.contains("guard let userId = currentUserId else { throw CancellationError() }"))
+        #expect(deletion.contains("requestProgress: requestProgress"))
+        #expect(deletion.contains("guard await requestProgress.requestStarted else { throw CancellationError() }"))
+        #expect(deletion.contains("return .accountChanged"))
+        #expect(deletion.contains("return .refreshRequired"))
+    }
+
+    @Test("Bulk delete progress starts at network dispatch")
+    func bulkDeleteProgressStartsAtNetworkDispatch() throws {
+        let clientSource = try sourceFile("TinfoilChat/Services/SyncEnclave/SyncEnclaveClient.swift")
+        let post = try functionBody(named: "func post<Response: Decodable>", in: clientSource)
+
+        let token = try #require(post.range(of: "let token = try await requireToken"))
+        let started = try #require(post.range(of: "await requestProgress?.markRequestStarted()", options: [], range: token.upperBound..<post.endIndex))
+        let dispatch = try #require(post.range(of: "var response = try await performPost"))
+        #expect(token.lowerBound < started.lowerBound)
+        #expect(started.lowerBound < dispatch.lowerBound)
     }
 
     @Test("Attachment removal and sign-out cancel processing")

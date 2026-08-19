@@ -816,7 +816,6 @@ struct SettingsView: View {
             setDeleting: { isDeletingAllChats = $0 }
         ) {
             try await chatViewModel.deleteAllChats()
-            return .deleted
         }
     }
 
@@ -840,7 +839,7 @@ struct SettingsView: View {
         phrase: String,
         itemsName: String,
         setDeleting: @escaping (Bool) -> Void,
-        delete: @escaping () async throws -> ChatViewModel.DeleteAllProjectsOutcome
+        delete: @escaping () async throws -> ChatViewModel.DeleteAllDataOutcome
     ) {
         guard typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == phrase else {
             dataActionMessage = "Deletion cancelled: the confirmation phrase didn't match."
@@ -850,8 +849,13 @@ struct SettingsView: View {
         Task {
             do {
                 let outcome = try await delete()
-                if outcome == .deleted {
+                switch outcome {
+                case .deleted:
                     dataActionMessage = "All \(itemsName) have been deleted."
+                case .accountChanged:
+                    break
+                case .refreshRequired:
+                    dataActionMessage = "Deletion may have completed. Refresh to confirm."
                 }
             } catch is CancellationError {
                 dataActionMessage = "Deletion cancelled before a request could be completed."

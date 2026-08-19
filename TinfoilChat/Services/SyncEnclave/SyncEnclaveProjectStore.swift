@@ -67,12 +67,13 @@ struct SyncEnclaveProjectStore {
         )
     }
 
-    func deleteAllProjects() async throws -> Int {
+    func deleteAllProjects(requestProgress: SyncEnclaveRequestProgress? = nil) async throws -> Int {
         let response = try await SyncEnclaveAPI.deleteAllProjects(
             EnclaveDeleteAllProjectsRequest(
                 key: try CEKEncoding.requirePrimaryKeyB64(),
                 idempotencyKey: newSyncEnclaveIdempotencyKey()
-            )
+            ),
+            requestProgress: requestProgress
         )
         guard response.ok else { throw CloudStorageError.invalidResponse }
         return response.deleted

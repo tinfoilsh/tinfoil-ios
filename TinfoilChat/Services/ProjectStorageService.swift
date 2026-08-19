@@ -158,8 +158,8 @@ final class ProjectStorageService: ObservableObject {
     }
 
     @discardableResult
-    func deleteAllProjects() async throws -> Int {
-        try await enclaveStore.deleteAllProjects()
+    func deleteAllProjects(requestProgress: SyncEnclaveRequestProgress? = nil) async throws -> Int {
+        try await enclaveStore.deleteAllProjects(requestProgress: requestProgress)
     }
 
     func listProjects(

@@ -862,14 +862,26 @@ enum SyncEnclaveAPI {
     }
 
     @discardableResult
-    static func deleteRow(_ request: EnclaveDeleteRequest) async throws -> EnclaveOKResponse {
-        try await SyncEnclaveClient.shared.post(path: "/v1/sync/delete", body: request)
+    static func deleteRow(
+        _ request: EnclaveDeleteRequest,
+        requestProgress: SyncEnclaveRequestProgress? = nil
+    ) async throws -> EnclaveOKResponse {
+        try await SyncEnclaveClient.shared.post(
+            path: "/v1/sync/delete",
+            body: request,
+            requestProgress: requestProgress
+        )
     }
 
     static func deleteAllProjects(
-        _ request: EnclaveDeleteAllProjectsRequest
+        _ request: EnclaveDeleteAllProjectsRequest,
+        requestProgress: SyncEnclaveRequestProgress? = nil
     ) async throws -> EnclaveDeleteAllProjectsResponse {
-        try await SyncEnclaveClient.shared.post(path: "/v1/sync/delete-all-projects", body: request)
+        try await SyncEnclaveClient.shared.post(
+            path: "/v1/sync/delete-all-projects",
+            body: request,
+            requestProgress: requestProgress
+        )
     }
 
     // MARK: Key registry

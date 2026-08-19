@@ -436,9 +436,10 @@ class ChatViewModel: ObservableObject {
         let projectId: String
         let accountGeneration: Int
     }
-    enum DeleteAllProjectsOutcome: Equatable {
+    enum DeleteAllDataOutcome: Equatable {
         case deleted
-        case accountChangedAfterCommit
+        case accountChanged
+        case refreshRequired
     }
     private var projectUploadTasks: [UUID: Task<Void, Never>] = [:]
     private var projectUploadTokens: [UUID: UUID] = [:]
@@ -2073,22 +2074,31 @@ class ChatViewModel: ObservableObject {
 
     /// Permanently deletes every project the user owns, mirroring the
     /// webapp's bulk action. Throws before the request when account context
-    /// is lost, and reports account changes after a successful commit.
+    /// is lost, and distinguishes cancellation after request dispatch.
     @MainActor
-    func deleteAllProjects() async throws -> DeleteAllProjectsOutcome {
+    func deleteAllProjects() async throws -> DeleteAllDataOutcome {
         guard isProjectAccountActive, let accountUserId = currentUserId else {
             throw CancellationError()
         }
         let accountGeneration = projectListAccountGeneration
+        let requestProgress = SyncEnclaveRequestProgress()
         projectUploadBarrierCount += 1
         defer { projectUploadBarrierCount -= 1 }
         await cancelAndAwaitProjectUploads()
         guard isCurrentProjectAccount(accountGeneration), currentUserId == accountUserId else {
             throw CancellationError()
         }
-        _ = try await projectStorage.deleteAllProjects()
+        do {
+            _ = try await projectStorage.deleteAllProjects(requestProgress: requestProgress)
+        } catch is CancellationError {
+            guard await requestProgress.requestStarted else { throw CancellationError() }
+            guard isCurrentProjectAccount(accountGeneration), currentUserId == accountUserId else {
+                return .accountChanged
+            }
+            return .refreshRequired
+        }
         guard isCurrentProjectAccount(accountGeneration), currentUserId == accountUserId else {
-            return .accountChangedAfterCommit
+            return .accountChanged
         }
         projectListLoadGeneration += 1
         latestAppliedProjectListLoadGeneration = projectListLoadGeneration
@@ -6446,8 +6456,10 @@ class ChatViewModel: ObservableObject {
     /// bulk-delete runs first so a failure leaves local state untouched and
     /// the user can retry without partial-deletion side effects.
     @MainActor
-    func deleteAllChats() async throws {
+    func deleteAllChats() async throws -> DeleteAllDataOutcome {
         guard let userId = currentUserId else { throw CancellationError() }
+        let accountGeneration = accountLifecycleGeneration
+        let requestProgress = SyncEnclaveRequestProgress()
         let allChatIds = Set(
             cloudSidebarSummaries.map(\.id)
                 + localSidebarSummaries.map(\.id)
@@ -6465,48 +6477,62 @@ class ChatViewModel: ObservableObject {
         let hasKey = EncryptionService.shared.hasEncryptionKey()
         let shouldDeleteCloud = isAuthenticated
             && (hasKey || SettingsManager.shared.isCloudSyncEnabled)
-        try await DeleteAllChatsCoordinator.quiesceAndDeleteCloud(
-            closeSaveAdmission: {
-                self.acceptsChatSaves = false
-            },
-            stopProducers: {
-                self.autoSyncTimer?.invalidate()
-                self.autoSyncTimer = nil
-                let autoSyncTask = self.autoSyncTask
-                self.autoSyncTask = nil
-                autoSyncTask?.cancel()
-                self.recoveryScanTimer?.invalidate()
-                self.recoveryScanTimer = nil
-                let streamTasks = self.cancelAllGenerations()
-                await self.accountOperationTracker.closeAndWait()
-                await autoSyncTask?.value
-                await self.suspendRecoveryScans()
-                await self.drainStreamTasks(streamTasks)
-                let cleanupTasks = Array(self.recoverySessionCleanupTasks.values)
-                self.recoverySessionCleanupTasks.values.forEach { $0.cancel() }
-                self.recoverySessionCleanupTasks.removeAll()
-                for task in cleanupTasks {
-                    await task.value
+        do {
+            try await DeleteAllChatsCoordinator.quiesceAndDeleteCloud(
+                closeSaveAdmission: {
+                    self.acceptsChatSaves = false
+                },
+                stopProducers: {
+                    self.autoSyncTimer?.invalidate()
+                    self.autoSyncTimer = nil
+                    let autoSyncTask = self.autoSyncTask
+                    self.autoSyncTask = nil
+                    autoSyncTask?.cancel()
+                    self.recoveryScanTimer?.invalidate()
+                    self.recoveryScanTimer = nil
+                    let streamTasks = self.cancelAllGenerations()
+                    await self.accountOperationTracker.closeAndWait()
+                    await autoSyncTask?.value
+                    await self.suspendRecoveryScans()
+                    await self.drainStreamTasks(streamTasks)
+                    let cleanupTasks = Array(self.recoverySessionCleanupTasks.values)
+                    self.recoverySessionCleanupTasks.values.forEach { $0.cancel() }
+                    self.recoverySessionCleanupTasks.removeAll()
+                    for task in cleanupTasks {
+                        await task.value
+                    }
+                },
+                drainSavesAndBackups: {
+                    await self.drainPendingSaves()
+                },
+                quiesceUploads: {
+                    guard shouldDeleteCloud else { return }
+                    try await self.cloudSync.quiesceUploadsForBulkDelete(userId: userId)
+                },
+                deleteCloud: {
+                    guard shouldDeleteCloud else { return }
+                    try await self.cloudSync.deleteAllFromCloud(
+                        userId: userId,
+                        requestProgress: requestProgress
+                    )
+                },
+                recoverFromFailure: {
+                    await self.restoreDeleteAllOperationalState(
+                        userId: userId,
+                        inMemoryWasCleared: false
+                    )
                 }
-            },
-            drainSavesAndBackups: {
-                await self.drainPendingSaves()
-            },
-            quiesceUploads: {
-                guard shouldDeleteCloud else { return }
-                try await self.cloudSync.quiesceUploadsForBulkDelete(userId: userId)
-            },
-            deleteCloud: {
-                guard shouldDeleteCloud else { return }
-                try await self.cloudSync.deleteAllFromCloud(userId: userId)
-            },
-            recoverFromFailure: {
-                await self.restoreDeleteAllOperationalState(
-                    userId: userId,
-                    inMemoryWasCleared: false
-                )
+            )
+        } catch is CancellationError {
+            guard await requestProgress.requestStarted else { throw CancellationError() }
+            guard isCurrentAccountLifecycle(accountGeneration), currentUserId == userId else {
+                return .accountChanged
             }
-        )
+            return .refreshRequired
+        }
+        guard isCurrentAccountLifecycle(accountGeneration), currentUserId == userId else {
+            return .accountChanged
+        }
 
         clearHydratedFavorites()
         ProfileManager.shared.clearPinnedChats()
@@ -6534,9 +6560,16 @@ class ChatViewModel: ObservableObject {
             userId: userId,
             inMemoryWasCleared: inMemoryWasCleared
         )
+        guard isCurrentAccountLifecycle(accountGeneration), currentUserId == userId else {
+            return .accountChanged
+        }
         if let cleanupError {
+            if cleanupError is CancellationError {
+                return .refreshRequired
+            }
             throw cleanupError
         }
+        return .deleted
     }
 
     private func restoreDeleteAllOperationalState(
