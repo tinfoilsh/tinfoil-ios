@@ -36,6 +36,25 @@ struct ManagedFileStoreTests {
         #expect(throws: BoundedFileIOError.self) {
             try fixture.store.stage(sourceURL: linkURL, maximumSize: 1_024)
         }
+        #expect(FileManager.default.fileExists(atPath: sourceURL.path))
+        #expect(FileManager.default.fileExists(atPath: linkURL.path))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.stagingURL.path).isEmpty)
+    }
+
+    @Test("Stops incremental I/O when a source grows beyond the limit")
+    func stopsIncrementalIOWhenSourceGrowsBeyondLimit() throws {
+        var chunks = [Data(repeating: 1, count: 4), Data(repeating: 2, count: 5)]
+        var consumed = Data()
+
+        #expect(throws: BoundedFileIOError.self) {
+            try BoundedFileIO.stream(maximumSize: 8) { _ in
+                chunks.isEmpty ? nil : chunks.removeFirst()
+            } consume: { chunk in
+                consumed.append(chunk)
+            }
+        }
+
+        #expect(consumed == Data(repeating: 1, count: 4))
     }
 
     @Test("Startup sweep removes only owned staging files")

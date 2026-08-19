@@ -57,7 +57,10 @@ final class ManagedFileStore: @unchecked Sendable {
             let size = try BoundedFileIO.copy(
                 from: sourceURL,
                 to: destinationURL,
-                maximumSize: maximumSize
+                maximumSize: maximumSize,
+                destinationAttributes: [
+                    .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication
+                ]
             )
             try protectAndExcludeFromBackup(destinationURL)
             return ManagedStagedFile(id: id, url: destinationURL, originalSize: Int(size), store: self)
