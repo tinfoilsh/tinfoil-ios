@@ -12,7 +12,6 @@ final class SharedImportCoordinator {
 
     private var importTask: Task<Void, Never>?
     private var acknowledgementTasks: [UUID: Task<Void, Never>] = [:]
-    private var acknowledgementTokens: [UUID: UUID] = [:]
 
     private init() {}
 
@@ -23,59 +22,83 @@ final class SharedImportCoordinator {
             viewModel.pendingAttachments.compactMap(\.sharedImportRequestID)
         ).union(acknowledgementTasks.keys)
         importTask = Task { [weak self, weak viewModel] in
-            let imports = await Task.detached(priority: .userInitiated) {
-                guard let store = try? SharedImportStore() else { return [PendingImport]() }
+            defer { self?.importTask = nil }
+            let requestTask = Task.detached(priority: .userInitiated) {
+                guard let store = try? SharedImportStore() else { return [SharedImportRequest]() }
                 return store.pendingRequests()
                     .filter { !importedRequestIDs.contains($0.id) }
-                    .map { request in
-                        do {
-                            switch request.item.kind {
-                            case .image:
-                                return .image(
-                                    try store.payloadData(for: request),
-                                    request.item.originalFileName,
-                                    request.id
-                                )
-                            case .document:
-                                let file = try ManagedFileStore.shared.stage(
-                                    sourceURL: store.payloadURL(for: request),
-                                    maximumSize: request.item.kind.maximumSizeBytes
-                                )
-                                return .document(file, request.item.originalFileName, request.id)
+            }
+            let requests = await withTaskCancellationHandler {
+                await requestTask.value
+            } onCancel: {
+                requestTask.cancel()
+            }
+            for request in requests {
+                guard !Task.isCancelled else { return }
+                let worker = Task.detached(priority: .userInitiated) { () -> PendingImport? in
+                    do {
+                        try Task.checkCancellation()
+                        let store = try SharedImportStore()
+                        switch request.item.kind {
+                        case .image:
+                            let data = try store.payloadData(for: request)
+                            try Task.checkCancellation()
+                            return .image(data, request.item.originalFileName, request.id)
+                        case .document:
+                            let file = try ManagedFileStore.shared.stage(
+                                sourceURL: store.payloadURL(for: request),
+                                maximumSize: request.item.kind.maximumSizeBytes
+                            )
+                            guard !Task.isCancelled else {
+                                file.discard()
+                                return nil
                             }
-                        } catch {
-                            return .failure(error.localizedDescription)
+                            return .document(file, request.item.originalFileName, request.id)
                         }
+                    } catch is CancellationError {
+                        return nil
+                    } catch {
+                        return .failure(error.localizedDescription)
                     }
-            }.value
-
-            defer { self?.importTask = nil }
-            guard !Task.isCancelled else {
-                for case .document(let file, _, _) in imports {
-                    file.discard()
                 }
-                return
-            }
-            guard let viewModel else {
-                for case .document(let file, _, _) in imports {
-                    file.discard()
+                guard let pendingImport = await withTaskCancellationHandler(
+                    operation: { await worker.value },
+                    onCancel: { worker.cancel() }
+                ) else {
+                    guard !Task.isCancelled else { return }
+                    continue
                 }
-                return
-            }
-            for pendingImport in imports {
+                guard !Task.isCancelled, let viewModel else {
+                    if case .document(let file, _, _) = pendingImport {
+                        file.discard()
+                    }
+                    return
+                }
                 switch pendingImport {
                 case .image(let data, let fileName, let requestID):
-                    viewModel.addImageAttachment(
+                    if let processingTask = viewModel.addImageAttachment(
                         data: data,
                         fileName: fileName,
                         sharedImportRequestID: requestID
-                    )
+                    ) {
+                        await withTaskCancellationHandler {
+                            await processingTask.value
+                        } onCancel: {
+                            processingTask.cancel()
+                        }
+                    }
                 case .document(let file, let fileName, let requestID):
-                    viewModel.addDocumentAttachment(
+                    if let processingTask = viewModel.addDocumentAttachment(
                         file: file,
                         fileName: fileName,
                         sharedImportRequestID: requestID
-                    )
+                    ) {
+                        await withTaskCancellationHandler {
+                            await processingTask.value
+                        } onCancel: {
+                            processingTask.cancel()
+                        }
+                    }
                 case .failure(let message):
                     viewModel.attachmentError = message
                 }
@@ -85,24 +108,17 @@ final class SharedImportCoordinator {
 
     func acknowledge(requestID: UUID, onFailure: @escaping (String) -> Void) {
         guard acknowledgementTasks[requestID] == nil else { return }
-        let token = UUID()
-        acknowledgementTokens[requestID] = token
         let task = Task { [weak self] in
             let failureMessage = await Task.detached(priority: .utility) {
                 do {
                     let store = try SharedImportStore()
-                    do {
-                        try store.removeRequest(id: requestID)
-                    } catch {
-                        try store.removeRequest(id: requestID)
-                    }
+                    try store.removeRequest(id: requestID)
                     return nil as String?
                 } catch {
                     return error.localizedDescription
                 }
             }.value
-            guard let self, acknowledgementTokens[requestID] == token else { return }
-            acknowledgementTokens.removeValue(forKey: requestID)
+            guard let self else { return }
             acknowledgementTasks.removeValue(forKey: requestID)
             if let failureMessage {
                 onFailure(failureMessage)

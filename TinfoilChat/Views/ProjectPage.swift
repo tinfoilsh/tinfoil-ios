@@ -406,10 +406,12 @@ struct ProjectDocumentsView: View {
                 onDocumentPicked: { file, fileName in
                     viewModel.uploadProjectDocument(file: file, filename: fileName)
                 },
-                onError: { error in
-                    viewModel.projectDocumentError = error.localizedDescription
-                }
-            )
+                    onError: { error in
+                        viewModel.projectDocumentError = error.localizedDescription
+                    },
+                    accountLifecycleGeneration: viewModel.accountLifecycleGeneration,
+                    isAccountLifecycleCurrent: viewModel.isCurrentAccountLifecycle
+                )
         }
         .alert("Project Error", isPresented: Binding(
             get: { viewModel.projectDocumentError != nil },

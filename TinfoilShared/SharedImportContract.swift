@@ -18,7 +18,7 @@ enum SharedImportConfiguration {
     ]
 }
 
-enum SharedImportKind: String, Codable, Equatable {
+enum SharedImportKind: String, Codable, Equatable, Sendable {
     case image
     case document
 
@@ -32,13 +32,13 @@ enum SharedImportKind: String, Codable, Equatable {
     }
 }
 
-struct SharedImportRequest: Codable, Equatable, Identifiable {
+struct SharedImportRequest: Codable, Equatable, Identifiable, Sendable {
     let id: UUID
     let createdAt: Date
     let item: SharedImportItem
 }
 
-struct SharedImportItem: Codable, Equatable, Identifiable {
+struct SharedImportItem: Codable, Equatable, Identifiable, Sendable {
     let id: UUID
     let kind: SharedImportKind
     let typeIdentifier: String

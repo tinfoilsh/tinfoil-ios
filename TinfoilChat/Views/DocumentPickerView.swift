@@ -18,6 +18,8 @@ struct DocumentPickerView: UIViewControllerRepresentable {
 
     var onDocumentPicked: (ManagedStagedFile, String) -> Void
     var onError: (Error) -> Void
+    var accountLifecycleGeneration: Int
+    var isAccountLifecycleCurrent: @MainActor (Int) -> Bool
 
     private static let supportedTypes: [UTType] = [
         .pdf,
@@ -43,17 +45,27 @@ struct DocumentPickerView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onDocumentPicked: onDocumentPicked, onError: onError)
+        Coordinator(
+            onDocumentPicked: onDocumentPicked,
+            onError: onError,
+            accountLifecycleGeneration: accountLifecycleGeneration,
+            isAccountLifecycleCurrent: isAccountLifecycleCurrent
+        )
     }
 
+    @MainActor
     class Coordinator: NSObject, UIDocumentPickerDelegate {
         let onDocumentPicked: (ManagedStagedFile, String) -> Void
         let onError: (Error) -> Void
+        let accountLifecycleGeneration: Int
+        let isAccountLifecycleCurrent: (Int) -> Bool
         private let stageDocument: @Sendable (URL) throws -> ManagedStagedFile
 
         init(
             onDocumentPicked: @escaping (ManagedStagedFile, String) -> Void,
             onError: @escaping (Error) -> Void,
+            accountLifecycleGeneration: Int,
+            isAccountLifecycleCurrent: @escaping (Int) -> Bool,
             stageDocument: @escaping @Sendable (URL) throws -> ManagedStagedFile = {
                 try ManagedFileStore.shared.stage(
                     sourceURL: $0,
@@ -63,6 +75,8 @@ struct DocumentPickerView: UIViewControllerRepresentable {
         ) {
             self.onDocumentPicked = onDocumentPicked
             self.onError = onError
+            self.accountLifecycleGeneration = accountLifecycleGeneration
+            self.isAccountLifecycleCurrent = isAccountLifecycleCurrent
             self.stageDocument = stageDocument
         }
 
@@ -85,6 +99,12 @@ struct DocumentPickerView: UIViewControllerRepresentable {
                 defer { sourceURL.stopAccessingSecurityScopedResource() }
                 return Result { try stageDocument(sourceURL) }
             }.value
+            guard isAccountLifecycleCurrent(accountLifecycleGeneration) else {
+                if case .success(let stagedFile) = result {
+                    stagedFile.discard()
+                }
+                return
+            }
             switch result {
             case .success(let stagedFile):
                 onDocumentPicked(stagedFile, fileName)

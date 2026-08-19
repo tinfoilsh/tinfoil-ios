@@ -289,7 +289,9 @@ struct MessageInputView: View {
                     },
                     onError: { error in
                         viewModel.attachmentError = error.localizedDescription
-                    }
+                    },
+                    accountLifecycleGeneration: viewModel.accountLifecycleGeneration,
+                    isAccountLifecycleCurrent: viewModel.isCurrentAccountLifecycle
                 )
             }
             .sheet(isPresented: $viewModel.showPhotoPicker, onDismiss: processSelectedPhotos) {

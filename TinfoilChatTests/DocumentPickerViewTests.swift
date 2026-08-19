@@ -13,6 +13,8 @@ struct DocumentPickerViewTests {
         let coordinator = DocumentPickerView.Coordinator(
             onDocumentPicked: { _, _ in },
             onError: { receivedError = $0 },
+            accountLifecycleGeneration: 0,
+            isAccountLifecycleCurrent: { $0 == 0 },
             stageDocument: { _ in
                 throw BoundedFileIOError.fileTooLarge(
                     size: expectedSize,
@@ -30,5 +32,33 @@ struct DocumentPickerViewTests {
         }
         #expect(size == expectedSize)
         #expect(maximum == expectedMaximum)
+    }
+
+    @Test("Discards staging completed after an account change")
+    @MainActor
+    func discardsStaleStagingResult() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString.lowercased(), isDirectory: true)
+        let sourceURL = rootURL.appendingPathComponent("source.txt")
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try Data("old account".utf8).write(to: sourceURL)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let store = ManagedFileStore(rootURL: rootURL.appendingPathComponent("staging"))
+        var didPublishResult = false
+        let coordinator = DocumentPickerView.Coordinator(
+            onDocumentPicked: { _, _ in didPublishResult = true },
+            onError: { _ in didPublishResult = true },
+            accountLifecycleGeneration: 1,
+            isAccountLifecycleCurrent: { _ in false },
+            stageDocument: { url in
+                try store.stage(sourceURL: url, maximumSize: 1_024)
+            }
+        )
+
+        await coordinator.stageDocument(at: sourceURL)
+
+        #expect(!didPublishResult)
+        #expect((try FileManager.default.contentsOfDirectory(atPath: store.rootURL.path)).isEmpty)
     }
 }

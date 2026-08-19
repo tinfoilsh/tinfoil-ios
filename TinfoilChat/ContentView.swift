@@ -253,7 +253,8 @@ struct ContentView: View {
         case .newChat:
             let navigationGeneration = chatViewModel.beginNavigationOperation()
             Task {
-                guard await chatViewModel.createNewRootChat(),
+                let createdRootChat = await chatViewModel.createNewRootChat()
+                guard (createdRootChat || !chatViewModel.hasChatAccess),
                       chatViewModel.navigationGeneration == navigationGeneration else { return }
                 chatViewModel.requestNavigation(to: .chat)
             }

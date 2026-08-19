@@ -300,6 +300,7 @@ class ChatViewModel: ObservableObject {
     private let accountOperationTracker = AccountOperationTracker()
     private var activeSignInToken: AccountOperationFence.Token?
     private var isAccountTeardownInProgress = false
+    private(set) var accountLifecycleGeneration = 0
     private var acceptsChatSaves = true
     private var hasPerformedInitialSync: Bool = false  // Track if initial sync has been done
     private var hasAnonymousChatsToSync: Bool = false  // Track if we have anonymous chats to sync
@@ -3400,14 +3401,15 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    @discardableResult
     func addDocumentAttachment(
         file: ManagedStagedFile,
         fileName: String,
         sharedImportRequestID: UUID? = nil
-    ) {
+    ) -> Task<Void, Never>? {
         guard !isAccountTeardownInProgress else {
             file.discard()
-            return
+            return nil
         }
         attachmentError = nil
         let attachmentId = UUID().uuidString.lowercased()
@@ -3419,7 +3421,7 @@ class ChatViewModel: ObservableObject {
             processingState: .processing
         )
         pendingAttachments.append(attachment)
-        startDocumentProcessing(
+        return startDocumentProcessing(
             file: file,
             fileName: fileName,
             attachmentId: attachmentId,
@@ -3428,13 +3430,14 @@ class ChatViewModel: ObservableObject {
         )
     }
 
+    @discardableResult
     private func startDocumentProcessing(
         file: ManagedStagedFile,
         fileName: String,
         attachmentId: String,
         sharedImportRequestID: UUID? = nil,
         processingGeneration: Int
-    ) {
+    ) -> Task<Void, Never> {
         var attachment = Attachment(
             id: attachmentId,
             type: .document,
@@ -3488,6 +3491,7 @@ class ChatViewModel: ObservableObject {
         } else {
             task.cancel()
         }
+        return task
     }
 
     func addDocumentAttachment(
@@ -3511,12 +3515,13 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    @discardableResult
     func addImageAttachment(
         data: Data,
         fileName: String,
         sharedImportRequestID: UUID? = nil
-    ) {
-        guard !isAccountTeardownInProgress else { return }
+    ) -> Task<Void, Never>? {
+        guard !isAccountTeardownInProgress else { return nil }
         attachmentError = nil
         let processingGeneration = attachmentProcessingGeneration
 
@@ -3577,6 +3582,7 @@ class ChatViewModel: ObservableObject {
         } else {
             task.cancel()
         }
+        return task
     }
 
     func removePendingAttachment(id: String) {
@@ -5765,6 +5771,10 @@ class ChatViewModel: ObservableObject {
         accountOperationTracker.reopen()
     }
 
+    func isCurrentAccountLifecycle(_ generation: Int) -> Bool {
+        !isAccountTeardownInProgress && generation == accountLifecycleGeneration
+    }
+
     func resetSharedProfileSettingsForAccountTeardown() {
         reasoningEffort = ReasoningEffort(rawValue: ProfileDefaults.reasoningEffort) ?? .medium
         thinkingEnabled = ProfileDefaults.thinkingEnabled
@@ -5832,6 +5842,7 @@ class ChatViewModel: ObservableObject {
         chatHydrationError = nil
 
         isAccountTeardownInProgress = true
+        accountLifecycleGeneration += 1
         let canceledAttachmentTasks = Array(attachmentProcessingTasks.values)
         let canceledPasteStagingTasks = Array(pasteStagingTasks.values)
         clearPendingAttachments()

@@ -23,11 +23,6 @@ struct TinfoilChatApp: App {
 
     init() {
         StorageKeysMigration.migrateIfNeeded()
-        do {
-            try ManagedFileStore.shared.sweepOnStartup()
-        } catch {
-            SentrySDK.capture(error: error)
-        }
         Clerk.configure(
             publishableKey: AppConfig.shared.clerkPublishableKey,
             options: Clerk.Options(telemetryEnabled: false)
@@ -179,6 +174,12 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             // Uncomment the following lines to add more data to your events
             // options.attachScreenshot = true // This adds a screenshot to the error events
             // options.attachViewHierarchy = true // This adds the view hierarchy to the error events
+        }
+
+        do {
+            try ManagedFileStore.shared.sweepOnStartup()
+        } catch {
+            SentrySDK.capture(error: error)
         }
 
         // Ignore SIGPIPE so broken streaming connections surface as errors instead of crashes.

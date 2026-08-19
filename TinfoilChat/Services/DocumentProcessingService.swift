@@ -76,10 +76,19 @@ final class DocumentProcessingService {
 
     private func extractTextFromPDF(at url: URL) throws -> String {
         try Task.checkCancellation()
-        let data = try BoundedFileIO.read(
-            from: url,
-            maximumSize: Constants.Attachments.maxFileSizeBytes
-        )
+        let data: Data
+        do {
+            data = try BoundedFileIO.read(
+                from: url,
+                maximumSize: Constants.Attachments.maxFileSizeBytes
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch BoundedFileIOError.fileTooLarge(let size, _) {
+            throw ProcessingError.fileTooLarge(size)
+        } catch {
+            throw ProcessingError.fileReadFailed
+        }
         guard let document = PDFDocument(data: data) else {
             throw ProcessingError.textExtractionFailed
         }
