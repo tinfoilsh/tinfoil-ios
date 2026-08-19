@@ -80,6 +80,74 @@ struct SharedImportStoreTests {
         #expect(fixture.store.pendingRequests().isEmpty)
     }
 
+    @Test("Enqueues payload data without an intermediary file")
+    func enqueuesPayloadDataDirectly() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+        let payload = Data("Direct shared text".utf8)
+
+        let request = try fixture.store.enqueue(
+            data: payload,
+            typeIdentifier: UTType.plainText.identifier,
+            originalFileName: "Notes.txt"
+        )
+
+        #expect(try fixture.store.payloadData(for: request) == payload)
+    }
+
+    @Test("Removes stale corrupt requests after 24 hours")
+    func removesStaleCorruptRequests() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+        let requestDirectory = fixture.inboxURL.appendingPathComponent(
+            UUID().uuidString.lowercased(),
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: requestDirectory, withIntermediateDirectories: false)
+        try Data("invalid".utf8).write(
+            to: requestDirectory.appendingPathComponent(SharedImportConfiguration.manifestFileName)
+        )
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-25 * 60 * 60)],
+            ofItemAtPath: requestDirectory.path
+        )
+
+        _ = fixture.store.pendingRequests()
+
+        #expect(!FileManager.default.fileExists(atPath: requestDirectory.path))
+    }
+
+    @Test("Retains valid requests for 30 days")
+    func retainsValidRequestsForThirtyDays() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+        let request = try fixture.store.enqueue(
+            data: Data("Shared text".utf8),
+            typeIdentifier: UTType.plainText.identifier,
+            originalFileName: "Notes.txt"
+        )
+        let manifestURL = fixture.inboxURL
+            .appendingPathComponent(request.id.uuidString.lowercased(), isDirectory: true)
+            .appendingPathComponent(SharedImportConfiguration.manifestFileName)
+        let retainedRequest = SharedImportRequest(
+            id: request.id,
+            createdAt: Date().addingTimeInterval(-29 * 24 * 60 * 60),
+            item: request.item
+        )
+        try JSONEncoder().encode(retainedRequest).write(to: manifestURL, options: .atomic)
+
+        #expect(fixture.store.pendingRequests() == [retainedRequest])
+
+        let expiredRequest = SharedImportRequest(
+            id: request.id,
+            createdAt: Date().addingTimeInterval(-31 * 24 * 60 * 60),
+            item: request.item
+        )
+        try JSONEncoder().encode(expiredRequest).write(to: manifestURL, options: .atomic)
+
+        #expect(fixture.store.pendingRequests().isEmpty)
+    }
+
     private func makeFixture() throws -> (
         store: SharedImportStore,
         rootURL: URL,
