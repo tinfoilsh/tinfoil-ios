@@ -436,6 +436,10 @@ class ChatViewModel: ObservableObject {
         let projectId: String
         let accountGeneration: Int
     }
+    enum DeleteAllProjectsOutcome: Equatable {
+        case deleted
+        case accountChangedAfterCommit
+    }
     private var projectUploadTasks: [UUID: Task<Void, Never>] = [:]
     private var projectUploadTokens: [UUID: UUID] = [:]
     private var projectUploadBarrierCount = 0
@@ -2068,18 +2072,24 @@ class ChatViewModel: ObservableObject {
     }
 
     /// Permanently deletes every project the user owns, mirroring the
-    /// webapp's bulk action. Throws so callers can surface the failure and
-    /// leave local state untouched for a retry.
+    /// webapp's bulk action. Throws before the request when account context
+    /// is lost, and reports account changes after a successful commit.
     @MainActor
-    func deleteAllProjects() async throws {
-        guard isProjectAccountActive else { throw CancellationError() }
+    func deleteAllProjects() async throws -> DeleteAllProjectsOutcome {
+        guard isProjectAccountActive, let accountUserId = currentUserId else {
+            throw CancellationError()
+        }
         let accountGeneration = projectListAccountGeneration
         projectUploadBarrierCount += 1
         defer { projectUploadBarrierCount -= 1 }
         await cancelAndAwaitProjectUploads()
-        guard isCurrentProjectAccount(accountGeneration) else { throw CancellationError() }
+        guard isCurrentProjectAccount(accountGeneration), currentUserId == accountUserId else {
+            throw CancellationError()
+        }
         _ = try await projectStorage.deleteAllProjects()
-        guard isCurrentProjectAccount(accountGeneration) else { throw CancellationError() }
+        guard isCurrentProjectAccount(accountGeneration), currentUserId == accountUserId else {
+            return .accountChangedAfterCommit
+        }
         projectListLoadGeneration += 1
         latestAppliedProjectListLoadGeneration = projectListLoadGeneration
         projectLoadGeneration += 1
@@ -2090,6 +2100,7 @@ class ChatViewModel: ObservableObject {
         pendingSearchResultChatId = nil
         activeStorageTab = .cloud
         createNewChat(isLocalOnly: false, focusInput: false)
+        return .deleted
     }
 
     func deleteActiveProject() async {
@@ -6436,7 +6447,7 @@ class ChatViewModel: ObservableObject {
     /// the user can retry without partial-deletion side effects.
     @MainActor
     func deleteAllChats() async throws {
-        guard let userId = currentUserId else { return }
+        guard let userId = currentUserId else { throw CancellationError() }
         let allChatIds = Set(
             cloudSidebarSummaries.map(\.id)
                 + localSidebarSummaries.map(\.id)

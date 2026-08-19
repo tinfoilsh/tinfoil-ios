@@ -5,10 +5,14 @@ import Testing
 struct DataLifecycleSourceTests {
     @Test("Sentry imports keep Clerk user types explicit")
     func sentryImportsKeepClerkUserTypesExplicit() throws {
-        let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let authSource = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let mfaSource = try sourceFile("TinfoilChat/ViewModels/AuthenticatorMFAViewModel.swift")
+        let settingsSource = try sourceFile("TinfoilChat/Views/SettingsView.swift")
 
-        #expect(source.contains("import Sentry"))
-        #expect(source.contains("from user: ClerkKit.User"))
+        #expect(authSource.contains("import Sentry"))
+        #expect(authSource.contains("from user: ClerkKit.User"))
+        #expect(mfaSource.contains("-> (ClerkKit.User, String)"))
+        #expect(settingsSource.contains("ClerkKit.User.UpdateParams()"))
     }
 
     @Test("Both recovery flows confirm before starting fresh")
@@ -47,19 +51,32 @@ struct DataLifecycleSourceTests {
         #expect(function.contains("createNewChat(isLocalOnly: false"))
     }
 
-    @Test("Bulk project deletion cancels instead of reporting a skipped request")
-    func bulkProjectDeletionCancelsWhenAccountChanges() throws {
+    @Test("Bulk project deletion distinguishes account changes around commit")
+    func bulkProjectDeletionDistinguishesAccountChanges() throws {
         let viewModelSource = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
         let settingsSource = try sourceFile("TinfoilChat/Views/SettingsView.swift")
         let deletion = try functionBody(named: "func deleteAllProjects()", in: viewModelSource)
         let confirmation = try functionBody(named: "private func confirmBulkDelete", in: settingsSource)
 
         let cancellation = try #require(deletion.range(of: "await cancelAndAwaitProjectUploads()"))
-        let validation = try #require(deletion.range(of: "guard isCurrentProjectAccount(accountGeneration) else { throw CancellationError() }"))
         let request = try #require(deletion.range(of: "try await projectStorage.deleteAllProjects()"))
-        #expect(cancellation.lowerBound < validation.lowerBound)
-        #expect(validation.lowerBound < request.lowerBound)
+        let committedChange = try #require(deletion.range(of: "return .accountChangedAfterCommit"))
+        let beforeRequest = deletion[cancellation.upperBound..<request.lowerBound]
+        let afterRequest = deletion[request.upperBound..<deletion.endIndex]
+        #expect(beforeRequest.contains("throw CancellationError()"))
+        #expect(!afterRequest.contains("throw CancellationError()"))
+        #expect(request.lowerBound < committedChange.lowerBound)
+        #expect(deletion.contains("currentUserId == accountUserId"))
         #expect(confirmation.contains("catch is CancellationError"))
+        #expect(confirmation.contains("if outcome == .deleted"))
+    }
+
+    @Test("Bulk chat deletion cancels without a current account")
+    func bulkChatDeletionRequiresCurrentAccount() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let deletion = try functionBody(named: "func deleteAllChats()", in: source)
+
+        #expect(deletion.contains("guard let userId = currentUserId else { throw CancellationError() }"))
     }
 
     @Test("Attachment removal and sign-out cancel processing")
@@ -96,18 +113,23 @@ struct DataLifecycleSourceTests {
         #expect(upload.contains("file.discard()"))
     }
 
-    @Test("Photo loading validates the captured account before publishing")
-    func photoLoadingValidatesCapturedAccount() throws {
+    @Test("Photo loading validates the presentation account before publishing")
+    func photoLoadingValidatesPresentationAccount() throws {
         let source = try sourceFile("TinfoilChat/Views/MessageInputView.swift")
+        let presentation = try functionBody(named: "private func presentPhotoPicker()", in: source)
         let function = try functionBody(named: "private func processSelectedPhotos()", in: source)
 
-        let capture = try #require(function.range(of: "let accountGeneration = viewModel.accountLifecycleGeneration"))
+        let capture = try #require(presentation.range(of: "photoPickerAccountGeneration = viewModel.accountLifecycleGeneration"))
+        let present = try #require(presentation.range(of: "viewModel.showPhotoPicker = true"))
+        let useCapture = try #require(function.range(of: "let accountGeneration = photoPickerAccountGeneration"))
         let load = try #require(function.range(of: "await item.loadTransferable(type: Data.self)"))
         let validation = try #require(function.range(of: "viewModel.isCurrentAccountLifecycle(accountGeneration)"))
         let publish = try #require(function.range(of: "viewModel.addImageAttachment"))
-        #expect(capture.lowerBound < load.lowerBound)
+        #expect(capture.lowerBound < present.lowerBound)
+        #expect(useCapture.lowerBound < load.lowerBound)
         #expect(load.lowerBound < validation.lowerBound)
         #expect(validation.lowerBound < publish.lowerBound)
+        #expect(!function.contains("viewModel.accountLifecycleGeneration"))
     }
 
     @Test("Project document staging preserves its upload destination")

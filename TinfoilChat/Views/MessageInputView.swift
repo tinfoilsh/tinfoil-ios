@@ -215,6 +215,7 @@ struct MessageInputView: View {
 
 
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var photoPickerAccountGeneration: Int?
     @State private var pendingPickerAction: PickerAction?
     @State private var showCameraPermissionAlert = false
 
@@ -325,7 +326,7 @@ struct MessageInputView: View {
                 pendingPickerAction = nil
                 switch action {
                 case .camera: requestCameraAccess()
-                case .photos: viewModel.showPhotoPicker = true
+                case .photos: presentPhotoPicker()
                 case .files: viewModel.showDocumentPicker = true
                 }
             }) {
@@ -798,8 +799,10 @@ struct MessageInputView: View {
 
     private func processSelectedPhotos() {
         let items = selectedPhotoItems
-        let accountGeneration = viewModel.accountLifecycleGeneration
+        let accountGeneration = photoPickerAccountGeneration
         selectedPhotoItems = []
+        photoPickerAccountGeneration = nil
+        guard let accountGeneration else { return }
         for (index, item) in items.enumerated() {
             Task {
                 if let data = try? await item.loadTransferable(type: Data.self) {
@@ -809,6 +812,12 @@ struct MessageInputView: View {
                 }
             }
         }
+    }
+
+    private func presentPhotoPicker() {
+        selectedPhotoItems = []
+        photoPickerAccountGeneration = viewModel.accountLifecycleGeneration
+        viewModel.showPhotoPicker = true
     }
 
     private func handleAudioButtonTap() {
