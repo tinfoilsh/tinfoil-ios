@@ -381,6 +381,7 @@ class ChatViewModel: ObservableObject {
     @Published var attachmentError: String? = nil
     @Published var pendingImageThumbnails: [String: String] = [:]
     private var attachmentProcessingTasks: [String: Task<Void, Never>] = [:]
+    private var attachmentProcessingTokens: [String: UUID] = [:]
     private var managedAttachmentFiles: [String: ManagedStagedFile] = [:]
     private var attachmentProcessingGeneration = 0
     var isProcessingAttachment: Bool {
@@ -415,6 +416,7 @@ class ChatViewModel: ObservableObject {
     @Published var isUploadingProjectDocument: Bool = false
     @Published var projectError: String?
     private var projectUploadTasks: [UUID: Task<Void, Never>] = [:]
+    private var projectUploadTokens: [UUID: UUID] = [:]
     private var projectUploadBarrierCount = 0
     private var projectListLoadGeneration = 0
     private var latestAppliedProjectListLoadGeneration = 0
@@ -1541,12 +1543,12 @@ class ChatViewModel: ObservableObject {
         createNewChat()
     }
 
-    private func leaveProjectContext() async -> Bool {
+    private func leaveProjectContext(validateOperation: () -> Bool = { true }) async -> Bool {
         let projectId = activeProject?.id
         projectUploadBarrierCount += 1
         defer { projectUploadBarrierCount -= 1 }
         await cancelAndAwaitProjectUploads()
-        guard activeProject?.id == projectId else { return false }
+        guard validateOperation(), activeProject?.id == projectId else { return false }
         activeProject = nil
         projectDocuments = []
         projectError = nil
@@ -1968,7 +1970,14 @@ class ChatViewModel: ObservableObject {
                 }
                 self.isViewingProjectChat = true
             } else if self.activeProject != nil {
-                guard await self.leaveProjectContext() else {
+                guard await self.leaveProjectContext(validateOperation: {
+                    !Task.isCancelled
+                        && self.currentUserId == userId
+                        && self.chatSelectionFence.accepts(
+                            id: chat.id,
+                            generation: selectionGeneration
+                        )
+                }) else {
                     self.failSelection(id: chat.id, generation: selectionGeneration)
                     return
                 }
@@ -2067,7 +2076,9 @@ class ChatViewModel: ObservableObject {
         let accountGeneration = projectListAccountGeneration
         let projectId = project.id
         let operationID = UUID()
+        let operationToken = UUID()
 
+        projectUploadTokens[operationID] = operationToken
         isUploadingProjectDocument = true
         projectError = nil
         let task = Task { [weak self] in
@@ -2077,9 +2088,12 @@ class ChatViewModel: ObservableObject {
             }
             defer {
                 file.discard()
-                projectUploadTasks.removeValue(forKey: operationID)
-                if isCurrentProjectAccount(accountGeneration) {
-                    isUploadingProjectDocument = !projectUploadTasks.isEmpty
+                if projectUploadTokens[operationID] == operationToken {
+                    projectUploadTokens.removeValue(forKey: operationID)
+                    projectUploadTasks.removeValue(forKey: operationID)
+                    if isCurrentProjectAccount(accountGeneration) {
+                        isUploadingProjectDocument = !projectUploadTokens.isEmpty
+                    }
                 }
             }
             do {
@@ -2113,7 +2127,11 @@ class ChatViewModel: ObservableObject {
                 projectError = error.localizedDescription
             }
         }
-        projectUploadTasks[operationID] = task
+        if projectUploadTokens[operationID] == operationToken {
+            projectUploadTasks[operationID] = task
+        } else {
+            task.cancel()
+        }
     }
 
     private func cancelProjectUploads() {
@@ -3256,6 +3274,8 @@ class ChatViewModel: ObservableObject {
         )
         pendingAttachments.append(attachment)
         managedAttachmentFiles[attachmentId] = file
+        let operationToken = UUID()
+        attachmentProcessingTokens[attachmentId] = operationToken
 
         let task = Task { [weak self] in
             guard let self else {
@@ -3265,7 +3285,10 @@ class ChatViewModel: ObservableObject {
             defer {
                 file.discard()
                 managedAttachmentFiles.removeValue(forKey: attachmentId)
-                attachmentProcessingTasks.removeValue(forKey: attachmentId)
+                if attachmentProcessingTokens[attachmentId] == operationToken {
+                    attachmentProcessingTokens.removeValue(forKey: attachmentId)
+                    attachmentProcessingTasks.removeValue(forKey: attachmentId)
+                }
             }
             do {
                 let text = try await DocumentProcessingService.shared.extractText(from: file.url)
@@ -3291,7 +3314,11 @@ class ChatViewModel: ObservableObject {
                 attachmentError = error.localizedDescription
             }
         }
-        attachmentProcessingTasks[attachmentId] = task
+        if attachmentProcessingTokens[attachmentId] == operationToken {
+            attachmentProcessingTasks[attachmentId] = task
+        } else {
+            task.cancel()
+        }
     }
 
     func addDocumentAttachment(
@@ -3334,10 +3361,17 @@ class ChatViewModel: ObservableObject {
             processingState: .processing
         )
         pendingAttachments.append(attachment)
+        let operationToken = UUID()
+        attachmentProcessingTokens[attachmentId] = operationToken
 
         let task = Task { [weak self] in
             guard let self else { return }
-            defer { attachmentProcessingTasks.removeValue(forKey: attachmentId) }
+            defer {
+                if attachmentProcessingTokens[attachmentId] == operationToken {
+                    attachmentProcessingTokens.removeValue(forKey: attachmentId)
+                    attachmentProcessingTasks.removeValue(forKey: attachmentId)
+                }
+            }
             do {
                 let processed = try await ImageProcessingService.shared.processImage(data: data)
                 try Task.checkCancellation()
@@ -3369,11 +3403,16 @@ class ChatViewModel: ObservableObject {
                 attachmentError = error.localizedDescription
             }
         }
-        attachmentProcessingTasks[attachmentId] = task
+        if attachmentProcessingTokens[attachmentId] == operationToken {
+            attachmentProcessingTasks[attachmentId] = task
+        } else {
+            task.cancel()
+        }
     }
 
     func removePendingAttachment(id: String) {
-        if let task = attachmentProcessingTasks[id] {
+        attachmentProcessingTokens.removeValue(forKey: id)
+        if let task = attachmentProcessingTasks.removeValue(forKey: id) {
             task.cancel()
         } else {
             managedAttachmentFiles.removeValue(forKey: id)?.discard()
@@ -3390,8 +3429,10 @@ class ChatViewModel: ObservableObject {
     func clearPendingAttachments(acknowledgeSharedImports: Bool = true) {
         attachmentProcessingGeneration += 1
         let tasks = Array(attachmentProcessingTasks.values)
+        let processingAttachmentIds = Set(attachmentProcessingTokens.keys)
+        attachmentProcessingTokens.removeAll()
+        attachmentProcessingTasks.removeAll()
         for task in tasks { task.cancel() }
-        let processingAttachmentIds = Set(attachmentProcessingTasks.keys)
         let unownedAttachmentIds = managedAttachmentFiles.keys.filter {
             !processingAttachmentIds.contains($0)
         }

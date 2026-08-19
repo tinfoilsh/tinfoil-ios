@@ -73,6 +73,20 @@ struct DataLifecycleSourceTests {
         #expect(upload.contains("file.discard()"))
     }
 
+    @Test("Root selection is revalidated after project upload cancellation")
+    func rootSelectionIsRevalidatedAfterProjectUploadCancellation() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let leaveProject = try functionBody(named: "func leaveProjectContext", in: source)
+        let openSearchResult = try functionBody(named: "func openSearchResult", in: source)
+
+        let cancellation = try #require(leaveProject.range(of: "await cancelAndAwaitProjectUploads()"))
+        let validation = try #require(leaveProject.range(of: "guard validateOperation()"))
+        #expect(cancellation.lowerBound < validation.lowerBound)
+        #expect(openSearchResult.contains("leaveProjectContext(validateOperation:"))
+        #expect(openSearchResult.contains("self.currentUserId == userId"))
+        #expect(openSearchResult.contains("self.chatSelectionFence.accepts("))
+    }
+
     @Test("Document cancellation waits for extraction before discard")
     func documentCancellationWaitsForExtractionBeforeDiscard() throws {
         let processingSource = try sourceFile("TinfoilChat/Services/DocumentProcessingService.swift")
@@ -83,11 +97,38 @@ struct DataLifecycleSourceTests {
         #expect(extraction.contains("withTaskCancellationHandler"))
         #expect(extraction.contains("extractionTask.cancel()"))
         #expect(extraction.contains("try await extractionTask.value"))
+        #expect(extraction.contains("return try self.extractTextFromPDF(at: url)"))
+        #expect(extraction.contains("return try self.readPlainText(at: url)"))
         let extractionCall = try #require(attachment.range(of: "extractText(from: file.url)"))
         let deferredCleanup = try #require(attachment.range(of: "defer {"))
         let cleanup = attachment[deferredCleanup.lowerBound..<extractionCall.lowerBound]
         #expect(cleanup.contains("file.discard()"))
         #expect(attachment.contains("processingGeneration == attachmentProcessingGeneration"))
+    }
+
+    @Test("Async attachment and upload tasks use token-aware registration")
+    func asyncTasksUseTokenAwareRegistration() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let projectUpload = try functionBody(named: "func uploadProjectDocument", in: source)
+        let documentAttachment = try functionBody(named: "func addDocumentAttachment", in: source)
+        let imageAttachment = try functionBody(named: "func addImageAttachment", in: source)
+
+        assertTokenRegistration(
+            in: projectUpload,
+            registration: "projectUploadTokens[operationID] = operationToken",
+            taskCreation: "let task = Task",
+            pendingCheck: "if projectUploadTokens[operationID] == operationToken",
+            taskStorage: "projectUploadTasks[operationID] = task"
+        )
+        for attachment in [documentAttachment, imageAttachment] {
+            assertTokenRegistration(
+                in: attachment,
+                registration: "attachmentProcessingTokens[attachmentId] = operationToken",
+                taskCreation: "let task = Task",
+                pendingCheck: "if attachmentProcessingTokens[attachmentId] == operationToken",
+                taskStorage: "attachmentProcessingTasks[attachmentId] = task"
+            )
+        }
     }
 
     private func sourceFile(_ relativePath: String) throws -> String {
@@ -118,6 +159,25 @@ struct DataLifecycleSourceTests {
             index = source.index(after: index)
         }
         throw SourceTestError.functionNotFound
+    }
+
+    private func assertTokenRegistration(
+        in function: Substring,
+        registration: String,
+        taskCreation: String,
+        pendingCheck: String,
+        taskStorage: String
+    ) {
+        guard let registrationRange = function.range(of: registration),
+              let creationRange = function.range(of: taskCreation),
+              let pendingRange = function.range(of: pendingCheck, options: .backwards),
+              let storageRange = function.range(of: taskStorage, options: .backwards) else {
+            Issue.record("Expected token-aware task registration")
+            return
+        }
+        #expect(registrationRange.lowerBound < creationRange.lowerBound)
+        #expect(creationRange.lowerBound < pendingRange.lowerBound)
+        #expect(pendingRange.lowerBound < storageRange.lowerBound)
     }
 }
 

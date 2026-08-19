@@ -51,7 +51,7 @@ final class DocumentProcessingService {
         case "pdf":
             let extractionTask = Task.detached(priority: .userInitiated) {
                 try Task.checkCancellation()
-                try self.extractTextFromPDF(at: url)
+                return try self.extractTextFromPDF(at: url)
             }
             return try await withTaskCancellationHandler {
                 try await extractionTask.value
@@ -61,7 +61,7 @@ final class DocumentProcessingService {
         case "txt", "md", "csv", "html", "json", "xml":
             let extractionTask = Task.detached(priority: .userInitiated) {
                 try Task.checkCancellation()
-                try self.readPlainText(at: url)
+                return try self.readPlainText(at: url)
             }
             return try await withTaskCancellationHandler {
                 try await extractionTask.value
