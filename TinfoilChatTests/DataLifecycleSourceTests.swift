@@ -92,7 +92,7 @@ struct DataLifecycleSourceTests {
         let processingSource = try sourceFile("TinfoilChat/Services/DocumentProcessingService.swift")
         let viewModelSource = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
         let extraction = try functionBody(named: "func extractText(from url", in: processingSource)
-        let attachment = try functionBody(named: "func addDocumentAttachment", in: viewModelSource)
+        let attachment = try functionBody(named: "func startDocumentProcessing", in: viewModelSource)
 
         #expect(extraction.contains("withTaskCancellationHandler"))
         #expect(extraction.contains("extractionTask.cancel()"))
@@ -110,7 +110,7 @@ struct DataLifecycleSourceTests {
     func asyncTasksUseTokenAwareRegistration() throws {
         let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
         let projectUpload = try functionBody(named: "func uploadProjectDocument", in: source)
-        let documentAttachment = try functionBody(named: "func addDocumentAttachment", in: source)
+        let documentAttachment = try functionBody(named: "func startDocumentProcessing", in: source)
         let imageAttachment = try functionBody(named: "func addImageAttachment", in: source)
 
         assertTokenRegistration(

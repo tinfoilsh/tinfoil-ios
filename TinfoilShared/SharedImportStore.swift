@@ -5,15 +5,18 @@ struct SharedImportStore: @unchecked Sendable {
     private static let publicationBlockFileName = ".publication-blocked"
     private let fileManager: FileManager
     private let publicationDidBegin: (@Sendable () -> Void)?
+    private let purgeDidBegin: (@Sendable () -> Void)?
     let inboxURL: URL
 
     init(
         fileManager: FileManager = .default,
         inboxURL: URL? = nil,
-        publicationDidBegin: (@Sendable () -> Void)? = nil
+        publicationDidBegin: (@Sendable () -> Void)? = nil,
+        purgeDidBegin: (@Sendable () -> Void)? = nil
     ) throws {
         self.fileManager = fileManager
         self.publicationDidBegin = publicationDidBegin
+        self.purgeDidBegin = purgeDidBegin
 
         if let inboxURL {
             self.inboxURL = inboxURL
@@ -271,6 +274,7 @@ struct SharedImportStore: @unchecked Sendable {
 
     func purgeAllRequests() throws {
         try withCoordinatedInboxWrite {
+            purgeDidBegin?()
             guard fileManager.fileExists(atPath: publicationBlockURL.path)
                 || fileManager.createFile(atPath: publicationBlockURL.path, contents: Data()) else {
                 throw SharedImportError.invalidFile

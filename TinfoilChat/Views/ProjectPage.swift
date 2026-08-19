@@ -122,6 +122,14 @@ struct ProjectPage: View {
                 deletingChatId = nil
             }
         }
+        .alert("Project Error", isPresented: Binding(
+            get: { viewModel.projectError != nil },
+            set: { if !$0 { viewModel.projectError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.projectError ?? "An error occurred")
+        }
     }
 
     private func syncEditingName() {
@@ -310,6 +318,14 @@ struct ProjectDetailsView: View {
         }
         .onAppear(perform: syncEditingState)
         .onChange(of: project?.id) { _, _ in syncEditingState() }
+        .alert("Project Error", isPresented: Binding(
+            get: { viewModel.projectError != nil },
+            set: { if !$0 { viewModel.projectError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.projectError ?? "An error occurred")
+        }
     }
 
     private func saveChanges() {
@@ -391,17 +407,17 @@ struct ProjectDocumentsView: View {
                     viewModel.uploadProjectDocument(file: file, filename: fileName)
                 },
                 onError: { error in
-                    viewModel.projectError = error.localizedDescription
+                    viewModel.projectDocumentError = error.localizedDescription
                 }
             )
         }
         .alert("Project Error", isPresented: Binding(
-            get: { viewModel.projectError != nil },
-            set: { if !$0 { viewModel.projectError = nil } }
+            get: { viewModel.projectDocumentError != nil },
+            set: { if !$0 { viewModel.projectDocumentError = nil } }
         )) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(viewModel.projectError ?? "An error occurred")
+            Text(viewModel.projectDocumentError ?? "An error occurred")
         }
     }
 
@@ -489,6 +505,14 @@ struct ProjectSettingsView: View {
             }
         } message: {
             Text("This deletes the project and its project context documents.")
+        }
+        .alert("Project Error", isPresented: Binding(
+            get: { viewModel.projectError != nil },
+            set: { if !$0 { viewModel.projectError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.projectError ?? "An error occurred")
         }
     }
 

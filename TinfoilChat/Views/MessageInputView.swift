@@ -517,8 +517,7 @@ struct MessageInputView: View {
                          onFocusHandled: { viewModel.shouldFocusInput = false },
                          onSendMessage: { text in viewModel.sendMessage(text: text) },
                          onPasteImage: { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
-                         onPasteFile: { file, fileName in viewModel.addDocumentAttachment(file: file, fileName: fileName) },
-                         onPasteFileError: { message in viewModel.attachmentError = message })
+                         onPasteFiles: { urls in viewModel.stagePastedDocuments(urls: urls) })
             .frame(height: textHeight)
             .padding(.horizontal)
     }
@@ -1408,15 +1407,13 @@ struct CustomTextEditor: UIViewRepresentable {
     /// itself when the draft was actually sent or queued.
     var onSendMessage: (String) -> Bool
     var onPasteImage: ((Data, String) -> Void)? = nil
-    var onPasteFile: ((ManagedStagedFile, String) -> Void)? = nil
-    var onPasteFileError: ((String) -> Void)? = nil
+    var onPasteFiles: (([URL]) -> Void)? = nil
 
     func makeUIView(context: Context) -> UITextView {
         let textView = PastingTextView()
         textView.allowsImagePaste = allowsImagePaste
         textView.onPasteImage = onPasteImage
-        textView.onPasteFile = onPasteFile
-        textView.onPasteFileError = onPasteFileError
+        textView.onPasteFiles = onPasteFiles
         textView.delegate = context.coordinator
         textView.font = UIFont.preferredFont(forTextStyle: .body)
         textView.backgroundColor = .clear
@@ -1456,8 +1453,7 @@ struct CustomTextEditor: UIViewRepresentable {
         if let pastingView = uiView as? PastingTextView {
             pastingView.allowsImagePaste = allowsImagePaste
             pastingView.onPasteImage = onPasteImage
-            pastingView.onPasteFile = onPasteFile
-            pastingView.onPasteFileError = onPasteFileError
+            pastingView.onPasteFiles = onPasteFiles
         }
         let isCurrentlyEditing = context.coordinator.isEditing
 
@@ -1701,8 +1697,7 @@ struct CustomTextEditor: UIViewRepresentable {
 final class PastingTextView: UITextView {
     var allowsImagePaste = false
     var onPasteImage: ((Data, String) -> Void)?
-    var onPasteFile: ((ManagedStagedFile, String) -> Void)?
-    var onPasteFileError: ((String) -> Void)?
+    var onPasteFiles: (([URL]) -> Void)?
 
     /// File URLs win over any string representation on the pasteboard:
     /// copying a file (e.g. from the Files app) often includes its name as
@@ -1736,7 +1731,7 @@ final class PastingTextView: UITextView {
             if allowsImagePaste && onPasteImage != nil && pasteboardState().hasImages {
                 return true
             }
-            if onPasteFile != nil && pasteboardState().hasFileURLs {
+            if onPasteFiles != nil && pasteboardState().hasFileURLs {
                 return true
             }
         }
@@ -1758,49 +1753,14 @@ final class PastingTextView: UITextView {
             return
         }
 
-        if let onPasteFile {
+        if let onPasteFiles {
             let fileURLs = pasteboardFileURLs
             if !fileURLs.isEmpty {
-                for url in fileURLs {
-                    importPastedFile(url: url, onPasteFile: onPasteFile)
-                }
+                onPasteFiles(fileURLs)
                 return
             }
         }
 
         super.paste(sender)
     }
-
-    /// Copies a pasted file into app-owned staging so the attachment
-    /// pipeline can read it after the pasteboard's access window closes.
-    /// Oversized files are rejected up front: the pipeline would refuse them
-    /// anyway, and copying or reading them first would waste disk and memory.
-    private func importPastedFile(url: URL, onPasteFile: @escaping (ManagedStagedFile, String) -> Void) {
-        let fileName = url.lastPathComponent
-        let didAccess = url.startAccessingSecurityScopedResource()
-        Task { @MainActor [weak self] in
-            let result = await Task.detached(priority: .userInitiated) {
-                defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
-                return Result {
-                    try ManagedFileStore.shared.stage(
-                        sourceURL: url,
-                        maximumSize: Constants.Attachments.maxFileSizeBytes
-                    )
-                }
-            }.value
-            switch result {
-            case .success(let file):
-                onPasteFile(file, fileName)
-            case .failure(let error):
-                if let boundedError = error as? BoundedFileIOError,
-                   case .fileTooLarge(let size, _) = boundedError {
-                    self?.onPasteFileError?(
-                        DocumentProcessingService.ProcessingError.fileTooLarge(size).localizedDescription
-                    )
-                } else {
-                    self?.onPasteFileError?("Couldn't read the pasted file. Try attaching it with the + button instead.")
-                }
-            }
-        }
-    }
-} 
+}

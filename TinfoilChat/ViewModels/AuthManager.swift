@@ -257,7 +257,13 @@ class AuthManager: ObservableObject {
                 self.chatViewModel?.completeAccountTeardown()
             } catch {
                 SentrySDK.capture(error: error)
-                self.isLoading = false
+                do {
+                    try await self.performAccountTeardown()
+                    self.chatViewModel?.completeAccountTeardown()
+                } catch {
+                    SentrySDK.capture(error: error)
+                    self.isLoading = false
+                }
             }
         }
         accountTeardownId = teardownId

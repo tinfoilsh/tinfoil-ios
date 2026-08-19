@@ -11,6 +11,8 @@ final class SharedImportCoordinator {
     }
 
     private var importTask: Task<Void, Never>?
+    private var acknowledgementTasks: [UUID: Task<Void, Never>] = [:]
+    private var acknowledgementTokens: [UUID: UUID] = [:]
 
     private init() {}
 
@@ -19,7 +21,7 @@ final class SharedImportCoordinator {
 
         let importedRequestIDs = Set(
             viewModel.pendingAttachments.compactMap(\.sharedImportRequestID)
-        )
+        ).union(acknowledgementTasks.keys)
         importTask = Task { [weak self, weak viewModel] in
             let imports = await Task.detached(priority: .userInitiated) {
                 guard let store = try? SharedImportStore() else { return [PendingImport]() }
@@ -48,6 +50,12 @@ final class SharedImportCoordinator {
             }.value
 
             defer { self?.importTask = nil }
+            guard !Task.isCancelled else {
+                for case .document(let file, _, _) in imports {
+                    file.discard()
+                }
+                return
+            }
             guard let viewModel else {
                 for case .document(let file, _, _) in imports {
                     file.discard()
@@ -75,14 +83,42 @@ final class SharedImportCoordinator {
         }
     }
 
-    func acknowledge(requestID: UUID) {
-        Task.detached(priority: .utility) {
-            guard let store = try? SharedImportStore() else { return }
-            try? store.removeRequest(id: requestID)
+    func acknowledge(requestID: UUID, onFailure: @escaping (String) -> Void) {
+        guard acknowledgementTasks[requestID] == nil else { return }
+        let token = UUID()
+        acknowledgementTokens[requestID] = token
+        let task = Task { [weak self] in
+            let failureMessage = await Task.detached(priority: .utility) {
+                do {
+                    let store = try SharedImportStore()
+                    do {
+                        try store.removeRequest(id: requestID)
+                    } catch {
+                        try store.removeRequest(id: requestID)
+                    }
+                    return nil as String?
+                } catch {
+                    return error.localizedDescription
+                }
+            }.value
+            guard let self, acknowledgementTokens[requestID] == token else { return }
+            acknowledgementTokens.removeValue(forKey: requestID)
+            acknowledgementTasks.removeValue(forKey: requestID)
+            if let failureMessage {
+                onFailure(failureMessage)
+            }
         }
+        acknowledgementTasks[requestID] = task
     }
 
     func discardAllPending() async throws {
+        if let importTask {
+            importTask.cancel()
+            await importTask.value
+            self.importTask = nil
+        }
+        let acknowledgements = Array(acknowledgementTasks.values)
+        for task in acknowledgements { await task.value }
         try await Task.detached(priority: .userInitiated) {
             let store = try SharedImportStore()
             try store.purgeAllRequests()

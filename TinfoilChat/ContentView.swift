@@ -251,10 +251,10 @@ struct ContentView: View {
             guard chatViewModel.currentChat != nil else { return }
             chatViewModel.sendMessage(text: prompt)
         case .newChat:
-            let navigationRequestID = chatViewModel.navigationRequest?.id
+            let navigationGeneration = chatViewModel.beginNavigationOperation()
             Task {
                 guard await chatViewModel.createNewRootChat(),
-                      chatViewModel.navigationRequest?.id == navigationRequestID else { return }
+                      chatViewModel.navigationGeneration == navigationGeneration else { return }
                 chatViewModel.requestNavigation(to: .chat)
             }
         case .startDictation:

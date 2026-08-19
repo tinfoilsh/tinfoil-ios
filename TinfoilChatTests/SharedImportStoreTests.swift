@@ -3,6 +3,30 @@ import Testing
 import UniformTypeIdentifiers
 @testable import TinfoilChat
 
+private final class SharedImportCoordinationState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var publicationReleased = false
+    private var purgeEnteredBeforeRelease = false
+
+    func releasePublication() {
+        lock.lock()
+        publicationReleased = true
+        lock.unlock()
+    }
+
+    func recordPurgeEntry() {
+        lock.lock()
+        purgeEnteredBeforeRelease = purgeEnteredBeforeRelease || !publicationReleased
+        lock.unlock()
+    }
+
+    var didSerializePurgeAfterPublication: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !purgeEnteredBeforeRelease
+    }
+}
+
 @Suite("Shared Import Store Tests")
 struct SharedImportStoreTests {
     @Test("Classifies supported images and documents")
@@ -159,14 +183,19 @@ struct SharedImportStoreTests {
         let publicationBegan = DispatchSemaphore(value: 0)
         let allowPublication = DispatchSemaphore(value: 0)
         let purgeAttempted = DispatchSemaphore(value: 0)
+        let coordinationState = SharedImportCoordinationState()
         let publicationStore = try SharedImportStore(
             inboxURL: inboxURL,
             publicationDidBegin: {
                 publicationBegan.signal()
                 allowPublication.wait()
+                coordinationState.releasePublication()
             }
         )
-        let purgeStore = try SharedImportStore(inboxURL: inboxURL)
+        let purgeStore = try SharedImportStore(
+            inboxURL: inboxURL,
+            purgeDidBegin: coordinationState.recordPurgeEntry
+        )
 
         let publication = Task.detached {
             _ = try publicationStore.enqueue(
@@ -186,6 +215,7 @@ struct SharedImportStoreTests {
         try await publication.value
         try await purge.value
 
+        #expect(coordinationState.didSerializePurgeAfterPublication)
         #expect(purgeStore.pendingRequests().isEmpty)
     }
 

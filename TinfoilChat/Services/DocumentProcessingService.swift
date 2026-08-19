@@ -113,6 +113,8 @@ final class DocumentProcessingService {
             )
         } catch is CancellationError {
             throw CancellationError()
+        } catch BoundedFileIOError.fileTooLarge(let size, _) {
+            throw ProcessingError.fileTooLarge(size)
         } catch {
             throw ProcessingError.fileReadFailed
         }

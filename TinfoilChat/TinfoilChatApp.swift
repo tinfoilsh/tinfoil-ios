@@ -23,12 +23,10 @@ struct TinfoilChatApp: App {
 
     init() {
         StorageKeysMigration.migrateIfNeeded()
-        Task.detached(priority: .utility) {
-            do {
-                try ManagedFileStore.shared.sweepOnStartup()
-            } catch {
-                SentrySDK.capture(error: error)
-            }
+        do {
+            try ManagedFileStore.shared.sweepOnStartup()
+        } catch {
+            SentrySDK.capture(error: error)
         }
         Clerk.configure(
             publishableKey: AppConfig.shared.clerkPublishableKey,
