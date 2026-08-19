@@ -386,9 +386,14 @@ struct ProjectDocumentsView: View {
             }
         }
         .sheet(isPresented: $showDocumentPicker) {
-            DocumentPickerView { file, fileName in
-                viewModel.uploadProjectDocument(file: file, filename: fileName)
-            }
+            DocumentPickerView(
+                onDocumentPicked: { file, fileName in
+                    viewModel.uploadProjectDocument(file: file, filename: fileName)
+                },
+                onError: { error in
+                    viewModel.projectError = error.localizedDescription
+                }
+            )
         }
     }
 

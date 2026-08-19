@@ -283,9 +283,14 @@ struct MessageInputView: View {
                 Text(viewModel.attachmentError ?? "An error occurred")
             }
             .sheet(isPresented: $viewModel.showDocumentPicker) {
-                DocumentPickerView { file, fileName in
-                    viewModel.addDocumentAttachment(file: file, fileName: fileName)
-                }
+                DocumentPickerView(
+                    onDocumentPicked: { file, fileName in
+                        viewModel.addDocumentAttachment(file: file, fileName: fileName)
+                    },
+                    onError: { error in
+                        viewModel.attachmentError = error.localizedDescription
+                    }
+                )
             }
             .sheet(isPresented: $viewModel.showPhotoPicker, onDismiss: processSelectedPhotos) {
                 NavigationStack {

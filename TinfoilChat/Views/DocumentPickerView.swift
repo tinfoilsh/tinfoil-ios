@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 
 struct DocumentPickerView: UIViewControllerRepresentable {
     var onDocumentPicked: (ManagedStagedFile, String) -> Void
+    var onError: (Error) -> Void
 
     private static let supportedTypes: [UTType] = [
         .pdf,
@@ -34,36 +35,46 @@ struct DocumentPickerView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onDocumentPicked: onDocumentPicked)
+        Coordinator(onDocumentPicked: onDocumentPicked, onError: onError)
     }
 
     class Coordinator: NSObject, UIDocumentPickerDelegate {
         let onDocumentPicked: (ManagedStagedFile, String) -> Void
+        let onError: (Error) -> Void
+        private let stageDocument: (URL) throws -> ManagedStagedFile
 
-        init(onDocumentPicked: @escaping (ManagedStagedFile, String) -> Void) {
+        init(
+            onDocumentPicked: @escaping (ManagedStagedFile, String) -> Void,
+            onError: @escaping (Error) -> Void,
+            stageDocument: @escaping (URL) throws -> ManagedStagedFile = {
+                try ManagedFileStore.shared.stage(
+                    sourceURL: $0,
+                    maximumSize: Constants.Attachments.maxFileSizeBytes
+                )
+            }
+        ) {
             self.onDocumentPicked = onDocumentPicked
+            self.onError = onError
+            self.stageDocument = stageDocument
         }
 
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
             guard let sourceURL = urls.first else { return }
-
-            let fileName = sourceURL.lastPathComponent
 
             guard sourceURL.startAccessingSecurityScopedResource() else {
                 return
             }
             defer { sourceURL.stopAccessingSecurityScopedResource() }
 
+            stageDocument(at: sourceURL)
+        }
+
+        func stageDocument(at sourceURL: URL) {
             do {
-                let stagedFile = try ManagedFileStore.shared.stage(
-                    sourceURL: sourceURL,
-                    maximumSize: Constants.Attachments.maxFileSizeBytes
-                )
-                onDocumentPicked(stagedFile, fileName)
+                let stagedFile = try stageDocument(sourceURL)
+                onDocumentPicked(stagedFile, sourceURL.lastPathComponent)
             } catch {
-                #if DEBUG
-                print("Failed to stage document: \(error)")
-                #endif
+                onError(error)
             }
         }
     }
