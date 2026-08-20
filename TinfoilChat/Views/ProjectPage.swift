@@ -374,6 +374,9 @@ struct ProjectDocumentsView: View {
         .background(Color.settingsBackground(for: colorScheme))
         .navigationTitle("Documents")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            viewModel.projectError = nil
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
