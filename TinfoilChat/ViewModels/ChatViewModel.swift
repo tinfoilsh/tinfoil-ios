@@ -6056,17 +6056,19 @@ class ChatViewModel: ObservableObject {
         await sharedImportPauseTask.value
     }
 
-    func resumeAccountDataAccess(validatedOwnerUserId: String) {
+    @discardableResult
+    func resumeAccountDataAccess(validatedOwnerUserId: String) -> Bool {
         guard authManager?.isAuthenticated == true,
               currentUserId == validatedOwnerUserId,
               accountLifecycleUserId == nil || accountLifecycleUserId == validatedOwnerUserId,
               passkeyManager.resumeAccountOperations(
                 validatedOwnerUserId: validatedOwnerUserId
-              ) else { return }
+              ) else { return false }
         accountLifecycleUserId = validatedOwnerUserId
         acceptsChatSaves = true
         accountOperationTracker.reopen()
         restoreSuspendedPendingAttachments(validatedOwnerUserId: validatedOwnerUserId)
+        return true
     }
 
     func completeAccountTeardown() {

@@ -122,6 +122,7 @@ class AuthManager: ObservableObject {
     private var isAccountTeardownInProgress = false
     private var retainedOwnerUserId: String?
     private var authHydrationGeneration = AuthHydrationGeneration()
+    private var passiveAuthLossTask: (id: UUID, task: Task<Void, Never>)?
     
     // UserDefaults keys
     private let authStateKey = Constants.StorageKeys.Auth.state
@@ -162,9 +163,19 @@ class AuthManager: ObservableObject {
         
         // If already authenticated and clerk is set, trigger handleSignIn once
         // This handles the case where AuthManager loads before ChatViewModel
-        if isAuthenticated, clerk != nil, clerk?.user != nil, !hasTriggeredSignIn {
-            hasTriggeredSignIn = true
-            viewModel.handleSignIn()
+        if isAuthenticated, let userId = clerk?.user?.id, !hasTriggeredSignIn {
+            let hydrationToken = authHydrationGeneration.value
+            Task { @MainActor [weak self, weak viewModel] in
+                guard let self,
+                      let viewModel,
+                      await self.resumeAccountDataAccess(
+                        for: userId,
+                        hydrationToken: hydrationToken
+                      ),
+                      !self.hasTriggeredSignIn else { return }
+                self.hasTriggeredSignIn = true
+                viewModel.handleSignIn()
+            }
         }
         // Otherwise handleSignIn will be called from setClerk when authentication is confirmed
     }
@@ -208,7 +219,7 @@ class AuthManager: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self,
                       self.isCurrentAuthTransition(hydrationToken) else { return }
-                await self.chatViewModel?.handlePassiveAuthLoss()
+                await self.pauseAccountDataAccess()
             }
             return
         }
@@ -231,7 +242,7 @@ class AuthManager: ObservableObject {
                 Task { @MainActor [weak self] in
                     guard let self,
                           self.isCurrentAuthTransition(hydrationToken) else { return }
-                    await self.chatViewModel?.handlePassiveAuthLoss()
+                    await self.pauseAccountDataAccess()
                 }
                 return
             }
@@ -241,14 +252,20 @@ class AuthManager: ObservableObject {
             
             // Now set authenticated, which will trigger observers
             self.isAuthenticated = true
-            resumeAccountDataAccess(for: user.id, hydrationToken: hydrationToken)
+            Task { @MainActor [weak self] in
+                guard let self,
+                      await self.resumeAccountDataAccess(
+                        for: user.id,
+                        hydrationToken: hydrationToken
+                      ) else { return }
 
-            // Handle sign in for chat if not already triggered
-            if isCurrentAuthTransition(hydrationToken),
-               !hasTriggeredSignIn,
-               let chatVM = chatViewModel {
-                hasTriggeredSignIn = true
-                chatVM.handleSignIn()
+                // Handle sign in for chat if not already triggered
+                if self.isCurrentAuthTransition(hydrationToken),
+                   !self.hasTriggeredSignIn,
+                   let chatVM = self.chatViewModel {
+                    self.hasTriggeredSignIn = true
+                    chatVM.handleSignIn()
+                }
             }
         }
     }
@@ -278,15 +295,56 @@ class AuthManager: ObservableObject {
         accountTeardownError = nil
     }
 
-    private func resumeAccountDataAccess(for userId: String, hydrationToken: UInt64) {
+    @discardableResult
+    private func resumeAccountDataAccess(for userId: String, hydrationToken: UInt64) async -> Bool {
+        await passiveAuthLossTask?.task.value
         guard isCurrentAuthTransition(hydrationToken),
-              !isAccountSwitchConfirmationPending,
+              pendingAccountTeardownRetryReason == nil,
               clerk?.user?.id == userId,
               localUserId == userId,
-              isAuthenticated else { return }
+              isAuthenticated,
+              let chatViewModel,
+              chatViewModel.resumeAccountDataAccess(
+                validatedOwnerUserId: userId
+              ) else { return false }
         ProfileManager.shared.resumeAccountAccess()
         SettingsManager.shared.resumeAccountDerivedState()
-        chatViewModel?.resumeAccountDataAccess(validatedOwnerUserId: userId)
+        isAccountDataAccessReady = true
+        return true
+    }
+
+    private func pauseAccountDataAccess() async {
+        let pauseId = UUID()
+        let previousPauseTask = passiveAuthLossTask?.task
+        let chatViewModel = chatViewModel
+        let pauseTask = Task { @MainActor in
+            await previousPauseTask?.value
+            await chatViewModel?.handlePassiveAuthLoss()
+        }
+        passiveAuthLossTask = (pauseId, pauseTask)
+        await pauseTask.value
+        if passiveAuthLossTask?.id == pauseId {
+            passiveAuthLossTask = nil
+        }
+    }
+
+    private func restoreAccountDataAccessAfterFailedDeletion(
+        for userId: String,
+        hydrationToken: UInt64,
+        wasReady: Bool
+    ) async {
+        guard wasReady else { return }
+        await passiveAuthLossTask?.task.value
+        guard isCurrentAuthTransition(hydrationToken),
+              pendingAccountTeardownRetryReason == nil,
+              localUserId == userId,
+              isAuthenticated,
+              let chatViewModel,
+              chatViewModel.resumeAccountDataAccess(
+                validatedOwnerUserId: userId
+              ) else { return }
+        ProfileManager.shared.resumeAccountAccess()
+        SettingsManager.shared.resumeAccountDerivedState()
         isAccountDataAccessReady = true
     }
     
@@ -365,7 +423,7 @@ class AuthManager: ObservableObject {
 
         clearAccountSwitchFenceIfOwnerReturned(currentClerkUserId: clerk.user?.id)
         if isAccountSwitchConfirmationPending {
-            await chatViewModel?.handlePassiveAuthLoss()
+            await pauseAccountDataAccess()
             guard isCurrentAuthTransition(hydrationToken),
                   isAccountSwitchConfirmationPending else { return }
             isSessionUnavailable = false
@@ -387,7 +445,7 @@ class AuthManager: ObservableObject {
             guard isCurrentAuthTransition(hydrationToken) else { return }
             retainedOwnerUserId = localUserId ?? retainedOwnerUserId
             guard isCurrentAuthTransition(hydrationToken) else { return }
-            await chatViewModel?.handlePassiveAuthLoss()
+            await pauseAccountDataAccess()
             guard isCurrentAuthTransition(hydrationToken) else { return }
             isSessionUnavailable = false
             isAuthenticated = false
@@ -409,7 +467,7 @@ class AuthManager: ObservableObject {
                 newUserId: currentUserId
             ))
             accountTeardownError = Self.accountSwitchMessage
-            await chatViewModel?.handlePassiveAuthLoss()
+            await pauseAccountDataAccess()
             guard isCurrentAuthTransition(hydrationToken),
                   isAccountSwitchConfirmationPending,
                   retainedOwnerUserId == preservedOwnerUserId else { return }
@@ -435,7 +493,9 @@ class AuthManager: ObservableObject {
             updateUserData(from: user)
             await RevenueCatManager.shared.loginUser(user.id)
             guard isCurrentAuthTransition(hydrationToken) else { return }
-            resumeAccountDataAccess(for: user.id, hydrationToken: hydrationToken)
+            guard await resumeAccountDataAccess(for: user.id, hydrationToken: hydrationToken) else {
+                return
+            }
             if isCurrentAuthTransition(hydrationToken),
                !hasTriggeredSignIn,
                let chatVM = chatViewModel {
@@ -706,7 +766,10 @@ class AuthManager: ObservableObject {
     
     /// Deletes the user's account and clears all local data
     func deleteAccount() async throws {
-        _ = beginAuthTransition()
+        let previousUserId = localUserId
+        let accountAccessWasReady = isAccountDataAccessReady
+        let hydrationToken = beginAuthTransition()
+        var deletionWasConfirmed = false
         do {
             guard let clerk = self.clerk else {
                 throw NSError(domain: "AuthError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Clerk instance not set"])
@@ -719,6 +782,7 @@ class AuthManager: ObservableObject {
             // Delete the user's account
             let deletedUserId = user.id
             try await user.delete()
+            deletionWasConfirmed = true
             _ = beginAuthTransition()
             
             // Clear local state
@@ -731,6 +795,13 @@ class AuthManager: ObservableObject {
             }
             
         } catch {
+            if !deletionWasConfirmed, let previousUserId {
+                await restoreAccountDataAccessAfterFailedDeletion(
+                    for: previousUserId,
+                    hydrationToken: hydrationToken,
+                    wasReady: accountAccessWasReady
+                )
+            }
             throw error
         }
     }

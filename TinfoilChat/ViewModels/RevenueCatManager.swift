@@ -42,6 +42,8 @@ class RevenueCatManager: ObservableObject {
     @Published var isPurchasing = false
     
     static let shared = RevenueCatManager()
+
+    private var identityTransition: (id: UUID, task: Task<Bool, Never>)?
     
     private init() {}
     
@@ -82,6 +84,35 @@ class RevenueCatManager: ObservableObject {
     /// produce webhooks without a user identifier that the backend rejects,
     /// so callers must block the paywall until this returns true.
     func ensureLoggedIn(_ userId: String) async -> Bool {
+        await transitionIdentity(to: userId)
+    }
+
+    private func transitionIdentity(to userId: String?) async -> Bool {
+        let transitionId = UUID()
+        let previousTransition = identityTransition?.task
+        let transitionTask = Task { @MainActor [weak self] in
+            _ = await previousTransition?.value
+            guard let self else { return false }
+            return await self.performIdentityTransition(to: userId)
+        }
+        identityTransition = (transitionId, transitionTask)
+        let didTransition = await transitionTask.value
+        if identityTransition?.id == transitionId {
+            identityTransition = nil
+        }
+        return didTransition
+    }
+
+    private func performIdentityTransition(to userId: String?) async -> Bool {
+        guard let userId else {
+            do {
+                customerInfo = try await Purchases.shared.logOut()
+                return true
+            } catch {
+                return false
+            }
+        }
+
         do {
             // logIn also refreshes customerInfo when already identified,
             // so always call it rather than short-circuiting on appUserID.
@@ -101,13 +132,7 @@ class RevenueCatManager: ObservableObject {
     
     /// Log out user from RevenueCat
     func logoutUser() async {
-        do {
-            let customerInfo = try await Purchases.shared.logOut()
-            await MainActor.run {
-                self.customerInfo = customerInfo
-            }
-        } catch {
-        }
+        _ = await transitionIdentity(to: nil)
     }
     
     /// Fetch available offerings
