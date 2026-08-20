@@ -10,6 +10,48 @@ import ClerkKit
 import Combine
 import Sentry
 
+enum AuthHydrationResolution: Equatable {
+    case sessionUnavailable
+    case signedOut
+    case authenticated
+    case accountSwitch
+
+    static func resolve(
+        isCachedAuthenticated: Bool,
+        cachedUserId: String?,
+        clerkUserId: String?
+    ) -> Self {
+        guard let clerkUserId else {
+            return isCachedAuthenticated ? .sessionUnavailable : .signedOut
+        }
+        if let cachedUserId, cachedUserId != clerkUserId {
+            return .accountSwitch
+        }
+        return .authenticated
+    }
+
+    var requiresAccountTeardown: Bool {
+        self == .accountSwitch
+    }
+}
+
+enum AccountTeardownTrigger: Equatable {
+    case explicitSignOut
+    case accountDeletion(deletedUserId: String)
+    case accountSwitch(previousUserId: String, newUserId: String)
+
+    func isConfirmed(currentClerkUserId: String?) -> Bool {
+        switch self {
+        case .explicitSignOut:
+            return currentClerkUserId == nil
+        case .accountDeletion(let deletedUserId):
+            return currentClerkUserId == nil || currentClerkUserId == deletedUserId
+        case .accountSwitch(let previousUserId, let newUserId):
+            return previousUserId != newUserId && currentClerkUserId == newUserId
+        }
+    }
+}
+
 @MainActor
 class AuthManager: ObservableObject {
     private static let userIdKey = "id"
@@ -19,6 +61,7 @@ class AuthManager: ObservableObject {
     @Published var localUserData: [String: Any]? = nil
     @Published var hasActiveSubscription = false
     @Published var accountTeardownError: String?
+    @Published var isSessionUnavailable = false
 
     var localUserId: String? {
         localUserData?[Self.userIdKey] as? String
@@ -31,6 +74,7 @@ class AuthManager: ObservableObject {
     private var accountSwitchTask: Task<Void, Never>?
     private var accountTeardownTask: Task<Bool, Never>?
     private var accountTeardownId: UUID?
+    private var pendingAccountTeardownTrigger: AccountTeardownTrigger?
     
     // UserDefaults keys
     private let authStateKey = Constants.StorageKeys.Auth.state
@@ -107,12 +151,16 @@ class AuthManager: ObservableObject {
         self.clerk = clerk
         // Check if clerk is already loaded and has a user
         if let user = clerk.user {
+            isSessionUnavailable = false
             if let cachedUserId = localUserId,
                cachedUserId != user.id {
-                hasTriggeredSignIn = true
                 accountSwitchTask = Task { @MainActor [weak self] in
                     guard let self else { return }
-                    guard await self.clearAuthState() else { return }
+                    let trigger = AccountTeardownTrigger.accountSwitch(
+                        previousUserId: cachedUserId,
+                        newUserId: user.id
+                    )
+                    guard await self.clearAuthState(for: trigger) else { return }
                     await RevenueCatManager.shared.logoutUser()
                     // A sign-out may have completed while the cleanup
                     // above was suspended; only restore auth state when
@@ -207,6 +255,7 @@ class AuthManager: ObservableObject {
         } catch {
             // Network or other error loading Clerk - preserve cached auth state
             // User will remain "authenticated" based on cached state until we can verify
+            isSessionUnavailable = isAuthenticated
             isLoading = false
             return
         }
@@ -216,13 +265,35 @@ class AuthManager: ObservableObject {
             self.accountSwitchTask = nil
         }
 
-        // Clerk loaded successfully - now we can trust clerk.user state
-        let wasAuthenticated = isAuthenticated
+        let resolution = AuthHydrationResolution.resolve(
+            isCachedAuthenticated: isAuthenticated,
+            cachedUserId: localUserId,
+            clerkUserId: clerk.user?.id
+        )
 
-        if let user = clerk.user {
-            if let cachedUserId = localUserId,
-               cachedUserId != user.id {
-                guard await clearAuthState() else {
+        switch resolution {
+        case .sessionUnavailable:
+            isSessionUnavailable = true
+            isLoading = false
+            return
+        case .signedOut:
+            isSessionUnavailable = false
+            isAuthenticated = false
+            hasActiveSubscription = false
+        case .authenticated, .accountSwitch:
+            guard let user = clerk.user else {
+                isSessionUnavailable = true
+                isLoading = false
+                return
+            }
+            isSessionUnavailable = false
+            if resolution.requiresAccountTeardown,
+               let cachedUserId = localUserId {
+                let trigger = AccountTeardownTrigger.accountSwitch(
+                    previousUserId: cachedUserId,
+                    newUserId: user.id
+                )
+                guard await clearAuthState(for: trigger) else {
                     isLoading = false
                     return
                 }
@@ -231,27 +302,20 @@ class AuthManager: ObservableObject {
             isAuthenticated = true
             updateUserData(from: user)
             await RevenueCatManager.shared.loginUser(user.id)
-        } else {
-            if wasAuthenticated {
-                // User was authenticated but Clerk confirms they're no longer signed in.
-                // clearAuthState calls handleSignOut first (while auth is still true)
-                // so that local chats can be saved to disk before clearing.
-                guard await clearAuthState() else {
-                    isLoading = false
-                    return
-                }
-                await RevenueCatManager.shared.logoutUser()
-            } else {
-                isAuthenticated = false
+            if !hasTriggeredSignIn, let chatVM = chatViewModel {
+                hasTriggeredSignIn = true
+                chatVM.handleSignIn()
             }
-            hasActiveSubscription = false
         }
 
         isLoading = false
     }
     
     @discardableResult
-    private func clearAuthState() async -> Bool {
+    private func clearAuthState(for trigger: AccountTeardownTrigger) async -> Bool {
+        guard trigger.isConfirmed(currentClerkUserId: clerk?.user?.id) else {
+            return false
+        }
         if let accountTeardownTask {
             return await accountTeardownTask.value
         }
@@ -263,17 +327,23 @@ class AuthManager: ObservableObject {
                 try await self.performAccountTeardown()
                 self.chatViewModel?.completeAccountTeardown()
                 self.accountTeardownError = nil
+                self.pendingAccountTeardownTrigger = nil
                 return true
             } catch {
                 SentrySDK.capture(error: error)
                 do {
+                    guard trigger.isConfirmed(currentClerkUserId: self.clerk?.user?.id) else {
+                        return false
+                    }
                     try await self.performAccountTeardown()
                     self.chatViewModel?.completeAccountTeardown()
                     self.accountTeardownError = nil
+                    self.pendingAccountTeardownTrigger = nil
                     return true
                 } catch {
                     SentrySDK.capture(error: error)
                     self.isLoading = false
+                    self.pendingAccountTeardownTrigger = trigger
                     self.accountTeardownError = "Tinfoil couldn't finish clearing local account data. Account actions remain paused to protect your data. Retry cleanup before continuing."
                     return false
                 }
@@ -290,7 +360,8 @@ class AuthManager: ObservableObject {
 
     func retryAccountTeardown() async {
         isLoading = true
-        guard await clearAuthState() else { return }
+        guard let trigger = pendingAccountTeardownTrigger,
+              await clearAuthState(for: trigger) else { return }
         await RevenueCatManager.shared.logoutUser()
         await initializeAuthState()
     }
@@ -346,7 +417,7 @@ class AuthManager: ObservableObject {
             try await clerk.auth.signOut()
         } catch {
         }
-        await clearAuthState()
+        await clearAuthState(for: .explicitSignOut)
     }
     
     /// Fetches subscription status directly from the API
@@ -430,10 +501,11 @@ class AuthManager: ObservableObject {
             }
             
             // Delete the user's account
+            let deletedUserId = user.id
             try await user.delete()
             
             // Clear local state
-            guard await clearAuthState() else {
+            guard await clearAuthState(for: .accountDeletion(deletedUserId: deletedUserId)) else {
                 throw NSError(
                     domain: "AuthError",
                     code: 3,

@@ -6339,7 +6339,9 @@ class ChatViewModel: ObservableObject {
             scanPendingRecoveries()
 
             // If no cloud key exists, try passkey recovery before falling back
-            if !EncryptionService.shared.hasEncryptionKey() {
+            if shouldAttemptPasskeyRecovery(
+                hasLocalEncryptionKey: EncryptionService.shared.hasEncryptionKey()
+            ) {
                 let passkeyResult = await passkeyManager.attemptPasskeyKeyRecovery()
                 guard isCurrentSignIn(token, userId: userId) else { return }
                 switch passkeyResult {
@@ -7344,6 +7346,10 @@ class ChatViewModel: ObservableObject {
             }
         }
     }
+}
+
+func shouldAttemptPasskeyRecovery(hasLocalEncryptionKey: Bool) -> Bool {
+    !hasLocalEncryptionKey
 }
 
 extension ChatViewModel {

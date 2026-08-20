@@ -92,7 +92,7 @@ struct DataLifecycleSourceTests {
         let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
         let retry = try functionBody(named: "func retryAccountTeardown()", in: source)
 
-        let cleanup = try #require(retry.range(of: "guard await clearAuthState() else { return }"))
+        let cleanup = try #require(retry.range(of: "await clearAuthState(for: trigger) else { return }"))
         let revenueCat = try #require(retry.range(of: "await RevenueCatManager.shared.logoutUser()"))
         let clerk = try #require(retry.range(of: "await initializeAuthState()"))
         #expect(cleanup.lowerBound < revenueCat.lowerBound)
