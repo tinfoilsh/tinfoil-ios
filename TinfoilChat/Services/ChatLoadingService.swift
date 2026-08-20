@@ -458,23 +458,32 @@ enum ChatProjectDetachment {
     static func persist(
         userId: String,
         storage: ChatStorageTab,
-        loadingService: any ChatLoadingService
+        loadingService: any ChatLoadingService,
+        shouldContinue: @MainActor () -> Bool = { true }
     ) async throws -> Result {
+        try Task.checkCancellation()
+        guard shouldContinue() else { throw CancellationError() }
         let entries = try await loadingService.loadIndex(userId: userId, storage: storage)
         var detachedIds: [String] = []
         var failedIds: [String] = []
 
         for entry in entries where entry.projectId != nil {
             do {
+                try Task.checkCancellation()
+                guard shouldContinue() else { throw CancellationError() }
                 var chat = try await loadingService.loadChat(
                     id: entry.id,
                     userId: userId,
                     storage: storage
                 )
+                try Task.checkCancellation()
+                guard shouldContinue() else { throw CancellationError() }
                 chat.projectId = nil
                 chat.projectLocallyModified = false
                 try await loadingService.saveChat(chat, userId: userId, storage: storage)
                 detachedIds.append(chat.id)
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 failedIds.append(entry.id)
             }

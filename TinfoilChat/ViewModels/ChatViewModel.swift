@@ -2022,7 +2022,10 @@ class ChatViewModel: ObservableObject {
             exitProject()
         }
         if let userId {
-            await persistRetainedChatProjectDetachment(userId: userId)
+            await persistRetainedChatProjectDetachment(
+                userId: userId,
+                accountGeneration: accountGeneration
+            )
         }
         return deleted
     }
@@ -2040,20 +2043,34 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    private func persistRetainedChatProjectDetachment(userId: String) async {
+    private func persistRetainedChatProjectDetachment(
+        userId: String,
+        accountGeneration: Int
+    ) async {
         for storage in [ChatStorageTab.local, .cloud] {
+            guard isCurrentProjectAccount(accountGeneration),
+                  currentUserId == userId else { return }
             do {
                 let result = try await ChatProjectDetachment.persist(
                     userId: userId,
                     storage: storage,
-                    loadingService: chatLoadingService
+                    loadingService: chatLoadingService,
+                    shouldContinue: { [weak self] in
+                        guard let self else { return false }
+                        return self.isCurrentProjectAccount(accountGeneration)
+                            && self.currentUserId == userId
+                    }
                 )
-                guard currentUserId == userId else { return }
+                guard isCurrentProjectAccount(accountGeneration),
+                      currentUserId == userId else { return }
                 if !result.failedIds.isEmpty {
                     syncErrors.append("Some chats could not be updated after deleting projects.")
                 }
+            } catch is CancellationError {
+                return
             } catch {
-                guard currentUserId == userId else { return }
+                guard isCurrentProjectAccount(accountGeneration),
+                      currentUserId == userId else { return }
                 syncErrors.append(error.localizedDescription)
             }
         }
