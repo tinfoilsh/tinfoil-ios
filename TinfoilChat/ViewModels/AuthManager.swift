@@ -34,6 +34,19 @@ enum AuthHydrationOutcome: Equatable {
     }
 }
 
+struct AuthHydrationGeneration {
+    private(set) var value: UInt64 = 0
+
+    mutating func advance() -> UInt64 {
+        value += 1
+        return value
+    }
+
+    func isCurrent(_ token: UInt64) -> Bool {
+        token == value
+    }
+}
+
 enum AccountTeardownTrigger: Equatable {
     case explicitSignOut
     case accountDeletion(deletedUserId: String)
@@ -86,6 +99,7 @@ class AuthManager: ObservableObject {
     private var accountTeardownId: UUID?
     private var pendingAccountTeardownTrigger: AccountTeardownTrigger?
     private var retainedOwnerUserId: String?
+    private var authHydrationGeneration = AuthHydrationGeneration()
     
     // UserDefaults keys
     private let authStateKey = Constants.StorageKeys.Auth.state
@@ -160,9 +174,11 @@ class AuthManager: ObservableObject {
     }
     
     func setClerk(_ clerk: Clerk) {
+        let hydrationToken = beginAuthTransition()
         self.clerk = clerk
         // Check if clerk is already loaded and has a user
         if let user = clerk.user {
+            guard isCurrentAuthTransition(hydrationToken) else { return }
             isSessionUnavailable = false
             if let cachedUserId = localUserId,
                cachedUserId != user.id {
@@ -173,16 +189,20 @@ class AuthManager: ObservableObject {
                         newUserId: user.id
                     )
                     guard await self.clearAuthState(for: trigger) else { return }
+                    guard self.isCurrentAuthTransition(hydrationToken) else { return }
                     await RevenueCatManager.shared.logoutUser()
+                    guard self.isCurrentAuthTransition(hydrationToken) else { return }
                     // A sign-out may have completed while the cleanup
                     // above was suspended; only restore auth state when
                     // Clerk still reports the captured user.
-                    guard self.clerk?.user?.id == user.id else { return }
+                    guard self.clerk?.user?.id == user.id,
+                          self.isCurrentAuthTransition(hydrationToken) else { return }
                     self.updateUserData(from: user)
                     self.isAuthenticated = true
                     self.saveAuthState()
                     await RevenueCatManager.shared.loginUser(user.id)
-                    guard self.clerk?.user?.id == user.id else { return }
+                    guard self.clerk?.user?.id == user.id,
+                          self.isCurrentAuthTransition(hydrationToken) else { return }
                     if !self.hasTriggeredSignIn,
                        let chatVM = self.chatViewModel {
                         self.hasTriggeredSignIn = true
@@ -192,17 +212,28 @@ class AuthManager: ObservableObject {
                 return
             }
             // Update user data BEFORE setting isAuthenticated
+            guard isCurrentAuthTransition(hydrationToken) else { return }
             updateUserData(from: user)
             
             // Now set authenticated, which will trigger observers
             self.isAuthenticated = true
             
             // Handle sign in for chat if not already triggered
-            if !hasTriggeredSignIn, let chatVM = chatViewModel {
+            if isCurrentAuthTransition(hydrationToken),
+               !hasTriggeredSignIn,
+               let chatVM = chatViewModel {
                 hasTriggeredSignIn = true
                 chatVM.handleSignIn()
             }
         }
+    }
+
+    private func beginAuthTransition() -> UInt64 {
+        authHydrationGeneration.advance()
+    }
+
+    private func isCurrentAuthTransition(_ token: UInt64) -> Bool {
+        authHydrationGeneration.isCurrent(token)
     }
     
     private func updateUserData(from user: ClerkKit.User) {
@@ -256,7 +287,9 @@ class AuthManager: ObservableObject {
     }
     
     func initializeAuthState() async {
+        let hydrationToken = beginAuthTransition()
         guard let clerk = self.clerk else {
+            guard isCurrentAuthTransition(hydrationToken) else { return }
             isLoading = false
             return
         }
@@ -264,8 +297,10 @@ class AuthManager: ObservableObject {
         do {
             if !clerk.isLoaded {
                 try await clerk.refreshClient()
+                guard isCurrentAuthTransition(hydrationToken) else { return }
             }
         } catch {
+            guard isCurrentAuthTransition(hydrationToken) else { return }
             // Network or other error loading Clerk - preserve cached auth state
             // User will remain "authenticated" based on cached state until we can verify
             isSessionUnavailable = isAuthenticated
@@ -275,6 +310,7 @@ class AuthManager: ObservableObject {
 
         if let accountSwitchTask {
             await accountSwitchTask.value
+            guard isCurrentAuthTransition(hydrationToken) else { return }
             self.accountSwitchTask = nil
         }
 
@@ -285,16 +321,21 @@ class AuthManager: ObservableObject {
 
         switch outcome {
         case .signedOut, .signedOutPreservingAccount:
+            guard isCurrentAuthTransition(hydrationToken) else { return }
             retainedOwnerUserId = localUserId ?? retainedOwnerUserId
+            guard isCurrentAuthTransition(hydrationToken) else { return }
             await chatViewModel?.handlePassiveAuthLoss()
+            guard isCurrentAuthTransition(hydrationToken) else { return }
             isSessionUnavailable = false
             isAuthenticated = false
             hasActiveSubscription = false
             hasTriggeredSignIn = false
             saveAuthState()
             await RevenueCatManager.shared.logoutUser()
+            guard isCurrentAuthTransition(hydrationToken) else { return }
         case .authenticated, .accountSwitch:
             guard let user = clerk.user else {
+                guard isCurrentAuthTransition(hydrationToken) else { return }
                 isSessionUnavailable = false
                 isAuthenticated = false
                 hasActiveSubscription = false
@@ -311,20 +352,28 @@ class AuthManager: ObservableObject {
                     newUserId: user.id
                 )
                 guard await clearAuthState(for: trigger) else {
+                    guard isCurrentAuthTransition(hydrationToken) else { return }
                     isLoading = false
                     return
                 }
+                guard isCurrentAuthTransition(hydrationToken) else { return }
                 await RevenueCatManager.shared.logoutUser()
+                guard isCurrentAuthTransition(hydrationToken) else { return }
             }
+            guard isCurrentAuthTransition(hydrationToken) else { return }
             isAuthenticated = true
             updateUserData(from: user)
             await RevenueCatManager.shared.loginUser(user.id)
-            if !hasTriggeredSignIn, let chatVM = chatViewModel {
+            guard isCurrentAuthTransition(hydrationToken) else { return }
+            if isCurrentAuthTransition(hydrationToken),
+               !hasTriggeredSignIn,
+               let chatVM = chatViewModel {
                 hasTriggeredSignIn = true
                 chatVM.handleSignIn()
             }
         }
 
+        guard isCurrentAuthTransition(hydrationToken) else { return }
         isLoading = false
     }
     
@@ -379,10 +428,13 @@ class AuthManager: ObservableObject {
     }
 
     func retryAccountTeardown() async {
+        let hydrationToken = beginAuthTransition()
         isLoading = true
         guard let trigger = pendingAccountTeardownTrigger,
               await clearAuthState(for: trigger) else { return }
+        guard isCurrentAuthTransition(hydrationToken) else { return }
         await RevenueCatManager.shared.logoutUser()
+        guard isCurrentAuthTransition(hydrationToken) else { return }
         await initializeAuthState()
     }
 
@@ -431,12 +483,14 @@ class AuthManager: ObservableObject {
     }
     
     func signOut() async {
+        _ = beginAuthTransition()
         do {
             // If we have a Clerk instance, use it, otherwise fall back to Clerk.shared
             let clerk = self.clerk ?? Clerk.shared
             try await clerk.auth.signOut()
         } catch {
         }
+        _ = beginAuthTransition()
         await clearAuthState(for: .explicitSignOut)
     }
     
@@ -511,6 +565,7 @@ class AuthManager: ObservableObject {
     
     /// Deletes the user's account and clears all local data
     func deleteAccount() async throws {
+        _ = beginAuthTransition()
         do {
             guard let clerk = self.clerk else {
                 throw NSError(domain: "AuthError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Clerk instance not set"])
@@ -523,6 +578,7 @@ class AuthManager: ObservableObject {
             // Delete the user's account
             let deletedUserId = user.id
             try await user.delete()
+            _ = beginAuthTransition()
             
             // Clear local state
             guard await clearAuthState(for: .accountDeletion(deletedUserId: deletedUserId)) else {

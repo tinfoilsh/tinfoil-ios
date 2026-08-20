@@ -135,6 +135,31 @@ struct DataLifecycleSourceTests {
         #expect(!signIn.contains("signInTask = canceledTask"))
     }
 
+    @Test("Auth hydration revalidates after cancellation before publishing")
+    func authHydrationRevalidatesAfterCancellation() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let hydration = try functionBody(named: "func initializeAuthState()", in: source)
+        let setClerk = try functionBody(named: "func setClerk(", in: source)
+        let signOut = try functionBody(named: "func signOut()", in: source)
+
+        let token = try #require(hydration.range(of: "let hydrationToken = beginAuthTransition()"))
+        let cancellation = try #require(hydration.range(of: "await chatViewModel?.handlePassiveAuthLoss()"))
+        let revalidation = try #require(hydration.range(
+            of: "guard isCurrentAuthTransition(hydrationToken) else { return }",
+            range: cancellation.upperBound..<hydration.endIndex
+        ))
+        let signedOutPublication = try #require(hydration.range(
+            of: "isAuthenticated = false",
+            range: revalidation.upperBound..<hydration.endIndex
+        ))
+
+        #expect(token.lowerBound < cancellation.lowerBound)
+        #expect(cancellation.lowerBound < revalidation.lowerBound)
+        #expect(revalidation.lowerBound < signedOutPublication.lowerBound)
+        #expect(setClerk.contains("let hydrationToken = beginAuthTransition()"))
+        #expect(signOut.contains("_ = beginAuthTransition()"))
+    }
+
     @Test("Bulk delete progress starts at network dispatch")
     func bulkDeleteProgressStartsAtNetworkDispatch() throws {
         let clientSource = try sourceFile("TinfoilChat/Services/SyncEnclave/SyncEnclaveClient.swift")
