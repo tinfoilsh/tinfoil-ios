@@ -15,6 +15,7 @@ enum SharedImportConfiguration {
     /// Hidden staging directories older than this are treated as abandoned
     /// by an interrupted share and swept from the app-group inbox.
     static let staleStagingLifetimeSeconds: TimeInterval = 24 * 60 * 60
+    static let unreadableRequestLifetimeSeconds: TimeInterval = 7 * 24 * 60 * 60
     static let supportedDocumentExtensions: Set<String> = [
         "pdf", "docx", "pptx", "xlsx", "txt", "md", "csv", "html", "json", "xml",
     ]

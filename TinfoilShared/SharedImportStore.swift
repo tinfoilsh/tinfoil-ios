@@ -9,6 +9,11 @@ struct SharedImportStore {
         case unreadable
     }
 
+    private struct PendingStorageUsage {
+        let requestCount: Int
+        let payloadBytes: Int64
+    }
+
     private static let enqueueLock = NSLock()
 
     private let fileManager: FileManager
@@ -122,23 +127,21 @@ struct SharedImportStore {
     }
 
     private func enforcePendingLimits(addingPayloadBytes byteCount: Int64) throws {
-        let pendingRequests = pendingRequests()
-        guard pendingRequests.count < maximumPendingRequestCount else {
+        _ = pendingRequests()
+        let usage: PendingStorageUsage
+        do {
+            usage = try pendingStorageUsage()
+        } catch {
+            throw SharedImportError.pendingPayloadQuotaExceeded(
+                maximumBytes: maximumPendingPayloadBytes
+            )
+        }
+        guard usage.requestCount < maximumPendingRequestCount else {
             throw SharedImportError.tooManyPendingRequests(maximum: maximumPendingRequestCount)
         }
 
-        var aggregateBytes: Int64 = 0
-        for request in pendingRequests {
-            let result = aggregateBytes.addingReportingOverflow(request.item.byteCount)
-            guard !result.overflow else {
-                throw SharedImportError.pendingPayloadQuotaExceeded(
-                    maximumBytes: maximumPendingPayloadBytes
-                )
-            }
-            aggregateBytes = result.partialValue
-        }
         guard byteCount <= maximumPendingPayloadBytes,
-              aggregateBytes <= maximumPendingPayloadBytes - byteCount else {
+              usage.payloadBytes <= maximumPendingPayloadBytes - byteCount else {
             throw SharedImportError.pendingPayloadQuotaExceeded(
                 maximumBytes: maximumPendingPayloadBytes
             )
@@ -227,13 +230,56 @@ struct SharedImportStore {
                 case .loaded(let request):
                     return request
                 case .malformed:
-                    removeMalformedRequestDirectoryIfStale(directoryURL)
+                    removeRequestDirectoryIfStale(
+                        directoryURL,
+                        lifetime: SharedImportConfiguration.staleStagingLifetimeSeconds
+                    )
                     return nil
                 case .unreadable:
+                    removeRequestDirectoryIfStale(
+                        directoryURL,
+                        lifetime: SharedImportConfiguration.unreadableRequestLifetimeSeconds
+                    )
                     return nil
                 }
             }
             .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private func pendingStorageUsage() throws -> PendingStorageUsage {
+        let requestDirectories = try fileManager.contentsOfDirectory(
+            at: inboxURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ).filter { UUID(uuidString: $0.lastPathComponent) != nil }
+
+        var payloadBytes: Int64 = 0
+        for directoryURL in requestDirectories {
+            let children = try fileManager.contentsOfDirectory(
+                at: directoryURL,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+                options: [.skipsHiddenFiles]
+            )
+            for child in children where child.lastPathComponent != SharedImportConfiguration.manifestFileName {
+                let values = try child.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+                guard values.isRegularFile == true, let fileSize = values.fileSize else {
+                    throw SharedImportError.pendingPayloadQuotaExceeded(
+                        maximumBytes: maximumPendingPayloadBytes
+                    )
+                }
+                let result = payloadBytes.addingReportingOverflow(Int64(fileSize))
+                guard !result.overflow else {
+                    throw SharedImportError.pendingPayloadQuotaExceeded(
+                        maximumBytes: maximumPendingPayloadBytes
+                    )
+                }
+                payloadBytes = result.partialValue
+            }
+        }
+        return PendingStorageUsage(
+            requestCount: requestDirectories.count,
+            payloadBytes: payloadBytes
+        )
     }
 
     /// Removes staging directories abandoned by an interrupted share (the
@@ -383,14 +429,15 @@ struct SharedImportStore {
         inboxURL.appendingPathComponent(requestID.uuidString.lowercased(), isDirectory: true)
     }
 
-    private func removeMalformedRequestDirectoryIfStale(_ directoryURL: URL) {
+    private func removeRequestDirectoryIfStale(
+        _ directoryURL: URL,
+        lifetime: TimeInterval
+    ) {
         guard UUID(uuidString: directoryURL.lastPathComponent) != nil,
               (try? directoryURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
             return
         }
-        let cutoff = currentDate().addingTimeInterval(
-            -SharedImportConfiguration.staleStagingLifetimeSeconds
-        )
+        let cutoff = currentDate().addingTimeInterval(-lifetime)
         guard let created = (try? directoryURL.resourceValues(forKeys: [.creationDateKey]))?
             .creationDate else { return }
         if created < cutoff {
