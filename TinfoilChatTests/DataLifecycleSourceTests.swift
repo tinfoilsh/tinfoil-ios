@@ -69,6 +69,35 @@ struct DataLifecycleSourceTests {
         #expect(deletion.contains("guard await requestProgress.requestStarted else { throw CancellationError() }"))
         #expect(deletion.contains("return .accountChanged"))
         #expect(deletion.contains("return .refreshRequired"))
+        let cloudGuard = try #require(deletion.range(of: "guard shouldDeleteCloud else { return }", options: .backwards))
+        let cancellation = try #require(deletion.range(of: "try Task.checkCancellation()", range: cloudGuard.upperBound..<deletion.endIndex))
+        #expect(cloudGuard.lowerBound < cancellation.lowerBound)
+    }
+
+    @Test("Document picker captures account state before staging")
+    func documentPickerCapturesAccountStateBeforeStaging() throws {
+        let source = try sourceFile("TinfoilChat/Views/DocumentPickerView.swift")
+        let callback = try functionBody(named: "func documentPicker(", in: source)
+        let staging = try functionBody(named: "func stageDocument(at sourceURL", in: source)
+
+        let capture = try #require(callback.range(of: "let accountLifecycleGeneration = accountLifecycleGeneration()"))
+        let task = try #require(callback.range(of: "Task {"))
+        #expect(capture.lowerBound < task.lowerBound)
+        #expect(callback.contains("accountLifecycleGeneration: accountLifecycleGeneration"))
+        #expect(!staging.contains("accountLifecycleGeneration()"))
+    }
+
+    @Test("Account teardown retry preserves failure until cleanup succeeds")
+    func accountTeardownRetryPreservesFailureUntilCleanupSucceeds() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let retry = try functionBody(named: "func retryAccountTeardown()", in: source)
+
+        let cleanup = try #require(retry.range(of: "guard await clearAuthState() else { return }"))
+        let revenueCat = try #require(retry.range(of: "await RevenueCatManager.shared.logoutUser()"))
+        let clerk = try #require(retry.range(of: "await initializeAuthState()"))
+        #expect(cleanup.lowerBound < revenueCat.lowerBound)
+        #expect(revenueCat.lowerBound < clerk.lowerBound)
+        #expect(!retry.contains("accountTeardownError = nil"))
     }
 
     @Test("Bulk delete progress starts at network dispatch")

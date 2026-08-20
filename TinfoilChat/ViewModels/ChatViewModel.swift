@@ -6519,8 +6519,8 @@ class ChatViewModel: ObservableObject {
                     try await self.cloudSync.quiesceUploadsForBulkDelete(userId: userId)
                 },
                 deleteCloud: {
-                    try Task.checkCancellation()
                     guard shouldDeleteCloud else { return }
+                    try Task.checkCancellation()
                     try await self.cloudSync.deleteAllFromCloud(
                         userId: userId,
                         requestProgress: requestProgress

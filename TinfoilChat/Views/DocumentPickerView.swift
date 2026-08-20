@@ -87,15 +87,18 @@ struct DocumentPickerView: UIViewControllerRepresentable {
                 onError(PickerError.accessDenied)
                 return
             }
+            let accountLifecycleGeneration = accountLifecycleGeneration()
             Task {
-                await stageDocument(at: sourceURL)
+                await stageDocument(
+                    at: sourceURL,
+                    accountLifecycleGeneration: accountLifecycleGeneration
+                )
             }
         }
 
-        func stageDocument(at sourceURL: URL) async {
+        func stageDocument(at sourceURL: URL, accountLifecycleGeneration: Int) async {
             let fileName = sourceURL.lastPathComponent
             let stageDocument = stageDocument
-            let accountLifecycleGeneration = accountLifecycleGeneration()
             let result = await Task.detached(priority: .userInitiated) {
                 defer { sourceURL.stopAccessingSecurityScopedResource() }
                 return Result { try stageDocument(sourceURL) }

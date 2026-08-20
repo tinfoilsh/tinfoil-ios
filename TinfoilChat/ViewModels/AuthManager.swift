@@ -289,8 +289,9 @@ class AuthManager: ObservableObject {
     }
 
     func retryAccountTeardown() async {
-        accountTeardownError = nil
         isLoading = true
+        guard await clearAuthState() else { return }
+        await RevenueCatManager.shared.logoutUser()
         await initializeAuthState()
     }
 

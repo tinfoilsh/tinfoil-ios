@@ -23,7 +23,10 @@ struct DocumentPickerViewTests {
             }
         )
 
-        await coordinator.stageDocument(at: URL(fileURLWithPath: "/tmp/oversized.txt"))
+        await coordinator.stageDocument(
+            at: URL(fileURLWithPath: "/tmp/oversized.txt"),
+            accountLifecycleGeneration: 0
+        )
 
         guard let error = receivedError as? BoundedFileIOError,
               case let .fileTooLarge(size, maximum) = error else {
@@ -56,7 +59,7 @@ struct DocumentPickerViewTests {
             stageDocument: { _ in stagedFile }
         )
 
-        await coordinator.stageDocument(at: sourceURL)
+        await coordinator.stageDocument(at: sourceURL, accountLifecycleGeneration: 1)
 
         #expect(!didPublishResult)
         #expect((try FileManager.default.contentsOfDirectory(atPath: store.rootURL.path)).isEmpty)
