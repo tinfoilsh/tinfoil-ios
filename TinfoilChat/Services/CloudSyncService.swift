@@ -2280,10 +2280,7 @@ class CloudSyncService: ObservableObject {
     /// number of rows deleted. Callers are responsible for tombstoning local
     /// IDs only after this succeeds, mirroring the webapp's ordering.
     @discardableResult
-    func deleteAllFromCloud(
-        userId: String,
-        requestProgress: SyncEnclaveRequestProgress? = nil
-    ) async throws -> Int {
+    func deleteAllFromCloud(userId: String) async throws -> Int {
         guard let account = bulkDeleteAccount,
               account.userId == userId,
               account.generation == accountGeneration,
@@ -2291,7 +2288,7 @@ class CloudSyncService: ObservableObject {
               await cloudStorage.isAuthenticated() else {
             throw CloudStorageError.authenticationRequired
         }
-        let deleted = try await cloudStorage.deleteAllChats(requestProgress: requestProgress)
+        let deleted = try await cloudStorage.deleteAllChats()
         guard bulkDeleteAccount == account,
               account.generation == accountGeneration,
               await getCurrentUserId() == userId else {

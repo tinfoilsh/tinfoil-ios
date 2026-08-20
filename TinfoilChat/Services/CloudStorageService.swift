@@ -482,7 +482,7 @@ class CloudStorageService: ObservableObject {
     /// Delete every chat for the current user. Paginates a stable v2 snapshot
     /// and issues one delete per row.
     @discardableResult
-    func deleteAllChats(requestProgress: SyncEnclaveRequestProgress? = nil) async throws -> Int {
+    func deleteAllChats() async throws -> Int {
         let key = try CEKEncoding.requirePrimaryKeyB64()
         var chatIds: [String] = []
         var cursor: String? = nil
@@ -513,8 +513,7 @@ class CloudStorageService: ObservableObject {
                     ifMatch: nil,
                     idempotencyKey: newSyncEnclaveIdempotencyKey(),
                     key: key
-                ),
-                requestProgress: requestProgress
+                )
             )
         }
         return chatIds.count

@@ -8,7 +8,6 @@
 import SwiftUI
 import ClerkKit
 import Combine
-import Sentry
 
 @MainActor
 class AuthManager: ObservableObject {
@@ -18,7 +17,6 @@ class AuthManager: ObservableObject {
     @Published var isLoading = true
     @Published var localUserData: [String: Any]? = nil
     @Published var hasActiveSubscription = false
-    @Published var accountTeardownError: String?
 
     var localUserId: String? {
         localUserData?[Self.userIdKey] as? String
@@ -29,7 +27,7 @@ class AuthManager: ObservableObject {
     private var clerk: Clerk?
     private var hasTriggeredSignIn = false
     private var accountSwitchTask: Task<Void, Never>?
-    private var accountTeardownTask: Task<Bool, Never>?
+    private var accountTeardownTask: Task<Void, Never>?
     private var accountTeardownId: UUID?
     
     // UserDefaults keys
@@ -112,7 +110,7 @@ class AuthManager: ObservableObject {
                 hasTriggeredSignIn = true
                 accountSwitchTask = Task { @MainActor [weak self] in
                     guard let self else { return }
-                    guard await self.clearAuthState() else { return }
+                    await self.clearAuthState()
                     await RevenueCatManager.shared.logoutUser()
                     // A sign-out may have completed while the cleanup
                     // above was suspended; only restore auth state when
@@ -145,7 +143,7 @@ class AuthManager: ObservableObject {
         }
     }
     
-    private func updateUserData(from user: ClerkKit.User) {
+    private func updateUserData(from user: User) {
         let wasAuthenticated = isAuthenticated
         
         // Store relevant user data
@@ -222,10 +220,7 @@ class AuthManager: ObservableObject {
         if let user = clerk.user {
             if let cachedUserId = localUserId,
                cachedUserId != user.id {
-                guard await clearAuthState() else {
-                    isLoading = false
-                    return
-                }
+                await clearAuthState()
                 await RevenueCatManager.shared.logoutUser()
             }
             isAuthenticated = true
@@ -236,10 +231,7 @@ class AuthManager: ObservableObject {
                 // User was authenticated but Clerk confirms they're no longer signed in.
                 // clearAuthState calls handleSignOut first (while auth is still true)
                 // so that local chats can be saved to disk before clearing.
-                guard await clearAuthState() else {
-                    isLoading = false
-                    return
-                }
+                await clearAuthState()
                 await RevenueCatManager.shared.logoutUser()
             } else {
                 isAuthenticated = false
@@ -250,59 +242,30 @@ class AuthManager: ObservableObject {
         isLoading = false
     }
     
-    @discardableResult
-    private func clearAuthState() async -> Bool {
+    private func clearAuthState() async {
         if let accountTeardownTask {
-            return await accountTeardownTask.value
+            await accountTeardownTask.value
+            return
         }
 
         let teardownId = UUID()
         let teardownTask = Task { @MainActor [weak self] in
-            guard let self else { return false }
-            do {
-                try await self.performAccountTeardown()
-                self.chatViewModel?.completeAccountTeardown()
-                self.accountTeardownError = nil
-                return true
-            } catch {
-                SentrySDK.capture(error: error)
-                do {
-                    try await self.performAccountTeardown()
-                    self.chatViewModel?.completeAccountTeardown()
-                    self.accountTeardownError = nil
-                    return true
-                } catch {
-                    SentrySDK.capture(error: error)
-                    self.isLoading = false
-                    self.accountTeardownError = "Tinfoil couldn't finish clearing local account data. Account actions remain paused to protect your data. Retry cleanup before continuing."
-                    return false
-                }
-            }
+            guard let self else { return }
+            await self.performAccountTeardown()
+            self.chatViewModel?.completeAccountTeardown()
         }
         accountTeardownId = teardownId
         accountTeardownTask = teardownTask
-        let didCompleteTeardown = await teardownTask.value
-        guard accountTeardownId == teardownId else { return didCompleteTeardown }
+        await teardownTask.value
+        guard accountTeardownId == teardownId else { return }
         accountTeardownTask = nil
         accountTeardownId = nil
-        return didCompleteTeardown
     }
 
-    func retryAccountTeardown() async {
-        isLoading = true
-        guard await clearAuthState() else { return }
-        await RevenueCatManager.shared.logoutUser()
-        await initializeAuthState()
-    }
-
-    private func performAccountTeardown() async throws {
+    private func performAccountTeardown() async {
         // Handle chat state BEFORE clearing auth so the view model can still
         // save the current chat (hasChatAccess depends on isAuthenticated).
-        if let chatViewModel {
-            try await chatViewModel.handleSignOut()
-        } else {
-            try await SharedImportCoordinator.shared.discardAllPending()
-        }
+        await chatViewModel?.handleSignOut()
         await ChatRecoveryCoordinator.shared.reset(accountId: nil)
 
         // Sign-out performs a full local wipe so that no content, encryption
@@ -433,13 +396,7 @@ class AuthManager: ObservableObject {
             try await user.delete()
             
             // Clear local state
-            guard await clearAuthState() else {
-                throw NSError(
-                    domain: "AuthError",
-                    code: 3,
-                    userInfo: [NSLocalizedDescriptionKey: "The account was deleted, but local data cleanup did not finish."]
-                )
-            }
+            await clearAuthState()
             
         } catch {
             throw error

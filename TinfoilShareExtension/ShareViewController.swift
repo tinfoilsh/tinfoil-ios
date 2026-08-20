@@ -111,7 +111,7 @@ final class ShareViewController: UIViewController {
 
             if let url {
                 saveSharedItem(
-                    sourceURL: url,
+                    from: url,
                     provider: provider,
                     typeIdentifier: typeIdentifier
                 )
@@ -137,16 +137,24 @@ final class ShareViewController: UIViewController {
                 return
             }
 
-            saveSharedItem(
-                data: data,
-                provider: provider,
-                typeIdentifier: typeIdentifier
-            )
+            let temporaryURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString.lowercased())
+            do {
+                try data.write(to: temporaryURL, options: .atomic)
+                saveSharedItem(
+                    from: temporaryURL,
+                    provider: provider,
+                    typeIdentifier: typeIdentifier
+                )
+                try? FileManager.default.removeItem(at: temporaryURL)
+            } catch {
+                showError(error)
+            }
         }
     }
 
     private func saveSharedItem(
-        sourceURL: URL,
+        from sourceURL: URL,
         provider: NSItemProvider,
         typeIdentifier: String
     ) {
@@ -154,29 +162,6 @@ final class ShareViewController: UIViewController {
             let store = try SharedImportStore()
             _ = try store.enqueue(
                 sourceURL: sourceURL,
-                typeIdentifier: typeIdentifier,
-                originalFileName: sharedFileName(
-                    provider: provider,
-                    typeIdentifier: typeIdentifier
-                )
-            )
-            DispatchQueue.main.async { [weak self] in
-                self?.extensionContext?.completeRequest(returningItems: nil)
-            }
-        } catch {
-            showError(error)
-        }
-    }
-
-    private func saveSharedItem(
-        data: Data,
-        provider: NSItemProvider,
-        typeIdentifier: String
-    ) {
-        do {
-            let store = try SharedImportStore()
-            _ = try store.enqueue(
-                data: data,
                 typeIdentifier: typeIdentifier,
                 originalFileName: sharedFileName(
                     provider: provider,

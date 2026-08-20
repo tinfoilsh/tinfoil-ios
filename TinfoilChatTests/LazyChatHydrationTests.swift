@@ -183,29 +183,6 @@ struct LazyChatHydrationTests {
     }
 
     @Test
-    func resumedRootSelectionRequiresItsFenceAndAccount() {
-        var fence = ChatSelectionFence()
-        let capturedAccount = "account-a"
-        var currentAccount = capturedAccount
-        let generation = fence.begin(id: "root-chat")
-        let acceptsResume = {
-            currentAccount == capturedAccount
-                && fence.accepts(id: "root-chat", generation: generation)
-        }
-
-        #expect(acceptsResume())
-        _ = fence.begin(id: "newer-chat")
-        #expect(!acceptsResume())
-
-        let accountGeneration = fence.begin(id: "root-chat")
-        currentAccount = "account-b"
-        #expect(
-            !(currentAccount == capturedAccount
-                && fence.accepts(id: "root-chat", generation: accountGeneration))
-        )
-    }
-
-    @Test
     func newerTransientSummaryOverridesOlderIndexSummary() {
         let older = makeChat(id: "chat", updatedAt: Date(timeIntervalSince1970: 1))
         var newer = older

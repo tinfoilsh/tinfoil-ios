@@ -23,14 +23,6 @@ extension Notification.Name {
     )
 }
 
-actor SyncEnclaveRequestProgress {
-    private(set) var requestStarted = false
-
-    func markRequestStarted() {
-        requestStarted = true
-    }
-}
-
 /// Error envelope returned by the sync enclave, parsed from `{error, code, ...details}`.
 struct SyncEnclaveError: LocalizedError, Equatable {
     let message: String
@@ -148,8 +140,7 @@ actor SyncEnclaveClient {
     func post<Response: Decodable>(
         path: String,
         body: Encodable? = nil,
-        skipAuth: Bool = false,
-        requestProgress: SyncEnclaveRequestProgress? = nil
+        skipAuth: Bool = false
     ) async throws -> Response {
         try Self.assertRelativePath(path)
         let requestGeneration = tokenGeneration
@@ -169,7 +160,6 @@ actor SyncEnclaveClient {
         }
 
         if skipAuth {
-            await requestProgress?.markRequestStarted()
             return try Self.decode(
                 response: try await performPost(client: client, url: url, headers: headers, body: bodyData),
                 path: path
@@ -181,7 +171,6 @@ actor SyncEnclaveClient {
             generation: requestGeneration
         )
         headers["Authorization"] = "Bearer \(token)"
-        await requestProgress?.markRequestStarted()
         var response = try await performPost(client: client, url: url, headers: headers, body: bodyData)
         if response.statusCode == 401 {
             guard requestGeneration == tokenGeneration else { throw CancellationError() }
@@ -190,7 +179,6 @@ actor SyncEnclaveClient {
                 generation: requestGeneration
             )
             headers["Authorization"] = "Bearer \(refreshedToken)"
-            await requestProgress?.markRequestStarted()
             response = try await performPost(client: client, url: url, headers: headers, body: bodyData)
             if response.statusCode == 401 {
                 let error = try await persistentAuthenticationError(generation: requestGeneration)
