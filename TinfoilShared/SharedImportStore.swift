@@ -3,6 +3,12 @@ import Foundation
 import UniformTypeIdentifiers
 
 struct SharedImportStore {
+    private enum RequestLoadResult {
+        case loaded(SharedImportRequest)
+        case malformed
+        case unreadable
+    }
+
     private static let enqueueLock = NSLock()
 
     private let fileManager: FileManager
@@ -217,11 +223,15 @@ struct SharedImportStore {
 
         return directories
             .compactMap { directoryURL in
-                let request = loadRequest(from: directoryURL)
-                if request == nil {
+                switch loadRequest(from: directoryURL) {
+                case .loaded(let request):
+                    return request
+                case .malformed:
                     removeMalformedRequestDirectoryIfStale(directoryURL)
+                    return nil
+                case .unreadable:
+                    return nil
                 }
-                return request
             }
             .sorted { $0.createdAt < $1.createdAt }
     }
@@ -311,9 +321,9 @@ struct SharedImportStore {
         return "\(stem.prefix(maxLength - fileExtension.count - 1)).\(fileExtension)"
     }
 
-    private func loadRequest(from directoryURL: URL) -> SharedImportRequest? {
+    private func loadRequest(from directoryURL: URL) -> RequestLoadResult {
         guard UUID(uuidString: directoryURL.lastPathComponent) != nil else {
-            return nil
+            return .malformed
         }
 
         let manifestURL = directoryURL.appendingPathComponent(
@@ -321,16 +331,52 @@ struct SharedImportStore {
         )
         let decoder = JSONDecoder()
 
-        guard let data = try? BoundedFileIO.read(
-            from: manifestURL,
-            maximumBytes: SharedImportConfiguration.maximumManifestSizeBytes
-        ),
-              let request = try? decoder.decode(SharedImportRequest.self, from: data),
-              directoryURL == self.directoryURL(for: request.id),
-              (try? payloadURL(for: request)) != nil else {
-            return nil
+        let data: Data
+        do {
+            data = try BoundedFileIO.read(
+                from: manifestURL,
+                maximumBytes: SharedImportConfiguration.maximumManifestSizeBytes
+            )
+        } catch let error as BoundedFileIO.Error {
+            switch error {
+            case .fileTooLarge, .notRegularFile:
+                return .malformed
+            default:
+                return .unreadable
+            }
+        } catch {
+            return .unreadable
         }
-        return request
+        guard let request = try? decoder.decode(SharedImportRequest.self, from: data),
+              directoryURL == self.directoryURL(for: request.id),
+              request.item.stagedFileName == URL(
+                  fileURLWithPath: request.item.stagedFileName
+              ).lastPathComponent,
+              SharedImportClassifier.kind(
+                  typeIdentifier: request.item.typeIdentifier,
+                  fileName: request.item.originalFileName
+              ) == request.item.kind else {
+            return .malformed
+        }
+        let payloadURL = directoryURL.appendingPathComponent(request.item.stagedFileName)
+        let payloadSize: Int64
+        do {
+            payloadSize = try BoundedFileIO.size(
+                of: payloadURL,
+                maximumBytes: request.item.kind.maximumSizeBytes
+            )
+        } catch let error as BoundedFileIO.Error {
+            switch error {
+            case .fileTooLarge, .notRegularFile:
+                return .malformed
+            default:
+                return .unreadable
+            }
+        } catch {
+            return .unreadable
+        }
+        guard payloadSize == request.item.byteCount else { return .malformed }
+        return .loaded(request)
     }
 
     private func directoryURL(for requestID: UUID) -> URL {
