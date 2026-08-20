@@ -36,9 +36,17 @@ enum BoundedFileIO {
         let device: dev_t
         let inode: ino_t
         let size: Int64
+        let modificationSeconds: Int64
+        let modificationNanoseconds: Int64
+        let statusChangeSeconds: Int64
+        let statusChangeNanoseconds: Int64
     }
 
-    static func read(from sourceURL: URL, maximumBytes: Int64) throws -> Data {
+    static func read(
+        from sourceURL: URL,
+        maximumBytes: Int64,
+        onReadChunk: (() throws -> Void)? = nil
+    ) throws -> Data {
         let descriptor = try openSource(sourceURL)
         defer { Darwin.close(descriptor) }
 
@@ -55,6 +63,7 @@ enum BoundedFileIO {
             guard bytesRead > 0 else { break }
             totalBytes += Int64(bytesRead)
             try enforceLimit(totalBytes, maximumBytes: maximumBytes)
+            try onReadChunk?()
             buffer.withUnsafeBytes { bytes in
                 data.append(bytes.bindMemory(to: UInt8.self).baseAddress!, count: bytesRead)
             }
@@ -69,7 +78,8 @@ enum BoundedFileIO {
         from sourceURL: URL,
         to destinationURL: URL,
         maximumBytes: Int64,
-        destinationAttributes: [FileAttributeKey: Any] = [:]
+        destinationAttributes: [FileAttributeKey: Any] = [:],
+        onReadChunk: (() throws -> Void)? = nil
     ) throws -> Int64 {
         let sourceDescriptor = try openSource(sourceURL)
         defer { Darwin.close(sourceDescriptor) }
@@ -116,6 +126,7 @@ enum BoundedFileIO {
             guard bytesRead > 0 else { break }
             totalBytes += Int64(bytesRead)
             try enforceLimit(totalBytes, maximumBytes: maximumBytes)
+            try onReadChunk?()
             try writeChunk(buffer, count: bytesRead, to: destinationDescriptor)
         }
 
@@ -167,7 +178,15 @@ enum BoundedFileIO {
     private static func fileInfo(from status: stat) throws -> FileInfo {
         guard status.st_mode & S_IFMT == S_IFREG else { throw Error.notRegularFile }
         guard status.st_size >= 0 else { throw Error.readFailed }
-        return FileInfo(device: status.st_dev, inode: status.st_ino, size: Int64(status.st_size))
+        return FileInfo(
+            device: status.st_dev,
+            inode: status.st_ino,
+            size: Int64(status.st_size),
+            modificationSeconds: Int64(status.st_mtimespec.tv_sec),
+            modificationNanoseconds: Int64(status.st_mtimespec.tv_nsec),
+            statusChangeSeconds: Int64(status.st_ctimespec.tv_sec),
+            statusChangeNanoseconds: Int64(status.st_ctimespec.tv_nsec)
+        )
     }
 
     private static func verifyUnchanged(

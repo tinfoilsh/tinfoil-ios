@@ -85,6 +85,7 @@ final class ManagedFileStore: @unchecked Sendable {
     }
 
     private func excludeFromBackup(_ url: URL) throws {
+        var url = url
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try url.setResourceValues(values)

@@ -58,6 +58,40 @@ struct BoundedDocumentStagingTests {
         #expect(try String(contentsOf: destination, encoding: .utf8) == "existing")
     }
 
+    @Test("Bounded copy rejects same-size in-place source changes")
+    func rejectsSameSizeSourceChanges() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.txt")
+        let destination = directory.appendingPathComponent("destination.txt")
+        let sourceData = Data(repeating: 0x41, count: BoundedFileIO.chunkSize * 2)
+        try sourceData.write(to: source)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1_000_000)],
+            ofItemAtPath: source.path
+        )
+        var didModifySource = false
+
+        #expect(throws: BoundedFileIO.Error.fileChanged) {
+            _ = try BoundedFileIO.copy(
+                from: source,
+                to: destination,
+                maximumBytes: Int64(sourceData.count),
+                onReadChunk: {
+                    guard !didModifySource else { return }
+                    didModifySource = true
+                    let handle = try FileHandle(forWritingTo: source)
+                    try handle.write(contentsOf: Data([0x42]))
+                    try handle.close()
+                }
+            )
+        }
+
+        #expect(didModifySource)
+        #expect(try BoundedFileIO.size(of: source, maximumBytes: Int64(sourceData.count)) == Int64(sourceData.count))
+        #expect(!FileManager.default.fileExists(atPath: destination.path))
+    }
+
     @Test("Managed files are protected, excluded from backup, and explicitly released")
     func managesStagedFileLifecycle() throws {
         let directory = try makeTemporaryDirectory()
