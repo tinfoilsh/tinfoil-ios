@@ -86,7 +86,6 @@ struct CloudSyncOnboardingView: View {
     @State private var direction: Edge = .trailing
     @State private var showFeatures: Bool = false
     @State private var animateIcon: Bool = false
-    @State private var showStartFreshConfirmation: Bool = false
 
     private var currentPageIndex: Int {
         switch currentStep {
@@ -348,13 +347,7 @@ struct CloudSyncOnboardingView: View {
                             .onboardingSecondaryButton()
                     }
 
-                    Button(action: {
-                        if mode == .recovery {
-                            showStartFreshConfirmation = true
-                        } else {
-                            handleGenerateKey()
-                        }
-                    }) {
+                    Button(action: { handleGenerateKey() }) {
                         Group {
                             if isProcessing {
                                 ProgressView()
@@ -369,12 +362,6 @@ struct CloudSyncOnboardingView: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 8)
-                .alert("You will lose your conversations", isPresented: $showStartFreshConfirmation) {
-                    Button("Yes, start fresh", role: .destructive, action: handleGenerateKey)
-                    Button("Go Back", role: .cancel) {}
-                } message: {
-                    Text("Starting fresh will generate a new encryption key that is not compatible with your existing one. Your existing encrypted cloud data will be deleted. All your conversations and settings encrypted with the old key will be lost.")
-                }
 
                 Spacer().frame(height: 20)
             }

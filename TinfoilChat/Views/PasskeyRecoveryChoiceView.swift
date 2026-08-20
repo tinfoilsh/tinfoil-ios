@@ -22,7 +22,6 @@ struct PasskeyRecoveryChoiceView: View {
 
     @State private var isLoading = false
     @State private var loadingAction: LoadingAction?
-    @State private var showStartFreshConfirmation = false
 
     private enum LoadingAction {
         case tryAgain
@@ -81,7 +80,7 @@ struct PasskeyRecoveryChoiceView: View {
                 .disabled(isLoading)
 
                 // Start Fresh — new key + new passkey
-                Button(action: { showStartFreshConfirmation = true }) {
+                Button(action: handleStartFresh) {
                     Group {
                         if loadingAction == .startFresh {
                             ProgressView()
@@ -133,12 +132,6 @@ struct PasskeyRecoveryChoiceView: View {
         .presentationDetents([.height(520)])
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(isLoading)
-        .alert("You will lose your conversations", isPresented: $showStartFreshConfirmation) {
-            Button("Yes, start fresh", role: .destructive, action: handleStartFresh)
-            Button("Go Back", role: .cancel) {}
-        } message: {
-            Text("Starting fresh will generate a new encryption key that is not compatible with your existing one. Your existing encrypted cloud data will be deleted. All your conversations and settings encrypted with the old key will be lost.")
-        }
     }
 
     // MARK: - Actions

@@ -215,7 +215,6 @@ struct MessageInputView: View {
 
 
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
-    @State private var photoPickerAccountGeneration: Int?
     @State private var pendingPickerAction: PickerAction?
     @State private var showCameraPermissionAlert = false
 
@@ -284,16 +283,9 @@ struct MessageInputView: View {
                 Text(viewModel.attachmentError ?? "An error occurred")
             }
             .sheet(isPresented: $viewModel.showDocumentPicker) {
-                DocumentPickerView(
-                    onDocumentPicked: { file, fileName in
-                        viewModel.addDocumentAttachment(file: file, fileName: fileName)
-                    },
-                    onError: { error in
-                        viewModel.attachmentError = error.localizedDescription
-                    },
-                    accountLifecycleGeneration: { viewModel.accountLifecycleGeneration },
-                    isAccountLifecycleCurrent: viewModel.isCurrentAccountLifecycle
-                )
+                DocumentPickerView { url, fileName in
+                    viewModel.addDocumentAttachment(url: url, fileName: fileName)
+                }
             }
             .sheet(isPresented: $viewModel.showPhotoPicker, onDismiss: processSelectedPhotos) {
                 NavigationStack {
@@ -326,7 +318,7 @@ struct MessageInputView: View {
                 pendingPickerAction = nil
                 switch action {
                 case .camera: requestCameraAccess()
-                case .photos: presentPhotoPicker()
+                case .photos: viewModel.showPhotoPicker = true
                 case .files: viewModel.showDocumentPicker = true
                 }
             }) {
@@ -520,7 +512,8 @@ struct MessageInputView: View {
                          onFocusHandled: { viewModel.shouldFocusInput = false },
                          onSendMessage: { text in viewModel.sendMessage(text: text) },
                          onPasteImage: { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
-                         onPasteFiles: { urls in viewModel.stagePastedDocuments(urls: urls) })
+                         onPasteFile: { url, fileName in viewModel.addDocumentAttachment(url: url, fileName: fileName) },
+                         onPasteFileError: { message in viewModel.attachmentError = message })
             .frame(height: textHeight)
             .padding(.horizontal)
     }
@@ -799,25 +792,15 @@ struct MessageInputView: View {
 
     private func processSelectedPhotos() {
         let items = selectedPhotoItems
-        let accountGeneration = photoPickerAccountGeneration
         selectedPhotoItems = []
-        photoPickerAccountGeneration = nil
-        guard let accountGeneration else { return }
         for (index, item) in items.enumerated() {
             Task {
                 if let data = try? await item.loadTransferable(type: Data.self) {
-                    guard viewModel.isCurrentAccountLifecycle(accountGeneration) else { return }
                     let fileName = items.count > 1 ? "Photo \(index + 1).jpg" : "Photo.jpg"
                     viewModel.addImageAttachment(data: data, fileName: fileName)
                 }
             }
         }
-    }
-
-    private func presentPhotoPicker() {
-        selectedPhotoItems = []
-        photoPickerAccountGeneration = viewModel.accountLifecycleGeneration
-        viewModel.showPhotoPicker = true
     }
 
     private func handleAudioButtonTap() {
@@ -1420,13 +1403,15 @@ struct CustomTextEditor: UIViewRepresentable {
     /// itself when the draft was actually sent or queued.
     var onSendMessage: (String) -> Bool
     var onPasteImage: ((Data, String) -> Void)? = nil
-    var onPasteFiles: (([URL]) -> Void)? = nil
+    var onPasteFile: ((URL, String) -> Void)? = nil
+    var onPasteFileError: ((String) -> Void)? = nil
 
     func makeUIView(context: Context) -> UITextView {
         let textView = PastingTextView()
         textView.allowsImagePaste = allowsImagePaste
         textView.onPasteImage = onPasteImage
-        textView.onPasteFiles = onPasteFiles
+        textView.onPasteFile = onPasteFile
+        textView.onPasteFileError = onPasteFileError
         textView.delegate = context.coordinator
         textView.font = UIFont.preferredFont(forTextStyle: .body)
         textView.backgroundColor = .clear
@@ -1466,7 +1451,8 @@ struct CustomTextEditor: UIViewRepresentable {
         if let pastingView = uiView as? PastingTextView {
             pastingView.allowsImagePaste = allowsImagePaste
             pastingView.onPasteImage = onPasteImage
-            pastingView.onPasteFiles = onPasteFiles
+            pastingView.onPasteFile = onPasteFile
+            pastingView.onPasteFileError = onPasteFileError
         }
         let isCurrentlyEditing = context.coordinator.isEditing
 
@@ -1710,7 +1696,8 @@ struct CustomTextEditor: UIViewRepresentable {
 final class PastingTextView: UITextView {
     var allowsImagePaste = false
     var onPasteImage: ((Data, String) -> Void)?
-    var onPasteFiles: (([URL]) -> Void)?
+    var onPasteFile: ((URL, String) -> Void)?
+    var onPasteFileError: ((String) -> Void)?
 
     /// File URLs win over any string representation on the pasteboard:
     /// copying a file (e.g. from the Files app) often includes its name as
@@ -1744,7 +1731,7 @@ final class PastingTextView: UITextView {
             if allowsImagePaste && onPasteImage != nil && pasteboardState().hasImages {
                 return true
             }
-            if onPasteFiles != nil && pasteboardState().hasFileURLs {
+            if onPasteFile != nil && pasteboardState().hasFileURLs {
                 return true
             }
         }
@@ -1766,14 +1753,43 @@ final class PastingTextView: UITextView {
             return
         }
 
-        if let onPasteFiles {
+        if let onPasteFile {
             let fileURLs = pasteboardFileURLs
             if !fileURLs.isEmpty {
-                onPasteFiles(fileURLs)
+                for url in fileURLs {
+                    importPastedFile(url: url, onPasteFile: onPasteFile)
+                }
                 return
             }
         }
 
         super.paste(sender)
     }
-}
+
+    /// Copies a pasted file into the app's temp directory so the attachment
+    /// pipeline can read it after the pasteboard's access window closes.
+    /// Oversized files are rejected up front: the pipeline would refuse them
+    /// anyway, and copying or reading them first would waste disk and memory.
+    private func importPastedFile(url: URL, onPasteFile: (URL, String) -> Void) {
+        let fileName = url.lastPathComponent
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString + "_" + fileName)
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+
+        if let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           Int64(fileSize) > Constants.Attachments.maxFileSizeBytes {
+            let message = DocumentProcessingService.ProcessingError
+                .fileTooLarge(Int64(fileSize)).errorDescription
+            onPasteFileError?(message ?? "File is too large.")
+            return
+        }
+
+        do {
+            try FileManager.default.copyItem(at: url, to: tempURL)
+            onPasteFile(tempURL, fileName)
+        } catch {
+            onPasteFileError?("Couldn't read the pasted file. Try attaching it with the + button instead.")
+        }
+    }
+} 

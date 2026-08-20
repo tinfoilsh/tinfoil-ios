@@ -21,7 +21,6 @@ struct Project: Codable, Identifiable, Equatable {
     var description: String
     var systemInstructions: String
     var memory: [MemoryFact]
-    var color: String? = nil
     var createdAt: String
     var updatedAt: String
     var syncVersion: Int
@@ -33,14 +32,12 @@ struct ProjectData: Codable, Equatable {
     var description: String
     var systemInstructions: String
     var memory: [MemoryFact]
-    var color: String? = nil
 }
 
 struct CreateProjectData: Codable, Equatable {
     var name: String
     var description: String = ""
     var systemInstructions: String = ""
-    var color: String? = nil
 }
 
 struct UpdateProjectData: Codable, Equatable {
@@ -48,7 +45,6 @@ struct UpdateProjectData: Codable, Equatable {
     var description: String?
     var systemInstructions: String?
     var memory: [MemoryFact]?
-    var color: String? = nil
 }
 
 struct ProjectDocument: Codable, Identifiable, Equatable {
@@ -68,11 +64,6 @@ struct ProjectDocumentPayload: Codable, Equatable {
     var content: String
     var filename: String
     var contentType: String
-    var sizeBytes: Int? = nil
-
-    var resolvedSizeBytes: Int {
-        sizeBytes ?? content.utf8.count
-    }
 }
 
 struct ProjectChat: Codable, Identifiable, Equatable {
@@ -142,3 +133,5 @@ struct ProjectSyncStatus: Codable, Equatable {
 
 typealias ProjectChatSyncStatus = ProjectSyncStatus
 typealias ProjectDocumentSyncStatus = ProjectSyncStatus
+
+

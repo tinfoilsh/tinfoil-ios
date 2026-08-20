@@ -839,7 +839,7 @@ struct SettingsView: View {
         phrase: String,
         itemsName: String,
         setDeleting: @escaping (Bool) -> Void,
-        delete: @escaping () async throws -> ChatViewModel.DeleteAllDataOutcome
+        delete: @escaping () async throws -> Void
     ) {
         guard typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == phrase else {
             dataActionMessage = "Deletion cancelled: the confirmation phrase didn't match."
@@ -848,17 +848,8 @@ struct SettingsView: View {
         setDeleting(true)
         Task {
             do {
-                let outcome = try await delete()
-                switch outcome {
-                case .deleted:
-                    dataActionMessage = "All \(itemsName) have been deleted."
-                case .accountChanged:
-                    break
-                case .refreshRequired:
-                    dataActionMessage = "Deletion may have completed. Refresh to confirm."
-                }
-            } catch is CancellationError {
-                dataActionMessage = "Deletion cancelled before a request could be completed."
+                try await delete()
+                dataActionMessage = "All \(itemsName) have been deleted."
             } catch {
                 dataActionMessage = "Failed to delete all \(itemsName). Please try again."
             }
@@ -1082,7 +1073,7 @@ struct SettingsView: View {
         profileUpdateError = nil
         
         do {
-            var updateParams = ClerkKit.User.UpdateParams()
+            var updateParams = User.UpdateParams()
             updateParams.firstName = editingFirstName
             updateParams.lastName = editingLastName
             try await clerk.user?.update(updateParams)
