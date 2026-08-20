@@ -7,23 +7,13 @@ import Foundation
 
 struct SyncEnclaveProjectStore {
     func createProject(id: String, data: CreateProjectData) async throws -> (ProjectData, Int) {
-        let payload = ProjectData(
-            name: data.name,
-            description: data.description,
-            systemInstructions: data.systemInstructions,
-            memory: []
-        )
+        let payload = ProjectData(createData: data)
         let response = try await pushProject(id: id, payload: payload, ifMatch: nil)
         return (payload, etagToSyncVersion(response.etag))
     }
 
     func updateProject(id: String, data: UpdateProjectData, existing: Project) async throws {
-        let payload = ProjectData(
-            name: data.name ?? existing.name,
-            description: data.description ?? existing.description,
-            systemInstructions: data.systemInstructions ?? existing.systemInstructions,
-            memory: data.memory ?? existing.memory
-        )
+        let payload = ProjectData(updateData: data, existing: existing)
         _ = try await pushProject(id: id, payload: payload, ifMatch: String(existing.syncVersion))
     }
 
@@ -91,9 +81,15 @@ struct SyncEnclaveProjectStore {
         projectId: String,
         filename: String,
         contentType: String,
-        content: String
+        content: String,
+        sizeBytes: Int
     ) async throws -> (ProjectDocumentPayload, Int) {
-        let payload = ProjectDocumentPayload(content: content, filename: filename, contentType: contentType)
+        let payload = ProjectDocumentPayload(
+            content: content,
+            filename: filename,
+            contentType: contentType,
+            sizeBytes: sizeBytes
+        )
         let metadata: [String: AnyCodable] = [
             "filename": AnyCodable(filename),
             "contentType": AnyCodable(contentType),
