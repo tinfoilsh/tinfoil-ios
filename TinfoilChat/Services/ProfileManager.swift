@@ -589,13 +589,17 @@ class ProfileManager: ObservableObject {
         syncDebounceTimer?.invalidate()
         syncDebounceTimer = nil
         fullSyncTask?.cancel()
+        syncLoopTask?.cancel()
+        syncLoopTask = nil
         applyDefaultProfile()
     }
 
     func resumeAccountAccess() {
         guard isAccountAccessPaused else { return }
+        keychainQueue.sync {}
         loadFromKeychain()
         isAccountAccessPaused = false
+        setupAutoSync()
     }
     
     /// Setup automatic sync timer
@@ -737,6 +741,9 @@ class ProfileManager: ObservableObject {
                     clearLocalProfileChanged()
                 }
             }
+            guard !isAccountAccessPaused,
+                  generation == accountGeneration,
+                  !Task.isCancelled else { return false }
             lastSyncDate = Date()
             syncError = nil
             return true

@@ -154,7 +154,7 @@ final class PasskeyManager: ObservableObject {
 
     @discardableResult
     func resumeAccountOperations(validatedOwnerUserId: String) -> Bool {
-        guard pausedOwnerUserId == nil || pausedOwnerUserId == validatedOwnerUserId else {
+        guard accountOperationsEnabled || pausedOwnerUserId == validatedOwnerUserId else {
             return false
         }
         pausedOwnerUserId = nil
@@ -566,8 +566,21 @@ final class PasskeyManager: ObservableObject {
     /// by the Settings "Registered platforms" list so the view never
     /// talks to the enclave wire directly.
     func listPasskeyBundles() async throws -> [EnclaveKeyCurrentBundle] {
-        let state = try await SyncEnclaveAPI.keyCurrent()
-        return Array(state.bundles.values)
+        guard accountOperationsEnabled else { throw CancellationError() }
+        let operationTask = Task {
+            try Task.checkCancellation()
+            let state = try await SyncEnclaveAPI.keyCurrent()
+            try Task.checkCancellation()
+            guard accountOperationsEnabled else { throw CancellationError() }
+            return Array(state.bundles.values)
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            throw CancellationError()
+        }
+        defer { accountOperationTracker.end(operationToken) }
+
+        return try await operationTask.value
     }
 
     /// Remove a passkey bundle from the enclave's current key, then

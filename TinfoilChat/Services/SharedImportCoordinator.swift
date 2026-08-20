@@ -15,6 +15,7 @@ final class SharedImportCoordinator {
     private var importsPaused = false
     private var pausedOwnerUserId: String?
     private var pausedImportsWereDiscarded = false
+    private var publicationBlockEstablished = false
     private var pauseGeneration: UInt64 = 0
 
     private init() {}
@@ -148,20 +149,21 @@ final class SharedImportCoordinator {
         }.value
         pausedOwnerUserId = nil
         pausedImportsWereDiscarded = true
+        publicationBlockEstablished = true
     }
 
     func beginPausingPreservedImports(ownerUserId: String?) {
-        if !importsPaused {
-            pauseGeneration += 1
-        }
+        pauseGeneration += 1
         importsPaused = true
         pausedOwnerUserId = ownerUserId ?? pausedOwnerUserId
         pausedImportsWereDiscarded = false
+        publicationBlockEstablished = false
         importTask?.cancel()
     }
 
     func pausePreservingPendingImports(ownerUserId: String?) async throws {
         beginPausingPreservedImports(ownerUserId: ownerUserId)
+        let pausedGeneration = pauseGeneration
         let publicationBlockTask = Task.detached(priority: .utility) {
             let store = try SharedImportStore()
             try store.blockPublications()
@@ -171,6 +173,8 @@ final class SharedImportCoordinator {
             self.importTask = nil
         }
         try await publicationBlockTask.value
+        guard pauseGeneration == pausedGeneration else { throw CancellationError() }
+        publicationBlockEstablished = true
         let acknowledgements = Array(acknowledgementTasks.values)
         for task in acknowledgements { await task.value }
     }
@@ -178,10 +182,27 @@ final class SharedImportCoordinator {
     func allowPublications(validatedOwnerUserId: String) async throws {
         guard !importsPaused
                 || pausedImportsWereDiscarded
+                || pausedOwnerUserId == nil
                 || pausedOwnerUserId == validatedOwnerUserId else {
             throw SharedImportError.publicationBlocked
         }
         let resumeGeneration = pauseGeneration
+        if importsPaused, !pausedImportsWereDiscarded, pausedOwnerUserId == nil {
+            try await Task.detached(priority: .utility) {
+                let store = try SharedImportStore()
+                try store.purgeAllRequests()
+            }.value
+            guard pauseGeneration == resumeGeneration else { throw CancellationError() }
+            pausedImportsWereDiscarded = true
+            publicationBlockEstablished = true
+        } else if importsPaused, !pausedImportsWereDiscarded, !publicationBlockEstablished {
+            try await Task.detached(priority: .utility) {
+                let store = try SharedImportStore()
+                try store.blockPublications()
+            }.value
+            guard pauseGeneration == resumeGeneration else { throw CancellationError() }
+            publicationBlockEstablished = true
+        }
         try await Task.detached(priority: .utility) {
             let store = try SharedImportStore()
             try store.allowPublications()
@@ -195,6 +216,7 @@ final class SharedImportCoordinator {
         }
         pausedOwnerUserId = nil
         pausedImportsWereDiscarded = false
+        publicationBlockEstablished = false
         importsPaused = false
     }
 }
