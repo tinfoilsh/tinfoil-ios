@@ -179,15 +179,6 @@ struct ContentView: View {
                 hasActiveSubscription: hasSubscription
             )
         }
-        .overlay {
-            if scenePhase != .active {
-                ZStack {
-                    splashBackground
-                    splashLogo
-                }
-                .transition(.opacity)
-            }
-        }
     }
 
     private var splashBackground: some View {
