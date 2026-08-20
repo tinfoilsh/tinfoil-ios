@@ -403,20 +403,6 @@ struct SettingsView: View {
         }
     }
     
-    /// Shared destructive cleanup used by both "Delete Everything" and "Delete Account".
-    private func performFullDataCleanup() async {
-        await ProfileManager.shared.clearLocalProfileForAccountRemoval()
-        await chatViewModel.clearAllChatsFromDevice(
-            resumeRecoveryScans: false,
-            reopenAccountOperations: false
-        )
-        await PasskeyManager.shared.reset()
-        EncryptionService.shared.clearKey()
-        await DeviceEncryptionService.shared.clearKey()
-        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.hasLaunchedBefore)
-        settings.clearAllSettings()
-    }
-
     private var accountSection: some View {
         Section {
             if authManager.isAuthenticated {
@@ -550,7 +536,6 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) { }
             Button("Sign Out") {
                 Task {
-                    await performFullDataCleanup()
                     await authManager.signOut()
                     dismiss()
                 }
@@ -570,17 +555,8 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
                 Task {
-                    // Require a live Clerk session before wiping anything:
-                    // without it the server-side account would survive while
-                    // local data is destroyed and the user is signed out.
-                    guard let user = clerk.user else {
-                        accountDeletionError = "Couldn't reach your account session. Please sign in again and retry."
-                        return
-                    }
                     do {
-                        try await user.delete()
-                        await performFullDataCleanup()
-                        await authManager.signOut()
+                        try await authManager.deleteAccount()
                         dismiss()
                     } catch {
                         accountDeletionError = error.localizedDescription

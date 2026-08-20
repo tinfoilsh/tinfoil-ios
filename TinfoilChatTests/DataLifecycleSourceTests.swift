@@ -414,16 +414,42 @@ struct DataLifecycleSourceTests {
         #expect(resume.contains("restoreSuspendedPendingAttachments(validatedOwnerUserId: validatedOwnerUserId)"))
     }
 
-    @Test("Confirmed account cleanup destroys suspended attachments")
-    func accountCleanupDiscardsSuspendedAttachments() throws {
+    @Test("Destructive cleanup removes all attachment drafts")
+    func destructiveCleanupRemovesAllAttachmentDrafts() throws {
         let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
-        let discard = try functionBody(named: "private func discardSuspendedPendingAttachments", in: source)
+        let authSource = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let cleanup = try functionBody(named: "private func destroyAttachmentDrafts", in: source)
         let signOut = try functionBody(named: "func handleSignOut(ownerUserId:", in: source)
+        let clearAll = try functionBody(named: "func clearAllChatsFromDevice", in: source)
+        let passiveLoss = try functionBody(named: "func handlePassiveAuthLoss()", in: source)
+        let authTeardown = try functionBody(named: "private func performAccountTeardown(ownerUserId:", in: authSource)
+        let accountSwitchRetry = try functionBody(named: "func retryAccountTeardown()", in: authSource)
+        let accountDeletion = try functionBody(named: "func deleteAccount()", in: authSource)
 
-        #expect(discard.contains("file.discard()"))
-        #expect(discard.contains("suspendedPendingAttachments = nil"))
-        #expect(discard.contains("await task.value"))
-        #expect(signOut.contains("await discardSuspendedPendingAttachments("))
+        for requiredCleanup in [
+            "attachmentProcessingGeneration += 1",
+            "Array(attachmentProcessingTasks.values)",
+            "Array(pasteStagingTasks.values)",
+            "managedAttachmentFiles.values",
+            "suspendedPendingAttachments.managedFiles.values",
+            "task.cancel()",
+            "await task.value",
+            "file.discard()",
+            "pendingAttachments.removeAll()",
+            "pendingImageThumbnails.removeAll()",
+            "attachmentError = nil",
+            "suspendedPendingAttachments = nil",
+            "messageQueues.removeAll()",
+            "SharedImportCoordinator.shared.discardAllPending()"
+        ] {
+            #expect(cleanup.contains(requiredCleanup))
+        }
+        #expect(signOut.contains("try await destroyAttachmentDrafts()"))
+        #expect(clearAll.contains("try await destroyAttachmentDrafts()"))
+        #expect(!passiveLoss.contains("destroyAttachmentDrafts"))
+        #expect(authTeardown.contains("handleSignOut(ownerUserId: ownerUserId)"))
+        #expect(accountSwitchRetry.contains("await clearAuthState(for: trigger)"))
+        #expect(accountDeletion.contains("clearAuthState(for: .accountDeletion"))
     }
 
     @Test("Paused attachments stay private and cannot be sent")
@@ -487,10 +513,7 @@ struct DataLifecycleSourceTests {
         #expect(removal.contains("task.cancel()"))
         #expect(clearing.contains("attachmentProcessingGeneration += 1"))
         #expect(clearing.contains("for task in tasks { task.cancel() }"))
-        #expect(signOut.contains("clearPendingAttachments()"))
-        #expect(signOut.contains("discardMessageQueue(chatId: chatId)"))
-        #expect(signOut.contains("SharedImportCoordinator.shared.discardAllPending()"))
-        #expect(signOut.contains("await task.value"))
+        #expect(signOut.contains("try await destroyAttachmentDrafts()"))
     }
 
     @Test("Project uploads are canceled before context changes")

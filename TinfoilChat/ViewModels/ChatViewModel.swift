@@ -3719,20 +3719,53 @@ class ChatViewModel: ObservableObject {
         suspendedPendingAttachments = nil
     }
 
-    private func discardSuspendedPendingAttachments(
-        after tasks: [Task<Void, Never>]
-    ) async {
-        let suspended = suspendedPendingAttachments
+    private func destroyAttachmentDrafts() async throws {
+        attachmentProcessingGeneration += 1
+        let processingTasks = Array(attachmentProcessingTasks.values)
+        let stagingTasks = Array(pasteStagingTasks.values)
+        var managedFilesById: [UUID: ManagedStagedFile] = [:]
+        for file in managedAttachmentFiles.values {
+            managedFilesById[file.id] = file
+        }
+        if let suspendedPendingAttachments {
+            for file in suspendedPendingAttachments.managedFiles.values {
+                managedFilesById[file.id] = file
+            }
+        }
+
+        attachmentProcessingTokens.removeAll()
+        attachmentProcessingTasks.removeAll()
+        pasteStagingTokens.removeAll()
+        pasteStagingTasks.removeAll()
+        managedAttachmentFiles.removeAll()
+        pendingAttachments.removeAll()
+        pendingImageThumbnails.removeAll()
+        attachmentError = nil
         suspendedPendingAttachments = nil
-        if let suspended {
-            acknowledgeSharedImports(in: suspended.attachments)
+        messageQueues.removeAll()
+
+        for task in processingTasks { task.cancel() }
+        for task in stagingTasks { task.cancel() }
+
+        var sharedImportError: Error?
+        do {
+            try await SharedImportCoordinator.shared.discardAllPending()
+        } catch {
+            sharedImportError = error
         }
-        for task in tasks {
-            await task.value
-        }
-        guard let suspended else { return }
-        for file in suspended.managedFiles.values {
-            file.discard()
+        for task in processingTasks { await task.value }
+        for task in stagingTasks { await task.value }
+        for file in managedFilesById.values { file.discard() }
+
+        pendingAttachments.removeAll()
+        pendingImageThumbnails.removeAll()
+        managedAttachmentFiles.removeAll()
+        attachmentError = nil
+        suspendedPendingAttachments = nil
+        messageQueues.removeAll()
+
+        if let sharedImportError {
+            throw sharedImportError
         }
     }
 
@@ -6114,12 +6147,6 @@ class ChatViewModel: ObservableObject {
         isAccountTeardownInProgress = true
         accountLifecycleUserId = nil
         accountLifecycleGeneration += 1
-        let canceledAttachmentTasks = Array(attachmentProcessingTasks.values)
-        let canceledPasteStagingTasks = Array(pasteStagingTasks.values)
-        clearPendingAttachments()
-        for chatId in Array(messageQueues.keys) {
-            discardMessageQueue(chatId: chatId)
-        }
         let canceledProjectUploadTasks = Array(projectUploadTasks.values)
         clearHydratedFavorites()
         clearProjectState()
@@ -6133,11 +6160,8 @@ class ChatViewModel: ObservableObject {
         await canceledSignInTask?.value
         await canceledLegacyMigrationTask?.value
         await drainStreamTasks(canceledStreamTasks)
-        await discardSuspendedPendingAttachments(
-            after: canceledAttachmentTasks + canceledPasteStagingTasks
-        )
+        try await destroyAttachmentDrafts()
         for task in canceledProjectUploadTasks { await task.value }
-        try await SharedImportCoordinator.shared.discardAllPending()
 
         // Stop sync timers when signing out
         autoSyncTimer?.invalidate()
@@ -6212,7 +6236,7 @@ class ChatViewModel: ObservableObject {
     func clearAllChatsFromDevice(
         resumeRecoveryScans: Bool = true,
         reopenAccountOperations: Bool = true
-    ) async {
+    ) async throws {
         clearHydratedFavorites()
         acceptsChatSaves = false
         let canceledSignInTask = cancelSignInOperation()
@@ -6224,6 +6248,7 @@ class ChatViewModel: ObservableObject {
         await canceledLegacyMigrationTask?.value
         await suspendRecoveryScans()
         await drainStreamTasks(canceledStreamTasks)
+        try await destroyAttachmentDrafts()
         await drainPendingSaves()
 
         // Clear all chats from memory
@@ -6787,7 +6812,7 @@ class ChatViewModel: ObservableObject {
                 DeletedChatsTracker.shared.markAsDeleted(id)
             }
 
-            await clearAllChatsFromDevice(
+            try await clearAllChatsFromDevice(
                 resumeRecoveryScans: false,
                 reopenAccountOperations: false
             )
