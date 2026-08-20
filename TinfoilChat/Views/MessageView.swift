@@ -1491,6 +1491,7 @@ struct AdaptiveMarkdownText: View {
         StructuredText(markdown: content)
             .textual.highlighterTheme(.default)
             .textual.paragraphStyle(UserBubbleParagraphStyle())
+            .textual.textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, horizontalPadding)
     }

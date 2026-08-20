@@ -1056,17 +1056,33 @@ private enum TableAlignment: Sendable {
     }
 }
 
+enum MarkdownTableLayout {
+    static func columnWidth(
+        intrinsicWidth: CGFloat,
+        availableWidth: CGFloat?,
+        columnCount: Int
+    ) -> CGFloat {
+        guard let availableWidth, availableWidth.isFinite, availableWidth > 0 else {
+            return intrinsicWidth
+        }
+        let dividerWidth = CGFloat(max(columnCount - 1, 0)) * Constants.UI.tableColumnDividerWidth
+        let availableContentWidth = max(availableWidth - dividerWidth, 0)
+        return min(intrinsicWidth, availableContentWidth * Constants.UI.tableMaximumColumnWidthRatio)
+    }
+}
+
 private struct MarkdownTableView: View {
     let table: ParsedTable
     let isDarkMode: Bool
     let textSelectionEnabled: Bool
-    let columnWidths: [Int: CGFloat]
+    let intrinsicColumnWidths: [Int: CGFloat]
+    @State private var availableWidth: CGFloat?
 
     init(table: ParsedTable, isDarkMode: Bool, textSelectionEnabled: Bool = true) {
         self.table = table
         self.isDarkMode = isDarkMode
         self.textSelectionEnabled = textSelectionEnabled
-        self.columnWidths = Self.measureColumnWidths(for: table)
+        self.intrinsicColumnWidths = Self.measureColumnWidths(for: table)
     }
 
     private var borderColor: SwiftUI.Color {
@@ -1082,11 +1098,26 @@ private struct MarkdownTableView: View {
     }
 
     var body: some View {
+        let columnCount = intrinsicColumnWidths.count
+        let columnWidths = intrinsicColumnWidths.mapValues {
+            MarkdownTableLayout.columnWidth(
+                intrinsicWidth: $0,
+                availableWidth: availableWidth,
+                columnCount: columnCount
+            )
+        }
+
         ViewThatFits(in: .horizontal) {
-            tableContainer
+            tableContainer(columnWidths: columnWidths)
             ScrollView(.horizontal, showsIndicators: true) {
-                tableContainer
+                tableContainer(columnWidths: columnWidths)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+        } action: { width in
+            availableWidth = width > 0 && width.isFinite ? width : nil
         }
         .padding(.vertical, 8)
     }
@@ -1100,13 +1131,13 @@ private struct MarkdownTableView: View {
 
         for (index, header) in table.headers.enumerated() {
             let size = (header as NSString).size(withAttributes: [.font: boldFont])
-            widths[index] = min(size.width + horizontalPadding, Constants.UI.tableMaxColumnWidth)
+            widths[index] = size.width + horizontalPadding
         }
 
         for row in table.rows {
             for (index, cell) in row.enumerated() {
                 let size = (cell as NSString).size(withAttributes: [.font: font])
-                let width = min(size.width + horizontalPadding, Constants.UI.tableMaxColumnWidth)
+                let width = size.width + horizontalPadding
                 widths[index] = max(widths[index] ?? 0, width)
             }
         }
@@ -1114,7 +1145,7 @@ private struct MarkdownTableView: View {
         return widths
     }
 
-    private var tableContainer: some View {
+    private func tableContainer(columnWidths: [Int: CGFloat]) -> some View {
         VStack(spacing: 0) {
             if !table.headers.isEmpty {
                 MarkdownTableRowView(
@@ -1185,7 +1216,7 @@ private struct MarkdownTableRowView: View {
                 if index < cells.count - 1 {
                     Rectangle()
                         .fill(borderColor)
-                        .frame(width: 1)
+                        .frame(width: Constants.UI.tableColumnDividerWidth)
                 }
             }
         }
