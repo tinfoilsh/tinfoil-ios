@@ -74,6 +74,16 @@ struct ContentView: View {
                 }
             }
         }
+        .alert("Account Cleanup Required", isPresented: Binding(
+            get: { authManager.accountTeardownError != nil },
+            set: { if !$0 { authManager.accountTeardownError = nil } }
+        )) {
+            Button("Retry") {
+                Task { await authManager.retryAccountTeardown() }
+            }
+        } message: {
+            Text(authManager.accountTeardownError ?? "")
+        }
         .sheet(isPresented: $passkeyManager.showPasskeyRecoveryChoice) {
             PasskeyRecoveryChoiceView(
                 onTryAgain: {

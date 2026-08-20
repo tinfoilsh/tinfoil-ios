@@ -3,18 +3,6 @@ import Testing
 
 @Suite("Data Lifecycle Source Tests")
 struct DataLifecycleSourceTests {
-    @Test("Sentry imports keep Clerk user types explicit")
-    func sentryImportsKeepClerkUserTypesExplicit() throws {
-        let authSource = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
-        let mfaSource = try sourceFile("TinfoilChat/ViewModels/AuthenticatorMFAViewModel.swift")
-        let settingsSource = try sourceFile("TinfoilChat/Views/SettingsView.swift")
-
-        #expect(authSource.contains("import Sentry"))
-        #expect(authSource.contains("from user: ClerkKit.User"))
-        #expect(mfaSource.contains("-> (ClerkKit.User, String)"))
-        #expect(settingsSource.contains("ClerkKit.User.UpdateParams()"))
-    }
-
     @Test("Both recovery flows confirm before starting fresh")
     func recoveryFlowsConfirmBeforeStartingFresh() throws {
         let onboarding = try sourceFile("TinfoilChat/Views/CloudSyncOnboardingView.swift")

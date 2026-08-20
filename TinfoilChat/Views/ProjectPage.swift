@@ -418,7 +418,7 @@ struct ProjectDocumentsView: View {
                     onError: { error in
                         viewModel.projectDocumentError = error.localizedDescription
                     },
-                    accountLifecycleGeneration: viewModel.accountLifecycleGeneration,
+                    accountLifecycleGeneration: { viewModel.accountLifecycleGeneration },
                     isAccountLifecycleCurrent: viewModel.isCurrentAccountLifecycle
                 )
             }

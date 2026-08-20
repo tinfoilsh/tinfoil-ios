@@ -18,6 +18,7 @@ class AuthManager: ObservableObject {
     @Published var isLoading = true
     @Published var localUserData: [String: Any]? = nil
     @Published var hasActiveSubscription = false
+    @Published var accountTeardownError: String?
 
     var localUserId: String? {
         localUserData?[Self.userIdKey] as? String
@@ -235,7 +236,10 @@ class AuthManager: ObservableObject {
                 // User was authenticated but Clerk confirms they're no longer signed in.
                 // clearAuthState calls handleSignOut first (while auth is still true)
                 // so that local chats can be saved to disk before clearing.
-                await clearAuthState()
+                guard await clearAuthState() else {
+                    isLoading = false
+                    return
+                }
                 await RevenueCatManager.shared.logoutUser()
             } else {
                 isAuthenticated = false
@@ -255,18 +259,22 @@ class AuthManager: ObservableObject {
         let teardownId = UUID()
         let teardownTask = Task { @MainActor [weak self] in
             guard let self else { return false }
-            defer { self.chatViewModel?.completeAccountTeardown() }
             do {
                 try await self.performAccountTeardown()
+                self.chatViewModel?.completeAccountTeardown()
+                self.accountTeardownError = nil
                 return true
             } catch {
                 SentrySDK.capture(error: error)
                 do {
                     try await self.performAccountTeardown()
+                    self.chatViewModel?.completeAccountTeardown()
+                    self.accountTeardownError = nil
                     return true
                 } catch {
                     SentrySDK.capture(error: error)
                     self.isLoading = false
+                    self.accountTeardownError = "Tinfoil couldn't finish clearing local account data. Account actions remain paused to protect your data. Retry cleanup before continuing."
                     return false
                 }
             }
@@ -278,6 +286,12 @@ class AuthManager: ObservableObject {
         accountTeardownTask = nil
         accountTeardownId = nil
         return didCompleteTeardown
+    }
+
+    func retryAccountTeardown() async {
+        accountTeardownError = nil
+        isLoading = true
+        await initializeAuthState()
     }
 
     private func performAccountTeardown() async throws {

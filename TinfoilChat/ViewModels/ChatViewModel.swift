@@ -301,6 +301,7 @@ class ChatViewModel: ObservableObject {
     private var activeSignInToken: AccountOperationFence.Token?
     private var isAccountTeardownInProgress = false
     private(set) var accountLifecycleGeneration = 0
+    private var accountLifecycleUserId: String?
     private var acceptsChatSaves = true
     private var hasPerformedInitialSync: Bool = false  // Track if initial sync has been done
     private var hasAnonymousChatsToSync: Bool = false  // Track if we have anonymous chats to sync
@@ -2085,7 +2086,9 @@ class ChatViewModel: ObservableObject {
         projectUploadBarrierCount += 1
         defer { projectUploadBarrierCount -= 1 }
         await cancelAndAwaitProjectUploads()
-        guard isCurrentProjectAccount(accountGeneration), currentUserId == accountUserId else {
+        guard !Task.isCancelled,
+              isCurrentProjectAccount(accountGeneration),
+              currentUserId == accountUserId else {
             throw CancellationError()
         }
         do {
@@ -5880,6 +5883,7 @@ class ChatViewModel: ObservableObject {
         chatHydrationError = nil
 
         isAccountTeardownInProgress = true
+        accountLifecycleUserId = nil
         accountLifecycleGeneration += 1
         let canceledAttachmentTasks = Array(attachmentProcessingTasks.values)
         let canceledPasteStagingTasks = Array(pasteStagingTasks.values)
@@ -6199,6 +6203,11 @@ class ChatViewModel: ObservableObject {
             return
         }
 
+        if accountLifecycleUserId != userId {
+            accountLifecycleUserId = userId
+            accountLifecycleGeneration += 1
+        }
+
         passkeyManager.resumeAccountOperations()
 
         // Wire up passkey recovery callback
@@ -6510,6 +6519,7 @@ class ChatViewModel: ObservableObject {
                     try await self.cloudSync.quiesceUploadsForBulkDelete(userId: userId)
                 },
                 deleteCloud: {
+                    try Task.checkCancellation()
                     guard shouldDeleteCloud else { return }
                     try await self.cloudSync.deleteAllFromCloud(
                         userId: userId,

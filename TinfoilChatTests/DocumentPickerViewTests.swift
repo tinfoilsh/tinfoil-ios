@@ -13,7 +13,7 @@ struct DocumentPickerViewTests {
         let coordinator = DocumentPickerView.Coordinator(
             onDocumentPicked: { _, _ in },
             onError: { receivedError = $0 },
-            accountLifecycleGeneration: 0,
+            accountLifecycleGeneration: { 0 },
             isAccountLifecycleCurrent: { $0 == 0 },
             stageDocument: { _ in
                 throw BoundedFileIOError.fileTooLarge(
@@ -45,15 +45,15 @@ struct DocumentPickerViewTests {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let store = ManagedFileStore(rootURL: rootURL.appendingPathComponent("staging"))
+        let stagedFile = try store.stage(sourceURL: sourceURL, maximumSize: 1_024)
+        #expect(FileManager.default.fileExists(atPath: stagedFile.url.path))
         var didPublishResult = false
         let coordinator = DocumentPickerView.Coordinator(
             onDocumentPicked: { _, _ in didPublishResult = true },
             onError: { _ in didPublishResult = true },
-            accountLifecycleGeneration: 1,
+            accountLifecycleGeneration: { 1 },
             isAccountLifecycleCurrent: { _ in false },
-            stageDocument: { url in
-                try store.stage(sourceURL: url, maximumSize: 1_024)
-            }
+            stageDocument: { _ in stagedFile }
         )
 
         await coordinator.stageDocument(at: sourceURL)

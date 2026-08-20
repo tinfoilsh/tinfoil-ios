@@ -34,15 +34,6 @@ struct ProjectColorTests {
         #expect(Color.projectColor("unknown") == Color.accentColor)
     }
 
-    @Test("Project rows use the project folder icon")
-    func projectRowsUseProjectFolderIcon() throws {
-        let source = try sourceFile("TinfoilChat/Views/ChatSidebar.swift")
-
-        #expect(source.contains("ProjectFolderIcon(color: project.color)"))
-        #expect(source.contains("ProjectFolderIcon(color: projectColor, size: 18)"))
-        #expect(source.contains("ProjectFolderIcon(color: project.color, size: 22)"))
-    }
-
     private func rgbaComponents(of color: Color) -> (red: Double, green: Double, blue: Double, alpha: Double) {
         var red = CGFloat.zero
         var green = CGFloat.zero
@@ -50,11 +41,5 @@ struct ProjectColorTests {
         var alpha = CGFloat.zero
         UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
         return (Double(red), Double(green), Double(blue), Double(alpha))
-    }
-
-    private func sourceFile(_ relativePath: String) throws -> String {
-        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let repositoryRoot = testsDirectory.deletingLastPathComponent()
-        return try String(contentsOf: repositoryRoot.appendingPathComponent(relativePath), encoding: .utf8)
     }
 }

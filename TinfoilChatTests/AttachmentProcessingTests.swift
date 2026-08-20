@@ -32,10 +32,10 @@ struct AttachmentProcessingTests {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(UUID().uuidString.lowercased()).pdf")
         FileManager.default.createFile(atPath: url.path, contents: Data())
+        defer { try? FileManager.default.removeItem(at: url) }
         let handle = try FileHandle(forWritingTo: url)
         try handle.truncate(atOffset: UInt64(Constants.Attachments.maxFileSizeBytes + 1))
         try handle.close()
-        defer { try? FileManager.default.removeItem(at: url) }
 
         do {
             _ = try await DocumentProcessingService.shared.extractText(from: url)

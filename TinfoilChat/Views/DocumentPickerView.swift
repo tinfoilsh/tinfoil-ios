@@ -18,7 +18,7 @@ struct DocumentPickerView: UIViewControllerRepresentable {
 
     var onDocumentPicked: (ManagedStagedFile, String) -> Void
     var onError: (Error) -> Void
-    var accountLifecycleGeneration: Int
+    var accountLifecycleGeneration: @MainActor () -> Int
     var isAccountLifecycleCurrent: @MainActor (Int) -> Bool
 
     private static let supportedTypes: [UTType] = [
@@ -57,14 +57,14 @@ struct DocumentPickerView: UIViewControllerRepresentable {
     class Coordinator: NSObject, UIDocumentPickerDelegate {
         let onDocumentPicked: (ManagedStagedFile, String) -> Void
         let onError: (Error) -> Void
-        let accountLifecycleGeneration: Int
+        let accountLifecycleGeneration: @MainActor () -> Int
         let isAccountLifecycleCurrent: (Int) -> Bool
         private let stageDocument: @Sendable (URL) throws -> ManagedStagedFile
 
         init(
             onDocumentPicked: @escaping (ManagedStagedFile, String) -> Void,
             onError: @escaping (Error) -> Void,
-            accountLifecycleGeneration: Int,
+            accountLifecycleGeneration: @escaping @MainActor () -> Int,
             isAccountLifecycleCurrent: @escaping (Int) -> Bool,
             stageDocument: @escaping @Sendable (URL) throws -> ManagedStagedFile = {
                 try ManagedFileStore.shared.stage(
@@ -95,6 +95,7 @@ struct DocumentPickerView: UIViewControllerRepresentable {
         func stageDocument(at sourceURL: URL) async {
             let fileName = sourceURL.lastPathComponent
             let stageDocument = stageDocument
+            let accountLifecycleGeneration = accountLifecycleGeneration()
             let result = await Task.detached(priority: .userInitiated) {
                 defer { sourceURL.stopAccessingSecurityScopedResource() }
                 return Result { try stageDocument(sourceURL) }
