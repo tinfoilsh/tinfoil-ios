@@ -59,8 +59,8 @@ struct AuthHydrationSafetyTests {
         #expect(trigger.ownerUserId(retainedOwnerUserId: "user-1") == "user-1")
     }
 
-    @Test("A different user after a missing user requires account teardown")
-    func missingUserThenDifferentUserRequiresTeardown() {
+    @Test("A different user waits for explicit account teardown")
+    func differentUserWaitsForExplicitTeardown() {
         let missing = AuthHydrationOutcome.resolve(
             lastOwnerUserId: "user-1",
             clerkUserId: nil
@@ -83,10 +83,89 @@ struct AuthHydrationSafetyTests {
         #expect(trigger.ownerUserId(retainedOwnerUserId: nil) == "user-1")
     }
 
+    @Test("A to B passive switch does not delete data until retry")
+    func passiveSwitchWaitsForRetry() {
+        var hydration = AuthSwitchSafetyHarness(ownerUserId: "user-A")
+
+        hydration.observe(clerkUserId: "user-B")
+
+        #expect(hydration.deletedOwnerUserIds.isEmpty)
+        #expect(hydration.activeUserId == nil)
+        #expect(hydration.requiresExplicitRetry)
+    }
+
+    @Test("B to A reversal resumes without deletion")
+    func switchReversalResumesOwner() {
+        var hydration = AuthSwitchSafetyHarness(ownerUserId: "user-A")
+
+        hydration.observe(clerkUserId: "user-B")
+        hydration.observe(clerkUserId: "user-A")
+
+        #expect(hydration.deletedOwnerUserIds.isEmpty)
+        #expect(hydration.activeUserId == "user-A")
+        #expect(!hydration.requiresExplicitRetry)
+    }
+
+    @Test("Explicit retry clears A and activates current B")
+    func retryClearsOwnerAndActivatesCurrentUser() {
+        var hydration = AuthSwitchSafetyHarness(ownerUserId: "user-A")
+        hydration.observe(clerkUserId: "user-B")
+
+        hydration.retry(currentClerkUserId: "user-B")
+
+        #expect(hydration.deletedOwnerUserIds == ["user-A"])
+        #expect(hydration.activeUserId == "user-B")
+        #expect(!hydration.requiresExplicitRetry)
+    }
+
     @Test("A missing local key keeps passkey recovery available")
     func missingLocalKeyAllowsPasskeyRecovery() {
         #expect(shouldAttemptPasskeyRecovery(hasLocalEncryptionKey: false))
         #expect(!shouldAttemptPasskeyRecovery(hasLocalEncryptionKey: true))
+    }
+}
+
+private struct AuthSwitchSafetyHarness {
+    private(set) var ownerUserId: String?
+    private(set) var activeUserId: String?
+    private(set) var deletedOwnerUserIds: [String] = []
+    private(set) var requiresExplicitRetry = false
+
+    mutating func observe(clerkUserId: String?) {
+        switch AuthHydrationOutcome.resolve(
+            lastOwnerUserId: ownerUserId,
+            clerkUserId: clerkUserId
+        ) {
+        case .signedOut, .signedOutPreservingAccount:
+            activeUserId = nil
+        case .authenticated:
+            activeUserId = clerkUserId
+            requiresExplicitRetry = false
+        case .accountSwitch:
+            activeUserId = nil
+            requiresExplicitRetry = true
+        }
+    }
+
+    mutating func retry(currentClerkUserId: String?) {
+        switch AccountSwitchRetryOutcome.resolve(
+            preservedOwnerUserId: ownerUserId,
+            currentClerkUserId: currentClerkUserId
+        ) {
+        case .signedOutPreservingAccount:
+            activeUserId = nil
+            requiresExplicitRetry = false
+        case .resumeSameOwner:
+            activeUserId = currentClerkUserId
+            requiresExplicitRetry = false
+        case .teardown(let trigger):
+            if let ownerUserId = trigger.ownerUserId(retainedOwnerUserId: ownerUserId) {
+                deletedOwnerUserIds.append(ownerUserId)
+            }
+            ownerUserId = currentClerkUserId
+            activeUserId = currentClerkUserId
+            requiresExplicitRetry = false
+        }
     }
 }
 

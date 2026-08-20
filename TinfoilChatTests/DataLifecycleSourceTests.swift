@@ -94,10 +94,27 @@ struct DataLifecycleSourceTests {
 
         let cleanup = try #require(retry.range(of: "await clearAuthState(for: trigger) else { return }"))
         let revenueCat = try #require(retry.range(of: "await RevenueCatManager.shared.logoutUser()"))
-        let clerk = try #require(retry.range(of: "await initializeAuthState()"))
+        let clerk = try #require(retry.range(
+            of: "await initializeAuthState()",
+            range: revenueCat.upperBound..<retry.endIndex
+        ))
         #expect(cleanup.lowerBound < revenueCat.lowerBound)
         #expect(revenueCat.lowerBound < clerk.lowerBound)
-        #expect(!retry.contains("accountTeardownError = nil"))
+    }
+
+    @Test("Passive account switches cannot start destructive cleanup")
+    func passiveAccountSwitchCannotStartCleanup() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let setClerk = try functionBody(named: "func setClerk(", in: source)
+        let hydration = try functionBody(named: "func initializeAuthState()", in: source)
+        let retry = try functionBody(named: "func retryAccountTeardown()", in: source)
+
+        #expect(!setClerk.contains("clearAuthState"))
+        #expect(!hydration.contains("clearAuthState"))
+        #expect(hydration.contains("await chatViewModel?.handlePassiveAuthLoss()"))
+        #expect(hydration.contains("pendingAccountTeardownTrigger = .accountSwitch"))
+        #expect(retry.contains("AccountSwitchRetryOutcome.resolve"))
+        #expect(retry.contains("await clearAuthState(for: trigger)"))
     }
 
     @Test("Passive auth loss retains the owner for explicit cleanup")

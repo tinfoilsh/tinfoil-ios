@@ -75,9 +75,35 @@ enum AccountTeardownTrigger: Equatable {
     }
 }
 
+enum AccountSwitchRetryOutcome: Equatable {
+    case signedOutPreservingAccount
+    case resumeSameOwner
+    case teardown(AccountTeardownTrigger)
+
+    static func resolve(
+        preservedOwnerUserId: String?,
+        currentClerkUserId: String?
+    ) -> Self {
+        guard let currentClerkUserId else {
+            return .signedOutPreservingAccount
+        }
+        guard let preservedOwnerUserId else {
+            return .resumeSameOwner
+        }
+        guard preservedOwnerUserId != currentClerkUserId else {
+            return .resumeSameOwner
+        }
+        return .teardown(.accountSwitch(
+            previousUserId: preservedOwnerUserId,
+            newUserId: currentClerkUserId
+        ))
+    }
+}
+
 @MainActor
 class AuthManager: ObservableObject {
     private static let userIdKey = "id"
+    private static let accountSwitchMessage = "Tinfoil found a different signed-in account. Account actions remain paused to protect your data. Retry cleanup to clear the previous account's local data and continue."
 
     @Published var isAuthenticated = false
     @Published var isLoading = true
@@ -94,7 +120,6 @@ class AuthManager: ObservableObject {
     private var timer: Timer?
     private var clerk: Clerk?
     private var hasTriggeredSignIn = false
-    private var accountSwitchTask: Task<Void, Never>?
     private var accountTeardownTask: Task<Bool, Never>?
     private var accountTeardownId: UUID?
     private var pendingAccountTeardownTrigger: AccountTeardownTrigger?
@@ -182,32 +207,20 @@ class AuthManager: ObservableObject {
             isSessionUnavailable = false
             if let cachedUserId = localUserId,
                cachedUserId != user.id {
-                accountSwitchTask = Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    let trigger = AccountTeardownTrigger.accountSwitch(
-                        previousUserId: cachedUserId,
-                        newUserId: user.id
-                    )
-                    guard await self.clearAuthState(for: trigger) else { return }
-                    guard self.isCurrentAuthTransition(hydrationToken) else { return }
-                    await RevenueCatManager.shared.logoutUser()
-                    guard self.isCurrentAuthTransition(hydrationToken) else { return }
-                    // A sign-out may have completed while the cleanup
-                    // above was suspended; only restore auth state when
-                    // Clerk still reports the captured user.
-                    guard self.clerk?.user?.id == user.id,
+                retainedOwnerUserId = cachedUserId
+                isAuthenticated = false
+                hasActiveSubscription = false
+                hasTriggeredSignIn = false
+                saveAuthState()
+                pendingAccountTeardownTrigger = .accountSwitch(
+                    previousUserId: cachedUserId,
+                    newUserId: user.id
+                )
+                accountTeardownError = Self.accountSwitchMessage
+                Task { @MainActor [weak self] in
+                    guard let self,
                           self.isCurrentAuthTransition(hydrationToken) else { return }
-                    self.updateUserData(from: user)
-                    self.isAuthenticated = true
-                    self.saveAuthState()
-                    await RevenueCatManager.shared.loginUser(user.id)
-                    guard self.clerk?.user?.id == user.id,
-                          self.isCurrentAuthTransition(hydrationToken) else { return }
-                    if !self.hasTriggeredSignIn,
-                       let chatVM = self.chatViewModel {
-                        self.hasTriggeredSignIn = true
-                        chatVM.handleSignIn()
-                    }
+                    await self.chatViewModel?.handlePassiveAuthLoss()
                 }
                 return
             }
@@ -308,20 +321,18 @@ class AuthManager: ObservableObject {
             return
         }
 
-        if let accountSwitchTask {
-            await accountSwitchTask.value
-            guard isCurrentAuthTransition(hydrationToken) else { return }
-            self.accountSwitchTask = nil
-        }
-
         let outcome = AuthHydrationOutcome.resolve(
-            lastOwnerUserId: localUserId,
+            lastOwnerUserId: retainedOwnerUserId ?? localUserId,
             clerkUserId: clerk.user?.id
         )
 
         switch outcome {
         case .signedOut, .signedOutPreservingAccount:
             guard isCurrentAuthTransition(hydrationToken) else { return }
+            if case .accountSwitch = pendingAccountTeardownTrigger {
+                pendingAccountTeardownTrigger = nil
+                accountTeardownError = nil
+            }
             retainedOwnerUserId = localUserId ?? retainedOwnerUserId
             guard isCurrentAuthTransition(hydrationToken) else { return }
             await chatViewModel?.handlePassiveAuthLoss()
@@ -333,7 +344,29 @@ class AuthManager: ObservableObject {
             saveAuthState()
             await RevenueCatManager.shared.logoutUser()
             guard isCurrentAuthTransition(hydrationToken) else { return }
-        case .authenticated, .accountSwitch:
+        case .accountSwitch:
+            guard let currentUserId = clerk.user?.id,
+                  let preservedOwnerUserId = retainedOwnerUserId ?? localUserId else {
+                guard isCurrentAuthTransition(hydrationToken) else { return }
+                isLoading = false
+                return
+            }
+            retainedOwnerUserId = preservedOwnerUserId
+            await chatViewModel?.handlePassiveAuthLoss()
+            guard isCurrentAuthTransition(hydrationToken),
+                  self.clerk?.user?.id == currentUserId,
+                  retainedOwnerUserId == preservedOwnerUserId else { return }
+            isSessionUnavailable = false
+            isAuthenticated = false
+            hasActiveSubscription = false
+            hasTriggeredSignIn = false
+            saveAuthState()
+            pendingAccountTeardownTrigger = .accountSwitch(
+                previousUserId: preservedOwnerUserId,
+                newUserId: currentUserId
+            )
+            accountTeardownError = Self.accountSwitchMessage
+        case .authenticated:
             guard let user = clerk.user else {
                 guard isCurrentAuthTransition(hydrationToken) else { return }
                 isSessionUnavailable = false
@@ -345,20 +378,9 @@ class AuthManager: ObservableObject {
                 return
             }
             isSessionUnavailable = false
-            if outcome.requiresAccountTeardown,
-               let cachedUserId = localUserId {
-                let trigger = AccountTeardownTrigger.accountSwitch(
-                    previousUserId: cachedUserId,
-                    newUserId: user.id
-                )
-                guard await clearAuthState(for: trigger) else {
-                    guard isCurrentAuthTransition(hydrationToken) else { return }
-                    isLoading = false
-                    return
-                }
-                guard isCurrentAuthTransition(hydrationToken) else { return }
-                await RevenueCatManager.shared.logoutUser()
-                guard isCurrentAuthTransition(hydrationToken) else { return }
+            if case .accountSwitch = pendingAccountTeardownTrigger {
+                pendingAccountTeardownTrigger = nil
+                accountTeardownError = nil
             }
             guard isCurrentAuthTransition(hydrationToken) else { return }
             isAuthenticated = true
@@ -430,7 +452,29 @@ class AuthManager: ObservableObject {
     func retryAccountTeardown() async {
         let hydrationToken = beginAuthTransition()
         isLoading = true
-        guard let trigger = pendingAccountTeardownTrigger,
+        guard let pendingTrigger = pendingAccountTeardownTrigger else {
+            isLoading = false
+            return
+        }
+        let trigger: AccountTeardownTrigger
+        if case .accountSwitch = pendingTrigger {
+            let retryOutcome = AccountSwitchRetryOutcome.resolve(
+                preservedOwnerUserId: retainedOwnerUserId ?? localUserId,
+                currentClerkUserId: clerk?.user?.id
+            )
+            switch retryOutcome {
+            case .signedOutPreservingAccount, .resumeSameOwner:
+                pendingAccountTeardownTrigger = nil
+                accountTeardownError = nil
+                await initializeAuthState()
+                return
+            case .teardown(let currentTrigger):
+                trigger = currentTrigger
+            }
+        } else {
+            trigger = pendingTrigger
+        }
+        guard isCurrentAuthTransition(hydrationToken),
               await clearAuthState(for: trigger) else { return }
         guard isCurrentAuthTransition(hydrationToken) else { return }
         await RevenueCatManager.shared.logoutUser()
