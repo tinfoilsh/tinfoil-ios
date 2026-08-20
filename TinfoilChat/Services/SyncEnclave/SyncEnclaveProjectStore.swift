@@ -12,9 +12,10 @@ struct SyncEnclaveProjectStore {
         return (payload, etagToSyncVersion(response.etag))
     }
 
-    func updateProject(id: String, data: UpdateProjectData, existing: Project) async throws {
+    func updateProject(id: String, data: UpdateProjectData, existing: Project) async throws -> (ProjectData, Int) {
         let payload = ProjectData(updateData: data, existing: existing)
-        _ = try await pushProject(id: id, payload: payload, ifMatch: String(existing.syncVersion))
+        let response = try await pushProject(id: id, payload: payload, ifMatch: String(existing.syncVersion))
+        return (payload, etagToSyncVersion(response.etag))
     }
 
     func getProject(id: String) async throws -> (ProjectData, Int)? {

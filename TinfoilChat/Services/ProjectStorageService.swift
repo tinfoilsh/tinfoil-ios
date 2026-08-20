@@ -109,11 +109,26 @@ final class ProjectStorageService: ObservableObject {
         )
     }
 
-    func updateProject(_ projectId: String, data: UpdateProjectData) async throws {
+    func updateProject(_ projectId: String, data: UpdateProjectData) async throws -> Project {
         guard let existing = try await getProject(projectId) else {
             throw CloudStorageError.invalidResponse
         }
-        try await enclaveStore.updateProject(id: projectId, data: data, existing: existing)
+        let (payload, syncVersion) = try await enclaveStore.updateProject(
+            id: projectId,
+            data: data,
+            existing: existing
+        )
+        return Project(
+            id: projectId,
+            name: payload.name,
+            color: payload.color,
+            description: payload.description,
+            systemInstructions: payload.systemInstructions,
+            memory: payload.memory,
+            createdAt: existing.createdAt,
+            updatedAt: isoNow(),
+            syncVersion: syncVersion
+        )
     }
 
     func getProject(_ projectId: String) async throws -> Project? {
