@@ -337,6 +337,7 @@ class AuthManager: ObservableObject {
         await passiveAuthLossTask?.task.value
         guard isCurrentAuthTransition(hydrationToken),
               pendingAccountTeardownRetryReason == nil,
+              clerk?.user?.id == userId,
               localUserId == userId,
               isAuthenticated,
               let chatViewModel,
@@ -522,6 +523,12 @@ class AuthManager: ObservableObject {
         isAccountTeardownInProgress = true
         let teardownTask = Task { @MainActor [weak self] in
             guard let self else { return false }
+            if let passiveAuthLossTask = self.passiveAuthLossTask {
+                await passiveAuthLossTask.task.value
+                if self.passiveAuthLossTask?.id == passiveAuthLossTask.id {
+                    self.passiveAuthLossTask = nil
+                }
+            }
             do {
                 try await self.performAccountTeardown(ownerUserId: ownerUserId)
                 self.chatViewModel?.completeAccountTeardown()

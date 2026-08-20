@@ -102,6 +102,28 @@ struct DataLifecycleSourceTests {
         #expect(revenueCat.lowerBound < clerk.lowerBound)
     }
 
+    @Test("Account teardown drains passive auth loss before destruction")
+    func accountTeardownDrainsPassiveAuthLoss() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let teardown = try functionBody(named: "private func clearAuthState(for trigger:", in: source)
+
+        let drain = try #require(teardown.range(of: "await passiveAuthLossTask.task.value"))
+        let destruction = try #require(teardown.range(of: "try await self.performAccountTeardown"))
+        #expect(drain.lowerBound < destruction.lowerBound)
+    }
+
+    @Test("Failed deletion restores only a live matching Clerk owner")
+    func failedDeletionRequiresLiveOwner() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let restore = try functionBody(
+            named: "private func restoreAccountDataAccessAfterFailedDeletion(",
+            in: source
+        )
+
+        #expect(restore.contains("clerk?.user?.id == userId"))
+        #expect(restore.contains("localUserId == userId"))
+    }
+
     @Test("Attachment removal and sign-out cancel processing")
     func attachmentRemovalAndSignOutCancelProcessing() throws {
         let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")

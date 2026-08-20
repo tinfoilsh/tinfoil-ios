@@ -32,6 +32,30 @@ enum KeyMismatchResolution {
     case manualRecoveryRequired
 }
 
+enum PasskeyAccountOperationState: Equatable {
+    case enabled
+    case reset
+    case paused(ownerUserId: String?)
+
+    var operationsEnabled: Bool {
+        self == .enabled
+    }
+
+    func canResume(validatedOwnerUserId: String) -> Bool {
+        switch self {
+        case .enabled, .reset:
+            return true
+        case .paused(let ownerUserId):
+            return ownerUserId == validatedOwnerUserId
+        }
+    }
+
+    var pausedOwnerUserId: String? {
+        guard case .paused(let ownerUserId) = self else { return nil }
+        return ownerUserId
+    }
+}
+
 // MARK: - PasskeyManager
 
 @MainActor
@@ -64,8 +88,7 @@ final class PasskeyManager: ObservableObject {
     // MARK: - Private
 
     private var syncCheckTask: Task<Void, Never>?
-    private var accountOperationsEnabled = true
-    private var pausedOwnerUserId: String?
+    private var accountOperationState = PasskeyAccountOperationState.enabled
     private let accountOperationTracker = AccountOperationTracker()
     private let passkeyService = PasskeyService.shared
 
@@ -112,7 +135,7 @@ final class PasskeyManager: ObservableObject {
     // MARK: - Sign-Out Reset
 
     func reset() async {
-        accountOperationsEnabled = false
+        accountOperationState = .reset
         await accountOperationTracker.closeAndWait()
         let canceledSyncCheckTask = syncCheckTask
         canceledSyncCheckTask?.cancel()
@@ -127,15 +150,15 @@ final class PasskeyManager: ObservableObject {
         setDismissedRecoveryKeyId(nil)
         onRecoveryComplete = nil
         onKeyRefreshedFromBackup = nil
-        pausedOwnerUserId = nil
         passkeyService.clearCachedPrfResult()
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId)
     }
 
     func pauseAccountOperationsPreservingCredentials(ownerUserId: String?) async {
-        accountOperationsEnabled = false
-        pausedOwnerUserId = ownerUserId ?? pausedOwnerUserId
+        accountOperationState = .paused(
+            ownerUserId: ownerUserId ?? accountOperationState.pausedOwnerUserId
+        )
         await accountOperationTracker.closeAndWait()
         let canceledSyncCheckTask = syncCheckTask
         canceledSyncCheckTask?.cancel()
@@ -154,11 +177,10 @@ final class PasskeyManager: ObservableObject {
 
     @discardableResult
     func resumeAccountOperations(validatedOwnerUserId: String) -> Bool {
-        guard accountOperationsEnabled || pausedOwnerUserId == validatedOwnerUserId else {
+        guard accountOperationState.canResume(validatedOwnerUserId: validatedOwnerUserId) else {
             return false
         }
-        pausedOwnerUserId = nil
-        accountOperationsEnabled = true
+        accountOperationState = .enabled
         accountOperationTracker.reopen()
         return true
     }
@@ -557,7 +579,7 @@ final class PasskeyManager: ObservableObject {
     /// may have changed (e.g. legacy-blob migration completed,
     /// another device just added a bundle).
     func refreshBundleState() async {
-        guard accountOperationsEnabled else { return }
+        guard accountOperationState.operationsEnabled else { return }
         guard EncryptionService.shared.hasEncryptionKey() else { return }
         await checkPasskeyStateForExistingKey()
     }
@@ -566,12 +588,12 @@ final class PasskeyManager: ObservableObject {
     /// by the Settings "Registered platforms" list so the view never
     /// talks to the enclave wire directly.
     func listPasskeyBundles() async throws -> [EnclaveKeyCurrentBundle] {
-        guard accountOperationsEnabled else { throw CancellationError() }
+        guard accountOperationState.operationsEnabled else { throw CancellationError() }
         let operationTask = Task {
             try Task.checkCancellation()
             let state = try await SyncEnclaveAPI.keyCurrent()
             try Task.checkCancellation()
-            guard accountOperationsEnabled else { throw CancellationError() }
+            guard accountOperationState.operationsEnabled else { throw CancellationError() }
             return Array(state.bundles.values)
         }
         guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
@@ -586,7 +608,7 @@ final class PasskeyManager: ObservableObject {
     /// Remove a passkey bundle from the enclave's current key, then
     /// re-evaluate the local passkey state.
     func removePasskeyBundle(credentialId: String) async throws {
-        guard accountOperationsEnabled else { throw CancellationError() }
+        guard accountOperationState.operationsEnabled else { throw CancellationError() }
         let operationTask = Task {
             try Task.checkCancellation()
             let cek = try EncryptionService.shared.getKeyBytesOrThrow()
@@ -597,7 +619,7 @@ final class PasskeyManager: ObservableObject {
                 credentialId: credentialId
             )
             try Task.checkCancellation()
-            guard accountOperationsEnabled else { throw CancellationError() }
+            guard accountOperationState.operationsEnabled else { throw CancellationError() }
             await refreshBundleState()
         }
         guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
@@ -690,7 +712,7 @@ final class PasskeyManager: ObservableObject {
     }
 
     private var canMutateAccountKey: Bool {
-        accountOperationsEnabled && !Task.isCancelled
+        accountOperationState.operationsEnabled && !Task.isCancelled
     }
 
     private func applyRecoveredCek(cek: Data) async throws {
@@ -792,7 +814,7 @@ final class PasskeyManager: ObservableObject {
     /// changes, the local CEK is invalidated and a fresh recovery
     /// flow is required.
     func startSyncCheck() {
-        guard accountOperationsEnabled else { return }
+        guard accountOperationState.operationsEnabled else { return }
         syncCheckTask?.cancel()
         syncCheckTask = Task { [weak self] in
             while !Task.isCancelled {

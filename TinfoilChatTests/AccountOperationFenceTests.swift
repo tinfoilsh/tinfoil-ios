@@ -51,6 +51,28 @@ struct AccountOperationFenceTests {
     }
 }
 
+struct PasskeyAccountOperationStateTests {
+    @Test func destructiveResetAcceptsTheNextValidatedOwner() {
+        let state = PasskeyAccountOperationState.reset
+
+        #expect(state.canResume(validatedOwnerUserId: "user-a"))
+        #expect(state.canResume(validatedOwnerUserId: "user-b"))
+    }
+
+    @Test func passivePauseAcceptsOnlyItsOwner() {
+        let state = PasskeyAccountOperationState.paused(ownerUserId: "user-a")
+
+        #expect(state.canResume(validatedOwnerUserId: "user-a"))
+        #expect(!state.canResume(validatedOwnerUserId: "user-b"))
+    }
+
+    @Test func ownerlessPassivePauseStaysClosed() {
+        let state = PasskeyAccountOperationState.paused(ownerUserId: nil)
+
+        #expect(!state.canResume(validatedOwnerUserId: "user-a"))
+    }
+}
+
 @MainActor
 struct AccountOperationTrackerTests {
     @Test func beginAndEndCompleteAnOperation() async {
