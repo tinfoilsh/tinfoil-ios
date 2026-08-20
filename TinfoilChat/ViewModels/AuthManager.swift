@@ -49,6 +49,17 @@ enum AccountTeardownTrigger: Equatable {
             return previousUserId != newUserId && currentClerkUserId == newUserId
         }
     }
+
+    func ownerUserId(retainedOwnerUserId: String?) -> String? {
+        switch self {
+        case .explicitSignOut:
+            return retainedOwnerUserId
+        case .accountDeletion(let deletedUserId):
+            return deletedUserId
+        case .accountSwitch(let previousUserId, _):
+            return previousUserId
+        }
+    }
 }
 
 @MainActor
@@ -74,6 +85,7 @@ class AuthManager: ObservableObject {
     private var accountTeardownTask: Task<Bool, Never>?
     private var accountTeardownId: UUID?
     private var pendingAccountTeardownTrigger: AccountTeardownTrigger?
+    private var retainedOwnerUserId: String?
     
     // UserDefaults keys
     private let authStateKey = Constants.StorageKeys.Auth.state
@@ -125,6 +137,7 @@ class AuthManager: ObservableObject {
         if let userData = UserDefaults.standard.data(forKey: userDataKey),
            let decodedUserData = try? JSONSerialization.jsonObject(with: userData) as? [String: Any] {
             localUserData = decodedUserData
+            retainedOwnerUserId = decodedUserData[Self.userIdKey] as? String
         }
         
         isAuthenticated = UserDefaults.standard.bool(forKey: authStateKey)
@@ -194,6 +207,7 @@ class AuthManager: ObservableObject {
     
     private func updateUserData(from user: ClerkKit.User) {
         let wasAuthenticated = isAuthenticated
+        retainedOwnerUserId = user.id
         
         // Store relevant user data
         localUserData = [
@@ -271,6 +285,8 @@ class AuthManager: ObservableObject {
 
         switch outcome {
         case .signedOut, .signedOutPreservingAccount:
+            retainedOwnerUserId = localUserId ?? retainedOwnerUserId
+            await chatViewModel?.handlePassiveAuthLoss()
             isSessionUnavailable = false
             isAuthenticated = false
             hasActiveSubscription = false
@@ -322,13 +338,15 @@ class AuthManager: ObservableObject {
         }
 
         let teardownId = UUID()
+        let ownerUserId = trigger.ownerUserId(retainedOwnerUserId: retainedOwnerUserId) ?? localUserId
         let teardownTask = Task { @MainActor [weak self] in
             guard let self else { return false }
             do {
-                try await self.performAccountTeardown()
+                try await self.performAccountTeardown(ownerUserId: ownerUserId)
                 self.chatViewModel?.completeAccountTeardown()
                 self.accountTeardownError = nil
                 self.pendingAccountTeardownTrigger = nil
+                self.retainedOwnerUserId = nil
                 return true
             } catch {
                 SentrySDK.capture(error: error)
@@ -336,10 +354,11 @@ class AuthManager: ObservableObject {
                     guard trigger.isConfirmed(currentClerkUserId: self.clerk?.user?.id) else {
                         return false
                     }
-                    try await self.performAccountTeardown()
+                    try await self.performAccountTeardown(ownerUserId: ownerUserId)
                     self.chatViewModel?.completeAccountTeardown()
                     self.accountTeardownError = nil
                     self.pendingAccountTeardownTrigger = nil
+                    self.retainedOwnerUserId = nil
                     return true
                 } catch {
                     SentrySDK.capture(error: error)
@@ -367,11 +386,11 @@ class AuthManager: ObservableObject {
         await initializeAuthState()
     }
 
-    private func performAccountTeardown() async throws {
+    private func performAccountTeardown(ownerUserId: String?) async throws {
         // Handle chat state BEFORE clearing auth so the view model can still
         // save the current chat (hasChatAccess depends on isAuthenticated).
         if let chatViewModel {
-            try await chatViewModel.handleSignOut()
+            try await chatViewModel.handleSignOut(ownerUserId: ownerUserId)
         } else {
             try await SharedImportCoordinator.shared.discardAllPending()
         }
@@ -387,7 +406,7 @@ class AuthManager: ObservableObject {
         SettingsManager.shared.clearAllSettings()
         await ProfileManager.shared.clearLocalProfileForAccountRemoval()
         if let chatViewModel {
-            await chatViewModel.wipeLocalChatsForSignOut()
+            await chatViewModel.wipeLocalChatsForSignOut(ownerUserId: ownerUserId)
         } else {
             // No chat view model is attached (e.g. sign-out resolved before
             // the UI wired one up); run the same sync teardown handleSignOut
@@ -395,8 +414,8 @@ class AuthManager: ObservableObject {
             // clearing the checkpoint, and resetting the attested client —
             // and only then wipe the files, so a racing sync pass cannot
             // recreate them after the wipe.
-            await CloudSyncService.shared.clearSyncStatus(forUser: localUserId)
-            await Chat.deleteAllChatsFromStorage(userId: localUserId)
+            await CloudSyncService.shared.clearSyncStatus(forUser: ownerUserId)
+            await Chat.deleteAllChatsFromStorage(userId: ownerUserId)
         }
         EncryptionService.shared.clearKey()
         await DeviceEncryptionService.shared.clearKey()

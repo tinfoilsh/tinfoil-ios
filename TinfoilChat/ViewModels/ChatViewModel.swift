@@ -5806,6 +5806,13 @@ class ChatViewModel: ObservableObject {
         return canceledTask
     }
 
+    func handlePassiveAuthLoss() async {
+        let canceledSignInTask = cancelSignInOperation()
+        let canceledLegacyMigrationTask = cancelLegacyMigration()
+        await canceledSignInTask?.value
+        await canceledLegacyMigrationTask?.value
+    }
+
     func completeAccountTeardown() {
         acceptsChatSaves = true
         isAccountTeardownInProgress = false
@@ -5871,11 +5878,10 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Handle sign-out by clearing current chats but preserving them in storage
-    func handleSignOut() async throws {
-        // Capture the signing-out user's id up front. Later steps (and
-        // the auth manager's cleanup) clear the authenticated state, after
-        // which currentUserId no longer resolves this user.
-        let signingOutUserId = currentUserId
+    func handleSignOut(ownerUserId: String?) async throws {
+        // Keep using the captured owner from the auth manager because
+        // currentUserId may already be nil after passive auth loss.
+        let signingOutUserId = ownerUserId
         chatSelectionFence.invalidate()
         chatSelectionTask?.cancel()
         chatSelectionTask = nil
@@ -6039,15 +6045,14 @@ class ChatViewModel: ObservableObject {
 
     /// Erase on-disk chats for the signed-out user during sign-out cleanup.
     /// The in-memory blank chat created by handleSignOut is left intact so the
-    /// signed-out session still has a usable chat. Must run before the auth
-    /// manager clears its authenticated state so currentUserId still resolves.
-    func wipeLocalChatsForSignOut() async {
+    /// signed-out session still has a usable chat.
+    func wipeLocalChatsForSignOut(ownerUserId: String?) async {
         clearHydratedFavorites()
         acceptsChatSaves = false
         // Save admission remains closed throughout auth cleanup. Drain the
         // queued chain defensively before deleting the signed-out user's files.
         await drainPendingSaves()
-        await Chat.deleteAllChatsFromStorage(userId: currentUserId)
+        await Chat.deleteAllChatsFromStorage(userId: ownerUserId)
     }
 
     /// Clear a persisted passkey-recovery skip and re-open recovery.
@@ -6197,9 +6202,7 @@ class ChatViewModel: ObservableObject {
         guard !isAccountTeardownInProgress, acceptsChatSaves else { return }
 
         guard hasChatAccess, let userId = currentUserId else {
-            if let canceledTask = cancelSignInOperation() {
-                signInTask = canceledTask
-            }
+            cancelSignInOperation()
             return
         }
 

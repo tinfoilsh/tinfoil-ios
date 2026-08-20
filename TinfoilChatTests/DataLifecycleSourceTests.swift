@@ -100,6 +100,41 @@ struct DataLifecycleSourceTests {
         #expect(!retry.contains("accountTeardownError = nil"))
     }
 
+    @Test("Passive auth loss retains the owner for explicit cleanup")
+    func passiveAuthLossRetainsOwnerForExplicitCleanup() throws {
+        let authSource = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let chatSource = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let hydration = try functionBody(named: "func initializeAuthState()", in: authSource)
+        let teardown = try functionBody(named: "private func performAccountTeardown(ownerUserId:", in: authSource)
+        let signOut = try functionBody(named: "func handleSignOut(ownerUserId:", in: chatSource)
+        let wipe = try functionBody(named: "func wipeLocalChatsForSignOut(ownerUserId:", in: chatSource)
+
+        #expect(hydration.contains("retainedOwnerUserId = localUserId ?? retainedOwnerUserId"))
+        #expect(teardown.contains("handleSignOut(ownerUserId: ownerUserId)"))
+        #expect(teardown.contains("wipeLocalChatsForSignOut(ownerUserId: ownerUserId)"))
+        #expect(signOut.contains("let signingOutUserId = ownerUserId"))
+        #expect(wipe.contains("Chat.deleteAllChatsFromStorage(userId: ownerUserId)"))
+    }
+
+    @Test("Passive auth loss clears sign-in state before same-user recovery")
+    func passiveAuthLossClearsSignInStateForRecovery() throws {
+        let authSource = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let chatSource = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let hydration = try functionBody(named: "func initializeAuthState()", in: authSource)
+        let passiveLoss = try functionBody(named: "func handlePassiveAuthLoss()", in: chatSource)
+        let cancellation = try functionBody(named: "private func cancelSignInOperation()", in: chatSource)
+        let signIn = try functionBody(named: "func handleSignIn()", in: chatSource)
+
+        #expect(hydration.contains("await chatViewModel?.handlePassiveAuthLoss()"))
+        #expect(passiveLoss.contains("let canceledSignInTask = cancelSignInOperation()"))
+        #expect(passiveLoss.contains("await canceledSignInTask?.value"))
+        #expect(cancellation.contains("signInTask = nil"))
+        #expect(cancellation.contains("activeSignInToken = nil"))
+        #expect(cancellation.contains("accountOperationFence.invalidate()"))
+        #expect(signIn.contains("let token = accountOperationFence.begin(userId: userId)"))
+        #expect(!signIn.contains("signInTask = canceledTask"))
+    }
+
     @Test("Bulk delete progress starts at network dispatch")
     func bulkDeleteProgressStartsAtNetworkDispatch() throws {
         let clientSource = try sourceFile("TinfoilChat/Services/SyncEnclave/SyncEnclaveClient.swift")
@@ -117,7 +152,7 @@ struct DataLifecycleSourceTests {
         let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
         let removal = try functionBody(named: "func removePendingAttachment", in: source)
         let clearing = try functionBody(named: "func clearPendingAttachments", in: source)
-        let signOut = try functionBody(named: "func handleSignOut()", in: source)
+        let signOut = try functionBody(named: "func handleSignOut(ownerUserId:", in: source)
 
         #expect(removal.contains("attachmentProcessingTasks[id]"))
         #expect(removal.contains("task.cancel()"))

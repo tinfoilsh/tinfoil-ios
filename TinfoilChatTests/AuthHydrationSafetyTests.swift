@@ -41,6 +41,7 @@ struct AuthHydrationSafetyTests {
 
         #expect(trigger.isConfirmed(currentClerkUserId: nil))
         #expect(trigger.isConfirmed(currentClerkUserId: "user-1"))
+        #expect(trigger.ownerUserId(retainedOwnerUserId: "user-1") == "user-1")
     }
 
     @Test("A different user after a missing user requires account teardown")
@@ -64,6 +65,7 @@ struct AuthHydrationSafetyTests {
         #expect(trigger.isConfirmed(currentClerkUserId: "user-2"))
         #expect(!trigger.isConfirmed(currentClerkUserId: nil))
         #expect(!trigger.isConfirmed(currentClerkUserId: "user-1"))
+        #expect(trigger.ownerUserId(retainedOwnerUserId: nil) == "user-1")
     }
 
     @Test("A missing local key keeps passkey recovery available")
