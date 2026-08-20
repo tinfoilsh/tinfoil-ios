@@ -169,9 +169,14 @@ actor SyncEnclaveClient {
         }
 
         if skipAuth {
-            await requestProgress?.markRequestStarted()
             return try Self.decode(
-                response: try await performPost(client: client, url: url, headers: headers, body: bodyData),
+                response: try await performPost(
+                    client: client,
+                    url: url,
+                    headers: headers,
+                    body: bodyData,
+                    requestProgress: requestProgress
+                ),
                 path: path
             )
         }
@@ -182,9 +187,13 @@ actor SyncEnclaveClient {
         )
         try Task.checkCancellation()
         headers["Authorization"] = "Bearer \(token)"
-        await requestProgress?.markRequestStarted()
-        try Task.checkCancellation()
-        var response = try await performPost(client: client, url: url, headers: headers, body: bodyData)
+        var response = try await performPost(
+            client: client,
+            url: url,
+            headers: headers,
+            body: bodyData,
+            requestProgress: requestProgress
+        )
         try Task.checkCancellation()
         if response.statusCode == 401 {
             guard requestGeneration == tokenGeneration else { throw CancellationError() }
@@ -194,9 +203,13 @@ actor SyncEnclaveClient {
             )
             try Task.checkCancellation()
             headers["Authorization"] = "Bearer \(refreshedToken)"
-            await requestProgress?.markRequestStarted()
-            try Task.checkCancellation()
-            response = try await performPost(client: client, url: url, headers: headers, body: bodyData)
+            response = try await performPost(
+                client: client,
+                url: url,
+                headers: headers,
+                body: bodyData,
+                requestProgress: requestProgress
+            )
             try Task.checkCancellation()
             if response.statusCode == 401 {
                 let error = try await persistentAuthenticationError(generation: requestGeneration)
@@ -319,9 +332,11 @@ actor SyncEnclaveClient {
         client: SecureClient,
         url: String,
         headers: [String: String],
-        body: Data?
+        body: Data?,
+        requestProgress: SyncEnclaveRequestProgress?
     ) async throws -> SecureResponse {
         do {
+            await requestProgress?.markRequestStarted()
             return try await client.post(url: url, headers: headers, body: body)
         } catch is CancellationError {
             throw CancellationError()
