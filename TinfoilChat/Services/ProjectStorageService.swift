@@ -125,7 +125,7 @@ final class ProjectStorageService: ObservableObject {
             description: payload.description,
             systemInstructions: payload.systemInstructions,
             memory: payload.memory,
-            createdAt: existing.createdAt,
+            createdAt: createdAtFromReverseId(projectId),
             updatedAt: isoNow(),
             syncVersion: syncVersion
         )
