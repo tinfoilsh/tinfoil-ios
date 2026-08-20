@@ -65,6 +65,17 @@ struct ChatStreamState {
     }
 }
 
+struct ProjectLoadGenerationFence {
+    static func invalidate(listGeneration: inout Int, projectGeneration: inout Int) {
+        listGeneration += 1
+        projectGeneration += 1
+    }
+
+    static func isCurrent(_ generation: Int, currentGeneration: Int) -> Bool {
+        generation == currentGeneration
+    }
+}
+
 private struct GenUIRetryKey: Hashable {
     let chatId: String
     let messageId: String
@@ -1630,13 +1641,20 @@ class ChatViewModel: ObservableObject {
         isLoadingProjects = true
         projectError = nil
         defer {
-            if generation == projectListLoadGeneration {
+            if ProjectLoadGenerationFence.isCurrent(
+                generation,
+                currentGeneration: projectListLoadGeneration
+            ) {
                 isLoadingProjects = false
             }
         }
         do {
             let loadedProjects = try await projectStorage.loadProjects()
             guard accountGeneration == projectListAccountGeneration,
+                  ProjectLoadGenerationFence.isCurrent(
+                      generation,
+                      currentGeneration: projectListLoadGeneration
+                  ),
                   generation > latestAppliedProjectListLoadGeneration,
                   currentUserId == userId,
                   SettingsManager.shared.isCloudSyncEnabled else { return }
@@ -1644,7 +1662,10 @@ class ChatViewModel: ObservableObject {
             projects = loadedProjects
         } catch is CancellationError {
         } catch {
-            guard generation == projectListLoadGeneration,
+            guard ProjectLoadGenerationFence.isCurrent(
+                      generation,
+                      currentGeneration: projectListLoadGeneration
+                  ),
                   accountGeneration == projectListAccountGeneration,
                   currentUserId == userId,
                   SettingsManager.shared.isCloudSyncEnabled else { return }
@@ -1981,15 +2002,24 @@ class ChatViewModel: ObservableObject {
     /// webapp's bulk action. Throws so callers can surface the failure and
     /// leave local state untouched for a retry.
     @MainActor
-    func deleteAllProjects() async throws {
-        guard isProjectAccountActive else { return }
+    func deleteAllProjects() async throws -> Int {
+        guard isProjectAccountActive else { return 0 }
         let accountGeneration = projectListAccountGeneration
-        _ = try await projectStorage.deleteAllProjects()
-        guard isCurrentProjectAccount(accountGeneration) else { return }
+        let deleted = try await projectStorage.deleteAllProjects()
+        guard isCurrentProjectAccount(accountGeneration) else { return deleted }
+        ProjectLoadGenerationFence.invalidate(
+            listGeneration: &projectListLoadGeneration,
+            projectGeneration: &projectLoadGeneration
+        )
         projects = []
+        projectDocuments = []
+        projectError = nil
+        isLoadingProjects = false
+        isLoadingProject = false
         if activeProject != nil {
             exitProject()
         }
+        return deleted
     }
 
     func deleteActiveProject() async {

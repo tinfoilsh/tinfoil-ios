@@ -6,6 +6,21 @@
 import Foundation
 
 struct SyncEnclaveProjectStore {
+    private let deleteAllProjectsOperation: (
+        EnclaveDeleteAllProjectsRequest
+    ) async throws -> EnclaveDeleteAllProjectsResponse
+    private let requirePrimaryKeyB64: () throws -> String
+
+    init(
+        deleteAllProjectsOperation: @escaping (
+            EnclaveDeleteAllProjectsRequest
+        ) async throws -> EnclaveDeleteAllProjectsResponse = SyncEnclaveAPI.deleteAllProjects,
+        requirePrimaryKeyB64: @escaping () throws -> String = CEKEncoding.requirePrimaryKeyB64
+    ) {
+        self.deleteAllProjectsOperation = deleteAllProjectsOperation
+        self.requirePrimaryKeyB64 = requirePrimaryKeyB64
+    }
+
     func createProject(id: String, data: CreateProjectData) async throws -> (ProjectData, Int) {
         let payload = ProjectData(
             name: data.name,
@@ -62,28 +77,14 @@ struct SyncEnclaveProjectStore {
     }
 
     func deleteAllProjects() async throws -> Int {
-        let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
-        var deleted = 0
-        var cursor: String? = nil
-        repeat {
-            let status = try await SyncEnclaveAPI.listStatus(
-                EnclaveListStatusRequest(scope: .project, cursor: cursor, limit: Constants.SyncEnclave.listStatusPageLimit, projectId: nil)
+        let response = try await deleteAllProjectsOperation(
+            EnclaveDeleteAllProjectsRequest(
+                key: try requirePrimaryKeyB64(),
+                idempotencyKey: newSyncEnclaveIdempotencyKey()
             )
-            for update in status.updates {
-                _ = try await SyncEnclaveAPI.deleteRow(
-                    EnclaveDeleteRequest(
-                        scope: .project,
-                        id: update.id,
-                        ifMatch: nil,
-                        idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                        key: keyB64
-                    )
-                )
-                deleted += 1
-            }
-            cursor = status.nextCursor
-        } while hasNextCursor(cursor)
-        return deleted
+        )
+        guard response.ok else { throw CloudStorageError.invalidResponse }
+        return response.deleted
     }
 
     func uploadDocument(
@@ -203,10 +204,5 @@ struct SyncEnclaveProjectStore {
     private func etagToSyncVersion(_ etag: String?) -> Int {
         guard let etag, let value = Int(etag), value > 0 else { return 1 }
         return value
-    }
-
-    private func hasNextCursor(_ cursor: String?) -> Bool {
-        guard let cursor else { return false }
-        return !cursor.isEmpty
     }
 }

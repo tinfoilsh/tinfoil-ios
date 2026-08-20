@@ -392,6 +392,21 @@ struct EnclaveDeleteRequest: Encodable {
     }
 }
 
+struct EnclaveDeleteAllProjectsRequest: Encodable, Sendable {
+    let key: String
+    let idempotencyKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case idempotencyKey = "idempotency_key"
+    }
+}
+
+struct EnclaveDeleteAllProjectsResponse: Decodable, Sendable {
+    let ok: Bool
+    let deleted: Int
+}
+
 struct EnclaveOKResponse: Decodable {
     let ok: Bool
 }
@@ -849,6 +864,12 @@ enum SyncEnclaveAPI {
     @discardableResult
     static func deleteRow(_ request: EnclaveDeleteRequest) async throws -> EnclaveOKResponse {
         try await SyncEnclaveClient.shared.post(path: "/v1/sync/delete", body: request)
+    }
+
+    static func deleteAllProjects(
+        _ request: EnclaveDeleteAllProjectsRequest
+    ) async throws -> EnclaveDeleteAllProjectsResponse {
+        try await SyncEnclaveClient.shared.post(path: "/v1/sync/delete-all-projects", body: request)
     }
 
     // MARK: Key registry

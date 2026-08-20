@@ -828,7 +828,7 @@ struct SettingsView: View {
             itemsName: "projects",
             setDeleting: { isDeletingAllProjects = $0 }
         ) {
-            try await chatViewModel.deleteAllProjects()
+            _ = try await chatViewModel.deleteAllProjects()
         }
     }
 
