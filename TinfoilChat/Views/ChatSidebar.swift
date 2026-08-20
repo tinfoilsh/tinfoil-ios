@@ -439,6 +439,7 @@ struct ChatSidebar: View {
                     syncFailed: !chat.isBlankChat && syncHealth.failedChats[chat.id] != nil,
                     isGenerating: viewModel.isChatStreaming(chat.id),
                     isPinned: profileManager.isChatPinned(chat.id),
+                    projectColor: viewModel.projects.first { $0.id == chat.projectId }?.color,
                     onSelect: {
                         if isChatSearchActive {
                             if !chatSearch.available {
@@ -496,7 +497,11 @@ struct ChatSidebar: View {
                                     await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
                                 }
                             } label: {
-                                Label("Add to \(project.name)", systemImage: "folder")
+                                Label {
+                                    Text("Add to \(project.name)")
+                                } icon: {
+                                    ProjectFolderIcon(color: project.color, size: 22)
+                                }
                             }
                         }
                     }
@@ -579,6 +584,7 @@ struct ChatSidebar: View {
             isGenerating: viewModel.isChatStreaming(chat.id),
             isPinned: true,
             showPinnedIndicator: false,
+            projectColor: viewModel.projects.first { $0.id == chat.projectId }?.color,
             onSelect: { viewModel.openSearchResult(chat) },
             onEdit: {
                 if editingChatId == chat.id {
@@ -622,10 +628,11 @@ struct ChatSidebar: View {
                         await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
                     }
                 } label: {
-                    Label(
-                        chat.projectId == nil ? "Add to \(project.name)" : "Move to \(project.name)",
-                        systemImage: "folder"
-                    )
+                    Label {
+                        Text(chat.projectId == nil ? "Add to \(project.name)" : "Move to \(project.name)")
+                    } icon: {
+                        ProjectFolderIcon(color: project.color, size: 22)
+                    }
                 }
             }
         }
@@ -773,8 +780,12 @@ struct ChatSidebar: View {
                         }
                     } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: project.decryptionFailed == true ? "lock.fill" : "folder")
-                                .foregroundColor(project.decryptionFailed == true ? .orange : .accentColor)
+                            if project.decryptionFailed == true {
+                                Image(systemName: "lock.fill")
+                                    .foregroundColor(.orange)
+                            } else {
+                                ProjectFolderIcon(color: project.color)
+                            }
                             Text(project.name)
                                 .lineLimit(1)
                             Spacer()
@@ -942,6 +953,7 @@ struct ChatListItem: View {
     var isGenerating: Bool = false
     var isPinned: Bool = false
     var showPinnedIndicator: Bool = true
+    var projectColor: String? = nil
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -976,9 +988,7 @@ struct ChatListItem: View {
                     } else {
                         HStack(spacing: 4) {
                             if chat.projectId != nil {
-                                Image(systemName: "folder")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                                ProjectFolderIcon(color: projectColor, size: 18)
                                     .accessibilityHidden(true)
                             }
                             if isPinned && showPinnedIndicator {
