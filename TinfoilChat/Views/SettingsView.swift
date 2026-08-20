@@ -32,30 +32,35 @@ class SettingsManager: ObservableObject {
     // Personalization settings
     @Published var isPersonalizationEnabled: Bool {
         didSet {
+            guard !isAccountDerivedStateHidden else { return }
             UserDefaults.standard.set(isPersonalizationEnabled, forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled)
         }
     }
     
     @Published var nickname: String {
         didSet {
+            guard !isAccountDerivedStateHidden else { return }
             UserDefaults.standard.set(nickname, forKey: Constants.StorageKeys.UserPrefs.nickname)
         }
     }
     
     @Published var profession: String {
         didSet {
+            guard !isAccountDerivedStateHidden else { return }
             UserDefaults.standard.set(profession, forKey: Constants.StorageKeys.UserPrefs.profession)
         }
     }
     
     @Published var selectedTraits: [String] {
         didSet {
+            guard !isAccountDerivedStateHidden else { return }
             UserDefaults.standard.set(selectedTraits, forKey: Constants.StorageKeys.UserPrefs.traits)
         }
     }
     
     @Published var additionalContext: String {
         didSet {
+            guard !isAccountDerivedStateHidden else { return }
             UserDefaults.standard.set(additionalContext, forKey: Constants.StorageKeys.UserPrefs.additionalContext)
         }
     }
@@ -63,12 +68,14 @@ class SettingsManager: ObservableObject {
     // Custom system prompt settings
     @Published var isUsingCustomPrompt: Bool {
         didSet {
+            guard !isAccountDerivedStateHidden else { return }
             UserDefaults.standard.set(isUsingCustomPrompt, forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled)
         }
     }
     
     @Published var customSystemPrompt: String {
         didSet {
+            guard !isAccountDerivedStateHidden else { return }
             UserDefaults.standard.set(customSystemPrompt, forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt)
         }
     }
@@ -78,6 +85,7 @@ class SettingsManager: ObservableObject {
     // sync callbacks and to prevent re-entering ProfileManager.shared while its
     // singleton is still being initialized (applyProfile runs inside init).
     var isApplyingSharedProfile = false
+    private var isAccountDerivedStateHidden = false
 
     @Published var webSearchAvailable: Bool {
         didSet {
@@ -225,6 +233,43 @@ class SettingsManager: ObservableObject {
         genUIEnabled = ProfileDefaults.genUIEnabled
         isCloudSyncEnabled = false
         isLocalOnlyModeEnabled = false
+    }
+
+    func hideAccountDerivedState() {
+        isAccountDerivedStateHidden = true
+        isPersonalizationEnabled = ProfileDefaults.isUsingPersonalization
+        nickname = ProfileDefaults.nickname
+        profession = ProfileDefaults.profession
+        selectedTraits = ProfileDefaults.traits
+        additionalContext = ProfileDefaults.additionalContext
+        isUsingCustomPrompt = ProfileDefaults.isUsingCustomPrompt
+        customSystemPrompt = ProfileDefaults.customSystemPrompt
+    }
+
+    func resumeAccountDerivedState() {
+        guard isAccountDerivedStateHidden else { return }
+        isPersonalizationEnabled = UserDefaults.standard.object(
+            forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled
+        ) as? Bool ?? ProfileDefaults.isUsingPersonalization
+        nickname = UserDefaults.standard.string(
+            forKey: Constants.StorageKeys.UserPrefs.nickname
+        ) ?? ProfileDefaults.nickname
+        profession = UserDefaults.standard.string(
+            forKey: Constants.StorageKeys.UserPrefs.profession
+        ) ?? ProfileDefaults.profession
+        selectedTraits = UserDefaults.standard.array(
+            forKey: Constants.StorageKeys.UserPrefs.traits
+        ) as? [String] ?? ProfileDefaults.traits
+        additionalContext = UserDefaults.standard.string(
+            forKey: Constants.StorageKeys.UserPrefs.additionalContext
+        ) ?? ProfileDefaults.additionalContext
+        isUsingCustomPrompt = UserDefaults.standard.object(
+            forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled
+        ) as? Bool ?? ProfileDefaults.isUsingCustomPrompt
+        customSystemPrompt = UserDefaults.standard.string(
+            forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt
+        ) ?? ProfileDefaults.customSystemPrompt
+        isAccountDerivedStateHidden = false
     }
 
     // Generate user preferences XML for system prompt.

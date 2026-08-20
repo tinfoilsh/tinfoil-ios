@@ -241,7 +241,8 @@ class AuthManager: ObservableObject {
             
             // Now set authenticated, which will trigger observers
             self.isAuthenticated = true
-            
+            resumeAccountDataAccess(for: user.id, hydrationToken: hydrationToken)
+
             // Handle sign in for chat if not already triggered
             if isCurrentAuthTransition(hydrationToken),
                !hasTriggeredSignIn,
@@ -255,6 +256,7 @@ class AuthManager: ObservableObject {
     private func beginAuthTransition() -> UInt64 {
         isAccountDataAccessReady = false
         ProfileManager.shared.pauseAccountAccess()
+        SettingsManager.shared.hideAccountDerivedState()
         return authHydrationGeneration.advance()
     }
 
@@ -283,6 +285,8 @@ class AuthManager: ObservableObject {
               localUserId == userId,
               isAuthenticated else { return }
         ProfileManager.shared.resumeAccountAccess()
+        SettingsManager.shared.resumeAccountDerivedState()
+        chatViewModel?.resumeAccountDataAccess(validatedOwnerUserId: userId)
         isAccountDataAccessReady = true
     }
     

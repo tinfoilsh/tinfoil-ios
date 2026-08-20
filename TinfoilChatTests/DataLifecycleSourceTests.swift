@@ -246,6 +246,91 @@ struct DataLifecycleSourceTests {
         #expect(!signIn.contains("signInTask = canceledTask"))
     }
 
+    @Test("Passive auth loss hides account UI without deleting storage")
+    func passiveAuthLossHidesAccountDataWithoutDeletion() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let passiveLoss = try functionBody(named: "func handlePassiveAuthLoss()", in: source)
+
+        for hiddenState in [
+            "chats = []",
+            "localChats = []",
+            "cloudSidebarSummaries = []",
+            "localSidebarSummaries = []",
+            "currentChat = nil",
+            "clearProjectState()",
+            "clearPendingAttachments(acknowledgeSharedImports: false)",
+            "navigationRequest = nil"
+        ] {
+            #expect(passiveLoss.contains(hiddenState))
+        }
+        #expect(passiveLoss.contains("acceptsChatSaves = false"))
+        #expect(passiveLoss.contains("accountLifecycleGeneration += 1"))
+        #expect(passiveLoss.contains("pausePreservingPendingImports"))
+        #expect(!passiveLoss.contains("deleteAllChatsFromStorage"))
+        #expect(!passiveLoss.contains("passkeyManager.reset()"))
+        #expect(!passiveLoss.contains("discardAllPending"))
+        #expect(!passiveLoss.contains("clearKey()"))
+    }
+
+    @Test("Passive passkey pause cancels stale recovery and preserves metadata")
+    func passivePasskeyPausePreservesRecoveryMetadata() throws {
+        let source = try sourceFile("TinfoilChat/Services/Passkey/PasskeyManager.swift")
+        let pause = try functionBody(
+            named: "func pauseAccountOperationsPreservingCredentials",
+            in: source
+        )
+        let resume = try functionBody(
+            named: "func resumeAccountOperations(validatedOwnerUserId:",
+            in: source
+        )
+
+        #expect(pause.contains("accountOperationsEnabled = false"))
+        #expect(pause.contains("await accountOperationTracker.closeAndWait()"))
+        #expect(pause.contains("canceledSyncCheckTask?.cancel()"))
+        #expect(pause.contains("await canceledSyncCheckTask?.value"))
+        #expect(pause.contains("passkeyService.clearCachedPrfResult()"))
+        #expect(pause.contains("onRecoveryComplete = nil"))
+        #expect(pause.contains("onKeyRefreshedFromBackup = nil"))
+        #expect(!pause.contains("passkeyEnclaveKeyId"))
+        #expect(!pause.contains("passkeyEnclaveCredentialId"))
+        #expect(!pause.contains("setDismissedRecoveryKeyId"))
+        #expect(resume.contains("pausedOwnerUserId == validatedOwnerUserId"))
+    }
+
+    @Test("Validated same-owner sign-in reopens and rehydrates preserved state")
+    func sameOwnerSignInRehydratesPreservedState() throws {
+        let authSource = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let chatSource = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let profileSource = try sourceFile("TinfoilChat/Services/ProfileManager.swift")
+        let settingsSource = try sourceFile("TinfoilChat/Views/SettingsView.swift")
+        let beginTransition = try functionBody(named: "private func beginAuthTransition()", in: authSource)
+        let resume = try functionBody(named: "private func resumeAccountDataAccess", in: authSource)
+        let chatResume = try functionBody(
+            named: "func resumeAccountDataAccess(validatedOwnerUserId:",
+            in: chatSource
+        )
+        let profilePause = try functionBody(named: "func pauseAccountAccess()", in: profileSource)
+        let profileResume = try functionBody(named: "func resumeAccountAccess()", in: profileSource)
+        let settingsHide = try functionBody(named: "func hideAccountDerivedState()", in: settingsSource)
+        let settingsResume = try functionBody(named: "func resumeAccountDerivedState()", in: settingsSource)
+        let signIn = try functionBody(named: "private func performSignIn(", in: chatSource)
+
+        #expect(beginTransition.contains("SettingsManager.shared.hideAccountDerivedState()"))
+        #expect(profilePause.contains("applyDefaultProfile()"))
+        #expect(settingsHide.contains("nickname = ProfileDefaults.nickname"))
+        #expect(resume.contains("clerk?.user?.id == userId"))
+        #expect(resume.contains("localUserId == userId"))
+        #expect(resume.contains("ProfileManager.shared.resumeAccountAccess()"))
+        #expect(resume.contains("resumeAccountDataAccess(validatedOwnerUserId: userId)"))
+        #expect(chatResume.contains("passkeyManager.resumeAccountOperations"))
+        #expect(chatResume.contains("accountOperationTracker.reopen()"))
+        #expect(chatResume.contains("acceptsChatSaves = true"))
+        #expect(profileResume.contains("loadFromKeychain()"))
+        #expect(settingsResume.contains("Constants.StorageKeys.UserPrefs.nickname"))
+        #expect(signIn.contains("refreshLocalSummaryIndex(userId: userId)"))
+        #expect(signIn.contains("refreshCloudSummaryIndex(userId: userId)"))
+    }
+
     @Test("Auth hydration revalidates after cancellation before publishing")
     func authHydrationRevalidatesAfterCancellation() throws {
         let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")

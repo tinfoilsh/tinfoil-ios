@@ -268,6 +268,7 @@ class ChatViewModel: ObservableObject {
     @Published var isSyncing: Bool = false
     @Published var lastSyncDate: Date? {
         didSet {
+            guard persistsLastSyncDateChanges else { return }
             // Persist to UserDefaults whenever it changes (scoped to user)
             if let date = lastSyncDate, let userId = currentUserId {
                 UserDefaults.standard.set(date, forKey: Constants.StorageKeys.Sync.lastSyncDate(userId: userId))
@@ -277,6 +278,7 @@ class ChatViewModel: ObservableObject {
         }
     }
     @Published var syncErrors: [String] = []
+    private var persistsLastSyncDateChanges = true
     private var encryptionKey: String? {  // Keep private for security
         didSet {
             if encryptionKey != nil, authManager?.isAuthenticated == true {
@@ -498,6 +500,7 @@ class ChatViewModel: ObservableObject {
     private var lastKnownAuthState: Bool?
     @Published private var genUIRetryStates: [GenUIRetryKey: GenUIRetryState] = [:]
     private var activeGenUIRetryIds: [GenUIRetryKey: UUID] = [:]
+    private var genUIRetryTasks: [GenUIRetryKey: Task<Void, Never>] = [:]
     
     // Auth reference for Premium features
     @Published var authManager: AuthManager? {
@@ -5090,7 +5093,7 @@ class ChatViewModel: ObservableObject {
         activeGenUIRetryIds[key] = requestId
         genUIRetryStates[key] = .generating
 
-        Task { [weak self] in
+        let task = Task { [weak self] in
             await self?.performGenUIToolCallRetry(
                 key: key,
                 requestId: requestId,
@@ -5104,6 +5107,7 @@ class ChatViewModel: ObservableObject {
                 widget: widget
             )
         }
+        genUIRetryTasks[key] = task
     }
 
     private func performGenUIToolCallRetry(
@@ -5269,6 +5273,7 @@ class ChatViewModel: ObservableObject {
         updateChat(chat)
         activeGenUIRetryIds[key] = nil
         genUIRetryStates[key] = nil
+        genUIRetryTasks[key] = nil
     }
 
     private func finishGenUIRetry(
@@ -5279,6 +5284,7 @@ class ChatViewModel: ObservableObject {
         guard activeGenUIRetryIds[key] == requestId else { return }
         activeGenUIRetryIds[key] = nil
         genUIRetryStates[key] = state
+        genUIRetryTasks[key] = nil
     }
 
     /// Regenerates the last assistant response by removing it and resending the last user message
@@ -5807,10 +5813,120 @@ class ChatViewModel: ObservableObject {
     }
 
     func handlePassiveAuthLoss() async {
+        let ownerUserId = accountLifecycleUserId ?? currentUserId
+        acceptsChatSaves = false
+        accountLifecycleGeneration += 1
+        chatSelectionFence.invalidate()
+        navigationGeneration += 1
+
+        autoSyncTimer?.invalidate()
+        autoSyncTimer = nil
+        let canceledAutoSyncTask = autoSyncTask
+        autoSyncTask = nil
+        canceledAutoSyncTask?.cancel()
+        recoveryScanTimer?.invalidate()
+        recoveryScanTimer = nil
+        let sharedImportPauseTask = Task {
+            try? await SharedImportCoordinator.shared.pausePreservingPendingImports()
+        }
+
         let canceledSignInTask = cancelSignInOperation()
         let canceledLegacyMigrationTask = cancelLegacyMigration()
+        let canceledStreamTasks = cancelAllGenerations()
+        let canceledAttachmentTasks = Array(attachmentProcessingTasks.values)
+        let canceledPasteStagingTasks = Array(pasteStagingTasks.values)
+        clearPendingAttachments(acknowledgeSharedImports: false)
+        let canceledProjectUploadTasks = Array(projectUploadTasks.values)
+        cancelProjectUploads()
+        let canceledFavoriteTasks = exactFavoriteHydrationOperations.values.map(\.task)
+        let canceledGenUIRetryTasks = Array(genUIRetryTasks.values)
+        canceledGenUIRetryTasks.forEach { $0.cancel() }
+        genUIRetryTasks.removeAll()
+        activeGenUIRetryIds.removeAll()
+        genUIRetryStates.removeAll()
+        let canceledSelectionTask = chatSelectionTask
+        chatSelectionTask = nil
+        canceledSelectionTask?.cancel()
+        let canceledImageTask = selectedChatImageTask
+        selectedChatImageTask = nil
+        canceledImageTask?.cancel()
+        let canceledRecoveryCleanupTasks = Array(recoverySessionCleanupTasks.values)
+        canceledRecoveryCleanupTasks.forEach { $0.cancel() }
+        recoverySessionCleanupTasks.removeAll()
+        let canceledBackupTasks = Array(pendingBackupTasks.values)
+        canceledBackupTasks.forEach { $0.cancel() }
+
+        clearHydratedFavorites()
+        clearProjectState()
+        chats = []
+        localChats = []
+        cloudSidebarSummaries = []
+        localSidebarSummaries = []
+        currentChat = nil
+        selectedChatId = nil
+        hydratingChatId = nil
+        chatHydrationError = nil
+        failedChatHydration = nil
+        messageQueues.removeAll()
+        streamState = ChatStreamState()
+        pendingStreamUpdates.removeAll()
+        streamUpdateTimers.values.forEach { $0.invalidate() }
+        streamUpdateTimers.removeAll()
+        imageViewerImages = []
+        imageViewerIndex = 0
+        showImageViewer = false
+        navigationRequest = nil
+        pendingSearchResultChatId = nil
+        activeStorageTab = .cloud
+        showDocumentPicker = false
+        showPhotoPicker = false
+        showCamera = false
+        showMessageSheet = false
+        showSidebarSettings = false
+        showCloudSyncOnboarding = false
+        shouldOpenCloudSync = false
+        shouldExpandProjectsInSidebar = false
+        isFirstTimeUser = false
+        showEncryptionSetup = false
+        shouldShowKeyImport = false
+        isSyncing = false
+        syncErrors = []
+        persistsLastSyncDateChanges = false
+        lastSyncDate = nil
+        persistsLastSyncDateChanges = true
+
+        await accountOperationTracker.closeAndWait()
+        await passkeyManager.pauseAccountOperationsPreservingCredentials(ownerUserId: ownerUserId)
         await canceledSignInTask?.value
         await canceledLegacyMigrationTask?.value
+        await canceledAutoSyncTask?.value
+        await suspendRecoveryScans()
+        await drainStreamTasks(canceledStreamTasks)
+        for task in canceledAttachmentTasks { await task.value }
+        for task in canceledPasteStagingTasks { await task.value }
+        for task in canceledProjectUploadTasks { await task.value }
+        for task in canceledFavoriteTasks { _ = await task.value }
+        for task in canceledGenUIRetryTasks { await task.value }
+        await canceledSelectionTask?.value
+        await canceledImageTask?.value
+        for task in canceledRecoveryCleanupTasks { await task.value }
+        for task in canceledBackupTasks { await task.value }
+        await pendingSaveTask?.value
+        pendingSaveTask = nil
+        pendingBackupTasks.removeAll()
+        await sharedImportPauseTask.value
+    }
+
+    func resumeAccountDataAccess(validatedOwnerUserId: String) {
+        guard authManager?.isAuthenticated == true,
+              currentUserId == validatedOwnerUserId,
+              accountLifecycleUserId == nil || accountLifecycleUserId == validatedOwnerUserId,
+              passkeyManager.resumeAccountOperations(
+                validatedOwnerUserId: validatedOwnerUserId
+              ) else { return }
+        accountLifecycleUserId = validatedOwnerUserId
+        acceptsChatSaves = true
+        accountOperationTracker.reopen()
     }
 
     func completeAccountTeardown() {
@@ -6210,8 +6326,6 @@ class ChatViewModel: ObservableObject {
             accountLifecycleUserId = userId
             accountLifecycleGeneration += 1
         }
-
-        passkeyManager.resumeAccountOperations()
 
         // Wire up passkey recovery callback
         passkeyManager.onRecoveryComplete = { [weak self] in

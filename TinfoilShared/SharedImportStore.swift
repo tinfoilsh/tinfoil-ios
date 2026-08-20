@@ -294,6 +294,15 @@ struct SharedImportStore: @unchecked Sendable {
         }
     }
 
+    func blockPublications() throws {
+        try withCoordinatedInboxWrite {
+            guard fileManager.fileExists(atPath: publicationBlockURL.path)
+                || fileManager.createFile(atPath: publicationBlockURL.path, contents: Data()) else {
+                throw SharedImportError.invalidFile
+            }
+        }
+    }
+
     func allowPublications() throws {
         try withCoordinatedInboxWrite {
             try removeIfPresent(at: publicationBlockURL)

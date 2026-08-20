@@ -123,6 +123,7 @@ class ProfileManager: ObservableObject {
     
     /// Save profile to Keychain
     private func saveToKeychain() {
+        guard !isAccountAccessPaused else { return }
         let profile = createProfileData()
 
         persistProfileToKeychain(profile)
@@ -588,9 +589,12 @@ class ProfileManager: ObservableObject {
         syncDebounceTimer?.invalidate()
         syncDebounceTimer = nil
         fullSyncTask?.cancel()
+        applyDefaultProfile()
     }
 
     func resumeAccountAccess() {
+        guard isAccountAccessPaused else { return }
+        loadFromKeychain()
         isAccountAccessPaused = false
     }
     

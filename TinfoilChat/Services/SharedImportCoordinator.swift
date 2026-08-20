@@ -141,6 +141,20 @@ final class SharedImportCoordinator {
         }.value
     }
 
+    func pausePreservingPendingImports() async throws {
+        try await Task.detached(priority: .utility) {
+            let store = try SharedImportStore()
+            try store.blockPublications()
+        }.value
+        if let importTask {
+            importTask.cancel()
+            await importTask.value
+            self.importTask = nil
+        }
+        let acknowledgements = Array(acknowledgementTasks.values)
+        for task in acknowledgements { await task.value }
+    }
+
     func allowPublications() async throws {
         try await Task.detached(priority: .utility) {
             let store = try SharedImportStore()

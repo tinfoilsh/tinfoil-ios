@@ -243,6 +243,31 @@ struct SharedImportStoreTests {
         #expect(fixture.store.pendingRequests() == [request])
     }
 
+    @Test("Passive publication pause preserves pending imports")
+    func publicationPausePreservesPendingImports() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+        let request = try fixture.store.enqueue(
+            data: Data("Shared text".utf8),
+            typeIdentifier: UTType.plainText.identifier,
+            originalFileName: "Notes.txt"
+        )
+
+        try fixture.store.blockPublications()
+
+        #expect(fixture.store.pendingRequests() == [request])
+        #expect(throws: SharedImportError.self) {
+            try fixture.store.enqueue(
+                data: Data("New text".utf8),
+                typeIdentifier: UTType.plainText.identifier,
+                originalFileName: "New Notes.txt"
+            )
+        }
+
+        try fixture.store.allowPublications()
+        #expect(fixture.store.pendingRequests() == [request])
+    }
+
     private func makeFixture() throws -> (
         store: SharedImportStore,
         rootURL: URL,

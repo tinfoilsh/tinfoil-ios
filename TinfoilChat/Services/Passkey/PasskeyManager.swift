@@ -65,6 +65,7 @@ final class PasskeyManager: ObservableObject {
 
     private var syncCheckTask: Task<Void, Never>?
     private var accountOperationsEnabled = true
+    private var pausedOwnerUserId: String?
     private let accountOperationTracker = AccountOperationTracker()
     private let passkeyService = PasskeyService.shared
 
@@ -126,14 +127,40 @@ final class PasskeyManager: ObservableObject {
         setDismissedRecoveryKeyId(nil)
         onRecoveryComplete = nil
         onKeyRefreshedFromBackup = nil
+        pausedOwnerUserId = nil
         passkeyService.clearCachedPrfResult()
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId)
     }
 
-    func resumeAccountOperations() {
+    func pauseAccountOperationsPreservingCredentials(ownerUserId: String?) async {
+        accountOperationsEnabled = false
+        pausedOwnerUserId = ownerUserId ?? pausedOwnerUserId
+        await accountOperationTracker.closeAndWait()
+        let canceledSyncCheckTask = syncCheckTask
+        canceledSyncCheckTask?.cancel()
+        syncCheckTask = nil
+        await canceledSyncCheckTask?.value
+
+        passkeyActive = false
+        passkeySetupAvailable = false
+        passkeyAddDeviceAvailable = false
+        showPasskeyRecoveryChoice = false
+        pendingRecoveryKeyId = nil
+        onRecoveryComplete = nil
+        onKeyRefreshedFromBackup = nil
+        passkeyService.clearCachedPrfResult()
+    }
+
+    @discardableResult
+    func resumeAccountOperations(validatedOwnerUserId: String) -> Bool {
+        guard pausedOwnerUserId == nil || pausedOwnerUserId == validatedOwnerUserId else {
+            return false
+        }
+        pausedOwnerUserId = nil
         accountOperationsEnabled = true
         accountOperationTracker.reopen()
+        return true
     }
 
     // MARK: - Recovery Flow
