@@ -1960,15 +1960,8 @@ class ChatViewModel: ObservableObject {
                 systemInstructions: systemInstructions,
                 memory: memory
             )
-            try await projectStorage.updateProject(project.id, data: update)
+            let updated = try await projectStorage.updateProject(project.id, data: update)
             guard isCurrentProjectAccount(accountGeneration) else { return }
-            var updated = project
-            updated.name = name ?? updated.name
-            updated.color = color ?? updated.color
-            updated.description = description ?? updated.description
-            updated.systemInstructions = systemInstructions ?? updated.systemInstructions
-            updated.memory = memory ?? updated.memory
-            updated.updatedAt = ISO8601DateFormatter().string(from: Date())
             activeProject = updated
             if let index = projects.firstIndex(where: { $0.id == updated.id }) {
                 projects[index] = updated
@@ -2022,7 +2015,10 @@ class ChatViewModel: ObservableObject {
             }
         }
         do {
-            let sizeBytes = try Data(contentsOf: url, options: .mappedIfSafe).count
+            let resourceValues = try url.resourceValues(forKeys: [.fileSizeKey])
+            guard let sizeBytes = resourceValues.fileSize else {
+                throw CocoaError(.fileReadUnknown)
+            }
             let markdown = try await DocumentConversionService.shared.convertToMarkdown(
                 url: url,
                 filename: filename
