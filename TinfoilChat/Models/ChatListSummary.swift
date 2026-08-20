@@ -10,7 +10,7 @@ struct ChatListSummary: Identifiable, Equatable, Sendable {
     let title: String
     let createdAt: Date
     let updatedAt: Date
-    let projectId: String?
+    var projectId: String?
     let isLocalOnly: Bool
     let decryptionFailed: Bool
     let dataCorrupted: Bool

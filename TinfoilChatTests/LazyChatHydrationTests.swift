@@ -183,6 +183,50 @@ struct LazyChatHydrationTests {
     }
 
     @Test
+    func projectDeletionDetachesRetainedChatsAndSidebarSummaries() async throws {
+        let service = RecordingChatLoadingService()
+        var cloudChat = makeChat(id: "cloud-project", updatedAt: Date())
+        cloudChat.projectId = "project"
+        cloudChat.projectLocallyModified = true
+        var localChat = makeChat(id: "local-project", updatedAt: Date())
+        localChat.projectId = "project"
+        localChat.projectLocallyModified = true
+        localChat.isLocalOnly = true
+        let rootChat = makeChat(id: "root", updatedAt: Date())
+        await service.setIndex(
+            [ChatIndexEntry(from: cloudChat), ChatIndexEntry(from: rootChat)],
+            storage: .cloud
+        )
+        await service.setIndex([ChatIndexEntry(from: localChat)], storage: .local)
+        await service.setChat(cloudChat, storage: .cloud)
+        await service.setChat(rootChat, storage: .cloud)
+        await service.setChat(localChat, storage: .local)
+        var summaries = [ChatListSummary(from: cloudChat), ChatListSummary(from: rootChat)]
+
+        let detachedSummaryIds = ChatProjectDetachment.detachSummaries(&summaries)
+        let cloudResult = try await ChatProjectDetachment.persist(
+            userId: "user",
+            storage: .cloud,
+            loadingService: service
+        )
+        let localResult = try await ChatProjectDetachment.persist(
+            userId: "user",
+            storage: .local,
+            loadingService: service
+        )
+
+        #expect(detachedSummaryIds == Set([cloudChat.id]))
+        #expect(summaries.allSatisfy { $0.projectId == nil })
+        #expect(cloudResult == .init(detachedIds: [cloudChat.id], failedIds: []))
+        #expect(localResult == .init(detachedIds: [localChat.id], failedIds: []))
+        #expect(await service.savedChat(id: cloudChat.id, storage: .cloud)?.projectId == nil)
+        #expect(await service.savedChat(id: localChat.id, storage: .local)?.projectId == nil)
+        #expect(await service.savedChat(id: cloudChat.id, storage: .cloud)?.projectLocallyModified == false)
+        #expect(await service.savedChat(id: localChat.id, storage: .local)?.projectLocallyModified == false)
+        #expect(await service.counts().saves == 2)
+    }
+
+    @Test
     func newerTransientSummaryOverridesOlderIndexSummary() {
         let older = makeChat(id: "chat", updatedAt: Date(timeIntervalSince1970: 1))
         var newer = older

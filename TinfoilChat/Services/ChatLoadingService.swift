@@ -432,6 +432,58 @@ enum ChatProjectStorageTransition {
     }
 }
 
+enum ChatProjectDetachment {
+    struct Result: Equatable {
+        let detachedIds: [String]
+        let failedIds: [String]
+    }
+
+    static func detachSummaries(_ summaries: inout [ChatListSummary]) -> Set<String> {
+        var detachedIds: Set<String> = []
+        for index in summaries.indices where summaries[index].projectId != nil {
+            detachedIds.insert(summaries[index].id)
+            summaries[index].projectId = nil
+        }
+        return detachedIds
+    }
+
+    static func detachChats(_ chats: inout [Chat]) {
+        for index in chats.indices where chats[index].projectId != nil {
+            chats[index].projectId = nil
+            chats[index].projectLocallyModified = false
+        }
+    }
+
+    @MainActor
+    static func persist(
+        userId: String,
+        storage: ChatStorageTab,
+        loadingService: any ChatLoadingService
+    ) async throws -> Result {
+        let entries = try await loadingService.loadIndex(userId: userId, storage: storage)
+        var detachedIds: [String] = []
+        var failedIds: [String] = []
+
+        for entry in entries where entry.projectId != nil {
+            do {
+                var chat = try await loadingService.loadChat(
+                    id: entry.id,
+                    userId: userId,
+                    storage: storage
+                )
+                chat.projectId = nil
+                chat.projectLocallyModified = false
+                try await loadingService.saveChat(chat, userId: userId, storage: storage)
+                detachedIds.append(chat.id)
+            } catch {
+                failedIds.append(entry.id)
+            }
+        }
+
+        return Result(detachedIds: detachedIds, failedIds: failedIds)
+    }
+}
+
 enum ChatSummaryState {
     static func page(
         from entries: [ChatIndexEntry],

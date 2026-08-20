@@ -2005,12 +2005,14 @@ class ChatViewModel: ObservableObject {
     func deleteAllProjects() async throws -> Int {
         guard isProjectAccountActive else { return 0 }
         let accountGeneration = projectListAccountGeneration
+        let userId = currentUserId
         let deleted = try await projectStorage.deleteAllProjects()
         guard isCurrentProjectAccount(accountGeneration) else { return deleted }
         ProjectLoadGenerationFence.invalidate(
             listGeneration: &projectListLoadGeneration,
             projectGeneration: &projectLoadGeneration
         )
+        detachRetainedChatStateFromProjects()
         projects = []
         projectDocuments = []
         projectError = nil
@@ -2019,7 +2021,42 @@ class ChatViewModel: ObservableObject {
         if activeProject != nil {
             exitProject()
         }
+        if let userId {
+            await persistRetainedChatProjectDetachment(userId: userId)
+        }
         return deleted
+    }
+
+    private func detachRetainedChatStateFromProjects() {
+        let detachedCloudIds = ChatProjectDetachment.detachSummaries(&cloudSidebarSummaries)
+        _ = ChatProjectDetachment.detachSummaries(&localSidebarSummaries)
+        loadedCloudRootSummaryIds.formUnion(detachedCloudIds)
+        ChatProjectDetachment.detachChats(&chats)
+        ChatProjectDetachment.detachChats(&localChats)
+        ChatProjectDetachment.detachChats(&favoriteChats)
+        if currentChat?.projectId != nil {
+            currentChat?.projectId = nil
+            currentChat?.projectLocallyModified = false
+        }
+    }
+
+    private func persistRetainedChatProjectDetachment(userId: String) async {
+        for storage in [ChatStorageTab.local, .cloud] {
+            do {
+                let result = try await ChatProjectDetachment.persist(
+                    userId: userId,
+                    storage: storage,
+                    loadingService: chatLoadingService
+                )
+                guard currentUserId == userId else { return }
+                if !result.failedIds.isEmpty {
+                    syncErrors.append("Some chats could not be updated after deleting projects.")
+                }
+            } catch {
+                guard currentUserId == userId else { return }
+                syncErrors.append(error.localizedDescription)
+            }
+        }
     }
 
     func deleteActiveProject() async {
