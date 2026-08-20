@@ -258,7 +258,7 @@ struct DataLifecycleSourceTests {
             "localSidebarSummaries = []",
             "currentChat = nil",
             "clearProjectState()",
-            "clearPendingAttachments(acknowledgeSharedImports: false)",
+            "suspendPendingAttachments(ownerUserId: ownerUserId)",
             "navigationRequest = nil"
         ] {
             #expect(passiveLoss.contains(hiddenState))
@@ -371,6 +371,72 @@ struct DataLifecycleSourceTests {
         #expect(managedDocument.contains("file.discard()"))
         #expect(dataDocument.contains("guard areAccountOperationsOpen"))
         #expect(image.contains("guard areAccountOperationsOpen"))
+    }
+
+    @Test("Stale subscription responses cannot update another account")
+    func staleSubscriptionResponsesAreRejected() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let fetch = try functionBody(named: "func fetchSubscriptionStatus()", in: source)
+        let validation = try functionBody(named: "private func isCurrentSubscriptionOwner", in: source)
+
+        let generation = try #require(fetch.range(of: "let hydrationToken = authHydrationGeneration.value"))
+        let expectedOwner = try #require(fetch.range(of: "let expectedUserId = localUserId"))
+        let tokenAwait = try #require(fetch.range(of: "await session.getToken()"))
+        let responseAwait = try #require(fetch.range(of: "await URLSession.shared.data"))
+        let responseValidation = try #require(fetch.range(
+            of: "guard isCurrentSubscriptionOwner(hydrationToken: hydrationToken, userId: expectedUserId)",
+            range: responseAwait.upperBound..<fetch.endIndex
+        ))
+        let persistence = try #require(fetch.range(of: "UserDefaults.standard.set(hasActiveSubscription"))
+
+        #expect(generation.lowerBound < tokenAwait.lowerBound)
+        #expect(expectedOwner.lowerBound < tokenAwait.lowerBound)
+        #expect(responseAwait.lowerBound < responseValidation.lowerBound)
+        #expect(responseValidation.lowerBound < persistence.lowerBound)
+        #expect(validation.contains("isAccountDataAccessReady"))
+        #expect(validation.contains("localUserId == userId"))
+        #expect(validation.contains("retainedOwnerUserId == userId"))
+        #expect(validation.contains("clerk?.user?.id == userId"))
+    }
+
+    @Test("Pending attachments restore only for the validated owner")
+    func suspendedAttachmentsRestoreForSameOwner() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let suspension = try functionBody(named: "private func suspendPendingAttachments", in: source)
+        let restoration = try functionBody(named: "private func restoreSuspendedPendingAttachments", in: source)
+        let resume = try functionBody(named: "func resumeAccountDataAccess(validatedOwnerUserId:", in: source)
+
+        #expect(suspension.contains("ownerUserId: ownerUserId"))
+        #expect(suspension.contains("attachments: pendingAttachments"))
+        #expect(suspension.contains("managedFiles: managedAttachmentFiles"))
+        #expect(restoration.contains("suspended.ownerUserId == validatedOwnerUserId"))
+        #expect(restoration.contains("pendingAttachments = suspended.attachments"))
+        #expect(resume.contains("restoreSuspendedPendingAttachments(validatedOwnerUserId: validatedOwnerUserId)"))
+    }
+
+    @Test("Confirmed account cleanup destroys suspended attachments")
+    func accountCleanupDiscardsSuspendedAttachments() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let discard = try functionBody(named: "private func discardSuspendedPendingAttachments", in: source)
+        let signOut = try functionBody(named: "func handleSignOut(ownerUserId:", in: source)
+
+        #expect(discard.contains("file.discard()"))
+        #expect(discard.contains("suspendedPendingAttachments = nil"))
+        #expect(discard.contains("await task.value"))
+        #expect(signOut.contains("await discardSuspendedPendingAttachments("))
+    }
+
+    @Test("Paused attachments stay private and cannot be sent")
+    func pausedAttachmentsAreNotVisibleOrAdmitted() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let suspension = try functionBody(named: "private func suspendPendingAttachments", in: source)
+        let send = try functionBody(named: "func sendMessage(text:", in: source)
+        let paste = try functionBody(named: "func stagePastedDocuments", in: source)
+
+        #expect(suspension.contains("pendingAttachments.removeAll()"))
+        #expect(suspension.contains("pendingImageThumbnails.removeAll()"))
+        #expect(send.contains("guard areAccountOperationsOpen"))
+        #expect(paste.contains("guard areAccountOperationsOpen"))
     }
 
     @Test("Auth hydration revalidates after cancellation before publishing")

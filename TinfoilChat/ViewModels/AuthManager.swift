@@ -617,9 +617,17 @@ class AuthManager: ObservableObject {
     /// Fetches subscription status directly from the API
     @discardableResult
     func fetchSubscriptionStatus() async -> Bool {
-        guard let clerk = clerk else { return false }
-        guard let session = clerk.session else { return false }
+        let hydrationToken = authHydrationGeneration.value
+        guard isAccountDataAccessReady,
+              isAuthenticated,
+              let expectedUserId = localUserId,
+              let clerk = clerk,
+              clerk.user?.id == expectedUserId,
+              let session = clerk.session else { return false }
         guard let token = try? await session.getToken() ?? session.lastActiveToken?.jwt else { return false }
+        guard isCurrentSubscriptionOwner(hydrationToken: hydrationToken, userId: expectedUserId) else {
+            return false
+        }
         
         do {
             let apiURL = "\(Constants.API.baseURL)/api/app/user-metadata"
@@ -632,7 +640,10 @@ class AuthManager: ObservableObject {
             request.addValue("application/json", forHTTPHeaderField: "Content-Type")
             
             let (data, response) = try await URLSession.shared.data(for: request)
-            
+
+            guard isCurrentSubscriptionOwner(hydrationToken: hydrationToken, userId: expectedUserId) else {
+                return false
+            }
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else { return false }
             
@@ -641,37 +652,36 @@ class AuthManager: ObservableObject {
                let chatStatus = publicMetadata["chat_subscription_status"] as? String {
                 let expiresAt = publicMetadata["chat_subscription_expires_at"] as? String
 
-                await MainActor.run {
-                    let wasActive = self.hasActiveSubscription
-                    self.hasActiveSubscription = self.isSubscriptionActive(status: chatStatus, expiresAt: expiresAt)
+                guard isCurrentSubscriptionOwner(hydrationToken: hydrationToken, userId: expectedUserId) else {
+                    return false
+                }
+                let wasActive = hasActiveSubscription
+                hasActiveSubscription = isSubscriptionActive(status: chatStatus, expiresAt: expiresAt)
 
-                    // Update local user data
-                    if self.localUserData != nil {
-                        self.localUserData?["subscription_status"] = chatStatus
-                    }
-                    
-                    // Update UserDefaults
-                    if let userData = self.localUserData,
-                       let encodedData = try? JSONSerialization.data(withJSONObject: userData) {
-                        UserDefaults.standard.set(encodedData, forKey: userDataKey)
-                    }
-                    
-                    // Save subscription state
-                    UserDefaults.standard.set(self.hasActiveSubscription, forKey: self.subscriptionKey)
-                    
-                    // Post notification only when subscription status actually changed
-                    if self.hasActiveSubscription != wasActive {
-                        NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
-                    }
+                // Update local user data
+                localUserData?["subscription_status"] = chatStatus
 
-                    // If subscription became active, swap the free-tier key for a
-                    // subscriber token. Refetch in place rather than clearing first so
-                    // in-flight requests keep using the still-valid key until the new
-                    // token is stored, instead of briefly sending an empty bearer.
-                    if self.hasActiveSubscription && !wasActive {
-                        Task {
-                            let _ = await SessionTokenManager.shared.fetchFreshSessionToken()
-                        }
+                // Update UserDefaults
+                if let userData = localUserData,
+                   let encodedData = try? JSONSerialization.data(withJSONObject: userData) {
+                    UserDefaults.standard.set(encodedData, forKey: userDataKey)
+                }
+
+                // Save subscription state
+                UserDefaults.standard.set(hasActiveSubscription, forKey: subscriptionKey)
+
+                // Post notification only when subscription status actually changed
+                if hasActiveSubscription != wasActive {
+                    NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                }
+
+                // If subscription became active, swap the free-tier key for a
+                // subscriber token. Refetch in place rather than clearing first so
+                // in-flight requests keep using the still-valid key until the new
+                // token is stored, instead of briefly sending an empty bearer.
+                if hasActiveSubscription && !wasActive {
+                    Task {
+                        let _ = await SessionTokenManager.shared.fetchFreshSessionToken()
                     }
                 }
                 return true
@@ -681,6 +691,17 @@ class AuthManager: ObservableObject {
             // Handle error silently - subscription status will remain unchanged
             return false
         }
+    }
+
+    private func isCurrentSubscriptionOwner(hydrationToken: UInt64, userId: String) -> Bool {
+        isCurrentAuthTransition(hydrationToken)
+            && isAccountDataAccessReady
+            && !isAccountTeardownInProgress
+            && !isAccountSwitchConfirmationPending
+            && isAuthenticated
+            && localUserId == userId
+            && retainedOwnerUserId == userId
+            && clerk?.user?.id == userId
     }
     
     /// Deletes the user's account and clears all local data

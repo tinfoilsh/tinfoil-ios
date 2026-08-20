@@ -395,6 +395,15 @@ class ChatViewModel: ObservableObject {
     private var managedAttachmentFiles: [String: ManagedStagedFile] = [:]
     private var attachmentProcessingGeneration = 0
 
+    private struct SuspendedPendingAttachments {
+        let ownerUserId: String
+        var attachments: [Attachment]
+        var imageThumbnails: [String: String]
+        var managedFiles: [String: ManagedStagedFile]
+        var error: String?
+    }
+    private var suspendedPendingAttachments: SuspendedPendingAttachments?
+
     private struct PastedDocumentSource: @unchecked Sendable {
         let url: URL
         let fileName: String
@@ -3196,7 +3205,7 @@ class ChatViewModel: ObservableObject {
     /// can keep the draft in the input when it wasn't.
     @discardableResult
     func sendMessage(text: String) -> Bool {
-        guard canUseCurrentChatActions else { return false }
+        guard areAccountOperationsOpen, canUseCurrentChatActions else { return false }
         let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasAttachments = !pendingAttachments.isEmpty
         guard hasText || hasAttachments else { return false }
@@ -3239,6 +3248,7 @@ class ChatViewModel: ObservableObject {
         attachments: [Attachment],
         dismissKeyboard: Bool
     ) {
+        guard areAccountOperationsOpen else { return }
         // Optimistically decrement the remaining request count
         SessionTokenManager.shared.snapshotAndDecrementRemaining()
 
@@ -3271,7 +3281,7 @@ class ChatViewModel: ObservableObject {
     /// still streaming. Pending attachments ride along with the queued
     /// message and are cleared from the input.
     private func enqueueMessage(text: String) {
-        guard let chatId = currentChat?.id else { return }
+        guard areAccountOperationsOpen, let chatId = currentChat?.id else { return }
         guard (messageQueues[chatId]?.count ?? 0) < Constants.MessageQueue.maxQueuedMessages else { return }
         let messageAttachments = pendingAttachments
         clearPendingAttachments(acknowledgeSharedImports: false)
@@ -3305,7 +3315,8 @@ class ChatViewModel: ObservableObject {
     /// resumes when reopened. Dispatch keeps the keyboard up so a draft the
     /// user is typing is never interrupted.
     private func drainMessageQueue(chatId: String) {
-        guard currentChat?.id == chatId,
+        guard areAccountOperationsOpen,
+              currentChat?.id == chatId,
               !streamState.isStreaming(chatId: chatId),
               !hasPendingResponseRecovery,
               var queue = messageQueues[chatId],
@@ -3348,7 +3359,7 @@ class ChatViewModel: ObservableObject {
     }
 
     func stagePastedDocuments(urls: [URL]) {
-        guard !isAccountTeardownInProgress, !urls.isEmpty else { return }
+        guard areAccountOperationsOpen, !urls.isEmpty else { return }
         attachmentError = nil
         let processingGeneration = attachmentProcessingGeneration
         let sources = urls.map { url in
@@ -3422,7 +3433,7 @@ class ChatViewModel: ObservableObject {
             for result in results {
                 switch result {
                 case .success(let file, let fileName, let attachmentId):
-                    guard pendingAttachments.contains(where: { $0.id == attachmentId }) else {
+                    guard containsPendingAttachment(id: attachmentId) else {
                         file.discard()
                         continue
                     }
@@ -3433,11 +3444,10 @@ class ChatViewModel: ObservableObject {
                         processingGeneration: processingGeneration
                     )
                 case .failure(let message, let attachmentId):
-                    guard let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) else {
-                        continue
+                    updatePendingAttachment(id: attachmentId) { attachment in
+                        attachment.processingState = .failed
                     }
-                    pendingAttachments[index].processingState = .failed
-                    attachmentError = message
+                    updatePendingAttachmentError(message)
                 }
             }
         }
@@ -3492,7 +3502,7 @@ class ChatViewModel: ObservableObject {
             sharedImportRequestID: sharedImportRequestID,
             processingState: .processing
         )
-        managedAttachmentFiles[attachmentId] = file
+        storeManagedAttachmentFile(file, attachmentId: attachmentId)
         let operationToken = UUID()
         attachmentProcessingTokens[attachmentId] = operationToken
 
@@ -3504,6 +3514,7 @@ class ChatViewModel: ObservableObject {
             defer {
                 file.discard()
                 managedAttachmentFiles.removeValue(forKey: attachmentId)
+                suspendedPendingAttachments?.managedFiles.removeValue(forKey: attachmentId)
                 if attachmentProcessingTokens[attachmentId] == operationToken {
                     attachmentProcessingTokens.removeValue(forKey: attachmentId)
                     attachmentProcessingTasks.removeValue(forKey: attachmentId)
@@ -3513,24 +3524,20 @@ class ChatViewModel: ObservableObject {
                 let text = try await DocumentProcessingService.shared.extractText(from: file.url)
                 try Task.checkCancellation()
                 guard processingGeneration == attachmentProcessingGeneration,
-                      pendingAttachments.contains(where: { $0.id == attachmentId }) else { return }
+                      containsPendingAttachment(id: attachmentId) else { return }
 
                 attachment.textContent = text
                 attachment.fileSize = Int64(file.originalSize)
                 attachment.processingState = .completed
 
-                if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
-                    pendingAttachments[index] = attachment
-                }
+                storePendingAttachment(attachment)
             } catch is CancellationError {
             } catch {
                 guard processingGeneration == attachmentProcessingGeneration,
-                      pendingAttachments.contains(where: { $0.id == attachmentId }) else { return }
+                      containsPendingAttachment(id: attachmentId) else { return }
                 attachment.processingState = .failed
-                if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
-                    pendingAttachments[index] = attachment
-                }
-                attachmentError = error.localizedDescription
+                storePendingAttachment(attachment)
+                updatePendingAttachmentError(error.localizedDescription)
             }
         }
         if attachmentProcessingTokens[attachmentId] == operationToken {
@@ -3598,7 +3605,7 @@ class ChatViewModel: ObservableObject {
                 let processed = try await ImageProcessingService.shared.processImage(data: data)
                 try Task.checkCancellation()
                 guard processingGeneration == attachmentProcessingGeneration,
-                      pendingAttachments.contains(where: { $0.id == attachmentId }) else { return }
+                      containsPendingAttachment(id: attachmentId) else { return }
 
                 attachment.mimeType = Constants.Attachments.defaultImageMimeType
                 attachment.base64 = processed.base64
@@ -3610,19 +3617,15 @@ class ChatViewModel: ObservableObject {
                 let sizeKB = processed.compressedSize / 1024
                 attachment.description = "\(fileName) — \(processed.width)×\(processed.height) JPEG, \(sizeKB) KB"
 
-                if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
-                    pendingAttachments[index] = attachment
-                }
-                pendingImageThumbnails[attachmentId] = processed.thumbnailBase64
+                storePendingAttachment(attachment)
+                storePendingImageThumbnail(processed.thumbnailBase64, attachmentId: attachmentId)
             } catch is CancellationError {
             } catch {
                 guard processingGeneration == attachmentProcessingGeneration,
-                      pendingAttachments.contains(where: { $0.id == attachmentId }) else { return }
+                      containsPendingAttachment(id: attachmentId) else { return }
                 attachment.processingState = .failed
-                if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
-                    pendingAttachments[index] = attachment
-                }
-                attachmentError = error.localizedDescription
+                storePendingAttachment(attachment)
+                updatePendingAttachmentError(error.localizedDescription)
             }
         }
         if attachmentProcessingTokens[attachmentId] == operationToken {
@@ -3631,6 +3634,106 @@ class ChatViewModel: ObservableObject {
             task.cancel()
         }
         return task
+    }
+
+    private func containsPendingAttachment(id: String) -> Bool {
+        pendingAttachments.contains(where: { $0.id == id })
+            || suspendedPendingAttachments?.attachments.contains(where: { $0.id == id }) == true
+    }
+
+    private func storePendingAttachment(_ attachment: Attachment) {
+        if areAccountOperationsOpen,
+           let index = pendingAttachments.firstIndex(where: { $0.id == attachment.id }) {
+            pendingAttachments[index] = attachment
+        } else if let index = suspendedPendingAttachments?.attachments.firstIndex(where: { $0.id == attachment.id }) {
+            suspendedPendingAttachments?.attachments[index] = attachment
+        }
+    }
+
+    private func updatePendingAttachment(id: String, update: (inout Attachment) -> Void) {
+        if areAccountOperationsOpen,
+           let index = pendingAttachments.firstIndex(where: { $0.id == id }) {
+            update(&pendingAttachments[index])
+        } else if var suspended = suspendedPendingAttachments,
+                  let index = suspended.attachments.firstIndex(where: { $0.id == id }) {
+            var attachment = suspended.attachments[index]
+            update(&attachment)
+            suspended.attachments[index] = attachment
+            suspendedPendingAttachments = suspended
+        }
+    }
+
+    private func storePendingImageThumbnail(_ thumbnail: String, attachmentId: String) {
+        if areAccountOperationsOpen {
+            pendingImageThumbnails[attachmentId] = thumbnail
+        } else {
+            suspendedPendingAttachments?.imageThumbnails[attachmentId] = thumbnail
+        }
+    }
+
+    private func storeManagedAttachmentFile(_ file: ManagedStagedFile, attachmentId: String) {
+        if areAccountOperationsOpen {
+            managedAttachmentFiles[attachmentId] = file
+        } else {
+            suspendedPendingAttachments?.managedFiles[attachmentId] = file
+        }
+    }
+
+    private func updatePendingAttachmentError(_ error: String) {
+        if areAccountOperationsOpen {
+            attachmentError = error
+        } else {
+            suspendedPendingAttachments?.error = error
+        }
+    }
+
+    private func suspendPendingAttachments(ownerUserId: String?) {
+        guard let ownerUserId else { return }
+        guard suspendedPendingAttachments == nil else {
+            pendingAttachments.removeAll()
+            pendingImageThumbnails.removeAll()
+            attachmentError = nil
+            return
+        }
+        suspendedPendingAttachments = SuspendedPendingAttachments(
+            ownerUserId: ownerUserId,
+            attachments: pendingAttachments,
+            imageThumbnails: pendingImageThumbnails,
+            managedFiles: managedAttachmentFiles,
+            error: attachmentError
+        )
+        pendingAttachments.removeAll()
+        pendingImageThumbnails.removeAll()
+        managedAttachmentFiles.removeAll()
+        attachmentError = nil
+    }
+
+    private func restoreSuspendedPendingAttachments(validatedOwnerUserId: String) {
+        guard areAccountOperationsOpen,
+              let suspended = suspendedPendingAttachments,
+              suspended.ownerUserId == validatedOwnerUserId else { return }
+        pendingAttachments = suspended.attachments
+        pendingImageThumbnails = suspended.imageThumbnails
+        managedAttachmentFiles = suspended.managedFiles
+        attachmentError = suspended.error
+        suspendedPendingAttachments = nil
+    }
+
+    private func discardSuspendedPendingAttachments(
+        after tasks: [Task<Void, Never>]
+    ) async {
+        let suspended = suspendedPendingAttachments
+        suspendedPendingAttachments = nil
+        if let suspended {
+            acknowledgeSharedImports(in: suspended.attachments)
+        }
+        for task in tasks {
+            await task.value
+        }
+        guard let suspended else { return }
+        for file in suspended.managedFiles.values {
+            file.discard()
+        }
     }
 
     func removePendingAttachment(id: String) {
@@ -5840,9 +5943,7 @@ class ChatViewModel: ObservableObject {
         let canceledSignInTask = cancelSignInOperation()
         let canceledLegacyMigrationTask = cancelLegacyMigration()
         let canceledStreamTasks = cancelAllGenerations()
-        let canceledAttachmentTasks = Array(attachmentProcessingTasks.values)
-        let canceledPasteStagingTasks = Array(pasteStagingTasks.values)
-        clearPendingAttachments(acknowledgeSharedImports: false)
+        suspendPendingAttachments(ownerUserId: ownerUserId)
         let canceledProjectUploadTasks = Array(projectUploadTasks.values)
         cancelProjectUploads()
         let canceledFavoriteTasks = exactFavoriteHydrationOperations.values.map(\.task)
@@ -5909,8 +6010,6 @@ class ChatViewModel: ObservableObject {
         await canceledAutoSyncTask?.value
         await suspendRecoveryScans()
         await drainStreamTasks(canceledStreamTasks)
-        for task in canceledAttachmentTasks { await task.value }
-        for task in canceledPasteStagingTasks { await task.value }
         for task in canceledProjectUploadTasks { await task.value }
         for task in canceledFavoriteTasks { _ = await task.value }
         for task in canceledGenUIRetryTasks { await task.value }
@@ -5934,6 +6033,7 @@ class ChatViewModel: ObservableObject {
         accountLifecycleUserId = validatedOwnerUserId
         acceptsChatSaves = true
         accountOperationTracker.reopen()
+        restoreSuspendedPendingAttachments(validatedOwnerUserId: validatedOwnerUserId)
     }
 
     func completeAccountTeardown() {
@@ -6033,8 +6133,9 @@ class ChatViewModel: ObservableObject {
         await canceledSignInTask?.value
         await canceledLegacyMigrationTask?.value
         await drainStreamTasks(canceledStreamTasks)
-        for task in canceledAttachmentTasks { await task.value }
-        for task in canceledPasteStagingTasks { await task.value }
+        await discardSuspendedPendingAttachments(
+            after: canceledAttachmentTasks + canceledPasteStagingTasks
+        )
         for task in canceledProjectUploadTasks { await task.value }
         try await SharedImportCoordinator.shared.discardAllPending()
 
