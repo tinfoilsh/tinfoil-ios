@@ -640,7 +640,7 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TinfoilChat/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Tinfoil Chat";
+				INFOPLIST_KEY_CFBundleDisplayName = Tinfoil;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Tinfoil needs access to your microphone to support speech-to-text.";
@@ -685,7 +685,7 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TinfoilChat/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Tinfoil Chat";
+				INFOPLIST_KEY_CFBundleDisplayName = Tinfoil;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Tinfoil needs access to your microphone to support speech-to-text.";
