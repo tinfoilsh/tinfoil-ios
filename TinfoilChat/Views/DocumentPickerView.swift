@@ -8,11 +8,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct DocumentPickerView: UIViewControllerRepresentable {
-    var onDocumentPicked: (ManagedFileHandle) -> Void
+    var onDocumentPicked: (ManagedStagedFile) -> Void
     var onError: (Error) -> Void
 
     init(
-        onDocumentPicked: @escaping (ManagedFileHandle) -> Void,
+        onDocumentPicked: @escaping (ManagedStagedFile) -> Void,
         onError: @escaping (Error) -> Void
     ) {
         self.onDocumentPicked = onDocumentPicked
@@ -47,11 +47,11 @@ struct DocumentPickerView: UIViewControllerRepresentable {
     }
 
     class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onDocumentPicked: (ManagedFileHandle) -> Void
+        let onDocumentPicked: (ManagedStagedFile) -> Void
         let onError: (Error) -> Void
 
         init(
-            onDocumentPicked: @escaping (ManagedFileHandle) -> Void,
+            onDocumentPicked: @escaping (ManagedStagedFile) -> Void,
             onError: @escaping (Error) -> Void
         ) {
             self.onDocumentPicked = onDocumentPicked

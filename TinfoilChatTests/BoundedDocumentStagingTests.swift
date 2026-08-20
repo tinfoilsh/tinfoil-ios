@@ -112,10 +112,67 @@ struct BoundedDocumentStagingTests {
         #expect(attributes[.protectionKey] as? FileProtectionType == .completeUntilFirstUserAuthentication)
         #expect(try Data(contentsOf: handle.url) == sourceData)
 
-        try handle.release()
+        #expect(handle.discard())
         #expect(!FileManager.default.fileExists(atPath: handle.url.path))
         #expect(FileManager.default.fileExists(atPath: source.path))
-        try handle.release()
+        #expect(handle.discard())
+    }
+
+    @Test("Managed discard never removes files outside staging")
+    func managedDiscardIsRestrictedToOwnedDirectChildren() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let stagingDirectory = directory.appendingPathComponent("ManagedFileStaging", isDirectory: true)
+        let providerFile = directory.appendingPathComponent("provider.txt")
+        try Data("provider".utf8).write(to: providerFile)
+        let store = ManagedFileStore(directoryURL: stagingDirectory)
+        let stagedFile = try store.stage(sourceURL: providerFile, fileName: "provider.txt")
+
+        #expect(store.owns(stagedFile.url))
+        #expect(!store.owns(providerFile))
+        #expect(!store.owns(stagingDirectory.appendingPathComponent("not-a-uuid.txt")))
+        #expect(!store.discard(id: stagedFile.id, url: providerFile))
+        #expect(FileManager.default.fileExists(atPath: providerFile.path))
+        #expect(stagedFile.discard())
+    }
+
+    @Test("Startup sweep removes only staging children and reports individual failures")
+    func startupSweepIsScopedAndReportsFailures() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let stagingDirectory = directory.appendingPathComponent("ManagedFileStaging", isDirectory: true)
+        let providerFile = directory.appendingPathComponent("provider.txt")
+        try Data("provider".utf8).write(to: providerFile)
+        try FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: false)
+        var blockedURL: URL?
+        let store = ManagedFileStore(
+            directoryURL: stagingDirectory,
+            removeItem: { url in
+                if url == blockedURL {
+                    throw CocoaError(.fileWriteNoPermission)
+                }
+                try FileManager.default.removeItem(at: url)
+            }
+        )
+        let removedURL = stagingDirectory.appendingPathComponent("\(UUID().uuidString.lowercased()).txt")
+        let failedURL = stagingDirectory.appendingPathComponent("\(UUID().uuidString.lowercased()).txt")
+        let unrelatedChild = stagingDirectory.appendingPathComponent("keep.txt")
+        let nestedDirectory = stagingDirectory.appendingPathComponent("nested", isDirectory: true)
+        try Data("first".utf8).write(to: removedURL)
+        try Data("second".utf8).write(to: failedURL)
+        try Data("keep".utf8).write(to: unrelatedChild)
+        try FileManager.default.createDirectory(at: nestedDirectory, withIntermediateDirectories: false)
+        blockedURL = failedURL
+
+        let failures = store.sweepOnStartup()
+
+        #expect(!FileManager.default.fileExists(atPath: removedURL.path))
+        #expect(FileManager.default.fileExists(atPath: failedURL.path))
+        #expect(failures.count == 1)
+        #expect((failures.first as? CocoaError)?.code == .fileWriteNoPermission)
+        #expect(!FileManager.default.fileExists(atPath: unrelatedChild.path))
+        #expect(!FileManager.default.fileExists(atPath: nestedDirectory.path))
+        #expect(FileManager.default.fileExists(atPath: providerFile.path))
     }
 
     @Test("Document processing uses bounded regular-file reads")

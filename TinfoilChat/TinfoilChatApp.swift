@@ -176,6 +176,12 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             // options.attachViewHierarchy = true // This adds the view hierarchy to the error events
         }
 
+        Task.detached(priority: .utility) {
+            for failure in ManagedFileStore.shared.sweepOnStartup() {
+                SentrySDK.capture(error: failure.error)
+            }
+        }
+
         // Ignore SIGPIPE so broken streaming connections surface as errors instead of crashes.
         // Must be set after SentrySDK.start which installs its own signal handlers.
         signal(SIGPIPE, SIG_IGN)
