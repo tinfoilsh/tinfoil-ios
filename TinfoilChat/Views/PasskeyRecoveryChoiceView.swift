@@ -22,6 +22,7 @@ struct PasskeyRecoveryChoiceView: View {
 
     @State private var isLoading = false
     @State private var loadingAction: LoadingAction?
+    @State private var startFreshConfirmation = StartFreshConfirmationState()
 
     private enum LoadingAction {
         case tryAgain
@@ -80,7 +81,7 @@ struct PasskeyRecoveryChoiceView: View {
                 .disabled(isLoading)
 
                 // Start Fresh — new key + new passkey
-                Button(action: handleStartFresh) {
+                Button(action: { startFreshConfirmation.request() }) {
                     Group {
                         if loadingAction == .startFresh {
                             ProgressView()
@@ -132,6 +133,22 @@ struct PasskeyRecoveryChoiceView: View {
         .presentationDetents([.height(520)])
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(isLoading)
+        .alert(
+            StartFreshConfirmationState.title,
+            isPresented: Binding(
+                get: { startFreshConfirmation.isPresented },
+                set: { if !$0 { startFreshConfirmation.dismissPresentation() } }
+            )
+        ) {
+            Button("Go Back", role: .cancel) {
+                startFreshConfirmation.cancel()
+            }
+            Button("Yes, start fresh", role: .destructive) {
+                startFreshConfirmation.confirm(perform: handleStartFresh)
+            }
+        } message: {
+            Text(StartFreshConfirmationState.warning)
+        }
     }
 
     // MARK: - Actions
