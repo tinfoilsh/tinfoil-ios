@@ -331,6 +331,48 @@ struct DataLifecycleSourceTests {
         #expect(signIn.contains("refreshCloudSummaryIndex(userId: userId)"))
     }
 
+    @Test("Shared imports remain paused until same-owner account access resumes")
+    func sharedImportsRequireValidatedAccountAccess() throws {
+        let contentSource = try sourceFile("TinfoilChat/ContentView.swift")
+        let coordinatorSource = try sourceFile("TinfoilChat/Services/SharedImportCoordinator.swift")
+        let chatSource = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let importIfReady = try functionBody(named: "private func importSharedAttachmentsIfReady()", in: contentSource)
+        let directImport = try functionBody(named: "func importPendingAttachments", in: coordinatorSource)
+        let pause = try functionBody(named: "func pausePreservingPendingImports", in: coordinatorSource)
+        let resume = try functionBody(named: "func allowPublications", in: coordinatorSource)
+        let signIn = try functionBody(named: "private func performSignIn(", in: chatSource)
+
+        #expect(importIfReady.contains("authManager.isAccountDataAccessReady"))
+        #expect(importIfReady.contains("chatViewModel.areAccountOperationsOpen"))
+        #expect(directImport.contains("guard !importsPaused"))
+        let requestLoad = try #require(directImport.range(of: "await requestTask.value"))
+        let postLoadPauseCheck = try #require(directImport.range(
+            of: "self?.importsPaused == false",
+            range: requestLoad.upperBound..<directImport.endIndex
+        ))
+        #expect(requestLoad.lowerBound < postLoadPauseCheck.lowerBound)
+        #expect(pause.contains("beginPausingPreservedImports(ownerUserId: ownerUserId)"))
+        #expect(resume.contains("pausedOwnerUserId == validatedOwnerUserId"))
+        #expect(resume.contains("pausedImportsWereDiscarded"))
+        #expect(signIn.contains("validatedOwnerUserId: userId"))
+        #expect(signIn.contains("authManager?.isAccountDataAccessReady == true"))
+        #expect(signIn.contains("areAccountOperationsOpen"))
+        #expect(signIn.contains("importPendingAttachments(into: self)"))
+    }
+
+    @Test("Direct attachment admission rejects paused account operations")
+    func directAttachmentAdmissionRequiresOpenAccountOperations() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/ChatViewModel.swift")
+        let managedDocument = try functionBody(named: "func addDocumentAttachment(\n        file:", in: source)
+        let dataDocument = try functionBody(named: "func addDocumentAttachment(\n        data:", in: source)
+        let image = try functionBody(named: "func addImageAttachment", in: source)
+
+        #expect(managedDocument.contains("guard areAccountOperationsOpen"))
+        #expect(managedDocument.contains("file.discard()"))
+        #expect(dataDocument.contains("guard areAccountOperationsOpen"))
+        #expect(image.contains("guard areAccountOperationsOpen"))
+    }
+
     @Test("Auth hydration revalidates after cancellation before publishing")
     func authHydrationRevalidatesAfterCancellation() throws {
         let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")

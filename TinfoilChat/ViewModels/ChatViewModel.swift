@@ -305,6 +305,9 @@ class ChatViewModel: ObservableObject {
     private(set) var accountLifecycleGeneration = 0
     private var accountLifecycleUserId: String?
     private var acceptsChatSaves = true
+    var areAccountOperationsOpen: Bool {
+        acceptsChatSaves && !isAccountTeardownInProgress && accountOperationTracker.isOpen
+    }
     private var hasPerformedInitialSync: Bool = false  // Track if initial sync has been done
     private var hasAnonymousChatsToSync: Bool = false  // Track if we have anonymous chats to sync
     private var isRetryingAnonymousChatReencryption = false
@@ -3451,7 +3454,7 @@ class ChatViewModel: ObservableObject {
         fileName: String,
         sharedImportRequestID: UUID? = nil
     ) -> Task<Void, Never>? {
-        guard !isAccountTeardownInProgress else {
+        guard areAccountOperationsOpen else {
             file.discard()
             return nil
         }
@@ -3543,6 +3546,7 @@ class ChatViewModel: ObservableObject {
         fileName: String,
         sharedImportRequestID: UUID? = nil
     ) {
+        guard areAccountOperationsOpen else { return }
         do {
             let file = try ManagedFileStore.shared.stage(
                 data: data,
@@ -3565,7 +3569,7 @@ class ChatViewModel: ObservableObject {
         fileName: String,
         sharedImportRequestID: UUID? = nil
     ) -> Task<Void, Never>? {
-        guard !isAccountTeardownInProgress else { return nil }
+        guard areAccountOperationsOpen else { return nil }
         attachmentError = nil
         let processingGeneration = attachmentProcessingGeneration
 
@@ -5826,8 +5830,11 @@ class ChatViewModel: ObservableObject {
         canceledAutoSyncTask?.cancel()
         recoveryScanTimer?.invalidate()
         recoveryScanTimer = nil
+        SharedImportCoordinator.shared.beginPausingPreservedImports(ownerUserId: ownerUserId)
         let sharedImportPauseTask = Task {
-            try? await SharedImportCoordinator.shared.pausePreservingPendingImports()
+            try? await SharedImportCoordinator.shared.pausePreservingPendingImports(
+                ownerUserId: ownerUserId
+            )
         }
 
         let canceledSignInTask = cancelSignInOperation()
@@ -6377,7 +6384,9 @@ class ChatViewModel: ObservableObject {
         guard isCurrentSignIn(token, userId: userId) else { return }
 
         do {
-            try await SharedImportCoordinator.shared.allowPublications()
+            try await SharedImportCoordinator.shared.allowPublications(
+                validatedOwnerUserId: userId
+            )
         } catch {
             guard isCurrentSignIn(token, userId: userId) else { return }
             attachmentError = error.localizedDescription
@@ -6385,6 +6394,9 @@ class ChatViewModel: ObservableObject {
             return
         }
         guard isCurrentSignIn(token, userId: userId) else { return }
+        if authManager?.isAccountDataAccessReady == true, areAccountOperationsOpen {
+            SharedImportCoordinator.shared.importPendingAttachments(into: self)
+        }
 
         // Restore pagination state immediately for better UX on cold start
         loadPersistedPaginationState(userId: userId)

@@ -174,6 +174,11 @@ struct ContentView: View {
                 performPendingIntentActionsIfReady()
             }
         }
+        .onChange(of: authManager.isAccountDataAccessReady) { _, isReady in
+            if isReady {
+                importSharedAttachmentsIfReady()
+            }
+        }
         .onChange(of: intentCoordinator.pendingActions) { _, actions in
             guard !actions.isEmpty else { return }
             performPendingIntentActionsIfReady()
@@ -225,7 +230,9 @@ struct ContentView: View {
     }
 
     private func importSharedAttachmentsIfReady() {
-        guard !authManager.isLoading else { return }
+        guard !authManager.isLoading,
+              authManager.isAccountDataAccessReady,
+              chatViewModel.areAccountOperationsOpen else { return }
         SharedImportCoordinator.shared.importPendingAttachments(into: chatViewModel)
     }
 

@@ -36,7 +36,7 @@ final class AccountOperationTracker {
         }
     }
 
-    private var isOpen = true
+    private(set) var isOpen = true
     private var nextOperationId: UInt64 = 0
     private var registrations: [Token: Registration] = [:]
     private var closeWaiters: [CheckedContinuation<Void, Never>] = []
