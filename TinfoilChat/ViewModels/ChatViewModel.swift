@@ -2022,10 +2022,18 @@ class ChatViewModel: ObservableObject {
             exitProject()
         }
         if let userId {
-            await persistRetainedChatProjectDetachment(
-                userId: userId,
-                accountGeneration: accountGeneration
-            )
+            let persistenceTask = Task { [weak self] in
+                await self?.persistRetainedChatProjectDetachment(
+                    userId: userId,
+                    accountGeneration: accountGeneration
+                )
+            }
+            if let operationToken = accountOperationTracker.begin(task: persistenceTask) {
+                await persistenceTask.value
+                accountOperationTracker.end(operationToken)
+            } else {
+                persistenceTask.cancel()
+            }
         }
         return deleted
     }

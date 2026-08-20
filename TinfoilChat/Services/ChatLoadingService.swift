@@ -481,6 +481,8 @@ enum ChatProjectDetachment {
                 chat.projectId = nil
                 chat.projectLocallyModified = false
                 try await loadingService.saveChat(chat, userId: userId, storage: storage)
+                try Task.checkCancellation()
+                guard shouldContinue() else { throw CancellationError() }
                 detachedIds.append(chat.id)
             } catch is CancellationError {
                 throw CancellationError()
