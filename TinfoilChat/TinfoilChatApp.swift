@@ -107,7 +107,9 @@ struct TinfoilChatApp: App {
                                     // Initialize ProfileManager to start auto-sync
                                     _ = ProfileManager.shared
                                     // Kick off an initial profile sync now that auth and token getter are ready
-                                    await ProfileManager.shared.performFullSync()
+                                    if authManager.isAccountDataAccessReady {
+                                        await ProfileManager.shared.performFullSync()
+                                    }
                                     
                                     // Add observer for Clerk auth state changes
                                     NotificationCenter.default.addObserver(
@@ -118,7 +120,9 @@ struct TinfoilChatApp: App {
                                         Task {
                                             await authManager.initializeAuthState()
                                             // Sync profile when auth state changes
-                                            await ProfileManager.shared.performFullSync()
+                                            if authManager.isAccountDataAccessReady {
+                                                await ProfileManager.shared.performFullSync()
+                                            }
                                         }
                                     }
                                 } catch {

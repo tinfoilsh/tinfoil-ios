@@ -117,6 +117,7 @@ class ProfileSyncService: ObservableObject {
     /// is no client-side decryption step.
     func fetchProfile() async throws -> ProfileData? {
         guard await isAuthenticated() else { return nil }
+        try Task.checkCancellation()
         guard let keys = CEKEncoding.pullKeysIfAvailable() else { return nil }
 
         do {
@@ -195,6 +196,7 @@ class ProfileSyncService: ObservableObject {
         baseline: ProfileData?
     ) async throws -> (success: Bool, version: Int?, remoteProfile: ProfileData?) {
         guard await isAuthenticated() else { return (false, nil, nil) }
+        try Task.checkCancellation()
         let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
 
         // The working copy that gets pushed. On a conflict it is
@@ -205,6 +207,7 @@ class ProfileSyncService: ObservableObject {
         // controlplane treats a missing/zero version as create-only and
         // any positive version as a CAS update gated on the row's etag.
         func pushAtVersion(_ baseVersion: Int) async throws -> (success: Bool, version: Int?) {
+            try Task.checkCancellation()
             var profileWithMetadata = working
             // Preserve the caller's edit time so other devices can
             // arbitrate last-write-wins; only stamp now when absent.

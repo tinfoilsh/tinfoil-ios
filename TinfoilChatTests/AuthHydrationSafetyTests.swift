@@ -83,32 +83,34 @@ struct AuthHydrationSafetyTests {
         #expect(trigger.ownerUserId(retainedOwnerUserId: nil) == "user-1")
     }
 
-    @Test("A to B passive switch does not delete data until retry")
-    func passiveSwitchWaitsForRetry() {
+    @Test("A profile cannot sync during a passive switch to B")
+    func passiveSwitchPausesProfileAccess() {
         var hydration = AuthSwitchSafetyHarness(ownerUserId: "user-A")
 
+        hydration.observe(clerkUserId: "user-A")
+        hydration.requestProfileSync()
         hydration.observe(clerkUserId: "user-B")
+        hydration.requestProfileSync()
 
         #expect(hydration.deletedOwnerUserIds.isEmpty)
         #expect(hydration.activeUserId == nil)
         #expect(hydration.requiresExplicitRetry)
+        #expect(hydration.profileSyncUserIds == ["user-A"])
     }
 
-    @Test("B to A changes remain fenced before confirmation")
-    func switchReversalRemainsFenced() {
+    @Test("B to A recovery resumes profile access for A")
+    func switchReversalResumesOwnerProfile() {
         var hydration = AuthSwitchSafetyHarness(ownerUserId: "user-A")
 
+        hydration.observe(clerkUserId: "user-A")
         hydration.observe(clerkUserId: "user-B")
         hydration.observe(clerkUserId: "user-A")
+        hydration.requestProfileSync()
 
         #expect(hydration.deletedOwnerUserIds.isEmpty)
-        #expect(hydration.activeUserId == nil)
-        #expect(hydration.requiresExplicitRetry)
-
-        hydration.confirmAccountSwitch(signOutSucceeds: true)
-
-        #expect(hydration.operations == ["signOut:user-A", "clear:user-A"])
-        #expect(hydration.activeUserId == nil)
+        #expect(hydration.activeUserId == "user-A")
+        #expect(!hydration.requiresExplicitRetry)
+        #expect(hydration.profileSyncUserIds == ["user-A"])
     }
 
     @Test("Clerk sign-out failure preserves A local data")
@@ -149,6 +151,23 @@ struct AuthHydrationSafetyTests {
         #expect(hydration.ownerUserId == nil)
     }
 
+    @Test("Explicit cleanup resumes profile access only after a later sign-in")
+    func cleanupRequiresFutureValidatedSignIn() {
+        var hydration = AuthSwitchSafetyHarness(ownerUserId: "user-A")
+        hydration.observe(clerkUserId: "user-A")
+        hydration.observe(clerkUserId: "user-B")
+
+        hydration.confirmAccountSwitch(signOutSucceeds: true)
+        hydration.requestProfileSync()
+        #expect(hydration.profileSyncUserIds.isEmpty)
+
+        hydration.observe(clerkUserId: "user-B")
+        hydration.requestProfileSync()
+
+        #expect(hydration.activeUserId == "user-B")
+        #expect(hydration.profileSyncUserIds == ["user-B"])
+    }
+
     @Test("An ordinary teardown retry does not sign Clerk out again")
     func ordinaryTeardownRetrySkipsClerkSignOut() {
         let retry = AccountTeardownRetryReason.teardownFailure(.explicitSignOut)
@@ -170,13 +189,21 @@ private struct AuthSwitchSafetyHarness {
     private(set) var deletedOwnerUserIds: [String] = []
     private(set) var operations: [String] = []
     private(set) var requiresExplicitRetry = false
+    private(set) var profileAccessReady = false
+    private(set) var profileSyncUserIds: [String] = []
 
     mutating func observe(clerkUserId: String?) {
         self.clerkUserId = clerkUserId
         if requiresExplicitRetry {
-            activeUserId = nil
-            return
+            if clerkUserId == ownerUserId {
+                requiresExplicitRetry = false
+            } else {
+                activeUserId = nil
+                profileAccessReady = false
+                return
+            }
         }
+        profileAccessReady = false
         switch AuthHydrationOutcome.resolve(
             lastOwnerUserId: ownerUserId,
             clerkUserId: clerkUserId
@@ -185,11 +212,18 @@ private struct AuthSwitchSafetyHarness {
             activeUserId = nil
         case .authenticated:
             activeUserId = clerkUserId
+            ownerUserId = clerkUserId
             requiresExplicitRetry = false
+            profileAccessReady = true
         case .accountSwitch:
             activeUserId = nil
             requiresExplicitRetry = true
         }
+    }
+
+    mutating func requestProfileSync() {
+        guard profileAccessReady, let activeUserId else { return }
+        profileSyncUserIds.append(activeUserId)
     }
 
     mutating func confirmAccountSwitch(signOutSucceeds: Bool) {
@@ -211,6 +245,7 @@ private struct AuthSwitchSafetyHarness {
         ownerUserId = nil
         activeUserId = nil
         requiresExplicitRetry = false
+        profileAccessReady = false
     }
 }
 

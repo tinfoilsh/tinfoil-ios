@@ -106,6 +106,7 @@ class AuthManager: ObservableObject {
     @Published var hasActiveSubscription = false
     @Published var accountTeardownError: String?
     @Published var isSessionUnavailable = false
+    @Published private(set) var isAccountDataAccessReady = false
 
     var localUserId: String? {
         localUserData?[Self.userIdKey] as? String
@@ -198,6 +199,7 @@ class AuthManager: ObservableObject {
         guard !isAccountTeardownInProgress else { return }
         let hydrationToken = beginAuthTransition()
         self.clerk = clerk
+        clearAccountSwitchFenceIfOwnerReturned(currentClerkUserId: clerk.user?.id)
         if isAccountSwitchConfirmationPending {
             isAuthenticated = false
             hasActiveSubscription = false
@@ -251,7 +253,9 @@ class AuthManager: ObservableObject {
     }
 
     private func beginAuthTransition() -> UInt64 {
-        authHydrationGeneration.advance()
+        isAccountDataAccessReady = false
+        ProfileManager.shared.pauseAccountAccess()
+        return authHydrationGeneration.advance()
     }
 
     private func isCurrentAuthTransition(_ token: UInt64) -> Bool {
@@ -263,6 +267,23 @@ class AuthManager: ObservableObject {
             return true
         }
         return false
+    }
+
+    private func clearAccountSwitchFenceIfOwnerReturned(currentClerkUserId: String?) {
+        guard case .accountSwitchConfirmation(.accountSwitch(let previousUserId, _)) = pendingAccountTeardownRetryReason,
+              currentClerkUserId == previousUserId else { return }
+        pendingAccountTeardownRetryReason = nil
+        accountTeardownError = nil
+    }
+
+    private func resumeAccountDataAccess(for userId: String, hydrationToken: UInt64) {
+        guard isCurrentAuthTransition(hydrationToken),
+              !isAccountSwitchConfirmationPending,
+              clerk?.user?.id == userId,
+              localUserId == userId,
+              isAuthenticated else { return }
+        ProfileManager.shared.resumeAccountAccess()
+        isAccountDataAccessReady = true
     }
     
     private func updateUserData(from user: ClerkKit.User) {
@@ -338,6 +359,7 @@ class AuthManager: ObservableObject {
             return
         }
 
+        clearAccountSwitchFenceIfOwnerReturned(currentClerkUserId: clerk.user?.id)
         if isAccountSwitchConfirmationPending {
             await chatViewModel?.handlePassiveAuthLoss()
             guard isCurrentAuthTransition(hydrationToken),
@@ -409,6 +431,7 @@ class AuthManager: ObservableObject {
             updateUserData(from: user)
             await RevenueCatManager.shared.loginUser(user.id)
             guard isCurrentAuthTransition(hydrationToken) else { return }
+            resumeAccountDataAccess(for: user.id, hydrationToken: hydrationToken)
             if isCurrentAuthTransition(hydrationToken),
                !hasTriggeredSignIn,
                let chatVM = chatViewModel {

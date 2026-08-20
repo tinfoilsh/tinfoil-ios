@@ -58,9 +58,10 @@ class ProfileManager: ObservableObject {
     private var isApplyingProfile: Bool = false  // Flag to prevent observer loops
     private var isPulling: Bool = false
     private var isPushing: Bool = false
-    private var isFullSyncInProgress: Bool = false
-    private var fullSyncWaiters: [CheckedContinuation<Void, Never>] = []
+    private var fullSyncTask: Task<Void, Never>?
+    private var fullSyncTaskId: UUID?
     private var accountGeneration: Int = 0
+    private var isAccountAccessPaused: Bool = true
     private var themeMode: String?
     private var localFieldClocks: [String: EditClock]?
     private var localClockVersion: Int?
@@ -580,6 +581,18 @@ class ProfileManager: ObservableObject {
     }
     
     // MARK: - Cloud Sync
+
+    func pauseAccountAccess() {
+        accountGeneration += 1
+        isAccountAccessPaused = true
+        syncDebounceTimer?.invalidate()
+        syncDebounceTimer = nil
+        fullSyncTask?.cancel()
+    }
+
+    func resumeAccountAccess() {
+        isAccountAccessPaused = false
+    }
     
     /// Setup automatic sync timer
     private func setupAutoSync() {
@@ -599,6 +612,7 @@ class ProfileManager: ObservableObject {
     
     /// Debounce cloud sync after local changes
     private func debounceCloudSync() {
+        guard !isAccountAccessPaused else { return }
         syncDebounceTimer?.invalidate()
         let timer = Timer(timeInterval: 2.0, repeats: false) { [weak self] _ in
             Task { @MainActor in
@@ -645,10 +659,17 @@ class ProfileManager: ObservableObject {
     }
 
     private func syncFromCloud(generation: Int) async -> Bool {
+        guard !isAccountAccessPaused,
+              generation == accountGeneration,
+              !Task.isCancelled else { return false }
         // Skip if not authenticated
         guard await profileSync.isAuthenticated() else {
             return false
         }
+
+        guard !isAccountAccessPaused,
+              generation == accountGeneration,
+              !Task.isCancelled else { return false }
 
         // Skip if no encryption key is set
         guard EncryptionService.shared.hasEncryptionKey() else {
@@ -663,9 +684,10 @@ class ProfileManager: ObservableObject {
         }
 
         do {
-            guard generation == accountGeneration else { return false }
             if let cloudProfile = try await profileSync.fetchProfile() {
-                guard generation == accountGeneration else { return false }
+                guard !isAccountAccessPaused,
+                      generation == accountGeneration,
+                      !Task.isCancelled else { return false }
                 let cloudVersion = cloudProfile.version ?? 0
                 let localProfile: ProfileData
                 if hasPendingLocalProfileChanges {
@@ -727,10 +749,17 @@ class ProfileManager: ObservableObject {
     }
 
     private func syncToCloud(generation: Int) async {
+        guard !isAccountAccessPaused,
+              generation == accountGeneration,
+              !Task.isCancelled else { return }
         // Skip if not authenticated but keep pending flag so we can retry later
         guard await profileSync.isAuthenticated() else {
             return
         }
+
+        guard !isAccountAccessPaused,
+              generation == accountGeneration,
+              !Task.isCancelled else { return }
 
         // Skip if no encryption key is set
         guard EncryptionService.shared.hasEncryptionKey() else {
@@ -747,7 +776,6 @@ class ProfileManager: ObservableObject {
             return
         }
 
-        guard generation == accountGeneration else { return }
         var profile: ProfileData
         do {
             profile = try prepareLocalProfileForSync()
@@ -776,7 +804,9 @@ class ProfileManager: ObservableObject {
                 profile,
                 baseline: lastSyncedProfile
             )
-            guard generation == accountGeneration else { return }
+            guard !isAccountAccessPaused,
+                  generation == accountGeneration,
+                  !Task.isCancelled else { return }
             if result.success {
                 // Server returns the authoritative version; always adopt it
                 if let version = result.version {
@@ -825,26 +855,40 @@ class ProfileManager: ObservableObject {
     
     /// Perform immediate sync (both directions)
     func performFullSync() async {
-        if isFullSyncInProgress {
-            await withCheckedContinuation { continuation in
-                fullSyncWaiters.append(continuation)
+        guard !isAccountAccessPaused else { return }
+        if let existingSyncTask = fullSyncTask {
+            let taskId = fullSyncTaskId
+            await existingSyncTask.value
+            if fullSyncTaskId == taskId {
+                self.fullSyncTask = nil
+                fullSyncTaskId = nil
+            }
+            if existingSyncTask.isCancelled, !isAccountAccessPaused {
+                await performFullSync()
             }
             return
         }
-        isFullSyncInProgress = true
-        defer {
-            isFullSyncInProgress = false
-            let waiters = fullSyncWaiters
-            fullSyncWaiters.removeAll()
-            waiters.forEach { $0.resume() }
-        }
 
         let generation = accountGeneration
-        // First pull from cloud
-        guard await syncFromCloud(generation: generation) else { return }
-        
-        // Then push any local changes (method will no-op if nothing changed)
-        await syncToCloud(generation: generation)
+        let taskId = UUID()
+        let task = Task { @MainActor [weak self] in
+            guard let self,
+                  !self.isAccountAccessPaused,
+                  generation == self.accountGeneration,
+                  !Task.isCancelled else { return }
+            guard await self.syncFromCloud(generation: generation) else { return }
+            guard !self.isAccountAccessPaused,
+                  generation == self.accountGeneration,
+                  !Task.isCancelled else { return }
+            await self.syncToCloud(generation: generation)
+        }
+        fullSyncTask = task
+        fullSyncTaskId = taskId
+        await task.value
+        if fullSyncTaskId == taskId {
+            fullSyncTask = nil
+            fullSyncTaskId = nil
+        }
     }
     
     /// Retry decryption with new encryption key
@@ -1006,12 +1050,13 @@ class ProfileManager: ObservableObject {
     }
 
     func clearLocalProfileForAccountRemoval() async {
-        accountGeneration += 1
-        syncDebounceTimer?.invalidate()
-        if isFullSyncInProgress {
-            await withCheckedContinuation { continuation in
-                fullSyncWaiters.append(continuation)
-            }
+        pauseAccountAccess()
+        let canceledSyncTask = fullSyncTask
+        let canceledSyncTaskId = fullSyncTaskId
+        await canceledSyncTask?.value
+        if fullSyncTaskId == canceledSyncTaskId {
+            fullSyncTask = nil
+            fullSyncTaskId = nil
         }
         applyDefaultProfile()
         // Reset non-published profile state too, so fields and CRDT

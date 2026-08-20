@@ -117,6 +117,56 @@ struct DataLifecycleSourceTests {
         #expect(retry.contains("await clearAuthState(for: trigger)"))
     }
 
+    @Test("Auth transitions fence profile access before publishing state")
+    func authTransitionsFenceProfileAccess() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let transition = try functionBody(named: "private func beginAuthTransition()", in: source)
+        let hydration = try functionBody(named: "func initializeAuthState()", in: source)
+        let ownerRecovery = try functionBody(named: "private func clearAccountSwitchFenceIfOwnerReturned", in: source)
+        let teardown = try functionBody(named: "private func performAccountTeardown(ownerUserId:", in: source)
+        let resume = try #require(hydration.range(of: "resumeAccountDataAccess(for: user.id"))
+        let authenticated = try #require(hydration.range(of: "case .authenticated:"))
+        let clearFence = try #require(hydration.range(of: "clearAccountSwitchFenceIfOwnerReturned"))
+        let pendingFence = try #require(hydration.range(of: "if isAccountSwitchConfirmationPending"))
+
+        #expect(transition.contains("isAccountDataAccessReady = false"))
+        #expect(transition.contains("ProfileManager.shared.pauseAccountAccess()"))
+        #expect(ownerRecovery.contains("currentClerkUserId == previousUserId"))
+        #expect(clearFence.lowerBound < pendingFence.lowerBound)
+        #expect(authenticated.lowerBound < resume.lowerBound)
+        #expect(!hydration[hydration.startIndex..<authenticated.lowerBound].contains("resumeAccountDataAccess"))
+        #expect(!teardown.contains("resumeAccountDataAccess"))
+        #expect(!teardown.contains("resumeAccountAccess"))
+    }
+
+    @Test("Profile sync entry points reject paused account access")
+    func profileSyncEntryPointsShareAccountAccessGuard() throws {
+        let source = try sourceFile("TinfoilChat/Services/ProfileManager.swift")
+        let pause = try functionBody(named: "func pauseAccountAccess()", in: source)
+        let debounce = try functionBody(named: "private func debounceCloudSync()", in: source)
+        let pull = try functionBody(named: "private func syncFromCloud(generation:", in: source)
+        let push = try functionBody(named: "private func syncToCloud(generation:", in: source)
+        let fullSync = try functionBody(named: "func performFullSync()", in: source)
+
+        #expect(pause.contains("accountGeneration += 1"))
+        #expect(pause.contains("fullSyncTask?.cancel()"))
+        #expect(debounce.contains("guard !isAccountAccessPaused else { return }"))
+        for entryPoint in [pull, push, fullSync] {
+            #expect(entryPoint.contains("!isAccountAccessPaused"))
+        }
+    }
+
+    @Test("Clerk profile sync callback requires account data readiness")
+    func clerkProfileSyncCallbackUsesAuthReadiness() throws {
+        let source = try sourceFile("TinfoilChat/TinfoilChatApp.swift")
+        let callback = try #require(source.range(of: "forName: NSNotification.Name(\"ClerkUserChanged\")"))
+        let callbackSource = source[callback.lowerBound...]
+        let readiness = try #require(callbackSource.range(of: "if authManager.isAccountDataAccessReady"))
+        let profileSync = try #require(callbackSource.range(of: "await ProfileManager.shared.performFullSync()"))
+
+        #expect(readiness.lowerBound < profileSync.lowerBound)
+    }
+
     @Test("Confirmed account switches sign out Clerk before local cleanup")
     func confirmedAccountSwitchSignsOutBeforeCleanup() throws {
         let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")

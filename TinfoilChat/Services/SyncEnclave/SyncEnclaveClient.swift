@@ -180,18 +180,24 @@ actor SyncEnclaveClient {
             forceRefresh: false,
             generation: requestGeneration
         )
+        try Task.checkCancellation()
         headers["Authorization"] = "Bearer \(token)"
         await requestProgress?.markRequestStarted()
+        try Task.checkCancellation()
         var response = try await performPost(client: client, url: url, headers: headers, body: bodyData)
+        try Task.checkCancellation()
         if response.statusCode == 401 {
             guard requestGeneration == tokenGeneration else { throw CancellationError() }
             let refreshedToken = try await requireToken(
                 forceRefresh: true,
                 generation: requestGeneration
             )
+            try Task.checkCancellation()
             headers["Authorization"] = "Bearer \(refreshedToken)"
             await requestProgress?.markRequestStarted()
+            try Task.checkCancellation()
             response = try await performPost(client: client, url: url, headers: headers, body: bodyData)
+            try Task.checkCancellation()
             if response.statusCode == 401 {
                 let error = try await persistentAuthenticationError(generation: requestGeneration)
                 throw error
