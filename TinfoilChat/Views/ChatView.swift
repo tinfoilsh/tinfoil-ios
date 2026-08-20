@@ -264,9 +264,11 @@ struct ChatContainer: View {
                         if isInProjectChat {
                             viewModel.returnToProjectLanding()
                         } else {
-                            viewModel.exitProject()
-                            withAnimation {
-                                isSidebarOpen = true
+                            Task {
+                                guard await viewModel.exitProject() else { return }
+                                withAnimation {
+                                    isSidebarOpen = true
+                                }
                             }
                         }
                     } label: {
@@ -307,9 +309,7 @@ struct ChatContainer: View {
 
                     if let activeProject = viewModel.activeProject {
                         HStack(spacing: 6) {
-                            Image(systemName: "folder")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(toolbarContentColor)
+                            ProjectFolderIcon(color: activeProject.color, size: 20)
                             Text(activeProject.name)
                                 .font(.caption)
                                 .fontWeight(.semibold)

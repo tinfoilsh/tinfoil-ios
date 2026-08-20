@@ -27,9 +27,7 @@ struct ProjectPage: View {
                 if let project {
                     Section {
                         HStack(spacing: 12) {
-                            Image(systemName: "folder.fill")
-                                .font(.title3)
-                                .foregroundColor(.accentColor)
+                            ProjectFolderIcon(color: project.color, size: 32)
                             VStack(alignment: .leading, spacing: 2) {
                                 TextField("Project name", text: $editingName)
                                     .font(.headline)
@@ -121,6 +119,14 @@ struct ProjectPage: View {
                 }
                 deletingChatId = nil
             }
+        }
+        .alert("Project Error", isPresented: Binding(
+            get: { viewModel.projectError != nil },
+            set: { if !$0 { viewModel.projectError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.projectError ?? "An error occurred")
         }
     }
 
@@ -224,7 +230,11 @@ struct ProjectPage: View {
                         await viewModel.moveChatToProject(chatId: chat.id, projectId: destination.id)
                     }
                 } label: {
-                    Label("Move to \(destination.name)", systemImage: "folder")
+                    Label {
+                        Text("Move to \(destination.name)")
+                    } icon: {
+                        ProjectFolderIcon(color: destination.color, size: 22)
+                    }
                 }
             }
         }
@@ -310,6 +320,14 @@ struct ProjectDetailsView: View {
         }
         .onAppear(perform: syncEditingState)
         .onChange(of: project?.id) { _, _ in syncEditingState() }
+        .alert("Project Error", isPresented: Binding(
+            get: { viewModel.projectError != nil },
+            set: { if !$0 { viewModel.projectError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.projectError ?? "An error occurred")
+        }
     }
 
     private func saveChanges() {
@@ -341,6 +359,7 @@ struct ProjectDocumentsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @State private var showDocumentPicker = false
+    @State private var uploadDestination: ChatViewModel.ProjectDocumentUploadDestination?
 
     var body: some View {
         Form {
@@ -377,7 +396,8 @@ struct ProjectDocumentsView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
-                    showDocumentPicker = true
+                    uploadDestination = viewModel.projectDocumentUploadDestination
+                    showDocumentPicker = uploadDestination != nil
                 } label: {
                     Image(systemName: "plus")
                 }
@@ -385,12 +405,31 @@ struct ProjectDocumentsView: View {
                 .accessibilityLabel("Add document")
             }
         }
-        .sheet(isPresented: $showDocumentPicker) {
-            DocumentPickerView { url, fileName in
-                Task {
-                    await viewModel.uploadProjectDocument(url: url, filename: fileName)
-                }
+        .sheet(isPresented: $showDocumentPicker, onDismiss: { uploadDestination = nil }) {
+            if let uploadDestination {
+                DocumentPickerView(
+                    onDocumentPicked: { file, fileName in
+                        viewModel.uploadProjectDocument(
+                            file: file,
+                            filename: fileName,
+                            destination: uploadDestination
+                        )
+                    },
+                    onError: { error in
+                        viewModel.projectDocumentError = error.localizedDescription
+                    },
+                    accountLifecycleGeneration: { viewModel.accountLifecycleGeneration },
+                    isAccountLifecycleCurrent: viewModel.isCurrentAccountLifecycle
+                )
             }
+        }
+        .alert("Project Error", isPresented: Binding(
+            get: { viewModel.projectDocumentError != nil },
+            set: { if !$0 { viewModel.projectDocumentError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.projectDocumentError ?? "An error occurred")
         }
     }
 
@@ -478,6 +517,14 @@ struct ProjectSettingsView: View {
             }
         } message: {
             Text("This deletes the project and its project context documents.")
+        }
+        .alert("Project Error", isPresented: Binding(
+            get: { viewModel.projectError != nil },
+            set: { if !$0 { viewModel.projectError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.projectError ?? "An error occurred")
         }
     }
 

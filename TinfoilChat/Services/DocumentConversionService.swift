@@ -49,7 +49,10 @@ actor DocumentConversionService {
     }
 
     func convertToMarkdown(url: URL, filename: String, contentType: String? = nil, mode: String = Constants.DocumentProcessing.defaultMode) async throws -> String {
-        let fileData = try Data(contentsOf: url)
+        let fileData = try BoundedFileIO.read(
+            from: url,
+            maximumSize: Constants.Attachments.maxFileSizeBytes
+        )
         let boundary = "Boundary-\(UUID().uuidString)"
         let mimeType = contentType ?? Self.mimeType(for: filename)
         let body = Self.multipartBody(

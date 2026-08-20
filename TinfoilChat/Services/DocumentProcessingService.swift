@@ -39,32 +39,63 @@ final class DocumentProcessingService {
             throw ProcessingError.unsupportedFormat(fileExtension)
         }
 
-        let fileSize = try fileSize(at: url)
-        guard fileSize <= Constants.Attachments.maxFileSizeBytes else {
-            throw ProcessingError.fileTooLarge(fileSize)
+        do {
+            _ = try BoundedFileIO.validatedSize(
+                of: url,
+                maximumSize: Constants.Attachments.maxFileSizeBytes
+            )
+        } catch BoundedFileIOError.fileTooLarge(let size, _) {
+            throw ProcessingError.fileTooLarge(size)
         }
 
         switch fileExtension {
         case "pdf":
-            return try await Task.detached(priority: .userInitiated) {
-                try self.extractTextFromPDF(at: url)
-            }.value
+            let extractionTask = Task.detached(priority: .userInitiated) {
+                try Task.checkCancellation()
+                return try self.extractTextFromPDF(at: url)
+            }
+            return try await withTaskCancellationHandler {
+                try await extractionTask.value
+            } onCancel: {
+                extractionTask.cancel()
+            }
         case "txt", "md", "csv", "html", "json", "xml":
-            return try await Task.detached(priority: .userInitiated) {
-                try self.readPlainText(at: url)
-            }.value
+            let extractionTask = Task.detached(priority: .userInitiated) {
+                try Task.checkCancellation()
+                return try self.readPlainText(at: url)
+            }
+            return try await withTaskCancellationHandler {
+                try await extractionTask.value
+            } onCancel: {
+                extractionTask.cancel()
+            }
         default:
             return try await DocumentConversionService.shared.convertToMarkdown(url: url, filename: url.lastPathComponent)
         }
     }
 
     private func extractTextFromPDF(at url: URL) throws -> String {
-        guard let document = PDFDocument(url: url) else {
+        try Task.checkCancellation()
+        let data: Data
+        do {
+            data = try BoundedFileIO.read(
+                from: url,
+                maximumSize: Constants.Attachments.maxFileSizeBytes
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch BoundedFileIOError.fileTooLarge(let size, _) {
+            throw ProcessingError.fileTooLarge(size)
+        } catch {
+            throw ProcessingError.fileReadFailed
+        }
+        guard let document = PDFDocument(data: data) else {
             throw ProcessingError.textExtractionFailed
         }
 
         var fullText = ""
         for pageIndex in 0..<document.pageCount {
+            try Task.checkCancellation()
             guard let page = document.page(at: pageIndex) else { continue }
             if let pageText = page.string {
                 if !fullText.isEmpty {
@@ -82,20 +113,29 @@ final class DocumentProcessingService {
     }
 
     private func readPlainText(at url: URL) throws -> String {
-        guard let data = try? Data(contentsOf: url),
-              let text = String(data: data, encoding: .utf8) else {
+        try Task.checkCancellation()
+        let data: Data
+        do {
+            data = try BoundedFileIO.read(
+                from: url,
+                maximumSize: Constants.Attachments.maxFileSizeBytes
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch BoundedFileIOError.fileTooLarge(let size, _) {
+            throw ProcessingError.fileTooLarge(size)
+        } catch {
             throw ProcessingError.fileReadFailed
         }
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw ProcessingError.fileReadFailed
+        }
+        try Task.checkCancellation()
 
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ProcessingError.textExtractionFailed
         }
 
         return text
-    }
-
-    private func fileSize(at url: URL) throws -> Int64 {
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        return attributes[.size] as? Int64 ?? 0
     }
 }

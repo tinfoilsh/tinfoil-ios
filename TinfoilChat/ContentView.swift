@@ -74,6 +74,16 @@ struct ContentView: View {
                 }
             }
         }
+        .alert("Account Cleanup Required", isPresented: Binding(
+            get: { authManager.accountTeardownError != nil },
+            set: { if !$0 { authManager.accountTeardownError = nil } }
+        )) {
+            Button("Retry") {
+                Task { await authManager.retryAccountTeardown() }
+            }
+        } message: {
+            Text(authManager.accountTeardownError ?? "")
+        }
         .sheet(isPresented: $passkeyManager.showPasskeyRecoveryChoice) {
             PasskeyRecoveryChoiceView(
                 onTryAgain: {
@@ -251,8 +261,13 @@ struct ContentView: View {
             guard chatViewModel.currentChat != nil else { return }
             chatViewModel.sendMessage(text: prompt)
         case .newChat:
-            chatViewModel.createNewRootChat()
-            chatViewModel.requestNavigation(to: .chat)
+            let navigationGeneration = chatViewModel.beginNavigationOperation()
+            Task {
+                let createdRootChat = await chatViewModel.createNewRootChat()
+                guard (createdRootChat || !chatViewModel.hasChatAccess),
+                      chatViewModel.navigationGeneration == navigationGeneration else { return }
+                chatViewModel.requestNavigation(to: .chat)
+            }
         case .startDictation:
             if chatViewModel.canUseAudioInput {
                 chatViewModel.createNewChat(focusInput: false)
