@@ -66,6 +66,137 @@ struct SharedImportStoreTests {
         #expect(try fixture.store.payloadData(for: request) == sourceData)
     }
 
+    @Test("Rejects new shares at the pending request limit")
+    func enforcesPendingRequestLimit() throws {
+        let fixture = try makeFixture(
+            maximumPendingRequestCount: 2,
+            maximumPendingPayloadBytes: 100
+        )
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+        for name in ["first.txt", "second.txt"] {
+            _ = try fixture.store.enqueue(
+                data: Data(name.utf8),
+                typeIdentifier: UTType.plainText.identifier,
+                originalFileName: name
+            )
+        }
+
+        #expect(throws: SharedImportError.tooManyPendingRequests(maximum: 2)) {
+            _ = try fixture.store.enqueue(
+                data: Data("third".utf8),
+                typeIdentifier: UTType.plainText.identifier,
+                originalFileName: "third.txt"
+            )
+        }
+        #expect(fixture.store.pendingRequests().count == 2)
+    }
+
+    @Test("Rejects new shares above the aggregate payload quota")
+    func enforcesPendingPayloadQuota() throws {
+        let fixture = try makeFixture(
+            maximumPendingRequestCount: 10,
+            maximumPendingPayloadBytes: 5
+        )
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+        _ = try fixture.store.enqueue(
+            data: Data("12345".utf8),
+            typeIdentifier: UTType.plainText.identifier,
+            originalFileName: "full.txt"
+        )
+
+        #expect(throws: SharedImportError.pendingPayloadQuotaExceeded(maximumBytes: 5)) {
+            _ = try fixture.store.enqueue(
+                data: Data("6".utf8),
+                typeIdentifier: UTType.plainText.identifier,
+                originalFileName: "extra.txt"
+            )
+        }
+        #expect(fixture.store.pendingRequests().count == 1)
+    }
+
+    @Test("Serializes concurrent aggregate quota checks")
+    func serializesConcurrentEnqueue() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString.lowercased(), isDirectory: true)
+        let inboxURL = rootURL.appendingPathComponent("ShareInbox", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        var results: [ConcurrentEnqueueResult] = []
+        await withTaskGroup(of: ConcurrentEnqueueResult.self) { group in
+            for name in ["first.txt", "second.txt"] {
+                group.addTask {
+                    do {
+                        let store = try SharedImportStore(
+                            inboxURL: inboxURL,
+                            maximumPendingRequestCount: 10,
+                            maximumPendingPayloadBytes: 1
+                        )
+                        _ = try store.enqueue(
+                            data: Data("1".utf8),
+                            typeIdentifier: UTType.plainText.identifier,
+                            originalFileName: name
+                        )
+                        return .success
+                    } catch SharedImportError.pendingPayloadQuotaExceeded(let maximumBytes) {
+                        return maximumBytes == 1 ? .quotaRejected : .unexpectedFailure
+                    } catch {
+                        return .unexpectedFailure
+                    }
+                }
+            }
+            for await result in group {
+                results.append(result)
+            }
+        }
+
+        #expect(results.filter { $0 == .success }.count == 1)
+        #expect(results.filter { $0 == .quotaRejected }.count == 1)
+        let store = try SharedImportStore(inboxURL: inboxURL)
+        #expect(store.pendingRequests().count == 1)
+    }
+
+    @Test("Prefers files before immediately bounding materialized fallback data")
+    func boundsMaterializedDataFallback() throws {
+        let fixture = try makeFixture(
+            maximumPendingRequestCount: 10,
+            maximumPendingPayloadBytes: 3
+        )
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+        var callOrder: [String] = []
+        var observedError: SharedImportError?
+
+        SharedImportRepresentationLoader.load(
+            fileRepresentation: { completion in
+                callOrder.append("file")
+                completion(nil, CocoaError(.fileReadUnknown))
+            },
+            dataRepresentation: { completion in
+                callOrder.append("data")
+                completion(Data("1234".utf8), nil)
+            }
+        ) { result in
+            guard case .success(.data(let data)) = result else {
+                observedError = .invalidFile
+                return
+            }
+            do {
+                _ = try fixture.store.enqueue(
+                    data: data,
+                    typeIdentifier: UTType.plainText.identifier,
+                    originalFileName: "fallback.txt"
+                )
+            } catch let error as SharedImportError {
+                observedError = error
+            } catch {
+                observedError = .invalidFile
+            }
+        }
+
+        #expect(callOrder == ["file", "data"])
+        #expect(observedError == .pendingPayloadQuotaExceeded(maximumBytes: 3))
+        #expect(fixture.store.pendingRequests().isEmpty)
+    }
+
     @Test("Rejects oversized file representations before publishing")
     func rejectsOversizedFileRepresentation() throws {
         let fixture = try makeFixture()
@@ -179,7 +310,9 @@ struct SharedImportStoreTests {
     }
 
     private func makeFixture(
-        currentDate: @escaping () -> Date = Date.init
+        currentDate: @escaping () -> Date = Date.init,
+        maximumPendingRequestCount: Int = SharedImportConfiguration.maximumPendingRequestCount,
+        maximumPendingPayloadBytes: Int64 = SharedImportConfiguration.maximumPendingPayloadBytes
     ) throws -> (
         store: SharedImportStore,
         rootURL: URL,
@@ -194,9 +327,20 @@ struct SharedImportStoreTests {
             attributes: nil
         )
         return (
-            try SharedImportStore(inboxURL: inboxURL, currentDate: currentDate),
+            try SharedImportStore(
+                inboxURL: inboxURL,
+                currentDate: currentDate,
+                maximumPendingRequestCount: maximumPendingRequestCount,
+                maximumPendingPayloadBytes: maximumPendingPayloadBytes
+            ),
             rootURL,
             inboxURL
         )
     }
+}
+
+private enum ConcurrentEnqueueResult: Equatable, Sendable {
+    case success
+    case quotaRejected
+    case unexpectedFailure
 }

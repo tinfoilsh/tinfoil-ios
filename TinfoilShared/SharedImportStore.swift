@@ -1,18 +1,27 @@
+import Darwin
 import Foundation
 import UniformTypeIdentifiers
 
 struct SharedImportStore {
+    private static let enqueueLock = NSLock()
+
     private let fileManager: FileManager
     private let currentDate: () -> Date
+    private let maximumPendingRequestCount: Int
+    private let maximumPendingPayloadBytes: Int64
     let inboxURL: URL
 
     init(
         fileManager: FileManager = .default,
         inboxURL: URL? = nil,
-        currentDate: @escaping () -> Date = Date.init
+        currentDate: @escaping () -> Date = Date.init,
+        maximumPendingRequestCount: Int = SharedImportConfiguration.maximumPendingRequestCount,
+        maximumPendingPayloadBytes: Int64 = SharedImportConfiguration.maximumPendingPayloadBytes
     ) throws {
         self.fileManager = fileManager
         self.currentDate = currentDate
+        self.maximumPendingRequestCount = maximumPendingRequestCount
+        self.maximumPendingPayloadBytes = maximumPendingPayloadBytes
 
         if let inboxURL {
             self.inboxURL = inboxURL
@@ -57,15 +66,18 @@ struct SharedImportStore {
             originalFileName: originalFileName,
             byteCount: byteCount
         )
-        return try publish(requestID: UUID(), item: item) { destinationURL in
-            do {
-                return try BoundedFileIO.copy(
-                    from: sourceURL,
-                    to: destinationURL,
-                    maximumBytes: item.kind.maximumSizeBytes
-                )
-            } catch BoundedFileIO.Error.fileTooLarge(let size, _) {
-                throw SharedImportError.fileTooLarge(kind: item.kind, size: size)
+        return try withExclusiveEnqueueLock {
+            try enforcePendingLimits(addingPayloadBytes: byteCount)
+            return try publish(requestID: UUID(), item: item) { destinationURL in
+                do {
+                    return try BoundedFileIO.copy(
+                        from: sourceURL,
+                        to: destinationURL,
+                        maximumBytes: item.kind.maximumSizeBytes
+                    )
+                } catch BoundedFileIO.Error.fileTooLarge(let size, _) {
+                    throw SharedImportError.fileTooLarge(kind: item.kind, size: size)
+                }
             }
         }
     }
@@ -91,13 +103,60 @@ struct SharedImportStore {
             byteCount: byteCount
         )
 
-        return try publish(requestID: UUID(), item: item) { destinationURL in
-            try data.write(to: destinationURL, options: .withoutOverwriting)
-            return try BoundedFileIO.size(
-                of: destinationURL,
-                maximumBytes: item.kind.maximumSizeBytes
+        return try withExclusiveEnqueueLock {
+            try enforcePendingLimits(addingPayloadBytes: byteCount)
+            return try publish(requestID: UUID(), item: item) { destinationURL in
+                try data.write(to: destinationURL, options: .withoutOverwriting)
+                return try BoundedFileIO.size(
+                    of: destinationURL,
+                    maximumBytes: item.kind.maximumSizeBytes
+                )
+            }
+        }
+    }
+
+    private func enforcePendingLimits(addingPayloadBytes byteCount: Int64) throws {
+        let pendingRequests = pendingRequests()
+        guard pendingRequests.count < maximumPendingRequestCount else {
+            throw SharedImportError.tooManyPendingRequests(maximum: maximumPendingRequestCount)
+        }
+
+        var aggregateBytes: Int64 = 0
+        for request in pendingRequests {
+            let result = aggregateBytes.addingReportingOverflow(request.item.byteCount)
+            guard !result.overflow else {
+                throw SharedImportError.pendingPayloadQuotaExceeded(
+                    maximumBytes: maximumPendingPayloadBytes
+                )
+            }
+            aggregateBytes = result.partialValue
+        }
+        guard byteCount <= maximumPendingPayloadBytes,
+              aggregateBytes <= maximumPendingPayloadBytes - byteCount else {
+            throw SharedImportError.pendingPayloadQuotaExceeded(
+                maximumBytes: maximumPendingPayloadBytes
             )
         }
+    }
+
+    private func withExclusiveEnqueueLock<T>(_ operation: () throws -> T) throws -> T {
+        Self.enqueueLock.lock()
+        defer { Self.enqueueLock.unlock() }
+
+        let lockURL = inboxURL.appendingPathComponent(SharedImportConfiguration.enqueueLockFileName)
+        let descriptor = Darwin.open(
+            lockURL.path,
+            O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC,
+            S_IRUSR | S_IWUSR
+        )
+        guard descriptor >= 0 else { throw SharedImportError.invalidFile }
+        defer { Darwin.close(descriptor) }
+
+        while Darwin.flock(descriptor, LOCK_EX) != 0 {
+            guard errno == EINTR else { throw SharedImportError.invalidFile }
+        }
+        defer { _ = Darwin.flock(descriptor, LOCK_UN) }
+        return try operation()
     }
 
     private func publish(

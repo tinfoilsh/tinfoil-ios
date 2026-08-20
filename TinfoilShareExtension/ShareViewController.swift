@@ -106,53 +106,60 @@ final class ShareViewController: UIViewController {
         }
 
         setSaving(true)
-        provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { [weak self] url, error in
+        SharedImportRepresentationLoader.load(
+            fileRepresentation: { completion in
+                _ = provider.loadFileRepresentation(
+                    forTypeIdentifier: typeIdentifier,
+                    completionHandler: completion
+                )
+            },
+            dataRepresentation: { completion in
+                _ = provider.loadDataRepresentation(
+                    forTypeIdentifier: typeIdentifier,
+                    completionHandler: completion
+                )
+            }
+        ) { [weak self] result in
             guard let self else { return }
-
-            if let url {
+            switch result {
+            case .success(.file(let url)):
                 saveSharedItem(
                     from: url,
                     provider: provider,
                     typeIdentifier: typeIdentifier
                 )
-            } else {
-                loadDataFallback(
+            case .success(.data(let data)):
+                saveSharedItem(
+                    data: data,
                     provider: provider,
-                    typeIdentifier: typeIdentifier,
-                    underlyingError: error
+                    typeIdentifier: typeIdentifier
                 )
+            case .failure(let error):
+                showError(error)
             }
         }
     }
 
-    private func loadDataFallback(
+    private func saveSharedItem(
+        data: Data,
         provider: NSItemProvider,
-        typeIdentifier: String,
-        underlyingError: Error?
+        typeIdentifier: String
     ) {
-        provider.loadDataRepresentation(forTypeIdentifier: typeIdentifier) { [weak self] data, error in
-            guard let self else { return }
-            guard let data else {
-                showError(error ?? underlyingError ?? SharedImportError.invalidFile)
-                return
-            }
-
-            do {
-                let store = try SharedImportStore()
-                _ = try store.enqueue(
-                    data: data,
-                    typeIdentifier: typeIdentifier,
-                    originalFileName: sharedFileName(
-                        provider: provider,
-                        typeIdentifier: typeIdentifier
-                    )
+        do {
+            let store = try SharedImportStore()
+            _ = try store.enqueue(
+                data: data,
+                typeIdentifier: typeIdentifier,
+                originalFileName: sharedFileName(
+                    provider: provider,
+                    typeIdentifier: typeIdentifier
                 )
-                DispatchQueue.main.async { [weak self] in
-                    self?.extensionContext?.completeRequest(returningItems: nil)
-                }
-            } catch {
-                showError(error)
+            )
+            DispatchQueue.main.async { [weak self] in
+                self?.extensionContext?.completeRequest(returningItems: nil)
             }
+        } catch {
+            showError(error)
         }
     }
 
