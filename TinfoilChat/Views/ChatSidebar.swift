@@ -284,13 +284,16 @@ struct ChatSidebar: View {
     }
 
     private var sidebarContent: some View {
+        let projectColors = viewModel.projects.reduce(into: [String: String]()) {
+            $0[$1.id] = $1.color
+        }
         VStack(spacing: 0) {
             recoveryBanner
             ScrollViewReader { scrollProxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if authManager.isAuthenticated && settings.isCloudSyncEnabled {
-                            favoritesSection
+                            favoritesSection(projectColors: projectColors)
                                 .padding(.horizontal, 16)
                                 .padding(.top, 16)
                                 .id(ChatNavigationDestination.favorites)
@@ -327,7 +330,7 @@ struct ChatSidebar: View {
                                     .padding(.top, 8)
                             }
 
-                            chatList
+                            chatList(projectColors: projectColors)
                                 .padding(.horizontal, 16)
                                 .padding(.top, 8)
                                 .padding(.bottom, 8)
@@ -425,7 +428,7 @@ struct ChatSidebar: View {
         }
     }
 
-    private var chatList: some View {
+    private func chatList(projectColors: [String: String]) -> some View {
         VStack(spacing: 12) {
             ForEach(Array(displayedChats.enumerated()), id: \.element.id) { _, chat in
                 ChatListItem(
@@ -439,7 +442,7 @@ struct ChatSidebar: View {
                     syncFailed: !chat.isBlankChat && syncHealth.failedChats[chat.id] != nil,
                     isGenerating: viewModel.isChatStreaming(chat.id),
                     isPinned: profileManager.isChatPinned(chat.id),
-                    projectColor: viewModel.projects.first { $0.id == chat.projectId }?.color,
+                    projectColor: chat.projectId.flatMap { projectColors[$0] },
                     onSelect: {
                         if isChatSearchActive {
                             if !chatSearch.available {
@@ -527,7 +530,7 @@ struct ChatSidebar: View {
         }
     }
 
-    private var favoritesSection: some View {
+    private func favoritesSection(projectColors: [String: String]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -561,14 +564,14 @@ struct ChatSidebar: View {
                         .padding(.horizontal, 14)
                 } else {
                     ForEach(viewModel.favoriteChats) { chat in
-                        favoriteChatRow(chat)
+                        favoriteChatRow(chat, projectColors: projectColors)
                     }
                 }
             }
         }
     }
 
-    private func favoriteChatRow(_ chat: Chat) -> some View {
+    private func favoriteChatRow(_ chat: Chat, projectColors: [String: String]) -> some View {
         let summary = ChatListSummary(from: chat)
         return ChatListItem(
             chat: summary,
@@ -582,7 +585,7 @@ struct ChatSidebar: View {
             isGenerating: viewModel.isChatStreaming(chat.id),
             isPinned: true,
             showPinnedIndicator: false,
-            projectColor: viewModel.projects.first { $0.id == chat.projectId }?.color,
+            projectColor: chat.projectId.flatMap { projectColors[$0] },
             onSelect: { viewModel.openSearchResult(chat) },
             onEdit: {
                 if editingChatId == chat.id {
