@@ -59,7 +59,7 @@ enum AccountTeardownTrigger: Equatable {
         case .accountDeletion(let deletedUserId):
             return currentClerkUserId == nil || currentClerkUserId == deletedUserId
         case .accountSwitch(let previousUserId, let newUserId):
-            return previousUserId != newUserId && currentClerkUserId == newUserId
+            return previousUserId != newUserId && currentClerkUserId == nil
         }
     }
 
@@ -75,35 +75,30 @@ enum AccountTeardownTrigger: Equatable {
     }
 }
 
-enum AccountSwitchRetryOutcome: Equatable {
-    case signedOutPreservingAccount
-    case resumeSameOwner
-    case teardown(AccountTeardownTrigger)
+enum AccountTeardownRetryReason: Equatable {
+    case accountSwitchConfirmation(AccountTeardownTrigger)
+    case teardownFailure(AccountTeardownTrigger)
 
-    static func resolve(
-        preservedOwnerUserId: String?,
-        currentClerkUserId: String?
-    ) -> Self {
-        guard let currentClerkUserId else {
-            return .signedOutPreservingAccount
+    var trigger: AccountTeardownTrigger {
+        switch self {
+        case .accountSwitchConfirmation(let trigger), .teardownFailure(let trigger):
+            return trigger
         }
-        guard let preservedOwnerUserId else {
-            return .resumeSameOwner
+    }
+
+    var requiresClerkSignOut: Bool {
+        if case .accountSwitchConfirmation = self {
+            return true
         }
-        guard preservedOwnerUserId != currentClerkUserId else {
-            return .resumeSameOwner
-        }
-        return .teardown(.accountSwitch(
-            previousUserId: preservedOwnerUserId,
-            newUserId: currentClerkUserId
-        ))
+        return false
     }
 }
 
 @MainActor
 class AuthManager: ObservableObject {
     private static let userIdKey = "id"
-    private static let accountSwitchMessage = "Tinfoil found a different signed-in account. Account actions remain paused to protect your data. Retry cleanup to clear the previous account's local data and continue."
+    private static let accountSwitchMessage = "Tinfoil found a different signed-in account. Account actions remain paused to protect your data. Retry cleanup to sign out the current account, clear the previous account's local data, then sign in again."
+    private static let accountSwitchSignOutFailureMessage = "Tinfoil couldn't sign out the current account. No local data was cleared. Check your connection and retry."
 
     @Published var isAuthenticated = false
     @Published var isLoading = true
@@ -122,7 +117,8 @@ class AuthManager: ObservableObject {
     private var hasTriggeredSignIn = false
     private var accountTeardownTask: Task<Bool, Never>?
     private var accountTeardownId: UUID?
-    private var pendingAccountTeardownTrigger: AccountTeardownTrigger?
+    private var pendingAccountTeardownRetryReason: AccountTeardownRetryReason?
+    private var isAccountTeardownInProgress = false
     private var retainedOwnerUserId: String?
     private var authHydrationGeneration = AuthHydrationGeneration()
     
@@ -199,8 +195,21 @@ class AuthManager: ObservableObject {
     }
     
     func setClerk(_ clerk: Clerk) {
+        guard !isAccountTeardownInProgress else { return }
         let hydrationToken = beginAuthTransition()
         self.clerk = clerk
+        if isAccountSwitchConfirmationPending {
+            isAuthenticated = false
+            hasActiveSubscription = false
+            hasTriggeredSignIn = false
+            saveAuthState()
+            Task { @MainActor [weak self] in
+                guard let self,
+                      self.isCurrentAuthTransition(hydrationToken) else { return }
+                await self.chatViewModel?.handlePassiveAuthLoss()
+            }
+            return
+        }
         // Check if clerk is already loaded and has a user
         if let user = clerk.user {
             guard isCurrentAuthTransition(hydrationToken) else { return }
@@ -212,10 +221,10 @@ class AuthManager: ObservableObject {
                 hasActiveSubscription = false
                 hasTriggeredSignIn = false
                 saveAuthState()
-                pendingAccountTeardownTrigger = .accountSwitch(
+                pendingAccountTeardownRetryReason = .accountSwitchConfirmation(.accountSwitch(
                     previousUserId: cachedUserId,
                     newUserId: user.id
-                )
+                ))
                 accountTeardownError = Self.accountSwitchMessage
                 Task { @MainActor [weak self] in
                     guard let self,
@@ -247,6 +256,13 @@ class AuthManager: ObservableObject {
 
     private func isCurrentAuthTransition(_ token: UInt64) -> Bool {
         authHydrationGeneration.isCurrent(token)
+    }
+
+    private var isAccountSwitchConfirmationPending: Bool {
+        if case .accountSwitchConfirmation = pendingAccountTeardownRetryReason {
+            return true
+        }
+        return false
     }
     
     private func updateUserData(from user: ClerkKit.User) {
@@ -300,6 +316,7 @@ class AuthManager: ObservableObject {
     }
     
     func initializeAuthState() async {
+        guard !isAccountTeardownInProgress else { return }
         let hydrationToken = beginAuthTransition()
         guard let clerk = self.clerk else {
             guard isCurrentAuthTransition(hydrationToken) else { return }
@@ -321,6 +338,19 @@ class AuthManager: ObservableObject {
             return
         }
 
+        if isAccountSwitchConfirmationPending {
+            await chatViewModel?.handlePassiveAuthLoss()
+            guard isCurrentAuthTransition(hydrationToken),
+                  isAccountSwitchConfirmationPending else { return }
+            isSessionUnavailable = false
+            isAuthenticated = false
+            hasActiveSubscription = false
+            hasTriggeredSignIn = false
+            saveAuthState()
+            isLoading = false
+            return
+        }
+
         let outcome = AuthHydrationOutcome.resolve(
             lastOwnerUserId: retainedOwnerUserId ?? localUserId,
             clerkUserId: clerk.user?.id
@@ -329,10 +359,6 @@ class AuthManager: ObservableObject {
         switch outcome {
         case .signedOut, .signedOutPreservingAccount:
             guard isCurrentAuthTransition(hydrationToken) else { return }
-            if case .accountSwitch = pendingAccountTeardownTrigger {
-                pendingAccountTeardownTrigger = nil
-                accountTeardownError = nil
-            }
             retainedOwnerUserId = localUserId ?? retainedOwnerUserId
             guard isCurrentAuthTransition(hydrationToken) else { return }
             await chatViewModel?.handlePassiveAuthLoss()
@@ -352,20 +378,20 @@ class AuthManager: ObservableObject {
                 return
             }
             retainedOwnerUserId = preservedOwnerUserId
+            pendingAccountTeardownRetryReason = .accountSwitchConfirmation(.accountSwitch(
+                previousUserId: preservedOwnerUserId,
+                newUserId: currentUserId
+            ))
+            accountTeardownError = Self.accountSwitchMessage
             await chatViewModel?.handlePassiveAuthLoss()
             guard isCurrentAuthTransition(hydrationToken),
-                  self.clerk?.user?.id == currentUserId,
+                  isAccountSwitchConfirmationPending,
                   retainedOwnerUserId == preservedOwnerUserId else { return }
             isSessionUnavailable = false
             isAuthenticated = false
             hasActiveSubscription = false
             hasTriggeredSignIn = false
             saveAuthState()
-            pendingAccountTeardownTrigger = .accountSwitch(
-                previousUserId: preservedOwnerUserId,
-                newUserId: currentUserId
-            )
-            accountTeardownError = Self.accountSwitchMessage
         case .authenticated:
             guard let user = clerk.user else {
                 guard isCurrentAuthTransition(hydrationToken) else { return }
@@ -378,10 +404,6 @@ class AuthManager: ObservableObject {
                 return
             }
             isSessionUnavailable = false
-            if case .accountSwitch = pendingAccountTeardownTrigger {
-                pendingAccountTeardownTrigger = nil
-                accountTeardownError = nil
-            }
             guard isCurrentAuthTransition(hydrationToken) else { return }
             isAuthenticated = true
             updateUserData(from: user)
@@ -410,13 +432,14 @@ class AuthManager: ObservableObject {
 
         let teardownId = UUID()
         let ownerUserId = trigger.ownerUserId(retainedOwnerUserId: retainedOwnerUserId) ?? localUserId
+        isAccountTeardownInProgress = true
         let teardownTask = Task { @MainActor [weak self] in
             guard let self else { return false }
             do {
                 try await self.performAccountTeardown(ownerUserId: ownerUserId)
                 self.chatViewModel?.completeAccountTeardown()
                 self.accountTeardownError = nil
-                self.pendingAccountTeardownTrigger = nil
+                self.pendingAccountTeardownRetryReason = nil
                 self.retainedOwnerUserId = nil
                 return true
             } catch {
@@ -428,13 +451,13 @@ class AuthManager: ObservableObject {
                     try await self.performAccountTeardown(ownerUserId: ownerUserId)
                     self.chatViewModel?.completeAccountTeardown()
                     self.accountTeardownError = nil
-                    self.pendingAccountTeardownTrigger = nil
+                    self.pendingAccountTeardownRetryReason = nil
                     self.retainedOwnerUserId = nil
                     return true
                 } catch {
                     SentrySDK.capture(error: error)
                     self.isLoading = false
-                    self.pendingAccountTeardownTrigger = trigger
+                    self.pendingAccountTeardownRetryReason = .teardownFailure(trigger)
                     self.accountTeardownError = "Tinfoil couldn't finish clearing local account data. Account actions remain paused to protect your data. Retry cleanup before continuing."
                     return false
                 }
@@ -446,40 +469,65 @@ class AuthManager: ObservableObject {
         guard accountTeardownId == teardownId else { return didCompleteTeardown }
         accountTeardownTask = nil
         accountTeardownId = nil
+        isAccountTeardownInProgress = false
         return didCompleteTeardown
     }
 
     func retryAccountTeardown() async {
+        guard !isAccountTeardownInProgress else { return }
         let hydrationToken = beginAuthTransition()
         isLoading = true
-        guard let pendingTrigger = pendingAccountTeardownTrigger else {
+        guard let retryReason = pendingAccountTeardownRetryReason else {
             isLoading = false
             return
         }
-        let trigger: AccountTeardownTrigger
-        if case .accountSwitch = pendingTrigger {
-            let retryOutcome = AccountSwitchRetryOutcome.resolve(
-                preservedOwnerUserId: retainedOwnerUserId ?? localUserId,
-                currentClerkUserId: clerk?.user?.id
-            )
-            switch retryOutcome {
-            case .signedOutPreservingAccount, .resumeSameOwner:
-                pendingAccountTeardownTrigger = nil
-                accountTeardownError = nil
-                await initializeAuthState()
+        let trigger = retryReason.trigger
+        if retryReason.requiresClerkSignOut {
+            isAccountTeardownInProgress = true
+            let clerk = self.clerk ?? Clerk.shared
+            do {
+                if clerk.user != nil {
+                    try await clerk.auth.signOut()
+                }
+            } catch {
+                isAccountTeardownInProgress = false
+                guard isCurrentAuthTransition(hydrationToken) else { return }
+                SentrySDK.capture(error: error)
+                accountTeardownError = Self.accountSwitchSignOutFailureMessage
+                isLoading = false
                 return
-            case .teardown(let currentTrigger):
-                trigger = currentTrigger
             }
-        } else {
-            trigger = pendingTrigger
+            guard isCurrentAuthTransition(hydrationToken) else {
+                isAccountTeardownInProgress = false
+                return
+            }
+            guard clerk.user == nil else {
+                isAccountTeardownInProgress = false
+                accountTeardownError = Self.accountSwitchSignOutFailureMessage
+                isLoading = false
+                return
+            }
         }
-        guard isCurrentAuthTransition(hydrationToken),
-              await clearAuthState(for: trigger) else { return }
+        guard isCurrentAuthTransition(hydrationToken) else {
+            isAccountTeardownInProgress = false
+            return
+        }
+        guard await clearAuthState(for: trigger) else {
+            isAccountTeardownInProgress = false
+            return
+        }
         guard isCurrentAuthTransition(hydrationToken) else { return }
         await RevenueCatManager.shared.logoutUser()
         guard isCurrentAuthTransition(hydrationToken) else { return }
-        await initializeAuthState()
+        if case .accountSwitch = trigger {
+            isSessionUnavailable = false
+            isAuthenticated = false
+            hasActiveSubscription = false
+            hasTriggeredSignIn = false
+            isLoading = false
+        } else {
+            await initializeAuthState()
+        }
     }
 
     private func performAccountTeardown(ownerUserId: String?) async throws {
@@ -489,6 +537,7 @@ class AuthManager: ObservableObject {
             try await chatViewModel.handleSignOut(ownerUserId: ownerUserId)
         } else {
             try await SharedImportCoordinator.shared.discardAllPending()
+            await PasskeyManager.shared.reset()
         }
         await ChatRecoveryCoordinator.shared.reset(accountId: nil)
 

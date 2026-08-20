@@ -92,7 +92,7 @@ struct DataLifecycleSourceTests {
         let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
         let retry = try functionBody(named: "func retryAccountTeardown()", in: source)
 
-        let cleanup = try #require(retry.range(of: "await clearAuthState(for: trigger) else { return }"))
+        let cleanup = try #require(retry.range(of: "await clearAuthState(for: trigger) else {"))
         let revenueCat = try #require(retry.range(of: "await RevenueCatManager.shared.logoutUser()"))
         let clerk = try #require(retry.range(
             of: "await initializeAuthState()",
@@ -112,9 +112,53 @@ struct DataLifecycleSourceTests {
         #expect(!setClerk.contains("clearAuthState"))
         #expect(!hydration.contains("clearAuthState"))
         #expect(hydration.contains("await chatViewModel?.handlePassiveAuthLoss()"))
-        #expect(hydration.contains("pendingAccountTeardownTrigger = .accountSwitch"))
-        #expect(retry.contains("AccountSwitchRetryOutcome.resolve"))
+        #expect(hydration.contains("pendingAccountTeardownRetryReason = .accountSwitchConfirmation"))
+        #expect(retry.contains("retryReason.requiresClerkSignOut"))
         #expect(retry.contains("await clearAuthState(for: trigger)"))
+    }
+
+    @Test("Confirmed account switches sign out Clerk before local cleanup")
+    func confirmedAccountSwitchSignsOutBeforeCleanup() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let retry = try functionBody(named: "func retryAccountTeardown()", in: source)
+
+        let fence = try #require(retry.range(of: "isAccountTeardownInProgress = true"))
+        let signOut = try #require(retry.range(of: "try await clerk.auth.signOut()"))
+        let noActiveUser = try #require(retry.range(of: "guard clerk.user == nil"))
+        let cleanup = try #require(retry.range(of: "await clearAuthState(for: trigger) else {"))
+        let setClerk = try functionBody(named: "func setClerk(", in: source)
+        let hydration = try functionBody(named: "func initializeAuthState()", in: source)
+        #expect(fence.lowerBound < signOut.lowerBound)
+        #expect(signOut.lowerBound < noActiveUser.lowerBound)
+        #expect(noActiveUser.lowerBound < cleanup.lowerBound)
+        #expect(setClerk.contains("guard !isAccountTeardownInProgress else { return }"))
+        #expect(hydration.contains("guard !isAccountTeardownInProgress else { return }"))
+        #expect(retry.contains("accountTeardownError = Self.accountSwitchSignOutFailureMessage"))
+    }
+
+    @Test("Account switch cleanup finishes signed out")
+    func accountSwitchCleanupDoesNotReactivateClerkUser() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let retry = try functionBody(named: "func retryAccountTeardown()", in: source)
+        let accountSwitchCompletion = try #require(retry.range(of: "if case .accountSwitch = trigger"))
+        let ordinaryCompletion = try #require(retry.range(
+            of: "} else {",
+            range: accountSwitchCompletion.upperBound..<retry.endIndex
+        ))
+        let completion = retry[accountSwitchCompletion.lowerBound..<ordinaryCompletion.lowerBound]
+
+        #expect(completion.contains("isAuthenticated = false"))
+        #expect(!completion.contains("initializeAuthState"))
+        #expect(!completion.contains("RevenueCatManager.shared.loginUser"))
+        #expect(!completion.contains("updateUserData"))
+    }
+
+    @Test("Teardown failures do not repeat account switch sign-out")
+    func teardownFailureRetrySkipsSessionSignOut() throws {
+        let source = try sourceFile("TinfoilChat/ViewModels/AuthManager.swift")
+        let clear = try functionBody(named: "private func clearAuthState(for trigger:", in: source)
+
+        #expect(clear.contains("pendingAccountTeardownRetryReason = .teardownFailure(trigger)"))
     }
 
     @Test("Passive auth loss retains the owner for explicit cleanup")

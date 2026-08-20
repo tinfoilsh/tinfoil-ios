@@ -77,8 +77,8 @@ struct AuthHydrationSafetyTests {
         #expect(missing == .signedOutPreservingAccount)
         #expect(switched == .accountSwitch)
         #expect(switched.requiresAccountTeardown)
-        #expect(trigger.isConfirmed(currentClerkUserId: "user-2"))
-        #expect(!trigger.isConfirmed(currentClerkUserId: nil))
+        #expect(!trigger.isConfirmed(currentClerkUserId: "user-2"))
+        #expect(trigger.isConfirmed(currentClerkUserId: nil))
         #expect(!trigger.isConfirmed(currentClerkUserId: "user-1"))
         #expect(trigger.ownerUserId(retainedOwnerUserId: nil) == "user-1")
     }
@@ -94,28 +94,66 @@ struct AuthHydrationSafetyTests {
         #expect(hydration.requiresExplicitRetry)
     }
 
-    @Test("B to A reversal resumes without deletion")
-    func switchReversalResumesOwner() {
+    @Test("B to A changes remain fenced before confirmation")
+    func switchReversalRemainsFenced() {
         var hydration = AuthSwitchSafetyHarness(ownerUserId: "user-A")
 
         hydration.observe(clerkUserId: "user-B")
         hydration.observe(clerkUserId: "user-A")
 
         #expect(hydration.deletedOwnerUserIds.isEmpty)
-        #expect(hydration.activeUserId == "user-A")
-        #expect(!hydration.requiresExplicitRetry)
+        #expect(hydration.activeUserId == nil)
+        #expect(hydration.requiresExplicitRetry)
+
+        hydration.confirmAccountSwitch(signOutSucceeds: true)
+
+        #expect(hydration.operations == ["signOut:user-A", "clear:user-A"])
+        #expect(hydration.activeUserId == nil)
     }
 
-    @Test("Explicit retry clears A and activates current B")
-    func retryClearsOwnerAndActivatesCurrentUser() {
+    @Test("Clerk sign-out failure preserves A local data")
+    func clerkSignOutFailurePreservesOwner() {
         var hydration = AuthSwitchSafetyHarness(ownerUserId: "user-A")
         hydration.observe(clerkUserId: "user-B")
 
-        hydration.retry(currentClerkUserId: "user-B")
+        hydration.confirmAccountSwitch(signOutSucceeds: false)
+
+        #expect(hydration.deletedOwnerUserIds.isEmpty)
+        #expect(hydration.clerkUserId == "user-B")
+        #expect(hydration.requiresExplicitRetry)
+    }
+
+    @Test("Successful confirmation signs out B before clearing A")
+    func confirmationSignsOutSessionBeforeClearingOwner() {
+        var hydration = AuthSwitchSafetyHarness(ownerUserId: "user-A")
+        hydration.observe(clerkUserId: "user-B")
+
+        hydration.confirmAccountSwitch(signOutSucceeds: true)
 
         #expect(hydration.deletedOwnerUserIds == ["user-A"])
-        #expect(hydration.activeUserId == "user-B")
+        #expect(hydration.operations == ["signOut:user-B", "clear:user-A"])
+        #expect(hydration.clerkUserId == nil)
+        #expect(hydration.activeUserId == nil)
         #expect(!hydration.requiresExplicitRetry)
+    }
+
+    @Test("Account switch cleanup never automatically activates B")
+    func accountSwitchCleanupFinishesSignedOut() {
+        var hydration = AuthSwitchSafetyHarness(ownerUserId: "user-A")
+        hydration.observe(clerkUserId: "user-B")
+
+        hydration.confirmAccountSwitch(signOutSucceeds: true)
+        hydration.observe(clerkUserId: nil)
+
+        #expect(hydration.activeUserId == nil)
+        #expect(hydration.ownerUserId == nil)
+    }
+
+    @Test("An ordinary teardown retry does not sign Clerk out again")
+    func ordinaryTeardownRetrySkipsClerkSignOut() {
+        let retry = AccountTeardownRetryReason.teardownFailure(.explicitSignOut)
+
+        #expect(!retry.requiresClerkSignOut)
     }
 
     @Test("A missing local key keeps passkey recovery available")
@@ -127,11 +165,18 @@ struct AuthHydrationSafetyTests {
 
 private struct AuthSwitchSafetyHarness {
     private(set) var ownerUserId: String?
+    private(set) var clerkUserId: String?
     private(set) var activeUserId: String?
     private(set) var deletedOwnerUserIds: [String] = []
+    private(set) var operations: [String] = []
     private(set) var requiresExplicitRetry = false
 
     mutating func observe(clerkUserId: String?) {
+        self.clerkUserId = clerkUserId
+        if requiresExplicitRetry {
+            activeUserId = nil
+            return
+        }
         switch AuthHydrationOutcome.resolve(
             lastOwnerUserId: ownerUserId,
             clerkUserId: clerkUserId
@@ -147,25 +192,25 @@ private struct AuthSwitchSafetyHarness {
         }
     }
 
-    mutating func retry(currentClerkUserId: String?) {
-        switch AccountSwitchRetryOutcome.resolve(
-            preservedOwnerUserId: ownerUserId,
-            currentClerkUserId: currentClerkUserId
-        ) {
-        case .signedOutPreservingAccount:
-            activeUserId = nil
-            requiresExplicitRetry = false
-        case .resumeSameOwner:
-            activeUserId = currentClerkUserId
-            requiresExplicitRetry = false
-        case .teardown(let trigger):
-            if let ownerUserId = trigger.ownerUserId(retainedOwnerUserId: ownerUserId) {
-                deletedOwnerUserIds.append(ownerUserId)
-            }
-            ownerUserId = currentClerkUserId
-            activeUserId = currentClerkUserId
-            requiresExplicitRetry = false
+    mutating func confirmAccountSwitch(signOutSucceeds: Bool) {
+        guard requiresExplicitRetry else { return }
+        if let clerkUserId {
+            operations.append("signOut:\(clerkUserId)")
+            guard signOutSucceeds else { return }
+            self.clerkUserId = nil
         }
+        let trigger = AccountTeardownTrigger.accountSwitch(
+            previousUserId: ownerUserId ?? "",
+            newUserId: "user-B"
+        )
+        guard trigger.isConfirmed(currentClerkUserId: clerkUserId) else { return }
+        if let ownerUserId {
+            operations.append("clear:\(ownerUserId)")
+            deletedOwnerUserIds.append(ownerUserId)
+        }
+        ownerUserId = nil
+        activeUserId = nil
+        requiresExplicitRetry = false
     }
 }
 
