@@ -137,16 +137,19 @@ final class ShareViewController: UIViewController {
                 return
             }
 
-            let temporaryURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString.lowercased())
             do {
-                try data.write(to: temporaryURL, options: .atomic)
-                saveSharedItem(
-                    from: temporaryURL,
-                    provider: provider,
-                    typeIdentifier: typeIdentifier
+                let store = try SharedImportStore()
+                _ = try store.enqueue(
+                    data: data,
+                    typeIdentifier: typeIdentifier,
+                    originalFileName: sharedFileName(
+                        provider: provider,
+                        typeIdentifier: typeIdentifier
+                    )
                 )
-                try? FileManager.default.removeItem(at: temporaryURL)
+                DispatchQueue.main.async { [weak self] in
+                    self?.extensionContext?.completeRequest(returningItems: nil)
+                }
             } catch {
                 showError(error)
             }

@@ -3,10 +3,16 @@ import UniformTypeIdentifiers
 
 struct SharedImportStore {
     private let fileManager: FileManager
+    private let currentDate: () -> Date
     let inboxURL: URL
 
-    init(fileManager: FileManager = .default, inboxURL: URL? = nil) throws {
+    init(
+        fileManager: FileManager = .default,
+        inboxURL: URL? = nil,
+        currentDate: @escaping () -> Date = Date.init
+    ) throws {
         self.fileManager = fileManager
+        self.currentDate = currentDate
 
         if let inboxURL {
             self.inboxURL = inboxURL
@@ -35,45 +41,71 @@ struct SharedImportStore {
         typeIdentifier: String,
         originalFileName: String
     ) throws -> SharedImportRequest {
-        guard let kind = SharedImportClassifier.kind(
+        let kind = try classifiedKind(
             typeIdentifier: typeIdentifier,
-            fileName: originalFileName
-        ) else {
-            throw SharedImportError.unsupportedType
-        }
-
-        let sourceValues = try sourceURL.resourceValues(
-            forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]
+            originalFileName: originalFileName
         )
-        guard sourceValues.isRegularFile == true, sourceValues.isSymbolicLink != true else {
-            throw SharedImportError.invalidFile
+        let byteCount: Int64
+        do {
+            byteCount = try BoundedFileIO.size(of: sourceURL, maximumBytes: kind.maximumSizeBytes)
+        } catch BoundedFileIO.Error.fileTooLarge(let size, _) {
+            throw SharedImportError.fileTooLarge(kind: kind, size: size)
         }
+        let item = makeItem(
+            kind: kind,
+            typeIdentifier: typeIdentifier,
+            originalFileName: originalFileName,
+            byteCount: byteCount
+        )
+        return try publish(requestID: UUID(), item: item) { destinationURL in
+            do {
+                return try BoundedFileIO.copy(
+                    from: sourceURL,
+                    to: destinationURL,
+                    maximumBytes: item.kind.maximumSizeBytes
+                )
+            } catch BoundedFileIO.Error.fileTooLarge(let size, _) {
+                throw SharedImportError.fileTooLarge(kind: item.kind, size: size)
+            }
+        }
+    }
 
-        let byteCount = Int64(sourceValues.fileSize ?? 0)
+    @discardableResult
+    func enqueue(
+        data: Data,
+        typeIdentifier: String,
+        originalFileName: String
+    ) throws -> SharedImportRequest {
+        let kind = try classifiedKind(
+            typeIdentifier: typeIdentifier,
+            originalFileName: originalFileName
+        )
+        let byteCount = Int64(data.count)
         guard byteCount <= kind.maximumSizeBytes else {
             throw SharedImportError.fileTooLarge(kind: kind, size: byteCount)
         }
+        let item = makeItem(
+            kind: kind,
+            typeIdentifier: typeIdentifier,
+            originalFileName: originalFileName,
+            byteCount: byteCount
+        )
 
-        let requestID = UUID()
-        let itemID = UUID()
-        let fileName = Self.sanitizedFileName(originalFileName)
-        let stagedFileName = Self.stagedFileName(
-            id: itemID,
-            originalFileName: fileName,
-            typeIdentifier: typeIdentifier
-        )
-        let request = SharedImportRequest(
-            id: requestID,
-            createdAt: Date(),
-            item: SharedImportItem(
-                id: itemID,
-                kind: kind,
-                typeIdentifier: typeIdentifier,
-                originalFileName: fileName,
-                stagedFileName: stagedFileName,
-                byteCount: byteCount
+        return try publish(requestID: UUID(), item: item) { destinationURL in
+            try data.write(to: destinationURL, options: .withoutOverwriting)
+            return try BoundedFileIO.size(
+                of: destinationURL,
+                maximumBytes: item.kind.maximumSizeBytes
             )
-        )
+        }
+    }
+
+    private func publish(
+        requestID: UUID,
+        item: SharedImportItem,
+        writePayload: (URL) throws -> Int64
+    ) throws -> SharedImportRequest {
+        let request = SharedImportRequest(id: requestID, createdAt: currentDate(), item: item)
 
         let temporaryDirectory = inboxURL.appendingPathComponent(
             ".\(requestID.uuidString.lowercased()).tmp",
@@ -88,11 +120,9 @@ struct SharedImportStore {
         )
 
         do {
-            let stagedURL = temporaryDirectory.appendingPathComponent(stagedFileName)
-            try fileManager.copyItem(at: sourceURL, to: stagedURL)
-
-            let copiedSize = try fileSize(at: stagedURL)
-            guard copiedSize == byteCount else {
+            let stagedURL = temporaryDirectory.appendingPathComponent(item.stagedFileName)
+            let copiedSize = try writePayload(stagedURL)
+            guard copiedSize == item.byteCount else {
                 throw SharedImportError.invalidFile
             }
 
@@ -100,7 +130,11 @@ struct SharedImportStore {
                 SharedImportConfiguration.manifestFileName
             )
             let encoder = JSONEncoder()
-            try encoder.encode(request).write(to: manifestURL, options: .atomic)
+            let manifestData = try encoder.encode(request)
+            guard Int64(manifestData.count) <= SharedImportConfiguration.maximumManifestSizeBytes else {
+                throw SharedImportError.invalidRequest
+            }
+            try manifestData.write(to: manifestURL, options: .atomic)
 
             protectAndExcludeFromBackup(stagedURL)
             protectAndExcludeFromBackup(manifestURL)
@@ -123,7 +157,13 @@ struct SharedImportStore {
         )) ?? []
 
         return directories
-            .compactMap { loadRequest(from: $0) }
+            .compactMap { directoryURL in
+                let request = loadRequest(from: directoryURL)
+                if request == nil {
+                    removeMalformedRequestDirectoryIfStale(directoryURL)
+                }
+                return request
+            }
             .sorted { $0.createdAt < $1.createdAt }
     }
 
@@ -132,7 +172,7 @@ struct SharedImportStore {
     /// app-group storage indefinitely. Only directories older than the
     /// staging lifetime are removed, to never race a share in progress.
     private func removeStaleTemporaryDirectories() {
-        let cutoff = Date().addingTimeInterval(
+        let cutoff = currentDate().addingTimeInterval(
             -SharedImportConfiguration.staleStagingLifetimeSeconds
         )
         let entries = (try? fileManager.contentsOfDirectory(
@@ -160,13 +200,10 @@ struct SharedImportStore {
 
         let payloadURL = directoryURL(for: request.id)
             .appendingPathComponent(request.item.stagedFileName)
-        let values = try payloadURL.resourceValues(
-            forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
-        )
-        guard values.isRegularFile == true,
-              values.isSymbolicLink != true,
-              try fileSize(at: payloadURL) == request.item.byteCount,
-              request.item.byteCount <= request.item.kind.maximumSizeBytes,
+        guard try BoundedFileIO.size(
+            of: payloadURL,
+            maximumBytes: request.item.kind.maximumSizeBytes
+        ) == request.item.byteCount,
               SharedImportClassifier.kind(
                 typeIdentifier: request.item.typeIdentifier,
                 fileName: request.item.originalFileName
@@ -174,6 +211,14 @@ struct SharedImportStore {
             throw SharedImportError.invalidRequest
         }
         return payloadURL
+    }
+
+    func payloadData(for request: SharedImportRequest) throws -> Data {
+        let payloadURL = try payloadURL(for: request)
+        return try BoundedFileIO.read(
+            from: payloadURL,
+            maximumBytes: request.item.kind.maximumSizeBytes
+        )
     }
 
     func removeRequest(id: UUID) {
@@ -217,7 +262,10 @@ struct SharedImportStore {
         )
         let decoder = JSONDecoder()
 
-        guard let data = try? Data(contentsOf: manifestURL),
+        guard let data = try? BoundedFileIO.read(
+            from: manifestURL,
+            maximumBytes: SharedImportConfiguration.maximumManifestSizeBytes
+        ),
               let request = try? decoder.decode(SharedImportRequest.self, from: data),
               directoryURL == self.directoryURL(for: request.id),
               (try? payloadURL(for: request)) != nil else {
@@ -230,12 +278,19 @@ struct SharedImportStore {
         inboxURL.appendingPathComponent(requestID.uuidString.lowercased(), isDirectory: true)
     }
 
-    private func fileSize(at url: URL) throws -> Int64 {
-        let attributes = try fileManager.attributesOfItem(atPath: url.path)
-        guard let size = attributes[.size] as? NSNumber else {
-            throw SharedImportError.invalidFile
+    private func removeMalformedRequestDirectoryIfStale(_ directoryURL: URL) {
+        guard UUID(uuidString: directoryURL.lastPathComponent) != nil,
+              (try? directoryURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
+            return
         }
-        return size.int64Value
+        let cutoff = currentDate().addingTimeInterval(
+            -SharedImportConfiguration.staleStagingLifetimeSeconds
+        )
+        guard let created = (try? directoryURL.resourceValues(forKeys: [.creationDateKey]))?
+            .creationDate else { return }
+        if created < cutoff {
+            try? fileManager.removeItem(at: directoryURL)
+        }
     }
 
     private func protectAndExcludeFromBackup(_ url: URL) {
@@ -263,5 +318,40 @@ struct SharedImportStore {
             return id.uuidString.lowercased()
         }
         return "\(id.uuidString.lowercased()).\(fileExtension)"
+    }
+
+    private func classifiedKind(
+        typeIdentifier: String,
+        originalFileName: String
+    ) throws -> SharedImportKind {
+        guard let kind = SharedImportClassifier.kind(
+            typeIdentifier: typeIdentifier,
+            fileName: originalFileName
+        ) else {
+            throw SharedImportError.unsupportedType
+        }
+        return kind
+    }
+
+    private func makeItem(
+        kind: SharedImportKind,
+        typeIdentifier: String,
+        originalFileName: String,
+        byteCount: Int64
+    ) -> SharedImportItem {
+        let itemID = UUID()
+        let fileName = Self.sanitizedFileName(originalFileName)
+        return SharedImportItem(
+            id: itemID,
+            kind: kind,
+            typeIdentifier: typeIdentifier,
+            originalFileName: fileName,
+            stagedFileName: Self.stagedFileName(
+                id: itemID,
+                originalFileName: fileName,
+                typeIdentifier: typeIdentifier
+            ),
+            byteCount: byteCount
+        )
     }
 }

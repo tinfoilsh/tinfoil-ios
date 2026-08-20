@@ -1,43 +1,78 @@
 import Foundation
 
 @MainActor
+protocol SharedImportAttachmentReceiving: AnyObject {
+    var pendingAttachments: [Attachment] { get }
+    var attachmentError: String? { get set }
+
+    func addImageAttachment(
+        data: Data,
+        fileName: String,
+        sharedImportRequestID: UUID?
+    )
+
+    func addDocumentAttachment(
+        url: URL,
+        fileName: String,
+        sharedImportRequestID: UUID?,
+        managedFile: ManagedStagedFile?
+    )
+}
+
+extension ChatViewModel: SharedImportAttachmentReceiving {}
+
+@MainActor
 final class SharedImportCoordinator {
     static let shared = SharedImportCoordinator()
 
-    private init() {}
+    private let storeProvider: () throws -> SharedImportStore
+    private let managedFileStore: ManagedFileStore
 
-    func importPendingAttachments(into viewModel: ChatViewModel) {
-        guard let store = try? SharedImportStore() else { return }
+    init(
+        storeProvider: @escaping () throws -> SharedImportStore = { try SharedImportStore() },
+        managedFileStore: ManagedFileStore = .shared
+    ) {
+        self.storeProvider = storeProvider
+        self.managedFileStore = managedFileStore
+    }
+
+    func importPendingAttachments(into receiver: SharedImportAttachmentReceiving) {
+        guard let store = try? storeProvider() else { return }
 
         let importedRequestIDs = Set(
-            viewModel.pendingAttachments.compactMap(\.sharedImportRequestID)
+            receiver.pendingAttachments.compactMap(\.sharedImportRequestID)
         )
         for request in store.pendingRequests() where !importedRequestIDs.contains(request.id) {
             do {
-                let payloadURL = try store.payloadURL(for: request)
                 switch request.item.kind {
                 case .image:
-                    let data = try Data(contentsOf: payloadURL, options: .mappedIfSafe)
-                    viewModel.addImageAttachment(
+                    let data = try store.payloadData(for: request)
+                    receiver.addImageAttachment(
                         data: data,
                         fileName: request.item.originalFileName,
                         sharedImportRequestID: request.id
                     )
                 case .document:
-                    viewModel.addDocumentAttachment(
-                        url: payloadURL,
+                    let payloadURL = try store.payloadURL(for: request)
+                    let managedFile = try managedFileStore.stage(
+                        sourceURL: payloadURL,
+                        fileName: request.item.originalFileName
+                    )
+                    receiver.addDocumentAttachment(
+                        url: managedFile.url,
                         fileName: request.item.originalFileName,
-                        sharedImportRequestID: request.id
+                        sharedImportRequestID: request.id,
+                        managedFile: managedFile
                     )
                 }
             } catch {
-                viewModel.attachmentError = error.localizedDescription
+                receiver.attachmentError = error.localizedDescription
             }
         }
     }
 
     func acknowledge(requestID: UUID) {
-        guard let store = try? SharedImportStore() else { return }
+        guard let store = try? storeProvider() else { return }
         store.removeRequest(id: requestID)
     }
 }

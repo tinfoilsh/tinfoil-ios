@@ -5,6 +5,7 @@ enum SharedImportConfiguration {
     static let appGroupIdentifier = "group.sh.tinfoil.TinfoilChat"
     static let inboxDirectoryName = "ShareInbox"
     static let manifestFileName = "request.json"
+    static let maximumManifestSizeBytes: Int64 = 64 * 1024
     static let maximumFileNameLength = 120
     static let maximumImageSizeBytes: Int64 = 10 * 1024 * 1024
     static let maximumDocumentSizeBytes: Int64 = 20 * 1024 * 1024
