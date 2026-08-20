@@ -8,7 +8,16 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct DocumentPickerView: UIViewControllerRepresentable {
-    var onDocumentPicked: (URL, String) -> Void
+    var onDocumentPicked: (ManagedFileHandle) -> Void
+    var onError: (Error) -> Void
+
+    init(
+        onDocumentPicked: @escaping (ManagedFileHandle) -> Void,
+        onError: @escaping (Error) -> Void
+    ) {
+        self.onDocumentPicked = onDocumentPicked
+        self.onError = onError
+    }
 
     private static let supportedTypes: [UTType] = [
         .pdf,
@@ -34,14 +43,19 @@ struct DocumentPickerView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onDocumentPicked: onDocumentPicked)
+        Coordinator(onDocumentPicked: onDocumentPicked, onError: onError)
     }
 
     class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onDocumentPicked: (URL, String) -> Void
+        let onDocumentPicked: (ManagedFileHandle) -> Void
+        let onError: (Error) -> Void
 
-        init(onDocumentPicked: @escaping (URL, String) -> Void) {
+        init(
+            onDocumentPicked: @escaping (ManagedFileHandle) -> Void,
+            onError: @escaping (Error) -> Void
+        ) {
             self.onDocumentPicked = onDocumentPicked
+            self.onError = onError
         }
 
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
@@ -50,23 +64,16 @@ struct DocumentPickerView: UIViewControllerRepresentable {
             let fileName = sourceURL.lastPathComponent
 
             guard sourceURL.startAccessingSecurityScopedResource() else {
+                onError(BoundedFileIO.Error.readFailed)
                 return
             }
             defer { sourceURL.stopAccessingSecurityScopedResource() }
 
-            let tempDir = FileManager.default.temporaryDirectory
-            let tempURL = tempDir.appendingPathComponent(UUID().uuidString + "_" + fileName)
-
             do {
-                if FileManager.default.fileExists(atPath: tempURL.path) {
-                    try FileManager.default.removeItem(at: tempURL)
-                }
-                try FileManager.default.copyItem(at: sourceURL, to: tempURL)
-                onDocumentPicked(tempURL, fileName)
+                let handle = try ManagedFileStore.shared.stage(sourceURL: sourceURL, fileName: fileName)
+                onDocumentPicked(handle)
             } catch {
-                #if DEBUG
-                print("Failed to copy document to temp directory: \(error)")
-                #endif
+                onError(error)
             }
         }
     }
