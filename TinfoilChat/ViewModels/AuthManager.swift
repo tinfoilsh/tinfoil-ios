@@ -10,21 +10,20 @@ import ClerkKit
 import Combine
 import Sentry
 
-enum AuthHydrationResolution: Equatable {
-    case sessionUnavailable
+enum AuthHydrationOutcome: Equatable {
     case signedOut
+    case signedOutPreservingAccount
     case authenticated
     case accountSwitch
 
     static func resolve(
-        isCachedAuthenticated: Bool,
-        cachedUserId: String?,
+        lastOwnerUserId: String?,
         clerkUserId: String?
     ) -> Self {
         guard let clerkUserId else {
-            return isCachedAuthenticated ? .sessionUnavailable : .signedOut
+            return lastOwnerUserId == nil ? .signedOut : .signedOutPreservingAccount
         }
-        if let cachedUserId, cachedUserId != clerkUserId {
+        if let lastOwnerUserId, lastOwnerUserId != clerkUserId {
             return .accountSwitch
         }
         return .authenticated
@@ -43,7 +42,7 @@ enum AccountTeardownTrigger: Equatable {
     func isConfirmed(currentClerkUserId: String?) -> Bool {
         switch self {
         case .explicitSignOut:
-            return currentClerkUserId == nil
+            return true
         case .accountDeletion(let deletedUserId):
             return currentClerkUserId == nil || currentClerkUserId == deletedUserId
         case .accountSwitch(let previousUserId, let newUserId):
@@ -265,29 +264,31 @@ class AuthManager: ObservableObject {
             self.accountSwitchTask = nil
         }
 
-        let resolution = AuthHydrationResolution.resolve(
-            isCachedAuthenticated: isAuthenticated,
-            cachedUserId: localUserId,
+        let outcome = AuthHydrationOutcome.resolve(
+            lastOwnerUserId: localUserId,
             clerkUserId: clerk.user?.id
         )
 
-        switch resolution {
-        case .sessionUnavailable:
-            isSessionUnavailable = true
-            isLoading = false
-            return
-        case .signedOut:
+        switch outcome {
+        case .signedOut, .signedOutPreservingAccount:
             isSessionUnavailable = false
             isAuthenticated = false
             hasActiveSubscription = false
+            hasTriggeredSignIn = false
+            saveAuthState()
+            await RevenueCatManager.shared.logoutUser()
         case .authenticated, .accountSwitch:
             guard let user = clerk.user else {
-                isSessionUnavailable = true
+                isSessionUnavailable = false
+                isAuthenticated = false
+                hasActiveSubscription = false
+                hasTriggeredSignIn = false
+                saveAuthState()
                 isLoading = false
                 return
             }
             isSessionUnavailable = false
-            if resolution.requiresAccountTeardown,
+            if outcome.requiresAccountTeardown,
                let cachedUserId = localUserId {
                 let trigger = AccountTeardownTrigger.accountSwitch(
                     previousUserId: cachedUserId,
