@@ -42,7 +42,6 @@ final class DocumentProcessingService {
         switch fileExtension {
         case "pdf":
             let extractionTask = Task.detached(priority: .userInitiated) {
-                try Task.checkCancellation()
                 try self.extractTextFromPDF(at: url)
             }
             return try await withTaskCancellationHandler {
@@ -52,7 +51,6 @@ final class DocumentProcessingService {
             }
         case "txt", "md", "csv", "html", "json", "xml":
             let extractionTask = Task.detached(priority: .userInitiated) {
-                try Task.checkCancellation()
                 try self.readPlainText(at: url)
             }
             return try await withTaskCancellationHandler {
@@ -67,7 +65,7 @@ final class DocumentProcessingService {
 
     private func extractTextFromPDF(at url: URL) throws -> String {
         try Task.checkCancellation()
-        let data = try boundedData(from: url, checkingCancellation: true)
+        let data = try boundedData(from: url)
         guard let document = PDFDocument(data: data) else {
             throw ProcessingError.textExtractionFailed
         }
@@ -93,7 +91,7 @@ final class DocumentProcessingService {
 
     private func readPlainText(at url: URL) throws -> String {
         try Task.checkCancellation()
-        let data = try boundedData(from: url, checkingCancellation: true)
+        let data = try boundedData(from: url)
         guard let text = String(data: data, encoding: .utf8) else {
             throw ProcessingError.fileReadFailed
         }
@@ -106,12 +104,12 @@ final class DocumentProcessingService {
         return text
     }
 
-    private func boundedData(from url: URL, checkingCancellation: Bool = false) throws -> Data {
+    private func boundedData(from url: URL) throws -> Data {
         do {
             return try BoundedFileIO.read(
                 from: url,
                 maximumBytes: Constants.Attachments.maxFileSizeBytes,
-                onReadChunk: checkingCancellation ? { try Task.checkCancellation() } : nil
+                onReadChunk: { try Task.checkCancellation() }
             )
         } catch BoundedFileIO.Error.fileTooLarge(let size, _) {
             throw ProcessingError.fileTooLarge(size)
