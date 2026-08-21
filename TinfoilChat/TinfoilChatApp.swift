@@ -177,8 +177,8 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         }
 
         Task.detached(priority: .utility) {
-            for failure in ManagedFileStore.shared.sweepOnStartup() {
-                SentrySDK.capture(error: failure.error)
+            for error in ManagedFileStore.shared.sweepOnStartup() {
+                SentrySDK.capture(error: error)
             }
         }
 
