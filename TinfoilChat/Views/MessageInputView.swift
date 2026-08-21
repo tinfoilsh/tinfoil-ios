@@ -283,9 +283,14 @@ struct MessageInputView: View {
                 Text(viewModel.attachmentError ?? "An error occurred")
             }
             .sheet(isPresented: $viewModel.showDocumentPicker) {
-                DocumentPickerView { url, fileName in
-                    viewModel.addDocumentAttachment(url: url, fileName: fileName)
-                }
+                DocumentPickerView(
+                    onDocumentPicked: { handle in
+                        viewModel.addDocumentAttachment(handle: handle)
+                    },
+                    onError: { error in
+                        viewModel.attachmentError = error.localizedDescription
+                    }
+                )
             }
             .sheet(isPresented: $viewModel.showPhotoPicker, onDismiss: processSelectedPhotos) {
                 NavigationStack {
@@ -512,7 +517,7 @@ struct MessageInputView: View {
                          onFocusHandled: { viewModel.shouldFocusInput = false },
                          onSendMessage: { text in viewModel.sendMessage(text: text) },
                          onPasteImage: { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
-                         onPasteFile: { url, fileName in viewModel.addDocumentAttachment(url: url, fileName: fileName) },
+                         onPasteFile: { handle in viewModel.addDocumentAttachment(handle: handle) },
                          onPasteFileError: { message in viewModel.attachmentError = message })
             .frame(height: textHeight)
             .padding(.horizontal)
@@ -1403,7 +1408,7 @@ struct CustomTextEditor: UIViewRepresentable {
     /// itself when the draft was actually sent or queued.
     var onSendMessage: (String) -> Bool
     var onPasteImage: ((Data, String) -> Void)? = nil
-    var onPasteFile: ((URL, String) -> Void)? = nil
+    var onPasteFile: ((ManagedFileHandle) -> Void)? = nil
     var onPasteFileError: ((String) -> Void)? = nil
 
     func makeUIView(context: Context) -> UITextView {
@@ -1696,7 +1701,7 @@ struct CustomTextEditor: UIViewRepresentable {
 final class PastingTextView: UITextView {
     var allowsImagePaste = false
     var onPasteImage: ((Data, String) -> Void)?
-    var onPasteFile: ((URL, String) -> Void)?
+    var onPasteFile: ((ManagedFileHandle) -> Void)?
     var onPasteFileError: ((String) -> Void)?
 
     /// File URLs win over any string representation on the pasteboard:
@@ -1766,30 +1771,20 @@ final class PastingTextView: UITextView {
         super.paste(sender)
     }
 
-    /// Copies a pasted file into the app's temp directory so the attachment
+    /// Copies a pasted file into the app's managed staging directory so the attachment
     /// pipeline can read it after the pasteboard's access window closes.
     /// Oversized files are rejected up front: the pipeline would refuse them
     /// anyway, and copying or reading them first would waste disk and memory.
-    private func importPastedFile(url: URL, onPasteFile: (URL, String) -> Void) {
+    private func importPastedFile(url: URL, onPasteFile: (ManagedFileHandle) -> Void) {
         let fileName = url.lastPathComponent
-        let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString + "_" + fileName)
         let didAccess = url.startAccessingSecurityScopedResource()
         defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
 
-        if let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-           Int64(fileSize) > Constants.Attachments.maxFileSizeBytes {
-            let message = DocumentProcessingService.ProcessingError
-                .fileTooLarge(Int64(fileSize)).errorDescription
-            onPasteFileError?(message ?? "File is too large.")
-            return
-        }
-
         do {
-            try FileManager.default.copyItem(at: url, to: tempURL)
-            onPasteFile(tempURL, fileName)
+            let handle = try ManagedFileStore.shared.stage(sourceURL: url, fileName: fileName)
+            onPasteFile(handle)
         } catch {
-            onPasteFileError?("Couldn't read the pasted file. Try attaching it with the + button instead.")
+            onPasteFileError?(error.localizedDescription)
         }
     }
 } 

@@ -374,6 +374,9 @@ struct ProjectDocumentsView: View {
         .background(Color.settingsBackground(for: colorScheme))
         .navigationTitle("Documents")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            viewModel.projectError = nil
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -386,11 +389,24 @@ struct ProjectDocumentsView: View {
             }
         }
         .sheet(isPresented: $showDocumentPicker) {
-            DocumentPickerView { url, fileName in
-                Task {
-                    await viewModel.uploadProjectDocument(url: url, filename: fileName)
+            DocumentPickerView(
+                onDocumentPicked: { handle in
+                    Task {
+                        await viewModel.uploadProjectDocument(handle: handle)
+                    }
+                },
+                onError: { error in
+                    viewModel.projectError = error.localizedDescription
                 }
-            }
+            )
+        }
+        .alert("Document Error", isPresented: Binding(
+            get: { viewModel.projectError != nil },
+            set: { if !$0 { viewModel.projectError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.projectError ?? "An error occurred")
         }
     }
 

@@ -2072,7 +2072,8 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    func uploadProjectDocument(url: URL, filename: String) async {
+    func uploadProjectDocument(handle: ManagedFileHandle) async {
+        defer { try? handle.release() }
         guard let project = activeProject else { return }
         let accountGeneration = projectListAccountGeneration
 
@@ -2089,14 +2090,14 @@ class ChatViewModel: ObservableObject {
                 throw CocoaError(.fileReadUnknown)
             }
             let markdown = try await DocumentConversionService.shared.convertToMarkdown(
-                url: url,
-                filename: filename
+                url: handle.url,
+                filename: handle.fileName
             )
             guard isCurrentProjectAccount(accountGeneration) else { return }
-            let contentType = DocumentConversionService.mimeType(for: filename)
+            let contentType = DocumentConversionService.mimeType(for: handle.fileName)
             let document = try await projectStorage.uploadDocument(
                 projectId: project.id,
-                filename: filename,
+                filename: handle.fileName,
                 contentType: contentType,
                 content: markdown,
                 sizeBytes: sizeBytes
@@ -3219,7 +3220,8 @@ class ChatViewModel: ObservableObject {
     func addDocumentAttachment(
         url: URL,
         fileName: String,
-        sharedImportRequestID: UUID? = nil
+        sharedImportRequestID: UUID? = nil,
+        managedFile: ManagedFileHandle? = nil
     ) {
         attachmentError = nil
 
@@ -3234,9 +3236,13 @@ class ChatViewModel: ObservableObject {
         pendingAttachments.append(attachment)
 
         Task {
+            defer { try? managedFile?.release() }
             do {
                 let text = try await DocumentProcessingService.shared.extractText(from: url)
-                let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+                let fileSize = try BoundedFileIO.size(
+                    of: url,
+                    maximumBytes: Constants.Attachments.maxFileSizeBytes
+                )
 
                 attachment.textContent = text
                 attachment.fileSize = fileSize
@@ -3253,6 +3259,14 @@ class ChatViewModel: ObservableObject {
                 attachmentError = error.localizedDescription
             }
         }
+    }
+
+    func addDocumentAttachment(handle: ManagedFileHandle) {
+        addDocumentAttachment(
+            url: handle.url,
+            fileName: handle.fileName,
+            managedFile: handle
+        )
     }
 
     func addImageAttachment(

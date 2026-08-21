@@ -39,11 +39,6 @@ final class DocumentProcessingService {
             throw ProcessingError.unsupportedFormat(fileExtension)
         }
 
-        let fileSize = try fileSize(at: url)
-        guard fileSize <= Constants.Attachments.maxFileSizeBytes else {
-            throw ProcessingError.fileTooLarge(fileSize)
-        }
-
         switch fileExtension {
         case "pdf":
             return try await Task.detached(priority: .userInitiated) {
@@ -59,7 +54,8 @@ final class DocumentProcessingService {
     }
 
     private func extractTextFromPDF(at url: URL) throws -> String {
-        guard let document = PDFDocument(url: url) else {
+        let data = try boundedData(from: url)
+        guard let document = PDFDocument(data: data) else {
             throw ProcessingError.textExtractionFailed
         }
 
@@ -82,8 +78,8 @@ final class DocumentProcessingService {
     }
 
     private func readPlainText(at url: URL) throws -> String {
-        guard let data = try? Data(contentsOf: url),
-              let text = String(data: data, encoding: .utf8) else {
+        let data = try boundedData(from: url)
+        guard let text = String(data: data, encoding: .utf8) else {
             throw ProcessingError.fileReadFailed
         }
 
@@ -94,8 +90,14 @@ final class DocumentProcessingService {
         return text
     }
 
-    private func fileSize(at url: URL) throws -> Int64 {
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        return attributes[.size] as? Int64 ?? 0
+    private func boundedData(from url: URL) throws -> Data {
+        do {
+            return try BoundedFileIO.read(
+                from: url,
+                maximumBytes: Constants.Attachments.maxFileSizeBytes
+            )
+        } catch BoundedFileIO.Error.fileTooLarge(let size, _) {
+            throw ProcessingError.fileTooLarge(size)
+        }
     }
 }
