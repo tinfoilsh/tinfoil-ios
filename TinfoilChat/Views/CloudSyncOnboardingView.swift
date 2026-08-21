@@ -86,6 +86,7 @@ struct CloudSyncOnboardingView: View {
     @State private var direction: Edge = .trailing
     @State private var showFeatures: Bool = false
     @State private var animateIcon: Bool = false
+    @State private var isStartFreshConfirmationPresented = false
 
     private var currentPageIndex: Int {
         switch currentStep {
@@ -176,6 +177,17 @@ struct CloudSyncOnboardingView: View {
                 inputKey = scannedKey
                 keyError = nil
             }
+        }
+        .alert(
+            StartFreshConfirmation.title,
+            isPresented: $isStartFreshConfirmationPresented
+        ) {
+            Button("Go Back", role: .cancel) {}
+            Button("Yes, start fresh", role: .destructive) {
+                handleGenerateKey()
+            }
+        } message: {
+            Text(StartFreshConfirmation.warning)
         }
     }
 
@@ -347,7 +359,13 @@ struct CloudSyncOnboardingView: View {
                             .onboardingSecondaryButton()
                     }
 
-                    Button(action: { handleGenerateKey() }) {
+                    Button(action: {
+                        if mode == .recovery {
+                            isStartFreshConfirmationPresented = true
+                        } else {
+                            handleGenerateKey()
+                        }
+                    }) {
                         Group {
                             if isProcessing {
                                 ProgressView()
