@@ -5,12 +5,17 @@ enum SharedImportConfiguration {
     static let appGroupIdentifier = "group.sh.tinfoil.TinfoilChat"
     static let inboxDirectoryName = "ShareInbox"
     static let manifestFileName = "request.json"
+    static let enqueueLockFileName = ".enqueue.lock"
+    static let maximumManifestSizeBytes: Int64 = 64 * 1024
     static let maximumFileNameLength = 120
     static let maximumImageSizeBytes: Int64 = 10 * 1024 * 1024
     static let maximumDocumentSizeBytes: Int64 = 20 * 1024 * 1024
+    static let maximumPendingRequestCount = 32
+    static let maximumPendingPayloadBytes: Int64 = 100 * 1024 * 1024
     /// Hidden staging directories older than this are treated as abandoned
     /// by an interrupted share and swept from the app-group inbox.
     static let staleStagingLifetimeSeconds: TimeInterval = 24 * 60 * 60
+    static let unreadableRequestLifetimeSeconds: TimeInterval = 7 * 24 * 60 * 60
     static let supportedDocumentExtensions: Set<String> = [
         "pdf", "docx", "pptx", "xlsx", "txt", "md", "csv", "html", "json", "xml",
     ]
@@ -76,11 +81,13 @@ enum SharedImportClassifier {
     }
 }
 
-enum SharedImportError: LocalizedError {
+enum SharedImportError: LocalizedError, Equatable {
     case sharedContainerUnavailable
     case unsupportedType
     case invalidFile
     case fileTooLarge(kind: SharedImportKind, size: Int64)
+    case tooManyPendingRequests(maximum: Int)
+    case pendingPayloadQuotaExceeded(maximumBytes: Int64)
     case invalidRequest
 
     var errorDescription: String? {
@@ -100,6 +107,10 @@ enum SharedImportError: LocalizedError {
                 sizeInMegabytes,
                 maximumSize
             )
+        case .tooManyPendingRequests:
+            return "Too many shared files are waiting in Tinfoil. Open Tinfoil to send or discard one, then try again."
+        case .pendingPayloadQuotaExceeded:
+            return "Shared files waiting in Tinfoil use too much storage. Open Tinfoil to send or discard some, then try again."
         case .invalidRequest:
             return "The shared file request is invalid."
         }
