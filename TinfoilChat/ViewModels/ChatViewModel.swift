@@ -1674,7 +1674,7 @@ class ChatViewModel: ObservableObject {
     }
 
     @discardableResult
-    func createProject(name: String? = nil) async -> Project? {
+    func createProject(name: String? = nil, color: String? = nil) async -> Project? {
         guard hasChatAccess, isProjectAccountActive else { return nil }
         let accountGeneration = projectListAccountGeneration
 
@@ -1688,7 +1688,7 @@ class ChatViewModel: ObservableObject {
         do {
             let resolvedName = name ?? "My Project #\(projects.count + 1)"
             let project = try await projectStorage.createProject(
-                CreateProjectData(name: resolvedName)
+                CreateProjectData(name: resolvedName, color: color)
             )
             guard isCurrentProjectAccount(accountGeneration) else { return nil }
             projects.insert(project, at: 0)
@@ -1948,7 +1948,7 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    func updateActiveProject(name: String? = nil, description: String? = nil, systemInstructions: String? = nil, memory: [MemoryFact]? = nil) async {
+    func updateActiveProject(name: String? = nil, color: String? = nil, description: String? = nil, systemInstructions: String? = nil, memory: [MemoryFact]? = nil) async {
         guard let project = activeProject else { return }
         let accountGeneration = projectListAccountGeneration
 
@@ -1956,18 +1956,13 @@ class ChatViewModel: ObservableObject {
         do {
             let update = UpdateProjectData(
                 name: name,
+                color: color,
                 description: description,
                 systemInstructions: systemInstructions,
                 memory: memory
             )
-            try await projectStorage.updateProject(project.id, data: update)
+            let updated = try await projectStorage.updateProject(project.id, data: update)
             guard isCurrentProjectAccount(accountGeneration) else { return }
-            var updated = project
-            updated.name = name ?? updated.name
-            updated.description = description ?? updated.description
-            updated.systemInstructions = systemInstructions ?? updated.systemInstructions
-            updated.memory = memory ?? updated.memory
-            updated.updatedAt = ISO8601DateFormatter().string(from: Date())
             activeProject = updated
             if let index = projects.firstIndex(where: { $0.id == updated.id }) {
                 projects[index] = updated
@@ -2089,6 +2084,10 @@ class ChatViewModel: ObservableObject {
             }
         }
         do {
+            let resourceValues = try url.resourceValues(forKeys: [.fileSizeKey])
+            guard let sizeBytes = resourceValues.fileSize else {
+                throw CocoaError(.fileReadUnknown)
+            }
             let markdown = try await DocumentConversionService.shared.convertToMarkdown(
                 url: url,
                 filename: filename
@@ -2099,7 +2098,8 @@ class ChatViewModel: ObservableObject {
                 projectId: project.id,
                 filename: filename,
                 contentType: contentType,
-                content: markdown
+                content: markdown,
+                sizeBytes: sizeBytes
             )
             guard isCurrentProjectAccount(accountGeneration) else { return }
             projectDocuments.append(document)

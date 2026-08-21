@@ -18,6 +18,7 @@ struct MemoryFact: Codable, Identifiable, Equatable {
 struct Project: Codable, Identifiable, Equatable {
     let id: String
     var name: String
+    var color: String? = nil
     var description: String
     var systemInstructions: String
     var memory: [MemoryFact]
@@ -29,6 +30,7 @@ struct Project: Codable, Identifiable, Equatable {
 
 struct ProjectData: Codable, Equatable {
     var name: String
+    var color: String? = nil
     var description: String
     var systemInstructions: String
     var memory: [MemoryFact]
@@ -36,15 +38,17 @@ struct ProjectData: Codable, Equatable {
 
 struct CreateProjectData: Codable, Equatable {
     var name: String
+    var color: String? = nil
     var description: String = ""
     var systemInstructions: String = ""
 }
 
 struct UpdateProjectData: Codable, Equatable {
-    var name: String?
-    var description: String?
-    var systemInstructions: String?
-    var memory: [MemoryFact]?
+    var name: String? = nil
+    var color: String? = nil
+    var description: String? = nil
+    var systemInstructions: String? = nil
+    var memory: [MemoryFact]? = nil
 }
 
 struct ProjectDocument: Codable, Identifiable, Equatable {
@@ -64,6 +68,33 @@ struct ProjectDocumentPayload: Codable, Equatable {
     var content: String
     var filename: String
     var contentType: String
+    var sizeBytes: Int? = nil
+
+    var resolvedSizeBytes: Int {
+        sizeBytes ?? content.utf8.count
+    }
+}
+
+extension ProjectData {
+    init(createData: CreateProjectData) {
+        self.init(
+            name: createData.name,
+            color: createData.color,
+            description: createData.description,
+            systemInstructions: createData.systemInstructions,
+            memory: []
+        )
+    }
+
+    init(updateData: UpdateProjectData, existing: Project) {
+        self.init(
+            name: updateData.name ?? existing.name,
+            color: updateData.color ?? existing.color,
+            description: updateData.description ?? existing.description,
+            systemInstructions: updateData.systemInstructions ?? existing.systemInstructions,
+            memory: updateData.memory ?? existing.memory
+        )
+    }
 }
 
 struct ProjectChat: Codable, Identifiable, Equatable {
@@ -133,5 +164,4 @@ struct ProjectSyncStatus: Codable, Equatable {
 
 typealias ProjectChatSyncStatus = ProjectSyncStatus
 typealias ProjectDocumentSyncStatus = ProjectSyncStatus
-
 

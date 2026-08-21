@@ -99,6 +99,7 @@ final class ProjectStorageService: ObservableObject {
         return Project(
             id: idResponse.projectId,
             name: payload.name,
+            color: payload.color,
             description: payload.description,
             systemInstructions: payload.systemInstructions,
             memory: payload.memory,
@@ -108,11 +109,26 @@ final class ProjectStorageService: ObservableObject {
         )
     }
 
-    func updateProject(_ projectId: String, data: UpdateProjectData) async throws {
+    func updateProject(_ projectId: String, data: UpdateProjectData) async throws -> Project {
         guard let existing = try await getProject(projectId) else {
             throw CloudStorageError.invalidResponse
         }
-        try await enclaveStore.updateProject(id: projectId, data: data, existing: existing)
+        let (payload, syncVersion) = try await enclaveStore.updateProject(
+            id: projectId,
+            data: data,
+            existing: existing
+        )
+        return Project(
+            id: projectId,
+            name: payload.name,
+            color: payload.color,
+            description: payload.description,
+            systemInstructions: payload.systemInstructions,
+            memory: payload.memory,
+            createdAt: createdAtFromReverseId(projectId),
+            updatedAt: isoNow(),
+            syncVersion: syncVersion
+        )
     }
 
     func getProject(_ projectId: String) async throws -> Project? {
@@ -121,6 +137,7 @@ final class ProjectStorageService: ObservableObject {
         return Project(
             id: projectId,
             name: decoded.name,
+            color: decoded.color,
             description: decoded.description,
             systemInstructions: decoded.systemInstructions,
             memory: decoded.memory,
@@ -139,6 +156,7 @@ final class ProjectStorageService: ObservableObject {
             out[id] = Project(
                 id: id,
                 name: decoded.0.name,
+                color: decoded.0.color,
                 description: decoded.0.description,
                 systemInstructions: decoded.0.systemInstructions,
                 memory: decoded.0.memory,
@@ -301,7 +319,8 @@ final class ProjectStorageService: ObservableObject {
         projectId: String,
         filename: String,
         contentType: String,
-        content: String
+        content: String,
+        sizeBytes: Int
     ) async throws -> ProjectDocument {
         let idResponse = try await generateDocumentId(projectId: projectId)
         let wireId = projectDocumentId(projectId: projectId, documentId: idResponse.documentId)
@@ -310,17 +329,17 @@ final class ProjectStorageService: ObservableObject {
             projectId: projectId,
             filename: filename,
             contentType: contentType,
-            content: content
+            content: content,
+            sizeBytes: sizeBytes
         )
 
         let now = isoNow()
-        let size = payload.content.data(using: .utf8)?.count ?? payload.content.count
         return ProjectDocument(
             id: idResponse.documentId,
             projectId: projectId,
             filename: payload.filename,
             contentType: payload.contentType,
-            sizeBytes: size,
+            sizeBytes: payload.resolvedSizeBytes,
             syncVersion: syncVersion,
             createdAt: now,
             updatedAt: now,
@@ -337,7 +356,7 @@ final class ProjectStorageService: ObservableObject {
             projectId: projectId,
             filename: decoded.filename,
             contentType: decoded.contentType,
-            sizeBytes: decoded.content.data(using: .utf8)?.count ?? decoded.content.count,
+            sizeBytes: decoded.resolvedSizeBytes,
             syncVersion: syncVersion,
             createdAt: now,
             updatedAt: now,
@@ -393,7 +412,7 @@ final class ProjectStorageService: ObservableObject {
                     projectId: projectId,
                     filename: decoded.0.filename,
                     contentType: decoded.0.contentType,
-                    sizeBytes: decoded.0.content.data(using: .utf8)?.count ?? decoded.0.content.count,
+                    sizeBytes: decoded.0.resolvedSizeBytes,
                     syncVersion: decoded.1,
                     createdAt: createdAtFromReverseId(docId),
                     updatedAt: update.updatedAt,
