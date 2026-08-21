@@ -360,7 +360,7 @@ struct CloudSyncOnboardingView: View {
                     }
 
                     Button(action: {
-                        if StartFreshConfirmation.isRequired(for: mode) {
+                        if mode == .recovery {
                             isStartFreshConfirmationPresented = true
                         } else {
                             handleGenerateKey()
