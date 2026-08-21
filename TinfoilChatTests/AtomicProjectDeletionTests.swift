@@ -50,27 +50,4 @@ struct AtomicProjectDeletionTests {
             _ = try await store.deleteAllProjects()
         }
     }
-
-    @Test func bulkDeletionInvalidatesStaleProjectLoads() {
-        var listGeneration = 3
-        var projectGeneration = 8
-        let staleListGeneration = listGeneration
-        let staleProjectGeneration = projectGeneration
-
-        ProjectLoadGenerationFence.invalidate(
-            listGeneration: &listGeneration,
-            projectGeneration: &projectGeneration
-        )
-
-        #expect(listGeneration == staleListGeneration + 1)
-        #expect(projectGeneration == staleProjectGeneration + 1)
-        #expect(!ProjectLoadGenerationFence.isCurrent(
-            staleListGeneration,
-            currentGeneration: listGeneration
-        ))
-        #expect(!ProjectLoadGenerationFence.isCurrent(
-            staleProjectGeneration,
-            currentGeneration: projectGeneration
-        ))
-    }
 }

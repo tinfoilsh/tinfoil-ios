@@ -217,8 +217,8 @@ struct LazyChatHydrationTests {
 
         #expect(detachedSummaryIds == Set([cloudChat.id]))
         #expect(summaries.allSatisfy { $0.projectId == nil })
-        #expect(cloudResult == .init(detachedIds: [cloudChat.id], failedIds: []))
-        #expect(localResult == .init(detachedIds: [localChat.id], failedIds: []))
+        #expect(cloudResult == .init(failedIds: []))
+        #expect(localResult == .init(failedIds: []))
         #expect(await service.savedChat(id: cloudChat.id, storage: .cloud)?.projectId == nil)
         #expect(await service.savedChat(id: localChat.id, storage: .local)?.projectId == nil)
         #expect(await service.savedChat(id: cloudChat.id, storage: .cloud)?.projectLocallyModified == false)

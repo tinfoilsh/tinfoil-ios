@@ -434,7 +434,6 @@ enum ChatProjectStorageTransition {
 
 enum ChatProjectDetachment {
     struct Result: Equatable {
-        let detachedIds: [String]
         let failedIds: [String]
     }
 
@@ -464,7 +463,6 @@ enum ChatProjectDetachment {
         try Task.checkCancellation()
         guard shouldContinue() else { throw CancellationError() }
         let entries = try await loadingService.loadIndex(userId: userId, storage: storage)
-        var detachedIds: [String] = []
         var failedIds: [String] = []
 
         for entry in entries where entry.projectId != nil {
@@ -483,7 +481,6 @@ enum ChatProjectDetachment {
                 try await loadingService.saveChat(chat, userId: userId, storage: storage)
                 try Task.checkCancellation()
                 guard shouldContinue() else { throw CancellationError() }
-                detachedIds.append(chat.id)
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
@@ -491,7 +488,7 @@ enum ChatProjectDetachment {
             }
         }
 
-        return Result(detachedIds: detachedIds, failedIds: failedIds)
+        return Result(failedIds: failedIds)
     }
 }
 
