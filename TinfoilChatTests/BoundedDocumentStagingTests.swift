@@ -98,17 +98,19 @@ struct BoundedDocumentStagingTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let source = directory.appendingPathComponent("provider-owned.txt")
         let stagingDirectory = directory.appendingPathComponent("ManagedFileStaging", isDirectory: true)
-        try Data("managed content".utf8).write(to: source)
+        let sourceData = Data("managed content".utf8)
+        try sourceData.write(to: source)
         let store = ManagedFileStore(directoryURL: stagingDirectory)
 
         let handle = try store.stage(sourceURL: source, fileName: "document.txt")
 
         #expect(handle.fileName == "document.txt")
-        #expect(handle.size == 15)
         #expect(FileManager.default.fileExists(atPath: handle.url.path))
         #expect(try handle.url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
         let attributes = try FileManager.default.attributesOfItem(atPath: handle.url.path)
+        #expect((attributes[.size] as? NSNumber)?.int64Value == Int64(sourceData.count))
         #expect(attributes[.protectionKey] as? FileProtectionType == .completeUntilFirstUserAuthentication)
+        #expect(try Data(contentsOf: handle.url) == sourceData)
 
         try handle.release()
         #expect(!FileManager.default.fileExists(atPath: handle.url.path))

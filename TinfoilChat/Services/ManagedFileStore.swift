@@ -3,16 +3,14 @@ import Foundation
 final class ManagedFileHandle: @unchecked Sendable {
     let url: URL
     let fileName: String
-    let size: Int64
 
     private let store: ManagedFileStore
     private let lock = NSLock()
     private var isReleased = false
 
-    fileprivate init(url: URL, fileName: String, size: Int64, store: ManagedFileStore) {
+    fileprivate init(url: URL, fileName: String, store: ManagedFileStore) {
         self.url = url
         self.fileName = fileName
-        self.size = size
         self.store = store
     }
 
@@ -45,7 +43,7 @@ final class ManagedFileStore: @unchecked Sendable {
     func stage(sourceURL: URL, fileName: String) throws -> ManagedFileHandle {
         try prepareDirectory()
         let destinationURL = directoryURL.appendingPathComponent(destinationName(for: sourceURL))
-        let size = try BoundedFileIO.copy(
+        try BoundedFileIO.copy(
             from: sourceURL,
             to: destinationURL,
             maximumBytes: Constants.Attachments.maxFileSizeBytes,
@@ -56,7 +54,7 @@ final class ManagedFileStore: @unchecked Sendable {
 
         do {
             try excludeFromBackup(destinationURL)
-            return ManagedFileHandle(url: destinationURL, fileName: fileName, size: size, store: self)
+            return ManagedFileHandle(url: destinationURL, fileName: fileName, store: self)
         } catch {
             try? fileManager.removeItem(at: destinationURL)
             throw error
