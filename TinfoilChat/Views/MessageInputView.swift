@@ -1408,7 +1408,7 @@ struct CustomTextEditor: UIViewRepresentable {
     /// itself when the draft was actually sent or queued.
     var onSendMessage: (String) -> Bool
     var onPasteImage: ((Data, String) -> Void)? = nil
-    var onPasteFile: ((ManagedFileHandle) -> Void)? = nil
+    var onPasteFile: ((ManagedStagedFile) -> Void)? = nil
     var onPasteFileError: ((String) -> Void)? = nil
 
     func makeUIView(context: Context) -> UITextView {
@@ -1701,7 +1701,7 @@ struct CustomTextEditor: UIViewRepresentable {
 final class PastingTextView: UITextView {
     var allowsImagePaste = false
     var onPasteImage: ((Data, String) -> Void)?
-    var onPasteFile: ((ManagedFileHandle) -> Void)?
+    var onPasteFile: ((ManagedStagedFile) -> Void)?
     var onPasteFileError: ((String) -> Void)?
 
     /// File URLs win over any string representation on the pasteboard:
@@ -1775,7 +1775,7 @@ final class PastingTextView: UITextView {
     /// pipeline can read it after the pasteboard's access window closes.
     /// Oversized files are rejected up front: the pipeline would refuse them
     /// anyway, and copying or reading them first would waste disk and memory.
-    private func importPastedFile(url: URL, onPasteFile: (ManagedFileHandle) -> Void) {
+    private func importPastedFile(url: URL, onPasteFile: (ManagedStagedFile) -> Void) {
         let fileName = url.lastPathComponent
         let didAccess = url.startAccessingSecurityScopedResource()
         defer { if didAccess { url.stopAccessingSecurityScopedResource() } }

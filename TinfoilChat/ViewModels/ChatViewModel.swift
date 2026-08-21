@@ -380,6 +380,7 @@ class ChatViewModel: ObservableObject {
     @Published var pendingAttachments: [Attachment] = []
     @Published var attachmentError: String? = nil
     @Published var pendingImageThumbnails: [String: String] = [:]
+    private let attachmentProcessingStore = AttachmentProcessingStore()
     var isProcessingAttachment: Bool {
         pendingAttachments.contains { $0.processingState == .processing }
     }
@@ -2072,8 +2073,8 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    func uploadProjectDocument(handle: ManagedFileHandle) async {
-        defer { try? handle.release() }
+    func uploadProjectDocument(handle: ManagedStagedFile) async {
+        defer { handle.discard() }
         guard let project = activeProject else { return }
         let accountGeneration = projectListAccountGeneration
 
@@ -3221,7 +3222,7 @@ class ChatViewModel: ObservableObject {
         url: URL,
         fileName: String,
         sharedImportRequestID: UUID? = nil,
-        managedFile: ManagedFileHandle? = nil
+        managedFile: ManagedStagedFile? = nil
     ) {
         attachmentError = nil
 
@@ -3235,14 +3236,16 @@ class ChatViewModel: ObservableObject {
         )
         pendingAttachments.append(attachment)
 
-        Task {
-            defer { try? managedFile?.release() }
+        let processAttachment: @MainActor (AttachmentProcessingStore.Publication) async -> Void = { [weak self] publication in
+            guard let self else { return }
             do {
                 let text = try await DocumentProcessingService.shared.extractText(from: url)
+                try Task.checkCancellation()
                 let fileSize = try BoundedFileIO.size(
                     of: url,
                     maximumBytes: Constants.Attachments.maxFileSizeBytes
                 )
+                guard publication.isCurrent else { return }
 
                 attachment.textContent = text
                 attachment.fileSize = fileSize
@@ -3251,7 +3254,9 @@ class ChatViewModel: ObservableObject {
                 if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
                     pendingAttachments[index] = attachment
                 }
+            } catch is CancellationError {
             } catch {
+                guard publication.isCurrent else { return }
                 attachment.processingState = .failed
                 if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
                     pendingAttachments[index] = attachment
@@ -3259,9 +3264,18 @@ class ChatViewModel: ObservableObject {
                 attachmentError = error.localizedDescription
             }
         }
+        if let managedFile {
+            attachmentProcessingStore.start(
+                id: attachmentId,
+                stagedFile: managedFile,
+                operation: processAttachment
+            )
+        } else {
+            attachmentProcessingStore.start(id: attachmentId, operation: processAttachment)
+        }
     }
 
-    func addDocumentAttachment(handle: ManagedFileHandle) {
+    func addDocumentAttachment(handle: ManagedStagedFile) {
         addDocumentAttachment(
             url: handle.url,
             fileName: handle.fileName,
@@ -3287,9 +3301,12 @@ class ChatViewModel: ObservableObject {
         )
         pendingAttachments.append(attachment)
 
-        Task {
+        attachmentProcessingStore.start(id: attachmentId) { [weak self] publication in
+            guard let self else { return }
             do {
                 let processed = try await ImageProcessingService.shared.processImage(data: data)
+                try Task.checkCancellation()
+                guard publication.isCurrent else { return }
 
                 attachment.mimeType = Constants.Attachments.defaultImageMimeType
                 attachment.base64 = processed.base64
@@ -3305,7 +3322,9 @@ class ChatViewModel: ObservableObject {
                     pendingAttachments[index] = attachment
                 }
                 pendingImageThumbnails[attachmentId] = processed.thumbnailBase64
+            } catch is CancellationError {
             } catch {
+                guard publication.isCurrent else { return }
                 attachment.processingState = .failed
                 if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
                     pendingAttachments[index] = attachment
@@ -3316,6 +3335,7 @@ class ChatViewModel: ObservableObject {
     }
 
     func removePendingAttachment(id: String) {
+        attachmentProcessingStore.cancel(id: id)
         let removed = pendingAttachments.filter { $0.id == id }
         pendingAttachments.removeAll { $0.id == id }
         pendingImageThumbnails.removeValue(forKey: id)
@@ -3326,6 +3346,7 @@ class ChatViewModel: ObservableObject {
     }
 
     func clearPendingAttachments(acknowledgeSharedImports: Bool = true) {
+        attachmentProcessingStore.cancelAll()
         let removed = pendingAttachments
         pendingAttachments.removeAll()
         pendingImageThumbnails.removeAll()
