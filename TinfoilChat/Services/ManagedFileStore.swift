@@ -55,10 +55,6 @@ final class ManagedFileStore: @unchecked Sendable {
         )
 
         do {
-            try fileManager.setAttributes(
-                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
-                ofItemAtPath: destinationURL.path
-            )
             try excludeFromBackup(destinationURL)
             return ManagedFileHandle(url: destinationURL, fileName: fileName, size: size, store: self)
         } catch {
