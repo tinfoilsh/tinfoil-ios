@@ -433,10 +433,6 @@ enum ChatProjectStorageTransition {
 }
 
 enum ChatProjectDetachment {
-    struct Result: Equatable {
-        let failedIds: [String]
-    }
-
     static func detachSummaries(_ summaries: inout [ChatListSummary]) -> Set<String> {
         var detachedIds: Set<String> = []
         for index in summaries.indices where summaries[index].projectId != nil {
@@ -459,7 +455,7 @@ enum ChatProjectDetachment {
         storage: ChatStorageTab,
         loadingService: any ChatLoadingService,
         shouldContinue: @MainActor () -> Bool = { true }
-    ) async throws -> Result {
+    ) async throws -> [String] {
         try Task.checkCancellation()
         guard shouldContinue() else { throw CancellationError() }
         let entries = try await loadingService.loadIndex(userId: userId, storage: storage)
@@ -488,7 +484,7 @@ enum ChatProjectDetachment {
             }
         }
 
-        return Result(failedIds: failedIds)
+        return failedIds
     }
 }
 

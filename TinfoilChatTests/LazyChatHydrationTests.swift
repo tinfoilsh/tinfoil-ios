@@ -204,12 +204,12 @@ struct LazyChatHydrationTests {
         var summaries = [ChatListSummary(from: cloudChat), ChatListSummary(from: rootChat)]
 
         let detachedSummaryIds = ChatProjectDetachment.detachSummaries(&summaries)
-        let cloudResult = try await ChatProjectDetachment.persist(
+        let cloudFailedIds = try await ChatProjectDetachment.persist(
             userId: "user",
             storage: .cloud,
             loadingService: service
         )
-        let localResult = try await ChatProjectDetachment.persist(
+        let localFailedIds = try await ChatProjectDetachment.persist(
             userId: "user",
             storage: .local,
             loadingService: service
@@ -217,8 +217,8 @@ struct LazyChatHydrationTests {
 
         #expect(detachedSummaryIds == Set([cloudChat.id]))
         #expect(summaries.allSatisfy { $0.projectId == nil })
-        #expect(cloudResult == .init(failedIds: []))
-        #expect(localResult == .init(failedIds: []))
+        #expect(cloudFailedIds.isEmpty)
+        #expect(localFailedIds.isEmpty)
         #expect(await service.savedChat(id: cloudChat.id, storage: .cloud)?.projectId == nil)
         #expect(await service.savedChat(id: localChat.id, storage: .local)?.projectId == nil)
         #expect(await service.savedChat(id: cloudChat.id, storage: .cloud)?.projectLocallyModified == false)

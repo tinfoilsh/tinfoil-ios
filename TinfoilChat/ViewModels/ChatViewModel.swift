@@ -2036,7 +2036,7 @@ class ChatViewModel: ObservableObject {
             guard isCurrentProjectAccount(accountGeneration),
                   currentUserId == userId else { return }
             do {
-                let result = try await ChatProjectDetachment.persist(
+                let failedIds = try await ChatProjectDetachment.persist(
                     userId: userId,
                     storage: storage,
                     loadingService: chatLoadingService,
@@ -2048,7 +2048,7 @@ class ChatViewModel: ObservableObject {
                 )
                 guard isCurrentProjectAccount(accountGeneration),
                       currentUserId == userId else { return }
-                if !result.failedIds.isEmpty {
+                if !failedIds.isEmpty {
                     syncErrors.append("Some chats could not be updated after deleting projects.")
                 }
             } catch is CancellationError {
