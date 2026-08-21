@@ -3,28 +3,14 @@ import Testing
 
 @Suite("Start fresh confirmation")
 struct StartFreshConfirmationTests {
-    @Test func cancellationDoesNotAuthorizeAction() {
-        var confirmation = StartFreshConfirmationState()
-        var actionCount = 0
-        confirmation.request()
-
-        confirmation.cancel()
-        confirmation.confirm { actionCount += 1 }
-
-        #expect(!confirmation.isPresented)
-        #expect(actionCount == 0)
+    @Test func confirmationIsRequiredOnlyDuringRecovery() {
+        #expect(StartFreshConfirmation.isRequired(for: .recovery))
+        #expect(!StartFreshConfirmation.isRequired(for: .setup))
     }
 
-    @Test func confirmationAuthorizesActionExactlyOnce() {
-        var confirmation = StartFreshConfirmationState()
-        var actionCount = 0
-        confirmation.request()
-
-        confirmation.dismissPresentation()
-        confirmation.confirm { actionCount += 1 }
-        confirmation.confirm { actionCount += 1 }
-
-        #expect(!confirmation.isPresented)
-        #expect(actionCount == 1)
+    @Test func warningExplainsTheRecoveryRisk() {
+        #expect(StartFreshConfirmation.title == "Start Fresh?")
+        #expect(StartFreshConfirmation.warning.contains("new encryption key"))
+        #expect(StartFreshConfirmation.warning.contains("lose access"))
     }
 }
