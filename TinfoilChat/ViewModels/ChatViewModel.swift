@@ -1637,6 +1637,7 @@ class ChatViewModel: ObservableObject {
         do {
             let loadedProjects = try await projectStorage.loadProjects()
             guard accountGeneration == projectListAccountGeneration,
+                  generation == projectListLoadGeneration,
                   generation > latestAppliedProjectListLoadGeneration,
                   currentUserId == userId,
                   SettingsManager.shared.isCloudSyncEnabled else { return }
@@ -1984,11 +1985,79 @@ class ChatViewModel: ObservableObject {
     func deleteAllProjects() async throws {
         guard isProjectAccountActive else { return }
         let accountGeneration = projectListAccountGeneration
+        let userId = currentUserId
         _ = try await projectStorage.deleteAllProjects()
         guard isCurrentProjectAccount(accountGeneration) else { return }
+        projectListLoadGeneration += 1
+        projectLoadGeneration += 1
+        detachRetainedChatStateFromProjects()
         projects = []
+        projectDocuments = []
+        projectError = nil
+        isLoadingProjects = false
+        isLoadingProject = false
         if activeProject != nil {
             exitProject()
+        }
+        if let userId {
+            let persistenceTask = Task { [weak self] in
+                await self?.persistRetainedChatProjectDetachment(
+                    userId: userId,
+                    accountGeneration: accountGeneration
+                )
+            }
+            if let operationToken = accountOperationTracker.begin(task: persistenceTask) {
+                await persistenceTask.value
+                accountOperationTracker.end(operationToken)
+            } else {
+                persistenceTask.cancel()
+            }
+        }
+    }
+
+    private func detachRetainedChatStateFromProjects() {
+        let detachedCloudIds = ChatProjectDetachment.detachSummaries(&cloudSidebarSummaries)
+        _ = ChatProjectDetachment.detachSummaries(&localSidebarSummaries)
+        loadedCloudRootSummaryIds.formUnion(detachedCloudIds)
+        ChatProjectDetachment.detachChats(&chats)
+        ChatProjectDetachment.detachChats(&localChats)
+        ChatProjectDetachment.detachChats(&favoriteChats)
+        if currentChat?.projectId != nil {
+            currentChat?.projectId = nil
+            currentChat?.projectLocallyModified = false
+        }
+    }
+
+    private func persistRetainedChatProjectDetachment(
+        userId: String,
+        accountGeneration: Int
+    ) async {
+        for storage in [ChatStorageTab.local, .cloud] {
+            guard isCurrentProjectAccount(accountGeneration),
+                  currentUserId == userId else { return }
+            do {
+                let failedIds = try await ChatProjectDetachment.persist(
+                    userId: userId,
+                    storage: storage,
+                    loadingService: chatLoadingService,
+                    shouldContinue: { [weak self] in
+                        guard let self else { return false }
+                        return self.isCurrentProjectAccount(accountGeneration)
+                            && self.currentUserId == userId
+                    }
+                )
+                guard isCurrentProjectAccount(accountGeneration),
+                      currentUserId == userId else { return }
+                if !failedIds.isEmpty {
+                    syncErrors.append("Some chats could not be updated after deleting projects.")
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard isCurrentProjectAccount(accountGeneration),
+                      currentUserId == userId else { return }
+                syncErrors.append(error.localizedDescription)
+            }
         }
     }
 
