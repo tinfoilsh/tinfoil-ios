@@ -27,9 +27,7 @@ struct ProjectPage: View {
                 if let project {
                     Section {
                         HStack(spacing: 12) {
-                            Image(systemName: "folder.fill")
-                                .font(.title3)
-                                .foregroundColor(.accentColor)
+                            ProjectFolderIcon(color: project.color, size: 32)
                             VStack(alignment: .leading, spacing: 2) {
                                 TextField("Project name", text: $editingName)
                                     .font(.headline)
@@ -224,7 +222,11 @@ struct ProjectPage: View {
                         await viewModel.moveChatToProject(chatId: chat.id, projectId: destination.id)
                     }
                 } label: {
-                    Label("Move to \(destination.name)", systemImage: "folder")
+                    Label {
+                        Text("Move to \(destination.name)")
+                    } icon: {
+                        ProjectFolderIcon(color: destination.color, size: 22)
+                    }
                 }
             }
         }

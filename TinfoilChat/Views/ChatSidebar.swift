@@ -284,13 +284,16 @@ struct ChatSidebar: View {
     }
 
     private var sidebarContent: some View {
+        let projectColors = viewModel.projects.reduce(into: [String: String]()) {
+            $0[$1.id] = $1.color
+        }
         VStack(spacing: 0) {
             recoveryBanner
             ScrollViewReader { scrollProxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if authManager.isAuthenticated && settings.isCloudSyncEnabled {
-                            favoritesSection
+                            favoritesSection(projectColors: projectColors)
                                 .padding(.horizontal, 16)
                                 .padding(.top, 16)
                                 .id(ChatNavigationDestination.favorites)
@@ -327,7 +330,7 @@ struct ChatSidebar: View {
                                     .padding(.top, 8)
                             }
 
-                            chatList
+                            chatList(projectColors: projectColors)
                                 .padding(.horizontal, 16)
                                 .padding(.top, 8)
                                 .padding(.bottom, 8)
@@ -425,7 +428,7 @@ struct ChatSidebar: View {
         }
     }
 
-    private var chatList: some View {
+    private func chatList(projectColors: [String: String]) -> some View {
         VStack(spacing: 12) {
             ForEach(Array(displayedChats.enumerated()), id: \.element.id) { _, chat in
                 ChatListItem(
@@ -439,6 +442,7 @@ struct ChatSidebar: View {
                     syncFailed: !chat.isBlankChat && syncHealth.failedChats[chat.id] != nil,
                     isGenerating: viewModel.isChatStreaming(chat.id),
                     isPinned: profileManager.isChatPinned(chat.id),
+                    projectColor: chat.projectId.flatMap { projectColors[$0] },
                     onSelect: {
                         if isChatSearchActive {
                             if !chatSearch.available {
@@ -494,7 +498,11 @@ struct ChatSidebar: View {
                                     await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
                                 }
                             } label: {
-                                Label("Add to \(project.name)", systemImage: "folder")
+                                Label {
+                                    Text("Add to \(project.name)")
+                                } icon: {
+                                    ProjectFolderIcon(color: project.color, size: 22)
+                                }
                             }
                         }
                     }
@@ -522,7 +530,7 @@ struct ChatSidebar: View {
         }
     }
 
-    private var favoritesSection: some View {
+    private func favoritesSection(projectColors: [String: String]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -556,14 +564,14 @@ struct ChatSidebar: View {
                         .padding(.horizontal, 14)
                 } else {
                     ForEach(viewModel.favoriteChats) { chat in
-                        favoriteChatRow(chat)
+                        favoriteChatRow(chat, projectColors: projectColors)
                     }
                 }
             }
         }
     }
 
-    private func favoriteChatRow(_ chat: Chat) -> some View {
+    private func favoriteChatRow(_ chat: Chat, projectColors: [String: String]) -> some View {
         let summary = ChatListSummary(from: chat)
         return ChatListItem(
             chat: summary,
@@ -577,6 +585,7 @@ struct ChatSidebar: View {
             isGenerating: viewModel.isChatStreaming(chat.id),
             isPinned: true,
             showPinnedIndicator: false,
+            projectColor: chat.projectId.flatMap { projectColors[$0] },
             onSelect: { viewModel.openSearchResult(chat) },
             onEdit: {
                 if editingChatId == chat.id {
@@ -620,10 +629,11 @@ struct ChatSidebar: View {
                         await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
                     }
                 } label: {
-                    Label(
-                        chat.projectId == nil ? "Add to \(project.name)" : "Move to \(project.name)",
-                        systemImage: "folder"
-                    )
+                    Label {
+                        Text(chat.projectId == nil ? "Add to \(project.name)" : "Move to \(project.name)")
+                    } icon: {
+                        ProjectFolderIcon(color: project.color, size: 22)
+                    }
                 }
             }
         }
@@ -771,8 +781,12 @@ struct ChatSidebar: View {
                         }
                     } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: project.decryptionFailed == true ? "lock.fill" : "folder")
-                                .foregroundColor(project.decryptionFailed == true ? .orange : .accentColor)
+                            if project.decryptionFailed == true {
+                                Image(systemName: "lock.fill")
+                                    .foregroundColor(.orange)
+                            } else {
+                                ProjectFolderIcon(color: project.color)
+                            }
                             Text(project.name)
                                 .lineLimit(1)
                             Spacer()
@@ -940,6 +954,7 @@ struct ChatListItem: View {
     var isGenerating: Bool = false
     var isPinned: Bool = false
     var showPinnedIndicator: Bool = true
+    var projectColor: String? = nil
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -974,9 +989,7 @@ struct ChatListItem: View {
                     } else {
                         HStack(spacing: 4) {
                             if chat.projectId != nil {
-                                Image(systemName: "folder")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                                ProjectFolderIcon(color: projectColor, size: 18)
                                     .accessibilityHidden(true)
                             }
                             if isPinned && showPinnedIndicator {

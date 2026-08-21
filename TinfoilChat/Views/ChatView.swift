@@ -307,9 +307,7 @@ struct ChatContainer: View {
 
                     if let activeProject = viewModel.activeProject {
                         HStack(spacing: 6) {
-                            Image(systemName: "folder")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(toolbarContentColor)
+                            ProjectFolderIcon(color: activeProject.color, size: 20)
                             Text(activeProject.name)
                                 .font(.caption)
                                 .fontWeight(.semibold)
