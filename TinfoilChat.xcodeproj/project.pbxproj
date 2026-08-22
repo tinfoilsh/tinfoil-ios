@@ -831,7 +831,7 @@
 			repositoryURL = "https://github.com/tinfoilsh/tinfoil-passkey-kit";
 			requirement = {
 				kind = revision;
-				revision = 4ff286ddc5b3198aaf11f8b264747dc986d98616;
+				revision = b8fe283f97bffbf24734d6503d186b850ba829ec;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
