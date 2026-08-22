@@ -213,11 +213,13 @@ struct PasskeyCompositionTests {
         let cancelled = PasskeyService.mapError(PasskeyKeyError.cancelled())
         let timeout = PasskeyService.mapError(PasskeyKeyError.timeout())
         let invalid = PasskeyService.mapError(PasskeyKeyError.invalidInput())
+        let missingAnchor = PasskeyError.presentationAnchorUnavailable
 
         #expect(PasskeyKeyFlow.failureFromPasskeyError(unsupported) == .prfUnsupported)
         #expect(PasskeyKeyFlow.failureFromPasskeyError(cancelled) == .userCancelled)
         #expect(PasskeyKeyFlow.failureFromPasskeyError(timeout) == .userCancelled)
         #expect(PasskeyKeyFlow.failureFromPasskeyError(invalid) == .userCancelled)
+        #expect(PasskeyKeyFlow.failureFromPasskeyError(missingAnchor) == .enclaveUnavailable)
     }
 
     @Test func accountGenerationRejectsPasskeyCompletionFromPriorAccount() {

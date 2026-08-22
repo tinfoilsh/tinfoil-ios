@@ -578,6 +578,8 @@ enum PasskeyKeyFlow {
                 return .userCancelled
             case .authorizationFailed, .randomGenerationFailed, .invalidBase64url:
                 return .userCancelled
+            case .presentationAnchorUnavailable:
+                return .enclaveUnavailable
             }
         }
         return .userCancelled
