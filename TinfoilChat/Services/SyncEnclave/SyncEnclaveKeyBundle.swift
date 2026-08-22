@@ -67,11 +67,21 @@ enum SyncEnclaveKeyBundle {
         kekIvHex: String,
         wrappedKeyHex: String
     ) throws -> SyncEnclaveUnwrappedCek {
-        let iv = try decodeHex(kekIvHex)
+        let iv: Data
+        do {
+            iv = try hexToData(kekIvHex)
+        } catch {
+            throw SyncEnclaveKeyBundleError.wrongIvLength(kekIvHex.count / 2)
+        }
         guard iv.count == aesGcmIvByteCount else {
             throw SyncEnclaveKeyBundleError.wrongIvLength(iv.count)
         }
-        let encrypted = try decodeHex(wrappedKeyHex)
+        let encrypted: Data
+        do {
+            encrypted = try hexToData(wrappedKeyHex)
+        } catch {
+            throw SyncEnclaveKeyBundleError.wrongCekLength(wrappedKeyHex.count / 2)
+        }
         guard encrypted.count >= aesGcmTagByteCount else {
             throw SyncEnclaveKeyBundleError.wrongCekLength(encrypted.count)
         }
@@ -159,23 +169,5 @@ enum SyncEnclaveKeyBundle {
             outputByteCount: keyIdByteCount
         )
         return keyId.withUnsafeBytes { dataToHex(Data($0)) }
-    }
-
-    private static func decodeHex(_ value: String) throws -> Data {
-        guard value.count.isMultiple(of: 2) else {
-            throw SyncEnclaveKeyBundleError.wrongCekLength(value.count / 2)
-        }
-        var bytes = [UInt8]()
-        bytes.reserveCapacity(value.count / 2)
-        var index = value.startIndex
-        while index < value.endIndex {
-            let next = value.index(index, offsetBy: 2)
-            guard let byte = UInt8(value[index..<next], radix: 16) else {
-                throw SyncEnclaveKeyBundleError.wrongCekLength(value.count / 2)
-            }
-            bytes.append(byte)
-            index = next
-        }
-        return Data(bytes)
     }
 }

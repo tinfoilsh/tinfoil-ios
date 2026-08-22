@@ -166,6 +166,47 @@ struct PasskeyCompositionTests {
         ) == key)
     }
 
+    @Test func validatedPRFSnapshotSurvivesCacheCredentialSwap() throws {
+        var cached = CachedPRFResult(
+            profile: TinfoilPasskeyProfile.current,
+            credentialId: "AQ",
+            prfOutput: Data(repeating: 4, count: 32)
+        )
+        let snapshot = try #require(LegacyBlobMigration.validatedPasskeySnapshot(
+            cached: cached,
+            credentialIds: ["AQ"]
+        ))
+        cached = CachedPRFResult(
+            profile: TinfoilPasskeyProfile.current,
+            credentialId: "Ag",
+            prfOutput: Data(repeating: 8, count: 32)
+        )
+        let manager = try PasskeyKeyManager(
+            profile: TinfoilPasskeyProfile.current,
+            relyingPartyName: Constants.Passkey.rpName,
+            presentationAnchorProvider: FakePasskeyPresentationAnchorProvider()
+        )
+        let key = Data((0..<32).map(UInt8.init))
+
+        let wrapped = try manager.wrapKeyWithPRFResult(
+            keyMaterial: key,
+            credentialId: snapshot.credentialId,
+            prfResult: snapshot.prfResult
+        )
+
+        #expect(wrapped.credentialId == "AQ")
+        #expect(try manager.unwrapKeyWithPRFResult(
+            wrappedKey: wrapped,
+            prfResult: snapshot.prfResult
+        ) == key)
+        #expect(throws: PasskeyKeyError.self) {
+            try manager.unwrapKeyWithPRFResult(
+                wrappedKey: wrapped,
+                prfResult: PRFResult(output: cached.prfOutput)
+            )
+        }
+    }
+
     @Test func oldPRFCacheRecordReconstructsTinfoilProfile() throws {
         let oldRecord = try JSONSerialization.data(withJSONObject: [
             "credentialId": "AQID",
@@ -219,7 +260,20 @@ struct PasskeyCompositionTests {
         #expect(PasskeyKeyFlow.failureFromPasskeyError(cancelled) == .userCancelled)
         #expect(PasskeyKeyFlow.failureFromPasskeyError(timeout) == .userCancelled)
         #expect(PasskeyKeyFlow.failureFromPasskeyError(invalid) == .userCancelled)
-        #expect(PasskeyKeyFlow.failureFromPasskeyError(missingAnchor) == .enclaveUnavailable)
+        #expect(PasskeyKeyFlow.failureFromPasskeyError(missingAnchor) == .presentationUnavailable)
+    }
+
+    @Test func sharedHexParserRejectsMalformedInputAtBothBoundaries() {
+        #expect(throws: SyncEnclaveError.self) { try hexToData("") }
+        #expect(throws: SyncEnclaveError.self) { try hexToData("0") }
+        #expect(throws: SyncEnclaveError.self) { try hexToData("zz") }
+        #expect(throws: SyncEnclaveKeyBundleError.self) {
+            try SyncEnclaveKeyBundle.unwrapLegacyJsonEnvelope(
+                prfOutput: Data(repeating: 1, count: 32),
+                kekIvHex: "zz",
+                wrappedKeyHex: String(repeating: "00", count: 16)
+            )
+        }
     }
 
     @Test func accountGenerationRejectsPasskeyCompletionFromPriorAccount() {

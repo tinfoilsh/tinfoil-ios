@@ -19,6 +19,7 @@
 
 import ClerkKit
 import Foundation
+import TinfoilPasskeyKit
 
 struct ScopeMigrationResult {
     let scope: SyncScope
@@ -48,6 +49,11 @@ struct MigrationReport {
 }
 
 enum LegacyBlobMigration {
+
+    struct ValidatedPasskeySnapshot {
+        let credentialId: String
+        let prfResult: PRFResult
+    }
 
     /// Terminal coordinator status for a job that died mid-run.
     private static let failedJobStatus = "failed"
@@ -436,10 +442,24 @@ enum LegacyBlobMigration {
     /// Reused by the cloud write gate (`canWriteToCloud`) so a legacy
     /// user adopts their key on their next write instead of deferring
     /// forever while they wait for the out-of-band migration kick.
-    static func adoptLocalKeyForMigration(keyB64: String) async -> Bool {
+    @MainActor
+    static func adoptLocalKeyForMigration(
+        keyB64: String,
+        isCurrentAccountGeneration: () -> Bool = { true }
+    ) async -> Bool {
         guard !Task.isCancelled else { return false }
+        guard let expectedUserId = Clerk.shared.user?.id,
+              let expectedKey = Data(base64Encoded: keyB64) else {
+            return false
+        }
+        guard isCurrentAccountGeneration() else { return false }
         let initialBundle = await initialBundleFromCachedPrf()
         guard !Task.isCancelled else { return false }
+        guard Clerk.shared.user?.id == expectedUserId,
+              committedKeyIfActiveMatches() == expectedKey else {
+            return false
+        }
+        guard isCurrentAccountGeneration() else { return false }
         do {
             guard !Task.isCancelled else { return false }
             _ = try await SyncEnclaveAPI.registerKey(
@@ -482,14 +502,19 @@ enum LegacyBlobMigration {
         guard !Task.isCancelled else { return nil }
         let entries = await LegacyPasskeyCredentials.fetch()
         guard !Task.isCancelled else { return nil }
-        guard entries.contains(where: { $0.id == cached.credentialId }) else {
+        guard let snapshot = validatedPasskeySnapshot(
+            cached: cached,
+            credentialIds: entries.map(\.id)
+        ) else {
             return nil
         }
         do {
             let cek = try EncryptionService.shared.getKeyBytesOrThrow()
-            guard let wrapped = try await PasskeyService.shared.rewrapKeyFromCache(cek) else {
-                return nil
-            }
+            let wrapped = try await PasskeyService.shared.wrapKeyWithPRFResult(
+                key: cek,
+                credentialId: snapshot.credentialId,
+                prfResult: snapshot.prfResult
+            )
             let bundle = TinfoilWrappedKeyAdapter.bundleBody(wrapped)
             return EnclaveKeyRegisterBundleInput(
                 credentialId: bundle.credentialId,
@@ -502,6 +527,17 @@ enum LegacyBlobMigration {
             #endif
             return nil
         }
+    }
+
+    static func validatedPasskeySnapshot(
+        cached: CachedPRFResult,
+        credentialIds: [String]
+    ) -> ValidatedPasskeySnapshot? {
+        guard credentialIds.contains(cached.credentialId) else { return nil }
+        return ValidatedPasskeySnapshot(
+            credentialId: cached.credentialId,
+            prfResult: PRFResult(output: Data(cached.prfOutput))
+        )
     }
 
     private static func shouldKeepPolling(_ resp: EnclaveMigrateAllResponse?) -> Bool {

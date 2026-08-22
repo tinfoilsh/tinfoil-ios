@@ -160,6 +160,10 @@ final class PasskeyManager: ObservableObject {
             if case .success = serverResult {
                 return await applyUnlockResult(serverResult)
             }
+            if case .failure(.presentationUnavailable, _) = serverResult {
+                surfaceRecoveryChoice(forKeyId: state.keyId)
+                return .recoveryFailed
+            }
             // This device holds none of the registered bundles. Before
             // surfacing the recovery chooser, try this device's own
             // pre-enclave passkey: it unlocks the same CEK and enrolls
@@ -173,6 +177,10 @@ final class PasskeyManager: ObservableObject {
                 guard canMutateAccountKey else { return .recoveryFailed }
                 if case .success = legacyResult {
                     return await applyUnlockResult(legacyResult)
+                }
+                if case .failure(.presentationUnavailable, _) = legacyResult {
+                    surfaceRecoveryChoice(forKeyId: state.keyId)
+                    return .recoveryFailed
                 }
             }
             surfaceRecoveryChoice(forKeyId: state.keyId)
@@ -212,6 +220,9 @@ final class PasskeyManager: ObservableObject {
             switch legacyResult {
             case .success:
                 return await applyUnlockResult(legacyResult)
+            case .failure(.presentationUnavailable, _):
+                surfaceRecoveryChoice(forKeyId: state.keyId)
+                return .recoveryFailed
             case .failure:
                 // Fall through to manual recovery below.
                 break
@@ -812,6 +823,10 @@ final class PasskeyManager: ObservableObject {
                 // refresh instead of jumping straight to the
                 // recovery / start-fresh prompt.
                 break
+            case .failure(.presentationUnavailable, _):
+                // The app has no active presentation window yet. Surface
+                // the existing recovery choice for a user retry once active.
+                surfaceRecoveryChoice(forKeyId: remoteKeyId)
             case .failure:
                 surfaceRecoveryChoice(forKeyId: remoteKeyId)
             }

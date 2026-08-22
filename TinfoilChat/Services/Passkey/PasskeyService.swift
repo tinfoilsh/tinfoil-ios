@@ -134,15 +134,6 @@ final class PasskeyService {
         }
     }
 
-    func rewrapKeyFromCache(_ key: Data) throws -> WrappedKey? {
-        do {
-            let keyManager = try keyManager()
-            return try keyManager.rewrapKeyFromCache(key: key)
-        } catch {
-            throw Self.mapError(error)
-        }
-    }
-
     func cachedPRFResult(for credentialIds: [String]? = nil) -> CachedPRFResult? {
         guard let result = try? storage.loadCachedPRFResult(),
               result.profile == TinfoilPasskeyProfile.current else {

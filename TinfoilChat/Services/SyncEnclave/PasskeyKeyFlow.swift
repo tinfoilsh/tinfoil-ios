@@ -39,6 +39,7 @@ enum PasskeyFlowFailure: String, Sendable {
     case bundleDecryptFailed
     case registerFailed
     case enclaveUnavailable
+    case presentationUnavailable
     case remoteKeyExists
     case keyIdMismatch
 }
@@ -579,7 +580,7 @@ enum PasskeyKeyFlow {
             case .authorizationFailed, .randomGenerationFailed, .invalidBase64url:
                 return .userCancelled
             case .presentationAnchorUnavailable:
-                return .enclaveUnavailable
+                return .presentationUnavailable
             }
         }
         return .userCancelled
