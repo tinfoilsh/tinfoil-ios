@@ -435,9 +435,13 @@ final class PasskeyManager: ObservableObject {
            ) {
             guard canMutateAccountKey else { return false }
             if case .success = result {
-                pendingLegacyRecovery = nil
                 let applied = await applyUnlockResult(result)
-                if case .success = applied { return true }
+                return Self.finishRecoveryRetry(
+                    appliedResult: applied,
+                    isCurrentAccount: canMutateAccountKey,
+                    dismiss: { self.showPasskeyRecoveryChoice = false },
+                    resume: onRecoveryComplete
+                )
             }
             return false
         }
@@ -463,9 +467,12 @@ final class PasskeyManager: ObservableObject {
             guard canMutateAccountKey else { return false }
             persistEnclaveKeyId(keyIdHex)
             activatePasskey()
-            showPasskeyRecoveryChoice = false
-            onRecoveryComplete?()
-            return true
+            return Self.finishRecoveryRetry(
+                appliedResult: .success,
+                isCurrentAccount: canMutateAccountKey,
+                dismiss: { self.showPasskeyRecoveryChoice = false },
+                resume: onRecoveryComplete
+            )
         case .failure:
             return false
         }
@@ -710,6 +717,18 @@ final class PasskeyManager: ObservableObject {
     ) async -> PasskeyFlowResult? {
         guard case .legacy(let entries, let enclaveKeyId) = context else { return nil }
         return await recover(entries, enclaveKeyId)
+    }
+
+    static func finishRecoveryRetry(
+        appliedResult: PasskeyRecoveryResult,
+        isCurrentAccount: Bool,
+        dismiss: () -> Void,
+        resume: (() -> Void)?
+    ) -> Bool {
+        guard case .success = appliedResult, isCurrentAccount else { return false }
+        dismiss()
+        resume?()
+        return true
     }
 
     private var canMutateAccountKey: Bool {

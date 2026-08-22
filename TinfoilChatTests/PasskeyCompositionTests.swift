@@ -181,6 +181,36 @@ struct PasskeyCompositionTests {
         #expect(!legacyRecoveryCalled)
     }
 
+    @Test func successfulLegacyRetryDismissesAndResumesExactlyOnce() {
+        var dismissCount = 0
+        var resumeCount = 0
+
+        let completed = PasskeyManager.finishRecoveryRetry(
+            appliedResult: .success,
+            isCurrentAccount: true,
+            dismiss: { dismissCount += 1 },
+            resume: { resumeCount += 1 }
+        )
+        let failed = PasskeyManager.finishRecoveryRetry(
+            appliedResult: .recoveryFailed,
+            isCurrentAccount: true,
+            dismiss: { dismissCount += 1 },
+            resume: { resumeCount += 1 }
+        )
+        let cancelled = PasskeyManager.finishRecoveryRetry(
+            appliedResult: .success,
+            isCurrentAccount: false,
+            dismiss: { dismissCount += 1 },
+            resume: { resumeCount += 1 }
+        )
+
+        #expect(completed)
+        #expect(!failed)
+        #expect(!cancelled)
+        #expect(dismissCount == 1)
+        #expect(resumeCount == 1)
+    }
+
     @Test func cachelessManagerRecoversDirectlyFromEvaluatedPRF() throws {
         let manager = try PasskeyKeyManager(
             profile: TinfoilPasskeyProfile.current,
