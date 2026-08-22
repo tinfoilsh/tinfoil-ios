@@ -211,6 +211,85 @@ struct PasskeyCompositionTests {
         #expect(resumeCount == 1)
     }
 
+    @Test func manualRouteClearsLegacyRetryBeforeCurrentEnclaveRetry() async {
+        let entry = LegacyPasskeyCredentialEntry(
+            id: "AQ",
+            iv: "iv",
+            encryptedKeys: "keys",
+            createdAt: nil,
+            version: nil,
+            syncVersion: nil,
+            bundleVersion: nil
+        )
+        var pendingContext: PasskeyManager.RecoveryRetryContext? = .legacy(
+            entries: [entry],
+            enclaveKeyId: nil
+        )
+
+        PasskeyManager.clearRecoveryRetryContext(&pendingContext)
+        let currentContext = pendingContext ?? .enclave
+        var staleLegacyRecoveryCalled = false
+        let legacyResult = await PasskeyManager.retryLegacyRecovery(
+            context: currentContext,
+            recover: { _, _ in
+                staleLegacyRecoveryCalled = true
+                return .failure(.userCancelled)
+            }
+        )
+
+        #expect(legacyResult == nil)
+        #expect(!staleLegacyRecoveryCalled)
+    }
+
+    @Test func manualRecoverySuccessClearsPendingLegacyContext() {
+        let entry = LegacyPasskeyCredentialEntry(
+            id: "AQ",
+            iv: "iv",
+            encryptedKeys: "keys",
+            createdAt: nil,
+            version: nil,
+            syncVersion: nil,
+            bundleVersion: nil
+        )
+        var pendingContext: PasskeyManager.RecoveryRetryContext? = .legacy(
+            entries: [entry],
+            enclaveKeyId: "legacy-key-id"
+        )
+
+        PasskeyManager.clearRecoveryRetryContext(&pendingContext)
+
+        #expect(pendingContext == nil)
+    }
+
+    @Test func staleLegacyRetryContextCannotReplayChangedCredential() {
+        let stored = LegacyPasskeyCredentialEntry(
+            id: "AQ",
+            iv: "old-iv",
+            encryptedKeys: "old-keys",
+            createdAt: nil,
+            version: nil,
+            syncVersion: nil,
+            bundleVersion: nil
+        )
+        let current = LegacyPasskeyCredentialEntry(
+            id: "Ag",
+            iv: "new-iv",
+            encryptedKeys: "new-keys",
+            createdAt: nil,
+            version: nil,
+            syncVersion: nil,
+            bundleVersion: nil
+        )
+
+        let validated = PasskeyManager.validatedLegacyRetryContext(
+            context: .legacy(entries: [stored], enclaveKeyId: "key-id"),
+            currentEntries: [current],
+            currentEnclaveKeyId: "key-id"
+        )
+
+        #expect(validated == nil)
+    }
+
     @Test func cachelessManagerRecoversDirectlyFromEvaluatedPRF() throws {
         let manager = try PasskeyKeyManager(
             profile: TinfoilPasskeyProfile.current,

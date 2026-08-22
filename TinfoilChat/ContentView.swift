@@ -74,7 +74,10 @@ struct ContentView: View {
                 }
             }
         }
-        .sheet(isPresented: $passkeyManager.showPasskeyRecoveryChoice) {
+        .sheet(
+            isPresented: $passkeyManager.showPasskeyRecoveryChoice,
+            onDismiss: { passkeyManager.recoveryChoiceDidDismiss() }
+        ) {
             PasskeyRecoveryChoiceView(
                 onTryAgain: {
                     await chatViewModel.retryPasskeyRecovery()
@@ -86,7 +89,7 @@ struct ContentView: View {
                     passkeyManager.dismissRecoveryChoice()
                 },
                 onManualKeyEntry: {
-                    passkeyManager.showPasskeyRecoveryChoice = false
+                    passkeyManager.beginManualKeyRecovery()
                     chatViewModel.cloudSyncOnboardingMode = .recovery
                     chatViewModel.showCloudSyncOnboarding = true
                 }
@@ -100,6 +103,7 @@ struct ContentView: View {
                         try await chatViewModel.setEncryptionKey(key, mode: activationMode)
                         await MainActor.run {
                             chatViewModel.showCloudSyncOnboarding = false
+                            passkeyManager.completeManualKeyRecovery()
                         }
                         chatViewModel.resumeAfterManualKeySetup()
                         return nil
@@ -109,6 +113,7 @@ struct ContentView: View {
                 },
                 onDismissWithoutSetup: {
                     chatViewModel.showCloudSyncOnboarding = false
+                    passkeyManager.cancelManualKeyRecovery()
                 }
             )
         }

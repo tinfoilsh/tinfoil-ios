@@ -390,7 +390,24 @@ final class PasskeyManager: ObservableObject {
             setDismissedRecoveryKeyId(keyId)
         }
         showPasskeyRecoveryChoice = false
-        pendingLegacyRecovery = nil
+        Self.clearRecoveryRetryContext(&pendingLegacyRecovery)
+    }
+
+    func beginManualKeyRecovery() {
+        showPasskeyRecoveryChoice = false
+        Self.clearRecoveryRetryContext(&pendingLegacyRecovery)
+    }
+
+    func completeManualKeyRecovery() {
+        Self.clearRecoveryRetryContext(&pendingLegacyRecovery)
+    }
+
+    func cancelManualKeyRecovery() {
+        Self.clearRecoveryRetryContext(&pendingLegacyRecovery)
+    }
+
+    func recoveryChoiceDidDismiss() {
+        Self.clearRecoveryRetryContext(&pendingLegacyRecovery)
     }
 
     /// Clear a persisted recovery skip and re-run the recovery decision
@@ -423,27 +440,43 @@ final class PasskeyManager: ObservableObject {
     // MARK: - Recovery Choice Actions
 
     func retryPasskeyRecovery() async -> Bool {
-        if let pendingLegacyRecovery,
-           let result = await Self.retryLegacyRecovery(
-               context: pendingLegacyRecovery,
-               recover: { entries, enclaveKeyId in
-                   await PasskeyKeyFlow.recoverFromLegacyPasskey(
-                       entries: entries,
-                       enclaveKeyId: enclaveKeyId
-                   )
-               }
-           ) {
-            guard canMutateAccountKey else { return false }
-            if case .success = result {
-                let applied = await applyUnlockResult(result)
-                return Self.finishRecoveryRetry(
-                    appliedResult: applied,
-                    isCurrentAccount: canMutateAccountKey,
-                    dismiss: { self.showPasskeyRecoveryChoice = false },
-                    resume: onRecoveryComplete
-                )
+        if let retryContext = pendingLegacyRecovery {
+            Self.clearRecoveryRetryContext(&pendingLegacyRecovery)
+            let currentState: EnclaveKeyCurrentResponse
+            do {
+                currentState = try await SyncEnclaveAPI.keyCurrent()
+            } catch {
+                if canMutateAccountKey { pendingLegacyRecovery = retryContext }
+                return false
             }
-            return false
+            let currentEntries = await LegacyPasskeyCredentials.fetch()
+            guard canMutateAccountKey else { return false }
+            if let validatedContext = Self.validatedLegacyRetryContext(
+                context: retryContext,
+                currentEntries: currentEntries,
+                currentEnclaveKeyId: currentState.keyId
+            ), let result = await Self.retryLegacyRecovery(
+                context: validatedContext,
+                recover: { entries, enclaveKeyId in
+                    await PasskeyKeyFlow.recoverFromLegacyPasskey(
+                        entries: entries,
+                        enclaveKeyId: enclaveKeyId
+                    )
+                }
+            ) {
+                guard canMutateAccountKey else { return false }
+                if case .success = result {
+                    let applied = await applyUnlockResult(result)
+                    return Self.finishRecoveryRetry(
+                        appliedResult: applied,
+                        isCurrentAccount: canMutateAccountKey,
+                        dismiss: { self.showPasskeyRecoveryChoice = false },
+                        resume: onRecoveryComplete
+                    )
+                }
+                pendingLegacyRecovery = validatedContext
+                return false
+            }
         }
 
         let state: EnclaveKeyCurrentResponse
@@ -717,6 +750,25 @@ final class PasskeyManager: ObservableObject {
     ) async -> PasskeyFlowResult? {
         guard case .legacy(let entries, let enclaveKeyId) = context else { return nil }
         return await recover(entries, enclaveKeyId)
+    }
+
+    static func validatedLegacyRetryContext(
+        context: RecoveryRetryContext,
+        currentEntries: [LegacyPasskeyCredentialEntry],
+        currentEnclaveKeyId: String?
+    ) -> RecoveryRetryContext? {
+        guard case .legacy(let storedEntries, let expectedKeyId) = context,
+              expectedKeyId == currentEnclaveKeyId else {
+            return nil
+        }
+        let storedCredentialIds = Set(storedEntries.map(\.id))
+        let validatedEntries = currentEntries.filter { storedCredentialIds.contains($0.id) }
+        guard !validatedEntries.isEmpty else { return nil }
+        return .legacy(entries: validatedEntries, enclaveKeyId: expectedKeyId)
+    }
+
+    static func clearRecoveryRetryContext(_ context: inout RecoveryRetryContext?) {
+        context = nil
     }
 
     static func finishRecoveryRetry(
