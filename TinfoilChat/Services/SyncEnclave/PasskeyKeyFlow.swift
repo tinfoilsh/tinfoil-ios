@@ -238,53 +238,71 @@ enum PasskeyKeyFlow {
         guard !candidates.isEmpty else {
             return (.failure(.noRemoteBundle), [])
         }
-        let credIds = candidates.map(\.credentialId)
-        let ordered: [String]
-        if let prefer, credIds.contains(prefer) {
-            ordered = [prefer] + credIds.filter { $0 != prefer }
-        } else {
-            ordered = credIds
-        }
-
-        let wrappedKeys = TinfoilWrappedKeyAdapter.ordered(candidates.map {
-            TinfoilWrappedKeyAdapter.wrappedKey(
-                credentialId: $0.credentialId,
-                kekIvHex: $0.kekIv,
-                wrappedKeyHex: $0.encryptedKeys
-            )
-        }, preferredCredentialId: prefer)
+        let candidateSet = TinfoilWrappedKeyAdapter.partition(
+            candidates,
+            preferredCredentialId: prefer
+        )
         let credentialId: String
         let cek: Data
         var legacyAlternatives: [String] = []
-        do {
-            let recovered = try await PasskeyService.shared.recoverKey(
-                wrappedKeys: wrappedKeys,
-                preferredCredentialId: prefer,
-                immediatelyAvailable: silent
-            )
-            credentialId = recovered.credentialId
-            cek = recovered.key
-        } catch let err {
+
+        if candidateSet.legacy.isEmpty {
+            guard !candidateSet.current.isEmpty else {
+                return (.failure(.noRemoteBundle), [])
+            }
             do {
-                let cached = try await PasskeyService.shared.evaluateLegacyCredential(
-                    credentialIds: ordered,
+                let recovered = try await PasskeyService.shared.recoverKey(
+                    wrappedKeys: candidateSet.current.map(\.wrappedKey),
+                    preferredCredentialId: prefer,
                     immediatelyAvailable: silent
                 )
-                guard let bundle = candidates.first(where: {
-                    $0.credentialId == cached.credentialId
-                }) else {
-                    return (.failure(.noRemoteBundle), [])
-                }
-                let unwrapped = try SyncEnclaveKeyBundle.unwrapLegacyJsonEnvelope(
-                    prfOutput: cached.prfOutput,
-                    kekIvHex: bundle.kekIv,
-                    wrappedKeyHex: bundle.encryptedKeys
+                credentialId = recovered.credentialId
+                cek = recovered.key
+            } catch let err {
+                return (.failure(failureFromPasskeyError(err), message: err.localizedDescription), [])
+            }
+        } else {
+            let evaluated: EvaluatedCredential
+            do {
+                evaluated = try await PasskeyService.shared.evaluateCredential(
+                    credentialIds: candidateSet.credentialIds,
+                    preferredCredentialId: prefer,
+                    immediatelyAvailable: silent
                 )
-                credentialId = cached.credentialId
+            } catch let err {
+                return (.failure(failureFromPasskeyError(err), message: err.localizedDescription), [])
+            }
+
+            switch candidateSet.selection(credentialId: evaluated.credentialId) {
+            case .current:
+                do {
+                    guard let recovered = try PasskeyService.shared.recoverKeyFromCache(
+                        wrappedKeys: candidateSet.current.map(\.wrappedKey),
+                        preferredCredentialId: evaluated.credentialId
+                    ) else {
+                        return (.failure(.bundleDecryptFailed, message: "Passkey cache is unavailable"), [])
+                    }
+                    credentialId = recovered.credentialId
+                    cek = recovered.key
+                } catch let err {
+                    return (.failure(failureFromPasskeyError(err), message: err.localizedDescription), [])
+                }
+            case .legacy(let bundle):
+                let unwrapped: SyncEnclaveUnwrappedCek
+                do {
+                    unwrapped = try SyncEnclaveKeyBundle.unwrapLegacyJsonEnvelope(
+                        prfOutput: evaluated.prfResult.output,
+                        kekIvHex: bundle.kekIv,
+                        wrappedKeyHex: bundle.encryptedKeys
+                    )
+                } catch {
+                    return (.failure(.bundleDecryptFailed, message: error.localizedDescription), [])
+                }
+                credentialId = evaluated.credentialId
                 cek = unwrapped.cek
                 legacyAlternatives = unwrapped.legacyAlternativeKeys
-            } catch {
-                return (.failure(failureFromPasskeyError(err), message: err.localizedDescription), [])
+            case .missing:
+                return (.failure(.noRemoteBundle), [])
             }
         }
 
@@ -362,21 +380,22 @@ enum PasskeyKeyFlow {
         }
 
         let credentialIds = entries.map(\.id)
-        let cached: CachedPRFResult
+        let evaluated: EvaluatedCredential
         do {
             // Use only locally-available credentials so the system does not
             // surface its cross-device "Use a Device Nearby" QR sheet. When
             // the legacy passkey isn't on this device, this fails fast and we
             // fall through to manual recovery (scan the webapp QR / paste key).
-            cached = try await PasskeyService.shared.evaluateLegacyCredential(
+            evaluated = try await PasskeyService.shared.evaluateCredential(
                 credentialIds: credentialIds,
+                preferredCredentialId: nil,
                 immediatelyAvailable: true
             )
         } catch let err {
             return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
         }
 
-        guard let entry = entries.first(where: { $0.id == cached.credentialId }) else {
+        guard let entry = entries.first(where: { $0.id == evaluated.credentialId }) else {
             return .failure(.noRemoteBundle)
         }
 
@@ -389,7 +408,7 @@ enum PasskeyKeyFlow {
         let legacyAlternatives: [String]
         do {
             let unwrapped = try SyncEnclaveKeyBundle.unwrapLegacyJsonEnvelope(
-                prfOutput: cached.prfOutput,
+                prfOutput: evaluated.prfResult.output,
                 kekIvHex: dataToHex(ivData),
                 wrappedKeyHex: dataToHex(ciphertextData)
             )
@@ -478,7 +497,7 @@ enum PasskeyKeyFlow {
         return .success(
             cek: cek,
             keyIdHex: keyIdHex,
-            credentialId: cached.credentialId,
+            credentialId: evaluated.credentialId,
             createdVia: SyncEnclaveCreatedVia.recovery.rawValue
         )
     }

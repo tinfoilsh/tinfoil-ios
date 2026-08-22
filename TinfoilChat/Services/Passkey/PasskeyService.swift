@@ -46,6 +46,7 @@ final class PasskeyService {
         self.storage = storage
         keyManager = try! PasskeyKeyManager(
             profile: TinfoilPasskeyProfile.current,
+            relyingPartyName: Constants.Passkey.rpName,
             storage: storage
         )
     }
@@ -76,18 +77,22 @@ final class PasskeyService {
         immediatelyAvailable: Bool = false
     ) async throws -> RecoveredKey {
         do {
-            if immediatelyAvailable {
-                guard let recovered = try keyManager.recoverKeyFromCache(
-                    wrappedKeys: wrappedKeys,
-                    preferredCredentialId: preferredCredentialId
-                ) else {
-                    throw PasskeyKeyError.cancelled(
-                        diagnostic: "No immediately available passkey credential"
-                    )
-                }
-                return recovered
-            }
             return try await keyManager.recoverKey(
+                wrappedKeys: wrappedKeys,
+                preferredCredentialId: preferredCredentialId,
+                interaction: Self.interaction(immediatelyAvailable: immediatelyAvailable)
+            )
+        } catch {
+            throw Self.mapError(error)
+        }
+    }
+
+    func recoverKeyFromCache(
+        wrappedKeys: [WrappedKey],
+        preferredCredentialId: String? = nil
+    ) throws -> RecoveredKey? {
+        do {
+            return try keyManager.recoverKeyFromCache(
                 wrappedKeys: wrappedKeys,
                 preferredCredentialId: preferredCredentialId
             )
@@ -113,40 +118,28 @@ final class PasskeyService {
         return credentialIds.contains(result.credentialId) ? result : nil
     }
 
-    func evaluateLegacyCredential(
+    func evaluateCredential(
         credentialIds: [String],
+        preferredCredentialId: String? = nil,
         immediatelyAvailable: Bool
-    ) async throws -> CachedPRFResult {
-        if let cached = cachedPRFResult(for: credentialIds) {
-            return cached
-        }
-        guard !immediatelyAvailable else {
-            throw PasskeyError.userCancelled
-        }
-
-        let placeholders = credentialIds.map {
-            TinfoilWrappedKeyAdapter.wrappedKey(
-                credentialId: $0,
-                kekIvHex: String(repeating: "0", count: 24),
-                wrappedKeyHex: String(repeating: "0", count: 96)
-            )
-        }
+    ) async throws -> EvaluatedCredential {
         do {
-            _ = try await keyManager.recoverKey(wrappedKeys: placeholders)
+            return try await keyManager.evaluateCredential(
+                credentialIds: credentialIds,
+                preferredCredentialId: preferredCredentialId,
+                interaction: Self.interaction(immediatelyAvailable: immediatelyAvailable)
+            )
         } catch {
-            if let cached = cachedPRFResult(for: credentialIds) {
-                return cached
-            }
             throw Self.mapError(error)
         }
-        guard let cached = cachedPRFResult(for: credentialIds) else {
-            throw PasskeyError.prfOutputMissing
-        }
-        return cached
     }
 
     func clearCachedPrfResult() {
         keyManager.clearLocalState()
+    }
+
+    nonisolated static func interaction(immediatelyAvailable: Bool) -> PasskeyInteraction {
+        immediatelyAvailable ? .immediatelyAvailable : .interactive
     }
 
     nonisolated static func mapError(_ error: Error) -> PasskeyError {

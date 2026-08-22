@@ -51,6 +51,7 @@ enum SyncEnclaveKeyBundle {
 
     static let cekByteCount = 32
     static let aesGcmIvByteCount = 12
+    static let aesGcmTagByteCount = 16
     static let keyIdByteCount = 16
 
     /// HKDF `info` string used to derive the deterministic 16-byte
@@ -71,13 +72,13 @@ enum SyncEnclaveKeyBundle {
             throw SyncEnclaveKeyBundleError.wrongIvLength(iv.count)
         }
         let encrypted = try decodeHex(wrappedKeyHex)
-        guard encrypted.count >= 16 else {
+        guard encrypted.count >= aesGcmTagByteCount else {
             throw SyncEnclaveKeyBundleError.wrongCekLength(encrypted.count)
         }
         let sealed = try AES.GCM.SealedBox(
             nonce: AES.GCM.Nonce(data: iv),
-            ciphertext: encrypted.dropLast(16),
-            tag: encrypted.suffix(16)
+            ciphertext: encrypted.dropLast(aesGcmTagByteCount),
+            tag: encrypted.suffix(aesGcmTagByteCount)
         )
         let kek = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: prfOutput),

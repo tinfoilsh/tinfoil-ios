@@ -12,44 +12,110 @@ struct PasskeyCompositionTests {
 
         #expect(profile.version == 1)
         #expect(profile.relyingPartyId == "tinfoil.sh")
-        #expect(profile.relyingPartyName == "Tinfoil Chat")
         #expect(profile.prfSalt == Data("tinfoil-chat-key-encryption".utf8))
         #expect(profile.hkdfInfo == Data("tinfoil-chat-kek-v1".utf8))
     }
 
-    @Test func wrappedKeyAdapterPreservesEnclaveWireFields() {
-        let wrapped = TinfoilWrappedKeyAdapter.wrappedKey(
+    @Test func wrappedKeyAdapterRoundTripsEnclaveFields() {
+        let fields = TinfoilWrappedKeyAdapter.EnclaveFields(
             credentialId: "AQID",
             kekIvHex: "000102030405060708090a0b",
             wrappedKeyHex: String(repeating: "ab", count: 48)
         )
+        let wrapped = TinfoilWrappedKeyAdapter.wrappedKey(fields)
 
-        let body = TinfoilWrappedKeyAdapter.bundleBody(wrapped)
+        let roundTrip = TinfoilWrappedKeyAdapter.enclaveFields(wrapped)
 
-        #expect(body.credentialId == "AQID")
-        #expect(body.kekIvHex == "000102030405060708090a0b")
-        #expect(body.wrappedKeyHex == String(repeating: "ab", count: 48))
+        #expect(roundTrip == fields)
         #expect(wrapped.profile == TinfoilPasskeyProfile.current)
     }
 
-    @Test func preferredCredentialIsPresentedFirstWithoutDroppingBundles() {
-        let first = TinfoilWrappedKeyAdapter.wrappedKey(
-            credentialId: "AQ",
-            kekIvHex: String(repeating: "0", count: 24),
-            wrappedKeyHex: String(repeating: "0", count: 96)
+    @Test func canonicalCodecMatchesFinalNestedProfileRecord() throws {
+        let wrapped = TinfoilWrappedKeyAdapter.wrappedKey(
+            TinfoilWrappedKeyAdapter.EnclaveFields(
+                credentialId: "AQID",
+                kekIvHex: "000102030405060708090a0b",
+                wrappedKeyHex: String(repeating: "ab", count: 48)
+            )
         )
-        let preferred = TinfoilWrappedKeyAdapter.wrappedKey(
-            credentialId: "Ag",
-            kekIvHex: String(repeating: "1", count: 24),
-            wrappedKeyHex: String(repeating: "1", count: 96)
+        let expected = "{\"version\":1,\"profile\":{\"version\":1,\"relyingPartyId\":\"tinfoil.sh\",\"prfSalt\":\"dGluZm9pbC1jaGF0LWtleS1lbmNyeXB0aW9u\",\"hkdfInfo\":\"dGluZm9pbC1jaGF0LWtlay12MQ\"},\"credentialId\":\"AQID\",\"kekIvHex\":\"000102030405060708090a0b\",\"wrappedKeyHex\":\"\(String(repeating: "ab", count: 48))\"}"
+
+        let encoded = try encodeWrappedKeyRecord(wrapped)
+
+        #expect(encoded == Data(expected.utf8))
+        #expect(try decodeWrappedKeyRecord(encoded) == wrapped)
+    }
+
+    @Test func currentOnlyCandidatesUseGenericWrappedKeys() {
+        let candidates = TinfoilWrappedKeyAdapter.partition(
+            [bundle(id: "AQ", wrappedByteCount: 48)],
+            preferredCredentialId: nil
         )
 
-        let ordered = TinfoilWrappedKeyAdapter.ordered(
-            [first, preferred],
-            preferredCredentialId: preferred.credentialId
+        #expect(candidates.current.map(\.bundle.credentialId) == ["AQ"])
+        #expect(candidates.legacy.isEmpty)
+    }
+
+    @Test func legacyOnlyCandidatesNeverBecomeGenericWrappedKeys() {
+        let candidates = TinfoilWrappedKeyAdapter.partition(
+            [bundle(id: "AQ", wrappedByteCount: 80)],
+            preferredCredentialId: nil
         )
 
-        #expect(ordered.map(\.credentialId) == ["Ag", "AQ"])
+        #expect(candidates.current.isEmpty)
+        #expect(candidates.legacy.map(\.credentialId) == ["AQ"])
+    }
+
+    @Test func mixedCandidatesPreservePreferredCredentialAndAllKinds() {
+        let candidates = TinfoilWrappedKeyAdapter.partition(
+            [
+                bundle(id: "AQ", wrappedByteCount: 48),
+                bundle(id: "Ag", wrappedByteCount: 80),
+                bundle(id: "Aw", wrappedByteCount: 48),
+            ],
+            preferredCredentialId: "Ag"
+        )
+
+        #expect(candidates.credentialIds == ["Ag", "AQ", "Aw"])
+        #expect(candidates.current.map(\.bundle.credentialId) == ["AQ", "Aw"])
+        #expect(candidates.legacy.map(\.credentialId) == ["Ag"])
+    }
+
+    @Test func selectedLegacyCredentialRoutesToLegacyEnvelope() {
+        let candidates = TinfoilWrappedKeyAdapter.partition(
+            [
+                bundle(id: "AQ", wrappedByteCount: 48),
+                bundle(id: "Ag", wrappedByteCount: 80),
+            ],
+            preferredCredentialId: "Ag"
+        )
+
+        guard case .legacy(let selected) = candidates.selection(credentialId: "Ag") else {
+            Issue.record("Expected legacy credential selection")
+            return
+        }
+        #expect(selected.credentialId == "Ag")
+    }
+
+    @Test func immediateRecoveryMapsToFinalKitInteraction() {
+        #expect(PasskeyService.interaction(immediatelyAvailable: true) == .immediatelyAvailable)
+        #expect(PasskeyService.interaction(immediatelyAvailable: false) == .interactive)
+    }
+
+    @Test func cachelessManagerReturnsNoRecoveredCurrentKey() throws {
+        let manager = try PasskeyKeyManager(
+            profile: TinfoilPasskeyProfile.current,
+            relyingPartyName: Constants.Passkey.rpName
+        )
+        let wrapped = TinfoilWrappedKeyAdapter.wrappedKey(
+            TinfoilWrappedKeyAdapter.EnclaveFields(
+                credentialId: "AQ",
+                kekIvHex: String(repeating: "0", count: 24),
+                wrappedKeyHex: String(repeating: "0", count: 96)
+            )
+        )
+
+        #expect(try manager.recoverKeyFromCache(wrappedKeys: [wrapped]) == nil)
     }
 
     @Test func oldPRFCacheRecordReconstructsTinfoilProfile() throws {
@@ -64,6 +130,26 @@ struct PasskeyCompositionTests {
         #expect(decoded.credentialId == "AQID")
         #expect(decoded.prfOutput == Data(repeating: 7, count: 32))
         #expect(decoded.profile == TinfoilPasskeyProfile.current)
+    }
+
+    @Test func priorGenericCacheRecordDropsPresentationName() throws {
+        let oldRecord = try JSONSerialization.data(withJSONObject: [
+            "profile": [
+                "version": 1,
+                "relyingPartyId": "tinfoil.sh",
+                "relyingPartyName": "Tinfoil Chat",
+                "prfSalt": TinfoilPasskeyProfile.prfSalt.base64EncodedString(),
+                "hkdfInfo": TinfoilPasskeyProfile.hkdfInfo.base64EncodedString(),
+            ],
+            "credentialId": "AQID",
+            "prfOutput": Data(repeating: 9, count: 32).base64EncodedString(),
+        ], options: [.sortedKeys])
+
+        let decoded = try TinfoilPasskeyKeyStorage.decodeCachedRecord(oldRecord)
+
+        #expect(decoded.profile == TinfoilPasskeyProfile.current)
+        #expect(decoded.credentialId == "AQID")
+        #expect(decoded.prfOutput == Data(repeating: 9, count: 32))
     }
 
     @Test func keyIdentifierMatchesTinfoilVector() throws {
@@ -92,6 +178,17 @@ struct PasskeyCompositionTests {
         _ = fence.begin(userId: "user-b")
 
         #expect(!fence.isCurrent(passkeyOperation, currentUserId: "user-b"))
+    }
+
+    private func bundle(id: String, wrappedByteCount: Int) -> EnclaveKeyCurrentBundle {
+        EnclaveKeyCurrentBundle(
+            credentialId: id,
+            kekIv: String(repeating: "0", count: 24),
+            encryptedKeys: String(repeating: "0", count: wrappedByteCount * 2),
+            bundleVersion: nil,
+            createdAt: nil,
+            updatedAt: nil
+        )
     }
 }
 
