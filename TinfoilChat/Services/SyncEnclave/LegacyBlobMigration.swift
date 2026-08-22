@@ -476,7 +476,7 @@ enum LegacyBlobMigration {
     /// make the account look passkey-recoverable when it is not.
     private static func initialBundleFromCachedPrf() async -> EnclaveKeyRegisterBundleInput? {
         guard !Task.isCancelled else { return nil }
-        guard let cached = await PasskeyService.shared.getCachedPrfResult() else {
+        guard let cached = await PasskeyService.shared.cachedPRFResult() else {
             return nil
         }
         guard !Task.isCancelled else { return nil }
@@ -487,12 +487,10 @@ enum LegacyBlobMigration {
         }
         do {
             let cek = try EncryptionService.shared.getKeyBytesOrThrow()
-            let kek = PasskeyService.deriveKeyEncryptionKey(from: cached.prfOutput)
-            let bundle = try SyncEnclaveKeyBundle.wrapCek(
-                credentialId: cached.credentialId,
-                kek: kek,
-                cek: cek
-            )
+            guard let wrapped = try await PasskeyService.shared.rewrapKeyFromCache(cek) else {
+                return nil
+            }
+            let bundle = TinfoilWrappedKeyAdapter.bundleBody(wrapped)
             return EnclaveKeyRegisterBundleInput(
                 credentialId: bundle.credentialId,
                 kekIvHex: bundle.kekIvHex,
