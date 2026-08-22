@@ -13,7 +13,6 @@
 
 import CryptoKit
 import Foundation
-import TinfoilPasskeyKit
 
 struct SyncEnclaveBundleBody {
     /// Base64url-encoded credential id (matches WebAuthn convention).
@@ -27,7 +26,6 @@ struct SyncEnclaveBundleBody {
 enum SyncEnclaveKeyBundleError: LocalizedError {
     case wrongCekLength(Int)
     case wrongIvLength(Int)
-    case randomGenerationFailed(OSStatus)
 
     var errorDescription: String? {
         switch self {
@@ -35,8 +33,6 @@ enum SyncEnclaveKeyBundleError: LocalizedError {
             return "CEK must be 32 bytes (got \(got))"
         case .wrongIvLength(let got):
             return "AES-GCM IV must be 12 bytes (got \(got))"
-        case .randomGenerationFailed(let status):
-            return "Secure random generation failed (status \(status))"
         }
     }
 }
@@ -53,95 +49,43 @@ struct SyncEnclaveUnwrappedCek {
 
 enum SyncEnclaveKeyBundle {
 
-    static let cekByteCount = PasskeyProtocol.cekByteCount
-    static let aesGcmIvByteCount = PasskeyProtocol.aesGCMIVByteCount
-    static let keyIdByteCount = PasskeyProtocol.keyIDByteCount
+    static let cekByteCount = 32
+    static let aesGcmIvByteCount = 12
+    static let keyIdByteCount = 16
 
     /// HKDF `info` string used to derive the deterministic 16-byte
     /// key_id from a raw CEK. Mirrors the Go enclave's `crypto.DeriveKeyID`
     /// byte-for-byte.
-    static let keyIdInfo = PasskeyProtocol.tinfoilKeyIDInfoV1
+    static let keyIdInfo = Data("tinfoil-key-id-v1".utf8)
 
-    /// Wrap a raw 32-byte CEK under a passkey-PRF-derived KEK via
-    /// AES-256-GCM. Returns hex-encoded IV + wrapped key in the shape
-    /// the enclave expects in a register-key / add-bundle body.
-    ///
-    /// Callers MUST already have run the PRF flow and derived the KEK
-    /// via `PasskeyService.deriveKeyEncryptionKey`.
-    static func wrapCek(
-        credentialId: String,
-        kek: SymmetricKey,
-        cek: Data
-    ) throws -> SyncEnclaveBundleBody {
-        do {
-            let wrapped = try PasskeyCrypto.wrapCEK(
-                credentialId: credentialId,
-                kek: kek,
-                cek: cek
-            )
-            return SyncEnclaveBundleBody(
-                credentialId: wrapped.credentialId,
-                kekIvHex: wrapped.kekIvHex,
-                wrappedKeyHex: wrapped.wrappedKeyHex
-            )
-        } catch let error as PasskeyCryptoError {
-            switch error {
-            case .wrongCEKLength(let count):
-                throw SyncEnclaveKeyBundleError.wrongCekLength(count)
-            case .randomGenerationFailed(let status):
-                throw SyncEnclaveKeyBundleError.randomGenerationFailed(status)
-            default:
-                throw error
-            }
-        }
-    }
-
-    /// Inverse of `wrapCek`. Returns the raw 32-byte CEK from a hex
-    /// IV + wrapped key ciphertext. Throws on any tamper or shape
-    /// mismatch.
-    static func unwrapCek(
-        kek: SymmetricKey,
-        kekIvHex: String,
-        wrappedKeyHex: String
-    ) throws -> Data {
-        return try unwrapCekDetailed(
-            kek: kek,
-            kekIvHex: kekIvHex,
-            wrappedKeyHex: wrappedKeyHex
-        ).cek
-    }
-
-    /// Like `unwrapCek`, but also surfaces the historical alternative
-    /// keys carried by the legacy pre-v2 JSON envelope (empty for v2
-    /// raw-CEK bundles). Callers on the recovery path feed those into
-    /// the decrypt-only key history so legacy rows sealed under
-    /// rotated-away CEKs can still be unsealed by the migration sweep.
-    static func unwrapCekDetailed(
-        kek: SymmetricKey,
+    /// Unwrap the legacy pre-v2 JSON envelope and surface its historical
+    /// alternative keys. Callers feed those into the decrypt-only key
+    /// history so legacy rows can still be unsealed by the migration sweep.
+    static func unwrapLegacyJsonEnvelope(
+        prfOutput: Data,
         kekIvHex: String,
         wrappedKeyHex: String
     ) throws -> SyncEnclaveUnwrappedCek {
-        let plaintext: Data
-        do {
-            plaintext = try PasskeyCrypto.decryptWrappedPayload(
-                WrappedCEK(
-                    credentialId: "",
-                    kekIvHex: kekIvHex,
-                    wrappedKeyHex: wrappedKeyHex
-                ),
-                using: kek
-            )
-        } catch PasskeyCryptoError.wrongIVLength(let count) {
-            throw SyncEnclaveKeyBundleError.wrongIvLength(count)
+        let iv = try decodeHex(kekIvHex)
+        guard iv.count == aesGcmIvByteCount else {
+            throw SyncEnclaveKeyBundleError.wrongIvLength(iv.count)
         }
-        if plaintext.count == cekByteCount {
-            return SyncEnclaveUnwrappedCek(cek: plaintext, legacyAlternativeKeys: [])
+        let encrypted = try decodeHex(wrappedKeyHex)
+        guard encrypted.count >= 16 else {
+            throw SyncEnclaveKeyBundleError.wrongCekLength(encrypted.count)
         }
-        // Pre-v2 bundles (webapp and iOS alike) wrap a JSON envelope
-        // around the CEK instead of raw bytes. A user who registered
-        // their passkey on that codepath and then signs in on iOS
-        // would otherwise be stuck unable to unlock. Try to recover
-        // the primary key bytes from the legacy shape before giving up.
+        let sealed = try AES.GCM.SealedBox(
+            nonce: AES.GCM.Nonce(data: iv),
+            ciphertext: encrypted.dropLast(16),
+            tag: encrypted.suffix(16)
+        )
+        let kek = HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: SymmetricKey(data: prfOutput),
+            salt: Data(),
+            info: TinfoilPasskeyProfile.hkdfInfo,
+            outputByteCount: cekByteCount
+        )
+        let plaintext = try AES.GCM.open(sealed, using: kek)
         if let legacy = legacyJsonEnvelopeCek(plaintext) {
             return legacy
         }
@@ -200,32 +144,37 @@ enum SyncEnclaveKeyBundle {
         return cek
     }
 
-    /// Convenience overload accepting a pre-built `EnclaveKeyCurrentBundle`.
-    static func unwrapCek(
-        kek: SymmetricKey,
-        bundle: EnclaveKeyCurrentBundle
-    ) throws -> Data {
-        return try unwrapCek(
-            kek: kek,
-            kekIvHex: bundle.kekIv,
-            wrappedKeyHex: bundle.encryptedKeys
-        )
-    }
-
     /// Derive the user's 16-byte key_id from their raw CEK via HKDF-SHA-256
     /// with `info = "tinfoil-key-id-v1"` and an empty salt — matches the
     /// enclave's `crypto.DeriveKeyID` byte-for-byte.
     static func deriveKeyIdHex(cek: Data) throws -> String {
-        do {
-            return PasskeyCodec.hexEncode(
-                try PasskeyCrypto.deriveKeyID(
-                    from: cek,
-                    info: keyIdInfo,
-                    outputByteCount: keyIdByteCount
-                )
-            )
-        } catch PasskeyCryptoError.wrongCEKLength(let count) {
-            throw SyncEnclaveKeyBundleError.wrongCekLength(count)
+        guard cek.count == cekByteCount else {
+            throw SyncEnclaveKeyBundleError.wrongCekLength(cek.count)
         }
+        let keyId = HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: SymmetricKey(data: cek),
+            salt: Data(),
+            info: keyIdInfo,
+            outputByteCount: keyIdByteCount
+        )
+        return keyId.withUnsafeBytes { dataToHex(Data($0)) }
+    }
+
+    private static func decodeHex(_ value: String) throws -> Data {
+        guard value.count.isMultiple(of: 2) else {
+            throw SyncEnclaveKeyBundleError.wrongCekLength(value.count / 2)
+        }
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(value.count / 2)
+        var index = value.startIndex
+        while index < value.endIndex {
+            let next = value.index(index, offsetBy: 2)
+            guard let byte = UInt8(value[index..<next], radix: 16) else {
+                throw SyncEnclaveKeyBundleError.wrongCekLength(value.count / 2)
+            }
+            bytes.append(byte)
+            index = next
+        }
+        return Data(bytes)
     }
 }
