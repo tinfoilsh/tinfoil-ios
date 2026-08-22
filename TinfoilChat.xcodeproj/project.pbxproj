@@ -830,8 +830,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tinfoilsh/tinfoil-passkey-kit";
 			requirement = {
-				kind = revision;
-				revision = dfd215b5565d2e023984ab42e18c5d4d7330e737;
+				kind = exactVersion;
+				version = 0.2.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
