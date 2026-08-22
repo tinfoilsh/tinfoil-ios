@@ -123,6 +123,64 @@ struct PasskeyCompositionTests {
         }
     }
 
+    @Test func legacyPresentationRetryPreservesLegacyContext() async {
+        let entry = LegacyPasskeyCredentialEntry(
+            id: "AQ",
+            iv: "iv",
+            encryptedKeys: "keys",
+            createdAt: nil,
+            version: nil,
+            syncVersion: nil,
+            bundleVersion: nil
+        )
+        let context = PasskeyManager.recoveryRetryContext(
+            legacyEntries: [entry],
+            enclaveKeyId: "legacy-key-id"
+        )
+        var recoveredCredentialId: String?
+        var recoveredKeyId: String?
+
+        let result = await PasskeyManager.retryLegacyRecovery(
+            context: context,
+            recover: { entries, enclaveKeyId in
+                recoveredCredentialId = entries.first?.id
+                recoveredKeyId = enclaveKeyId
+                return .success(
+                    cek: Data(repeating: 1, count: 32),
+                    keyIdHex: "legacy-key-id",
+                    credentialId: entries[0].id,
+                    createdVia: nil
+                )
+            }
+        )
+
+        #expect(recoveredCredentialId == "AQ")
+        #expect(recoveredKeyId == "legacy-key-id")
+        guard let result, case .success = result else {
+            Issue.record("Expected active-window legacy retry to succeed")
+            return
+        }
+    }
+
+    @Test func enclavePresentationRetryDoesNotRouteToLegacyRecovery() async {
+        let context = PasskeyManager.recoveryRetryContext(
+            legacyEntries: nil,
+            enclaveKeyId: "current-key-id"
+        )
+        var legacyRecoveryCalled = false
+
+        let result = await PasskeyManager.retryLegacyRecovery(
+            context: context,
+            recover: { _, _ in
+                legacyRecoveryCalled = true
+                return .failure(.userCancelled)
+            }
+        )
+
+        #expect(result == nil)
+        #expect(!legacyRecoveryCalled)
+    }
+
     @Test func cachelessManagerRecoversDirectlyFromEvaluatedPRF() throws {
         let manager = try PasskeyKeyManager(
             profile: TinfoilPasskeyProfile.current,

@@ -36,6 +36,11 @@ enum KeyMismatchResolution {
 
 @MainActor
 final class PasskeyManager: ObservableObject {
+    enum RecoveryRetryContext {
+        case enclave
+        case legacy(entries: [LegacyPasskeyCredentialEntry], enclaveKeyId: String?)
+    }
+
     static let shared = PasskeyManager()
 
     // MARK: - Published State
@@ -72,6 +77,7 @@ final class PasskeyManager: ObservableObject {
     /// captured so a "Skip for Now" can record exactly which keyId the
     /// user dismissed.
     private var pendingRecoveryKeyId: String?
+    private var pendingLegacyRecovery: RecoveryRetryContext?
 
     /// True when the user skipped recovery for the current remote key
     /// and has not since regained a usable key. Mirrors the webapp's
@@ -123,6 +129,7 @@ final class PasskeyManager: ObservableObject {
         passkeyAddDeviceAvailable = false
         showPasskeyRecoveryChoice = false
         pendingRecoveryKeyId = nil
+        pendingLegacyRecovery = nil
         setDismissedRecoveryKeyId(nil)
         onRecoveryComplete = nil
         onKeyRefreshedFromBackup = nil
@@ -161,6 +168,7 @@ final class PasskeyManager: ObservableObject {
                 return await applyUnlockResult(serverResult)
             }
             if case .failure(.presentationUnavailable, _) = serverResult {
+                pendingLegacyRecovery = .enclave
                 surfaceRecoveryChoice(forKeyId: state.keyId)
                 return .recoveryFailed
             }
@@ -179,6 +187,10 @@ final class PasskeyManager: ObservableObject {
                     return await applyUnlockResult(legacyResult)
                 }
                 if case .failure(.presentationUnavailable, _) = legacyResult {
+                    pendingLegacyRecovery = Self.recoveryRetryContext(
+                        legacyEntries: legacy,
+                        enclaveKeyId: state.keyId
+                    )
                     surfaceRecoveryChoice(forKeyId: state.keyId)
                     return .recoveryFailed
                 }
@@ -221,6 +233,10 @@ final class PasskeyManager: ObservableObject {
             case .success:
                 return await applyUnlockResult(legacyResult)
             case .failure(.presentationUnavailable, _):
+                pendingLegacyRecovery = Self.recoveryRetryContext(
+                    legacyEntries: legacy,
+                    enclaveKeyId: state.keyId
+                )
                 surfaceRecoveryChoice(forKeyId: state.keyId)
                 return .recoveryFailed
             case .failure:
@@ -374,6 +390,7 @@ final class PasskeyManager: ObservableObject {
             setDismissedRecoveryKeyId(keyId)
         }
         showPasskeyRecoveryChoice = false
+        pendingLegacyRecovery = nil
     }
 
     /// Clear a persisted recovery skip and re-run the recovery decision
@@ -406,6 +423,25 @@ final class PasskeyManager: ObservableObject {
     // MARK: - Recovery Choice Actions
 
     func retryPasskeyRecovery() async -> Bool {
+        if let pendingLegacyRecovery,
+           let result = await Self.retryLegacyRecovery(
+               context: pendingLegacyRecovery,
+               recover: { entries, enclaveKeyId in
+                   await PasskeyKeyFlow.recoverFromLegacyPasskey(
+                       entries: entries,
+                       enclaveKeyId: enclaveKeyId
+                   )
+               }
+           ) {
+            guard canMutateAccountKey else { return false }
+            if case .success = result {
+                pendingLegacyRecovery = nil
+                let applied = await applyUnlockResult(result)
+                if case .success = applied { return true }
+            }
+            return false
+        }
+
         let state: EnclaveKeyCurrentResponse
         do {
             state = try await SyncEnclaveAPI.keyCurrent()
@@ -660,6 +696,22 @@ final class PasskeyManager: ObservableObject {
         startSyncCheck()
     }
 
+    static func recoveryRetryContext(
+        legacyEntries: [LegacyPasskeyCredentialEntry]?,
+        enclaveKeyId: String?
+    ) -> RecoveryRetryContext {
+        guard let legacyEntries else { return .enclave }
+        return .legacy(entries: legacyEntries, enclaveKeyId: enclaveKeyId)
+    }
+
+    static func retryLegacyRecovery(
+        context: RecoveryRetryContext,
+        recover: ([LegacyPasskeyCredentialEntry], String?) async -> PasskeyFlowResult
+    ) async -> PasskeyFlowResult? {
+        guard case .legacy(let entries, let enclaveKeyId) = context else { return nil }
+        return await recover(entries, enclaveKeyId)
+    }
+
     private var canMutateAccountKey: Bool {
         accountOperationsEnabled && !Task.isCancelled
     }
@@ -749,6 +801,7 @@ final class PasskeyManager: ObservableObject {
         // A successful unlock clears any prior skip so a future genuine
         // mismatch can prompt again.
         pendingRecoveryKeyId = nil
+        pendingLegacyRecovery = nil
         setDismissedRecoveryKeyId(nil)
     }
 
@@ -823,11 +876,8 @@ final class PasskeyManager: ObservableObject {
                 // refresh instead of jumping straight to the
                 // recovery / start-fresh prompt.
                 break
-            case .failure(.presentationUnavailable, _):
-                // The app has no active presentation window yet. Surface
-                // the existing recovery choice for a user retry once active.
-                surfaceRecoveryChoice(forKeyId: remoteKeyId)
             case .failure:
+                pendingLegacyRecovery = .enclave
                 surfaceRecoveryChoice(forKeyId: remoteKeyId)
             }
         } catch {
