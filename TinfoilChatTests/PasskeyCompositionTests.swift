@@ -145,12 +145,19 @@ struct PasskeyCompositionTests {
             recover: { entries, enclaveKeyId in
                 recoveredCredentialId = entries.first?.id
                 recoveredKeyId = enclaveKeyId
-                return .success(
+                return .success(LegacyPasskeyRecovery(
                     cek: Data(repeating: 1, count: 32),
                     keyIdHex: "legacy-key-id",
                     credentialId: entries[0].id,
-                    createdVia: nil
-                )
+                    legacyAlternatives: [],
+                    promotion: LegacyPasskeyPromotion(
+                        expectedEnclaveKeyId: enclaveKeyId,
+                        keyB64: Data(repeating: 1, count: 32).base64EncodedString(),
+                        credentialId: entries[0].id,
+                        kekIvHex: String(repeating: "0", count: 24),
+                        encryptedKeysHex: String(repeating: "0", count: 96)
+                    )
+                ))
             }
         )
 
@@ -314,6 +321,74 @@ struct PasskeyCompositionTests {
 
         #expect(!canApply)
         #expect(!appliedRecoveredKey)
+    }
+
+    @Test func accountSwitchWithNoEnclaveKeySkipsLegacyRegistration() async {
+        let promotion = LegacyPasskeyPromotion(
+            expectedEnclaveKeyId: nil,
+            keyB64: Data(repeating: 1, count: 32).base64EncodedString(),
+            credentialId: "AQ",
+            kekIvHex: String(repeating: "0", count: 24),
+            encryptedKeysHex: String(repeating: "0", count: 96)
+        )
+        let recovery = LegacyPasskeyRecovery(
+            cek: Data(repeating: 1, count: 32),
+            keyIdHex: "recovered-key-id",
+            credentialId: "AQ",
+            legacyAlternatives: [],
+            promotion: promotion
+        )
+        let plan = PasskeyManager.legacyPromotionPlan(
+            recovery: recovery,
+            currentKeyId: nil,
+            isCurrentAccount: false
+        )
+        var registerCount = 0
+
+        if let plan {
+            _ = await PasskeyManager.executeLegacyPromotion(
+                plan,
+                register: { _ in registerCount += 1 },
+                addBundle: { _ in }
+            )
+        }
+
+        #expect(plan == nil)
+        #expect(registerCount == 0)
+    }
+
+    @Test func validSameAccountPromotesRecoveredLegacyKey() async throws {
+        let promotion = LegacyPasskeyPromotion(
+            expectedEnclaveKeyId: nil,
+            keyB64: Data(repeating: 2, count: 32).base64EncodedString(),
+            credentialId: "AQ",
+            kekIvHex: String(repeating: "1", count: 24),
+            encryptedKeysHex: String(repeating: "1", count: 96)
+        )
+        let recovery = LegacyPasskeyRecovery(
+            cek: Data(repeating: 2, count: 32),
+            keyIdHex: "recovered-key-id",
+            credentialId: "AQ",
+            legacyAlternatives: [],
+            promotion: promotion
+        )
+        let plan = try #require(PasskeyManager.legacyPromotionPlan(
+            recovery: recovery,
+            currentKeyId: nil,
+            isCurrentAccount: true
+        ))
+        var registerCount = 0
+        var addBundleCount = 0
+
+        let promoted = await PasskeyManager.executeLegacyPromotion(
+            plan,
+            register: { _ in registerCount += 1 },
+            addBundle: { _ in addBundleCount += 1 }
+        )
+
+        #expect(promoted)
+        #expect(registerCount == 1)
+        #expect(addBundleCount == 0)
     }
 
     @Test func cachelessManagerRecoversDirectlyFromEvaluatedPRF() throws {

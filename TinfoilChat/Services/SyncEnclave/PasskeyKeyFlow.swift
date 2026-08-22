@@ -49,6 +49,36 @@ enum PasskeyFlowResult: Sendable {
     case failure(PasskeyFlowFailure, message: String? = nil)
 }
 
+struct LegacyPasskeyPromotion: Sendable {
+    let expectedEnclaveKeyId: String?
+    let keyB64: String
+    let credentialId: String
+    let kekIvHex: String
+    let encryptedKeysHex: String
+}
+
+struct LegacyPasskeyRecovery: Sendable {
+    let cek: Data
+    let keyIdHex: String
+    let credentialId: String
+    let legacyAlternatives: [String]
+    let promotion: LegacyPasskeyPromotion
+
+    var flowResult: PasskeyFlowResult {
+        .success(
+            cek: cek,
+            keyIdHex: keyIdHex,
+            credentialId: credentialId,
+            createdVia: SyncEnclaveCreatedVia.recovery.rawValue
+        )
+    }
+}
+
+enum LegacyPasskeyRecoveryResult: Sendable {
+    case success(LegacyPasskeyRecovery)
+    case failure(PasskeyFlowFailure, message: String? = nil)
+}
+
 struct PasskeyUserInfo {
     let userId: String
     let userEmail: String
@@ -326,7 +356,7 @@ enum PasskeyKeyFlow {
     /// decrypt-only fallbacks so the migration sweep can unseal rows
     /// still sealed under a rotated-away key. Additive and idempotent;
     /// never touches the primary key.
-    private static func retainLegacyAlternatives(_ keys: [String]) {
+    static func retainLegacyAlternatives(_ keys: [String]) {
         for key in keys {
             try? EncryptionService.shared.addDecryptionKey(key)
         }
@@ -356,23 +386,20 @@ enum PasskeyKeyFlow {
     // MARK: - Legacy (v1) passkey recovery
 
     /// Recover the user's CEK from a passkey registered on the
-    /// pre-enclave webapp, then promote it into the enclave key
-    /// registry so future sessions use the v2 wire.
+    /// pre-enclave webapp and return immutable promotion material.
     ///
     /// The caller passes the legacy credential entries (from
     /// `LegacyPasskeyCredentials.fetch()`) and the enclave's current
-    /// key_id (or nil when no `user_keys` row exists yet). The flow:
+    /// key_id (or nil when no `user_keys` row exists yet). This method:
     ///   1. authenticate one of the legacy passkeys (PRF),
     ///   2. unwrap the AES-GCM legacy bundle under the PRF-derived KEK,
-    ///   3. derive the CEK's key_id and reconcile it with the enclave:
-    ///      - no enclave key  → register-key with an initial bundle,
-    ///      - matching key_id → add a bundle for this credential,
-    ///      - mismatched id   → fail (the legacy CEK is a rotated-away
-    ///        key; never clobber the current primary).
+    ///   3. derive the CEK's key_id and reject a known mismatch,
+    ///   4. return the recovered key and wrapped bundle for the manager
+    ///      to validate and promote under the current account.
     static func recoverFromLegacyPasskey(
         entries: [LegacyPasskeyCredentialEntry],
         enclaveKeyId: String?
-    ) async -> PasskeyFlowResult {
+    ) async -> LegacyPasskeyRecoveryResult {
         guard !entries.isEmpty else {
             return .failure(.noRemoteBundle)
         }
@@ -442,77 +469,19 @@ enum PasskeyKeyFlow {
             return .failure(.bundleDecryptFailed, message: error.localizedDescription)
         }
 
-        if enclaveKeyId == nil {
-            // No enclave key yet — register the recovered CEK + initial
-            // bundle so the user becomes a first-class v2 user.
-            do {
-                _ = try await SyncEnclaveAPI.registerKey(
-                    EnclaveKeyRegisterRequest(
-                        key: dataToBase64(cek),
-                        ifMatch: IfMatchSentinels.anyKey,
-                        createdVia: SyncEnclaveCreatedVia.recovery.rawValue,
-                        idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                        initialBundle: EnclaveKeyRegisterBundleInput(
-                            credentialId: bundle.credentialId,
-                            kekIvHex: bundle.kekIvHex,
-                            encryptedKeysHex: bundle.wrappedKeyHex
-                        )
-                    )
-                )
-            } catch let err as SyncEnclaveError {
-                // A racing setup may have landed first; the caller can
-                // re-run recovery against whatever the enclave now reports.
-                return .failure(failureFromEnclaveError(err), message: err.message)
-            } catch {
-                return .failure(.enclaveUnavailable, message: error.localizedDescription)
-            }
-        } else {
-            // Enclave key matches the recovered CEK but this credential
-            // has no bundle yet — add one so subsequent sessions unlock
-            // via the v2 wire instead of falling back to legacy.
-            do {
-                let current = try await SyncEnclaveAPI.keyCurrent()
-                guard current.keyId == keyIdHex else {
-                    return .failure(
-                        .keyIdMismatch,
-                        message: "legacy keyId no longer matches the enclave current key"
-                    )
-                }
-            } catch let err as SyncEnclaveError {
-                return .failure(failureFromEnclaveError(err), message: err.message)
-            } catch {
-                return .failure(.enclaveUnavailable, message: error.localizedDescription)
-            }
-            // After revalidating key identity, a bundle write failure is
-            // non-fatal: recovery can still use the legacy path next time.
-            do {
-                _ = try await SyncEnclaveAPI.addBundle(
-                    EnclaveAddBundleRequest(
-                        keyId: keyIdHex,
-                        key: dataToBase64(cek),
-                        credentialId: bundle.credentialId,
-                        kekIvHex: bundle.kekIvHex,
-                        encryptedKeysHex: bundle.wrappedKeyHex,
-                        idempotencyKey: newSyncEnclaveIdempotencyKey()
-                    )
-                )
-            } catch {
-                // Non-fatal — the CEK is already recovered locally.
-            }
-        }
-
-        // Only retain the bundle's historical keys once the recovery is
-        // accepted: a rejected recovery (rotated-away CEK) must not
-        // pollute the local key history with alternatives that were
-        // never adopted.
-        retainLegacyAlternatives(legacyAlternatives)
-
-        return .success(
+        return .success(LegacyPasskeyRecovery(
             cek: cek,
             keyIdHex: keyIdHex,
             credentialId: evaluated.credentialId,
-            createdVia: SyncEnclaveCreatedVia.recovery.rawValue
-        )
+            legacyAlternatives: legacyAlternatives,
+            promotion: LegacyPasskeyPromotion(
+                expectedEnclaveKeyId: enclaveKeyId,
+                keyB64: dataToBase64(cek),
+                credentialId: bundle.credentialId,
+                kekIvHex: bundle.kekIvHex,
+                encryptedKeysHex: bundle.wrappedKeyHex
+            )
+        ))
     }
 
     // MARK: - Multi-device: enroll new passkey for current CEK

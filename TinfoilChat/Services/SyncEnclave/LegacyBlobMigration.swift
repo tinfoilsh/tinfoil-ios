@@ -433,8 +433,9 @@ enum LegacyBlobMigration {
     /// the user's account, the CEK is wrapped under it and registered
     /// with an initial bundle so the adopted key is passkey-recoverable
     /// from day one; otherwise it is registered bundleless and a legacy
-    /// passkey wrapping this same CEK stays promotable afterwards
-    /// (recoverFromLegacyPasskey adds its bundle), so adopting never
+    /// passkey wrapping this same CEK stays promotable afterwards; the
+    /// recovery manager adds its bundle after validating key identity,
+    /// so adopting never
     /// strands a backup. register-key's if_match='*' fails safely on
     /// a concurrent register. Returns true when the key was adopted.
     /// Mirrors the webapp's migration adoption.
