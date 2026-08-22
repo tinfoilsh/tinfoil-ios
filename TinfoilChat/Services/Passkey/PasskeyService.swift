@@ -15,6 +15,7 @@ enum PasskeyError: LocalizedError {
     case authorizationFailed(Error)
     case randomGenerationFailed
     case invalidBase64url
+    case presentationAnchorUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -30,6 +31,8 @@ enum PasskeyError: LocalizedError {
             return "Failed to generate secure random bytes"
         case .invalidBase64url:
             return "Invalid base64url-encoded credential ID"
+        case .presentationAnchorUnavailable:
+            return "Passkey authorization requires an active app window"
         }
     }
 }
@@ -39,16 +42,24 @@ final class PasskeyService {
     static let shared = PasskeyService()
 
     private let storage: TinfoilPasskeyKeyStorage
-    private let keyManager: PasskeyKeyManager
+    private let presentationAnchorProvider: TinfoilPasskeyPresentationAnchorProvider
+    private let keyManagerResult: Result<PasskeyKeyManager, Error>
 
     private init() {
         let storage = TinfoilPasskeyKeyStorage()
+        let presentationAnchorProvider = TinfoilPasskeyPresentationAnchorProvider()
         self.storage = storage
-        keyManager = try! PasskeyKeyManager(
-            profile: TinfoilPasskeyProfile.current,
-            relyingPartyName: Constants.Passkey.rpName,
-            storage: storage
-        )
+        self.presentationAnchorProvider = presentationAnchorProvider
+        do {
+            keyManagerResult = .success(try PasskeyKeyManager(
+                profile: TinfoilPasskeyProfile.current,
+                relyingPartyName: Constants.Passkey.rpName,
+                storage: storage,
+                presentationAnchorProvider: presentationAnchorProvider
+            ))
+        } catch {
+            keyManagerResult = .failure(error)
+        }
     }
 
     func createAndWrapKey(
@@ -58,6 +69,8 @@ final class PasskeyService {
         key: Data
     ) async throws -> CreatedWrappedKey {
         do {
+            try presentationAnchorProvider.requirePresentationAnchor()
+            let keyManager = try keyManager()
             return try await keyManager.createAndWrapKey(
                 user: PasskeyUser(
                     id: Data(userId.utf8),
@@ -77,6 +90,8 @@ final class PasskeyService {
         immediatelyAvailable: Bool = false
     ) async throws -> RecoveredKey {
         do {
+            try presentationAnchorProvider.requirePresentationAnchor()
+            let keyManager = try keyManager()
             return try await keyManager.recoverKey(
                 wrappedKeys: wrappedKeys,
                 preferredCredentialId: preferredCredentialId,
@@ -93,6 +108,7 @@ final class PasskeyService {
         prfResult: PRFResult
     ) throws -> WrappedKey {
         do {
+            let keyManager = try keyManager()
             return try keyManager.wrapKeyWithPRFResult(
                 keyMaterial: key,
                 credentialId: credentialId,
@@ -108,6 +124,7 @@ final class PasskeyService {
         prfResult: PRFResult
     ) throws -> Data {
         do {
+            let keyManager = try keyManager()
             return try keyManager.unwrapKeyWithPRFResult(
                 wrappedKey: wrappedKey,
                 prfResult: prfResult
@@ -119,6 +136,7 @@ final class PasskeyService {
 
     func rewrapKeyFromCache(_ key: Data) throws -> WrappedKey? {
         do {
+            let keyManager = try keyManager()
             return try keyManager.rewrapKeyFromCache(key: key)
         } catch {
             throw Self.mapError(error)
@@ -140,6 +158,8 @@ final class PasskeyService {
         immediatelyAvailable: Bool
     ) async throws -> EvaluatedCredential {
         do {
+            try presentationAnchorProvider.requirePresentationAnchor()
+            let keyManager = try keyManager()
             return try await keyManager.evaluateCredential(
                 credentialIds: credentialIds,
                 preferredCredentialId: preferredCredentialId,
@@ -151,7 +171,17 @@ final class PasskeyService {
     }
 
     func clearCachedPrfResult() {
-        keyManager.clearLocalState()
+        if case .success(let keyManager) = keyManagerResult {
+            keyManager.clearLocalState()
+        }
+    }
+
+    private func keyManager() throws -> PasskeyKeyManager {
+        do {
+            return try keyManagerResult.get()
+        } catch {
+            throw PasskeyError.authorizationFailed(error)
+        }
     }
 
     nonisolated static func interaction(immediatelyAvailable: Bool) -> PasskeyInteraction {
@@ -159,6 +189,9 @@ final class PasskeyService {
     }
 
     nonisolated static func mapError(_ error: Error) -> PasskeyError {
+        if let passkeyError = error as? PasskeyError {
+            return passkeyError
+        }
         guard let passkeyError = error as? PasskeyKeyError else {
             return .authorizationFailed(error)
         }

@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import Testing
 import TinfoilPasskeyKit
+import UIKit
 @testable import TinfoilChat
 
 @MainActor
@@ -102,10 +103,31 @@ struct PasskeyCompositionTests {
         #expect(PasskeyService.interaction(immediatelyAvailable: false) == .interactive)
     }
 
+    @Test func presentationAnchorProviderUsesInjectedActiveWindow() throws {
+        let window = UIWindow(frame: .zero)
+        let provider = TinfoilPasskeyPresentationAnchorProvider { window }
+
+        #expect(try provider.requirePresentationAnchor() === window)
+        #expect(provider.presentationAnchor === window)
+    }
+
+    @Test func presentationAnchorProviderReportsMissingActiveWindow() {
+        let provider = TinfoilPasskeyPresentationAnchorProvider { nil }
+
+        do {
+            _ = try provider.requirePresentationAnchor()
+            Issue.record("Expected missing presentation anchor error")
+        } catch PasskeyError.presentationAnchorUnavailable {
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
     @Test func cachelessManagerRecoversDirectlyFromEvaluatedPRF() throws {
         let manager = try PasskeyKeyManager(
             profile: TinfoilPasskeyProfile.current,
-            relyingPartyName: Constants.Passkey.rpName
+            relyingPartyName: Constants.Passkey.rpName,
+            presentationAnchorProvider: FakePasskeyPresentationAnchorProvider()
         )
         let key = Data((0..<32).map(UInt8.init))
         let prfResult = PRFResult(output: Data(repeating: 7, count: 32))
@@ -126,7 +148,8 @@ struct PasskeyCompositionTests {
         let manager = try PasskeyKeyManager(
             profile: TinfoilPasskeyProfile.current,
             relyingPartyName: Constants.Passkey.rpName,
-            storage: FailingPasskeyStorage()
+            storage: FailingPasskeyStorage(),
+            presentationAnchorProvider: FakePasskeyPresentationAnchorProvider()
         )
         let key = Data((0..<32).map { UInt8($0 + 10) })
         let prfResult = PRFResult(output: Data(repeating: 9, count: 32))
@@ -260,4 +283,9 @@ private final class FailingPasskeyStorage: PasskeyKeyStorage {
     func loadLocalCredentialId() throws -> String? { throw Failure() }
     func saveLocalCredentialId(_ credentialId: String) throws { throw Failure() }
     func clear() throws { throw Failure() }
+}
+
+@MainActor
+private final class FakePasskeyPresentationAnchorProvider: PasskeyPresentationAnchorProviding {
+    let presentationAnchor = UIWindow(frame: .zero)
 }
