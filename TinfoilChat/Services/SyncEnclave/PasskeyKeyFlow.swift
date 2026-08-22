@@ -469,9 +469,22 @@ enum PasskeyKeyFlow {
         } else {
             // Enclave key matches the recovered CEK but this credential
             // has no bundle yet — add one so subsequent sessions unlock
-            // via the v2 wire instead of falling back to legacy. A
-            // failure here is non-fatal: the user is already unlocked
-            // locally and will simply hit the legacy path again next time.
+            // via the v2 wire instead of falling back to legacy.
+            do {
+                let current = try await SyncEnclaveAPI.keyCurrent()
+                guard current.keyId == keyIdHex else {
+                    return .failure(
+                        .keyIdMismatch,
+                        message: "legacy keyId no longer matches the enclave current key"
+                    )
+                }
+            } catch let err as SyncEnclaveError {
+                return .failure(failureFromEnclaveError(err), message: err.message)
+            } catch {
+                return .failure(.enclaveUnavailable, message: error.localizedDescription)
+            }
+            // After revalidating key identity, a bundle write failure is
+            // non-fatal: recovery can still use the legacy path next time.
             do {
                 _ = try await SyncEnclaveAPI.addBundle(
                     EnclaveAddBundleRequest(

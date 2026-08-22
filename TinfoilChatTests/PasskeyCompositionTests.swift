@@ -290,6 +290,32 @@ struct PasskeyCompositionTests {
         #expect(validated == nil)
     }
 
+    @Test func delayedLegacyRecoveryRejectsRotatedEnclaveKey() async {
+        let expectedAccount = PasskeyManager.LegacyRecoveryAccountSnapshot(
+            userId: "user-a",
+            generation: 3
+        )
+        let delayedRecovery = Task { @MainActor in
+            await Task.yield()
+            return "old-key-id"
+        }
+        let currentKeyId = "rotated-key-id"
+        let recoveredKeyId = await delayedRecovery.value
+        var appliedRecoveredKey = false
+
+        let canApply = PasskeyManager.canApplyLegacyRecovery(
+            recoveredKeyId: recoveredKeyId,
+            currentKeyId: currentKeyId,
+            expectedAccount: expectedAccount,
+            currentUserId: "user-a",
+            currentGeneration: 3
+        )
+        if canApply { appliedRecoveredKey = true }
+
+        #expect(!canApply)
+        #expect(!appliedRecoveredKey)
+    }
+
     @Test func cachelessManagerRecoversDirectlyFromEvaluatedPRF() throws {
         let manager = try PasskeyKeyManager(
             profile: TinfoilPasskeyProfile.current,

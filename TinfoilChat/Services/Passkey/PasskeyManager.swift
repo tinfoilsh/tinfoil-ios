@@ -70,6 +70,7 @@ final class PasskeyManager: ObservableObject {
 
     private var syncCheckTask: Task<Void, Never>?
     private var accountOperationsEnabled = true
+    private var accountGeneration = 0
     private let accountOperationTracker = AccountOperationTracker()
     private let passkeyService = PasskeyService.shared
 
@@ -118,6 +119,7 @@ final class PasskeyManager: ObservableObject {
 
     func reset() async {
         accountOperationsEnabled = false
+        accountGeneration &+= 1
         await accountOperationTracker.closeAndWait()
         let canceledSyncCheckTask = syncCheckTask
         canceledSyncCheckTask?.cancel()
@@ -178,12 +180,20 @@ final class PasskeyManager: ObservableObject {
             // itself as a new bundle so future sessions use the v2 wire.
             let legacy = await LegacyPasskeyCredentials.fetch()
             if !legacy.isEmpty {
+                let recoveryAccount = legacyRecoveryAccountSnapshot()
                 let legacyResult = await PasskeyKeyFlow.recoverFromLegacyPasskey(
                     entries: legacy,
                     enclaveKeyId: state.keyId
                 )
                 guard canMutateAccountKey else { return .recoveryFailed }
                 if case .success = legacyResult {
+                    guard let recoveryAccount,
+                          await validateLegacyRecoveryBeforeApply(
+                              legacyResult,
+                              expectedAccount: recoveryAccount
+                          ) else {
+                        return .recoveryFailed
+                    }
                     return await applyUnlockResult(legacyResult)
                 }
                 if case .failure(.presentationUnavailable, _) = legacyResult {
@@ -224,6 +234,7 @@ final class PasskeyManager: ObservableObject {
         // recover the CEK.
         let legacy = await LegacyPasskeyCredentials.fetch()
         if !legacy.isEmpty {
+            let recoveryAccount = legacyRecoveryAccountSnapshot()
             let legacyResult = await PasskeyKeyFlow.recoverFromLegacyPasskey(
                 entries: legacy,
                 enclaveKeyId: state.keyId
@@ -231,6 +242,13 @@ final class PasskeyManager: ObservableObject {
             guard canMutateAccountKey else { return .recoveryFailed }
             switch legacyResult {
             case .success:
+                guard let recoveryAccount,
+                      await validateLegacyRecoveryBeforeApply(
+                          legacyResult,
+                          expectedAccount: recoveryAccount
+                      ) else {
+                    return .recoveryFailed
+                }
                 return await applyUnlockResult(legacyResult)
             case .failure(.presentationUnavailable, _):
                 pendingLegacyRecovery = Self.recoveryRetryContext(
@@ -451,6 +469,7 @@ final class PasskeyManager: ObservableObject {
             }
             let currentEntries = await LegacyPasskeyCredentials.fetch()
             guard canMutateAccountKey else { return false }
+            let recoveryAccount = legacyRecoveryAccountSnapshot()
             if let validatedContext = Self.validatedLegacyRetryContext(
                 context: retryContext,
                 currentEntries: currentEntries,
@@ -466,6 +485,13 @@ final class PasskeyManager: ObservableObject {
             ) {
                 guard canMutateAccountKey else { return false }
                 if case .success = result {
+                    guard let recoveryAccount,
+                          await validateLegacyRecoveryBeforeApply(
+                              result,
+                              expectedAccount: recoveryAccount
+                          ) else {
+                        return false
+                    }
                     let applied = await applyUnlockResult(result)
                     return Self.finishRecoveryRetry(
                         appliedResult: applied,
@@ -780,6 +806,58 @@ final class PasskeyManager: ObservableObject {
         guard case .success = appliedResult, isCurrentAccount else { return false }
         dismiss()
         resume?()
+        return true
+    }
+
+    struct LegacyRecoveryAccountSnapshot {
+        let userId: String
+        let generation: Int
+    }
+
+    static func canApplyLegacyRecovery(
+        recoveredKeyId: String,
+        currentKeyId: String?,
+        expectedAccount: LegacyRecoveryAccountSnapshot,
+        currentUserId: String?,
+        currentGeneration: Int
+    ) -> Bool {
+        recoveredKeyId == currentKeyId
+            && expectedAccount.userId == currentUserId
+            && expectedAccount.generation == currentGeneration
+    }
+
+    private func legacyRecoveryAccountSnapshot() -> LegacyRecoveryAccountSnapshot? {
+        guard let userId = Clerk.shared.user?.id else { return nil }
+        return LegacyRecoveryAccountSnapshot(userId: userId, generation: accountGeneration)
+    }
+
+    private func validateLegacyRecoveryBeforeApply(
+        _ result: PasskeyFlowResult,
+        expectedAccount: LegacyRecoveryAccountSnapshot
+    ) async -> Bool {
+        guard case .success(_, let recoveredKeyId, _, _) = result else { return false }
+        let currentState: EnclaveKeyCurrentResponse?
+        do {
+            currentState = try await SyncEnclaveAPI.keyCurrent()
+        } catch {
+            currentState = nil
+        }
+        guard canMutateAccountKey,
+              expectedAccount.userId == Clerk.shared.user?.id,
+              expectedAccount.generation == accountGeneration else {
+            return false
+        }
+        guard Self.canApplyLegacyRecovery(
+            recoveredKeyId: recoveredKeyId,
+            currentKeyId: currentState?.keyId,
+            expectedAccount: expectedAccount,
+            currentUserId: Clerk.shared.user?.id,
+            currentGeneration: accountGeneration
+        ) else {
+            pendingLegacyRecovery = currentState?.keyId == nil ? nil : .enclave
+            surfaceRecoveryChoice(forKeyId: currentState?.keyId)
+            return false
+        }
         return true
     }
 
