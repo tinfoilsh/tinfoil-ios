@@ -102,20 +102,45 @@ struct PasskeyCompositionTests {
         #expect(PasskeyService.interaction(immediatelyAvailable: false) == .interactive)
     }
 
-    @Test func cachelessManagerReturnsNoRecoveredCurrentKey() throws {
+    @Test func cachelessManagerRecoversDirectlyFromEvaluatedPRF() throws {
         let manager = try PasskeyKeyManager(
             profile: TinfoilPasskeyProfile.current,
             relyingPartyName: Constants.Passkey.rpName
         )
-        let wrapped = TinfoilWrappedKeyAdapter.wrappedKey(
-            TinfoilWrappedKeyAdapter.EnclaveFields(
-                credentialId: "AQ",
-                kekIvHex: String(repeating: "0", count: 24),
-                wrappedKeyHex: String(repeating: "0", count: 96)
-            )
+        let key = Data((0..<32).map(UInt8.init))
+        let prfResult = PRFResult(output: Data(repeating: 7, count: 32))
+        let wrapped = try manager.wrapKeyWithPRFResult(
+            keyMaterial: key,
+            credentialId: "AQ",
+            prfResult: prfResult
         )
 
         #expect(try manager.recoverKeyFromCache(wrappedKeys: [wrapped]) == nil)
+        #expect(try manager.unwrapKeyWithPRFResult(
+            wrappedKey: wrapped,
+            prfResult: prfResult
+        ) == key)
+    }
+
+    @Test func failingStorageDoesNotBlockDirectPRFRecovery() throws {
+        let manager = try PasskeyKeyManager(
+            profile: TinfoilPasskeyProfile.current,
+            relyingPartyName: Constants.Passkey.rpName,
+            storage: FailingPasskeyStorage()
+        )
+        let key = Data((0..<32).map { UInt8($0 + 10) })
+        let prfResult = PRFResult(output: Data(repeating: 9, count: 32))
+        let wrapped = try manager.wrapKeyWithPRFResult(
+            keyMaterial: key,
+            credentialId: "Ag",
+            prfResult: prfResult
+        )
+
+        #expect(try manager.recoverKeyFromCache(wrappedKeys: [wrapped]) == nil)
+        #expect(try manager.unwrapKeyWithPRFResult(
+            wrappedKey: wrapped,
+            prfResult: prfResult
+        ) == key)
     }
 
     @Test func oldPRFCacheRecordReconstructsTinfoilProfile() throws {
@@ -224,4 +249,15 @@ struct LegacyPasskeyEnvelopeTests {
         #expect(recovered.cek == cek)
         #expect(recovered.legacyAlternativeKeys == [alternativeString])
     }
+}
+
+@MainActor
+private final class FailingPasskeyStorage: PasskeyKeyStorage {
+    struct Failure: Error {}
+
+    func loadCachedPRFResult() throws -> CachedPRFResult? { throw Failure() }
+    func saveCachedPRFResult(_ result: CachedPRFResult) throws { throw Failure() }
+    func loadLocalCredentialId() throws -> String? { throw Failure() }
+    func saveLocalCredentialId(_ credentialId: String) throws { throw Failure() }
+    func clear() throws { throw Failure() }
 }

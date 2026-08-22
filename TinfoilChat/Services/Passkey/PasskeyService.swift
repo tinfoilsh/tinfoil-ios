@@ -87,14 +87,30 @@ final class PasskeyService {
         }
     }
 
-    func recoverKeyFromCache(
-        wrappedKeys: [WrappedKey],
-        preferredCredentialId: String? = nil
-    ) throws -> RecoveredKey? {
+    func wrapKeyWithPRFResult(
+        key: Data,
+        credentialId: String,
+        prfResult: PRFResult
+    ) throws -> WrappedKey {
         do {
-            return try keyManager.recoverKeyFromCache(
-                wrappedKeys: wrappedKeys,
-                preferredCredentialId: preferredCredentialId
+            return try keyManager.wrapKeyWithPRFResult(
+                keyMaterial: key,
+                credentialId: credentialId,
+                prfResult: prfResult
+            )
+        } catch {
+            throw Self.mapError(error)
+        }
+    }
+
+    func unwrapKeyWithPRFResult(
+        wrappedKey: WrappedKey,
+        prfResult: PRFResult
+    ) throws -> Data {
+        do {
+            return try keyManager.unwrapKeyWithPRFResult(
+                wrappedKey: wrappedKey,
+                prfResult: prfResult
             )
         } catch {
             throw Self.mapError(error)

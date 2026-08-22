@@ -274,16 +274,13 @@ enum PasskeyKeyFlow {
             }
 
             switch candidateSet.selection(credentialId: evaluated.credentialId) {
-            case .current:
+            case .current(let current):
                 do {
-                    guard let recovered = try PasskeyService.shared.recoverKeyFromCache(
-                        wrappedKeys: candidateSet.current.map(\.wrappedKey),
-                        preferredCredentialId: evaluated.credentialId
-                    ) else {
-                        return (.failure(.bundleDecryptFailed, message: "Passkey cache is unavailable"), [])
-                    }
-                    credentialId = recovered.credentialId
-                    cek = recovered.key
+                    cek = try PasskeyService.shared.unwrapKeyWithPRFResult(
+                        wrappedKey: current.wrappedKey,
+                        prfResult: evaluated.prfResult
+                    )
+                    credentialId = evaluated.credentialId
                 } catch let err {
                     return (.failure(failureFromPasskeyError(err), message: err.localizedDescription), [])
                 }
@@ -434,9 +431,11 @@ enum PasskeyKeyFlow {
 
         let bundle: SyncEnclaveBundleBody
         do {
-            guard let wrapped = try PasskeyService.shared.rewrapKeyFromCache(cek) else {
-                return .failure(.bundleDecryptFailed, message: "Passkey cache is unavailable")
-            }
+            let wrapped = try PasskeyService.shared.wrapKeyWithPRFResult(
+                key: cek,
+                credentialId: evaluated.credentialId,
+                prfResult: evaluated.prfResult
+            )
             bundle = TinfoilWrappedKeyAdapter.bundleBody(wrapped)
         } catch {
             return .failure(.bundleDecryptFailed, message: error.localizedDescription)
