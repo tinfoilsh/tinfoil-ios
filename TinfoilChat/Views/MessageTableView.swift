@@ -534,6 +534,8 @@ struct MessageTableView: UIViewRepresentable {
             let cell = tableView.dequeueReusableCell(withIdentifier: cellIdentifier) ?? UITableViewCell(style: .default, reuseIdentifier: cellIdentifier)
             cell.selectionStyle = .none
             cell.backgroundColor = .clear
+            cell.clipsToBounds = false
+            cell.contentView.clipsToBounds = false
 
             if parent.messages.isEmpty {
                 cell.contentConfiguration = UIHostingConfiguration {
