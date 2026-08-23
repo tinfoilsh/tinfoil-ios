@@ -287,7 +287,7 @@ struct ChatSidebar: View {
         let projectColors = viewModel.projects.reduce(into: [String: String]()) {
             $0[$1.id] = $1.color
         }
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             recoveryBanner
             ScrollViewReader { scrollProxy in
                 ScrollView {
