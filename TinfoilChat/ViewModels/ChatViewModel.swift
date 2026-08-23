@@ -2086,7 +2086,7 @@ class ChatViewModel: ObservableObject {
             }
         }
         do {
-            let resourceValues = try url.resourceValues(forKeys: [.fileSizeKey])
+            let resourceValues = try handle.url.resourceValues(forKeys: [.fileSizeKey])
             guard let sizeBytes = resourceValues.fileSize else {
                 throw CocoaError(.fileReadUnknown)
             }
