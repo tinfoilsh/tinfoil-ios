@@ -161,10 +161,10 @@ struct SharedImportStore {
         guard descriptor >= 0 else { throw SharedImportError.invalidFile }
         defer { Darwin.close(descriptor) }
 
-        while Darwin.flock(descriptor, LOCK_EX) != 0 {
+        while Darwin.lockf(descriptor, F_LOCK, 0) != 0 {
             guard errno == EINTR else { throw SharedImportError.invalidFile }
         }
-        defer { _ = Darwin.flock(descriptor, LOCK_UN) }
+        defer { _ = Darwin.lockf(descriptor, F_ULOCK, 0) }
         return try operation()
     }
 
