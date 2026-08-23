@@ -5,7 +5,7 @@ final class AttachmentProcessingStore {
     struct Publication {
         fileprivate let isCurrentOperation: @MainActor () -> Bool
 
-        var isCurrent: Bool { isCurrentOperation() }
+        @MainActor var isCurrent: Bool { isCurrentOperation() }
     }
 
     private var tasks: [String: Task<Void, Never>] = [:]
