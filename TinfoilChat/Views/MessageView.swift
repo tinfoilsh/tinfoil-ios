@@ -144,7 +144,6 @@ struct MessageView: View {
     @State private var showRawContentModal = false
     @State private var isEditMode = false
     @State private var editedContent = ""
-    @State private var showSelectableText = false
     @State private var showSourcesSheet = false
     @State private var showUserMessageActions = false
     @State private var showShareSheet = false
@@ -155,7 +154,7 @@ struct MessageView: View {
     @State private var activeSearchInstanceSources: IdentifiedGroup<WebSearchSource>? = nil
 
     private var isAnyMessageSheetPresented: Bool {
-        showLongMessageSheet || showRawContentModal || showSelectableText || showSourcesSheet || showShareSheet || showThoughtsSheet || showURLFetchSheet || activeWebSearchGroup != nil || activeURLFetchGroup != nil || activeSearchInstanceSources != nil
+        showLongMessageSheet || showRawContentModal || showSourcesSheet || showShareSheet || showThoughtsSheet || showURLFetchSheet || activeWebSearchGroup != nil || activeURLFetchGroup != nil || activeSearchInstanceSources != nil
     }
 
     private var inlineAssistantTextSelectionEnabled: Bool {
@@ -844,12 +843,6 @@ struct MessageView: View {
                     }
                 }
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
-                .if(message.role == .user && !message.content.isEmpty) { view in
-                    view.highPriorityGesture(
-                        TapGesture(count: 2)
-                            .onEnded { showSelectableText = true }
-                    )
-                }
                 // While a stream is in flight the table reloads its rows
                 // every UI tick, which can deallocate the SwiftUI subgraph
                 // that backs an in-flight context menu and trip a deref of
@@ -868,12 +861,6 @@ struct MessageView: View {
                             UIPasteboard.general.string = message.content
                         } label: {
                             Label("Copy", systemImage: "doc.on.doc")
-                        }
-
-                        Button {
-                            showSelectableText = true
-                        } label: {
-                            Label("Select Text", systemImage: "text.cursor")
                         }
 
                         Button {
@@ -924,11 +911,6 @@ struct MessageView: View {
                 .presentationDetents([.medium, .large])
                 .iPadSheetSizing()
                 .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
-        }
-        .sheet(isPresented: $showSelectableText) {
-            UserMessageSelectView(content: message.content)
-                .presentationDetents([.medium, .large])
-                .iPadSheetSizing()
         }
         .sheet(isPresented: $showSourcesSheet) {
             if let sources = message.webSearchState?.sources {
@@ -1476,17 +1458,6 @@ struct MarkdownText: View {
     }
 }
 
-/// Paragraph style for user message bubbles. Matches the GitHub look but drops
-/// the outer block spacing so the bubble hugs its text instead of relying on a
-/// negative bottom padding to trim the trailing gap.
-private struct UserBubbleParagraphStyle: StructuredText.ParagraphStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .textual.lineSpacing(.fontScaled(0.25))
-            .textual.blockSpacing(.init(top: 0, bottom: 0))
-    }
-}
-
 /// A specialized markdown text view for user messages
 struct AdaptiveMarkdownText: View {
     let content: String
@@ -1499,10 +1470,19 @@ struct AdaptiveMarkdownText: View {
         self.horizontalPadding = horizontalPadding
     }
 
+    private var attributedContent: AttributedString {
+        (try? AttributedString(
+            markdown: content,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(content)
+    }
+
     var body: some View {
-        StructuredText(markdown: content)
-            .textual.highlighterTheme(.default)
-            .textual.paragraphStyle(UserBubbleParagraphStyle())
+        Text(attributedContent)
+            .font(.body)
+            .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode))
+            .textSelection(.enabled)
+            .lineSpacing(2)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, horizontalPadding)
     }
