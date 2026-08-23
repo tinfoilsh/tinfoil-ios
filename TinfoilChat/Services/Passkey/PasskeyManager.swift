@@ -188,10 +188,16 @@ final class PasskeyManager: ObservableObject {
                 guard canMutateAccountKey else { return .recoveryFailed }
                 if case .success(let recovery) = legacyResult {
                     guard let recoveryAccount else { return .recoveryFailed }
-                    return await applyValidatedLegacyRecovery(
+                    let outcome = await applyValidatedLegacyRecovery(
                         recovery,
-                        expectedAccount: recoveryAccount
-                    ) ? .success : .recoveryFailed
+                        expectedAccount: recoveryAccount,
+                        retryContext: Self.recoveryRetryContext(
+                            legacyEntries: legacy,
+                            enclaveKeyId: state.keyId
+                        )
+                    )
+                    if case .failed = outcome { return .recoveryFailed }
+                    return .success
                 }
                 if case .failure(.presentationUnavailable, _) = legacyResult {
                     pendingLegacyRecovery = Self.recoveryRetryContext(
@@ -240,10 +246,16 @@ final class PasskeyManager: ObservableObject {
             switch legacyResult {
             case .success(let recovery):
                 guard let recoveryAccount else { return .recoveryFailed }
-                return await applyValidatedLegacyRecovery(
+                let outcome = await applyValidatedLegacyRecovery(
                     recovery,
-                    expectedAccount: recoveryAccount
-                ) ? .success : .recoveryFailed
+                    expectedAccount: recoveryAccount,
+                    retryContext: Self.recoveryRetryContext(
+                        legacyEntries: legacy,
+                        enclaveKeyId: state.keyId
+                    )
+                )
+                if case .failed = outcome { return .recoveryFailed }
+                return .success
             case .failure(.presentationUnavailable, _):
                 pendingLegacyRecovery = Self.recoveryRetryContext(
                     legacyEntries: legacy,
@@ -480,11 +492,14 @@ final class PasskeyManager: ObservableObject {
                 guard canMutateAccountKey else { return false }
                 if case .success(let recovery) = result {
                     guard let recoveryAccount else { return false }
-                    return await applyValidatedLegacyRecovery(
+                    let outcome = await applyValidatedLegacyRecovery(
                         recovery,
                         expectedAccount: recoveryAccount,
+                        retryContext: validatedContext,
                         completeRetry: true
                     )
+                    if case .active = outcome { return true }
+                    return false
                 }
                 pendingLegacyRecovery = validatedContext
                 return false
@@ -516,7 +531,7 @@ final class PasskeyManager: ObservableObject {
                 appliedResult: .success,
                 isCurrentAccount: canMutateAccountKey,
                 dismiss: { self.showPasskeyRecoveryChoice = false },
-                resume: onRecoveryComplete
+                resume: { self.consumeRecoveryCompletion() }
             )
         case .failure:
             return false
@@ -805,6 +820,18 @@ final class PasskeyManager: ObservableObject {
         case addBundle(LegacyPasskeyPromotion)
     }
 
+    enum LegacyRecoveryApplyOutcome {
+        case active
+        case appliedPromotionPending
+        case failed
+    }
+
+    struct LegacyPromotionResolution {
+        let applyKey: Bool
+        let markPasskeyActive: Bool
+        let preserveRetry: Bool
+    }
+
     static func canApplyLegacyRecovery(
         recoveredKeyId: String,
         currentKeyId: String?,
@@ -856,21 +883,65 @@ final class PasskeyManager: ObservableObject {
         }
     }
 
+    static func legacyPromotionResolution(
+        promotionSucceeded: Bool,
+        identityValid: Bool
+    ) -> LegacyPromotionResolution {
+        guard identityValid else {
+            return LegacyPromotionResolution(
+                applyKey: false,
+                markPasskeyActive: false,
+                preserveRetry: false
+            )
+        }
+        return LegacyPromotionResolution(
+            applyKey: true,
+            markPasskeyActive: promotionSucceeded,
+            preserveRetry: !promotionSucceeded
+        )
+    }
+
+    static func isExpectedLegacyRecoveryAccount(
+        _ expectedAccount: LegacyRecoveryAccountSnapshot,
+        currentUserId: String?,
+        currentGeneration: Int
+    ) -> Bool {
+        expectedAccount.userId == currentUserId
+            && expectedAccount.generation == currentGeneration
+    }
+
+    static func shouldRestoreLegacyRetryAfterTransientFailure(
+        expectedAccount: LegacyRecoveryAccountSnapshot,
+        currentUserId: String?,
+        currentGeneration: Int
+    ) -> Bool {
+        isExpectedLegacyRecoveryAccount(
+            expectedAccount,
+            currentUserId: currentUserId,
+            currentGeneration: currentGeneration
+        )
+    }
+
     private func applyValidatedLegacyRecovery(
         _ recovery: LegacyPasskeyRecovery,
         expectedAccount: LegacyRecoveryAccountSnapshot,
+        retryContext: RecoveryRetryContext,
         completeRetry: Bool = false
-    ) async -> Bool {
+    ) async -> LegacyRecoveryApplyOutcome {
         let currentState: EnclaveKeyCurrentResponse
         do {
             currentState = try await SyncEnclaveAPI.keyCurrent()
         } catch {
-            return false
+            restoreLegacyRetryIfCurrent(retryContext, expectedAccount: expectedAccount)
+            return .failed
         }
         guard canMutateAccountKey,
-              expectedAccount.userId == Clerk.shared.user?.id,
-              expectedAccount.generation == accountGeneration else {
-            return false
+              Self.isExpectedLegacyRecoveryAccount(
+                  expectedAccount,
+                  currentUserId: Clerk.shared.user?.id,
+                  currentGeneration: accountGeneration
+              ) else {
+            return .failed
         }
         guard let plan = Self.legacyPromotionPlan(
             recovery: recovery,
@@ -878,10 +949,10 @@ final class PasskeyManager: ObservableObject {
             isCurrentAccount: true
         ) else {
             routeToCurrentRecoveryState(currentState)
-            return false
+            return .failed
         }
 
-        _ = await Self.executeLegacyPromotion(
+        let promotionSucceeded = await Self.executeLegacyPromotion(
             plan,
             register: { promotion in
                 _ = try await SyncEnclaveAPI.registerKey(
@@ -916,32 +987,95 @@ final class PasskeyManager: ObservableObject {
         do {
             refreshedState = try await SyncEnclaveAPI.keyCurrent()
         } catch {
-            return false
+            restoreLegacyRetryIfCurrent(retryContext, expectedAccount: expectedAccount)
+            return .failed
         }
         guard canMutateAccountKey,
-              Self.canApplyLegacyRecovery(
-                  recoveredKeyId: recovery.keyIdHex,
-                  currentKeyId: refreshedState.keyId,
+              Self.shouldRestoreLegacyRetryAfterTransientFailure(
                   expectedAccount: expectedAccount,
                   currentUserId: Clerk.shared.user?.id,
                   currentGeneration: accountGeneration
               ) else {
+            return .failed
+        }
+        let identityValid = Self.canApplyLegacyRecovery(
+            recoveredKeyId: recovery.keyIdHex,
+            currentKeyId: refreshedState.keyId,
+            expectedAccount: expectedAccount,
+            currentUserId: Clerk.shared.user?.id,
+            currentGeneration: accountGeneration
+        )
+        let resolution = Self.legacyPromotionResolution(
+            promotionSucceeded: promotionSucceeded,
+            identityValid: identityValid
+        )
+        guard resolution.applyKey else {
             routeToCurrentRecoveryState(refreshedState)
-            return false
+            return .failed
         }
 
         PasskeyKeyFlow.retainLegacyAlternatives(recovery.legacyAlternatives)
-        let applied = await applyUnlockResult(recovery.flowResult)
-        if completeRetry {
-            return Self.finishRecoveryRetry(
-                appliedResult: applied,
-                isCurrentAccount: canMutateAccountKey,
-                dismiss: { self.showPasskeyRecoveryChoice = false },
-                resume: onRecoveryComplete
-            )
+        do {
+            try await applyRecoveredCek(cek: recovery.cek)
+        } catch {
+            return .failed
         }
-        if case .success = applied { return true }
-        return false
+        guard canMutateAccountKey,
+              Self.isExpectedLegacyRecoveryAccount(
+                  expectedAccount,
+                  currentUserId: Clerk.shared.user?.id,
+                  currentGeneration: accountGeneration
+              ) else {
+            return .failed
+        }
+        if resolution.markPasskeyActive {
+            persistEnclaveKeyId(recovery.keyIdHex)
+            activatePasskey()
+            if completeRetry {
+                _ = Self.finishRecoveryRetry(
+                    appliedResult: .success,
+                    isCurrentAccount: true,
+                    dismiss: { self.showPasskeyRecoveryChoice = false },
+                    resume: { self.consumeRecoveryCompletion() }
+                )
+            }
+            return .active
+        }
+
+        passkeyActive = false
+        passkeySetupAvailable = true
+        if resolution.preserveRetry {
+            pendingLegacyRecovery = retryContext
+            setDismissedRecoveryKeyId(nil)
+            surfaceRecoveryChoice(forKeyId: refreshedState.keyId)
+        }
+        if completeRetry { consumeRecoveryCompletion() }
+        return .appliedPromotionPending
+    }
+
+    private func restoreLegacyRetryIfCurrent(
+        _ retryContext: RecoveryRetryContext,
+        expectedAccount: LegacyRecoveryAccountSnapshot
+    ) {
+        guard canMutateAccountKey,
+              Self.isExpectedLegacyRecoveryAccount(
+                  expectedAccount,
+                  currentUserId: Clerk.shared.user?.id,
+                  currentGeneration: accountGeneration
+              ) else {
+            return
+        }
+        pendingLegacyRecovery = retryContext
+        setDismissedRecoveryKeyId(nil)
+        if case .legacy(_, let enclaveKeyId) = retryContext {
+            surfaceRecoveryChoice(forKeyId: enclaveKeyId)
+        }
+    }
+
+    private func consumeRecoveryCompletion() {
+        let completion = onRecoveryComplete
+        onRecoveryComplete = nil
+        completion?()
     }
 
     private func routeToCurrentRecoveryState(_ state: EnclaveKeyCurrentResponse) {

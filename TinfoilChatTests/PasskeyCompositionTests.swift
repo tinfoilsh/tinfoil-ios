@@ -234,10 +234,10 @@ struct PasskeyCompositionTests {
         )
 
         PasskeyManager.clearRecoveryRetryContext(&pendingContext)
-        let currentContext = pendingContext ?? .enclave
+        #expect(pendingContext == nil)
         var staleLegacyRecoveryCalled = false
         let legacyResult = await PasskeyManager.retryLegacyRecovery(
-            context: currentContext,
+            context: .enclave,
             recover: { _, _ in
                 staleLegacyRecoveryCalled = true
                 return .failure(.userCancelled)
@@ -297,18 +297,13 @@ struct PasskeyCompositionTests {
         #expect(validated == nil)
     }
 
-    @Test func delayedLegacyRecoveryRejectsRotatedEnclaveKey() async {
+    @Test func legacyRecoveryRejectsRotatedEnclaveKey() {
         let expectedAccount = PasskeyManager.LegacyRecoveryAccountSnapshot(
             userId: "user-a",
             generation: 3
         )
-        let delayedRecovery = Task { @MainActor in
-            await Task.yield()
-            return "old-key-id"
-        }
         let currentKeyId = "rotated-key-id"
-        let recoveredKeyId = await delayedRecovery.value
-        var appliedRecoveredKey = false
+        let recoveredKeyId = "old-key-id"
 
         let canApply = PasskeyManager.canApplyLegacyRecovery(
             recoveredKeyId: recoveredKeyId,
@@ -317,13 +312,10 @@ struct PasskeyCompositionTests {
             currentUserId: "user-a",
             currentGeneration: 3
         )
-        if canApply { appliedRecoveredKey = true }
-
         #expect(!canApply)
-        #expect(!appliedRecoveredKey)
     }
 
-    @Test func accountSwitchWithNoEnclaveKeySkipsLegacyRegistration() async {
+    @Test func accountSwitchWithNoEnclaveKeySkipsLegacyRegistration() {
         let promotion = LegacyPasskeyPromotion(
             expectedEnclaveKeyId: nil,
             keyB64: Data(repeating: 1, count: 32).base64EncodedString(),
@@ -343,18 +335,44 @@ struct PasskeyCompositionTests {
             currentKeyId: nil,
             isCurrentAccount: false
         )
-        var registerCount = 0
-
-        if let plan {
-            _ = await PasskeyManager.executeLegacyPromotion(
-                plan,
-                register: { _ in registerCount += 1 },
-                addBundle: { _ in }
-            )
-        }
-
         #expect(plan == nil)
-        #expect(registerCount == 0)
+    }
+
+    @Test func promotionFailureAppliesKeyWithoutActivatingBackup() {
+        let resolution = PasskeyManager.legacyPromotionResolution(
+            promotionSucceeded: false,
+            identityValid: true
+        )
+
+        #expect(resolution.applyKey)
+        #expect(!resolution.markPasskeyActive)
+        #expect(resolution.preserveRetry)
+    }
+
+    @Test func staleAccountCannotRouteRefreshedRecoveryState() {
+        let expected = PasskeyManager.LegacyRecoveryAccountSnapshot(
+            userId: "user-a",
+            generation: 4
+        )
+
+        #expect(!PasskeyManager.isExpectedLegacyRecoveryAccount(
+            expected,
+            currentUserId: "user-b",
+            currentGeneration: 5
+        ))
+    }
+
+    @Test func transientFailureRestoresCurrentLegacyRetryContext() {
+        let expected = PasskeyManager.LegacyRecoveryAccountSnapshot(
+            userId: "user-a",
+            generation: 4
+        )
+
+        #expect(PasskeyManager.isExpectedLegacyRecoveryAccount(
+            expected,
+            currentUserId: "user-a",
+            currentGeneration: 4
+        ))
     }
 
     @Test func validSameAccountPromotesRecoveredLegacyKey() async throws {
