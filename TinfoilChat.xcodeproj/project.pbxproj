@@ -19,6 +19,7 @@
 		99F154842F4F632E00E9174E /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154832F4F632E00E9174E /* RevenueCat */; };
 		99F154862F4F633400E9174E /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154852F4F633400E9174E /* RevenueCatUI */; };
 		A1B2C3D40100000000000001 /* TinfoilPasskeyKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40100000000000003 /* TinfoilPasskeyKit */; };
+		A1B2C3D40100000000000004 /* TinfoilPasskeyKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40100000000000003 /* TinfoilPasskeyKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -109,6 +110,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1B2C3D40100000000000004 /* TinfoilPasskeyKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -190,6 +192,7 @@
 			);
 			name = TinfoilChatTests;
 			packageProductDependencies = (
+				A1B2C3D40100000000000003 /* TinfoilPasskeyKit */,
 			);
 			productName = TinfoilChatTests;
 			productReference = 992FC2952F532EA800699029 /* TinfoilChatTests.xctest */;
@@ -828,7 +831,7 @@
 			repositoryURL = "https://github.com/tinfoilsh/tinfoil-passkey-kit";
 			requirement = {
 				kind = exactVersion;
-				version = 0.1.0;
+				version = 0.2.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

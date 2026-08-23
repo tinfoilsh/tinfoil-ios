@@ -28,6 +28,7 @@
 
 import ClerkKit
 import Foundation
+import Security
 import TinfoilPasskeyKit
 
 enum PasskeyFlowFailure: String, Sendable {
@@ -38,12 +39,43 @@ enum PasskeyFlowFailure: String, Sendable {
     case bundleDecryptFailed
     case registerFailed
     case enclaveUnavailable
+    case presentationUnavailable
     case remoteKeyExists
     case keyIdMismatch
 }
 
 enum PasskeyFlowResult: Sendable {
     case success(cek: Data, keyIdHex: String, credentialId: String, createdVia: String?)
+    case failure(PasskeyFlowFailure, message: String? = nil)
+}
+
+struct LegacyPasskeyPromotion: Sendable {
+    let expectedEnclaveKeyId: String?
+    let keyB64: String
+    let credentialId: String
+    let kekIvHex: String
+    let encryptedKeysHex: String
+}
+
+struct LegacyPasskeyRecovery: Sendable {
+    let cek: Data
+    let keyIdHex: String
+    let credentialId: String
+    let legacyAlternatives: [String]
+    let promotion: LegacyPasskeyPromotion
+
+    var flowResult: PasskeyFlowResult {
+        .success(
+            cek: cek,
+            keyIdHex: keyIdHex,
+            credentialId: credentialId,
+            createdVia: SyncEnclaveCreatedVia.recovery.rawValue
+        )
+    }
+}
+
+enum LegacyPasskeyRecoveryResult: Sendable {
+    case success(LegacyPasskeyRecovery)
     case failure(PasskeyFlowFailure, message: String? = nil)
 }
 
@@ -72,7 +104,7 @@ enum PasskeyKeyFlow {
     ) async -> PasskeyFlowResult {
         let cek: Data
         do {
-            cek = try PasskeyCrypto.generateCEK()
+            cek = try generateCek()
         } catch {
             return .failure(.registerFailed, message: error.localizedDescription)
         }
@@ -108,12 +140,13 @@ enum PasskeyKeyFlow {
             return .failure(.registerFailed, message: "CEK is the wrong size")
         }
 
-        let passkey: PrfPasskeyResult
+        let created: CreatedWrappedKey
         do {
-            passkey = try await PasskeyService.shared.createPasskey(
+            created = try await PasskeyService.shared.createAndWrapKey(
                 userId: user.userId,
                 userEmail: user.userEmail,
-                displayName: user.displayName
+                displayName: user.displayName,
+                key: cek
             )
         } catch let err {
             return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
@@ -126,17 +159,7 @@ enum PasskeyKeyFlow {
             return .failure(.registerFailed, message: error.localizedDescription)
         }
 
-        let kek = PasskeyService.deriveKeyEncryptionKey(from: passkey.prfOutput)
-        let bundle: SyncEnclaveBundleBody
-        do {
-            bundle = try SyncEnclaveKeyBundle.wrapCek(
-                credentialId: passkey.credentialId,
-                kek: kek,
-                cek: cek
-            )
-        } catch {
-            return .failure(.bundleDecryptFailed, message: error.localizedDescription)
-        }
+        let bundle = TinfoilWrappedKeyAdapter.bundleBody(created.wrappedKey)
 
         // `If-Match: *` is create-only: the controlplane rejects it
         // whenever a key row already exists. A start-fresh over an
@@ -179,7 +202,7 @@ enum PasskeyKeyFlow {
         return .success(
             cek: cek,
             keyIdHex: keyIdHex,
-            credentialId: passkey.credentialId,
+            credentialId: created.credentialId,
             createdVia: createdVia.rawValue
         )
     }
@@ -246,38 +269,69 @@ enum PasskeyKeyFlow {
         guard !candidates.isEmpty else {
             return (.failure(.noRemoteBundle), [])
         }
-        let credIds = candidates.map(\.credentialId)
-        let ordered: [String]
-        if let prefer, credIds.contains(prefer) {
-            ordered = [prefer] + credIds.filter { $0 != prefer }
-        } else {
-            ordered = credIds
-        }
-
-        let passkey: PrfPasskeyResult
-        do {
-            passkey = try await PasskeyService.shared.authenticatePasskey(credentialIds: ordered, silent: silent)
-        } catch let err {
-            return (.failure(failureFromPasskeyError(err), message: err.localizedDescription), [])
-        }
-
-        guard let bundle = candidates.first(where: { $0.credentialId == passkey.credentialId }) else {
-            return (.failure(.noRemoteBundle), [])
-        }
-
-        let kek = PasskeyService.deriveKeyEncryptionKey(from: passkey.prfOutput)
+        let candidateSet = TinfoilWrappedKeyAdapter.partition(
+            candidates,
+            preferredCredentialId: prefer
+        )
+        let credentialId: String
         let cek: Data
-        let legacyAlternatives: [String]
-        do {
-            let unwrapped = try SyncEnclaveKeyBundle.unwrapCekDetailed(
-                kek: kek,
-                kekIvHex: bundle.kekIv,
-                wrappedKeyHex: bundle.encryptedKeys
-            )
-            cek = unwrapped.cek
-            legacyAlternatives = unwrapped.legacyAlternativeKeys
-        } catch {
-            return (.failure(.bundleDecryptFailed, message: error.localizedDescription), [])
+        var legacyAlternatives: [String] = []
+
+        if candidateSet.legacy.isEmpty {
+            guard !candidateSet.current.isEmpty else {
+                return (.failure(.noRemoteBundle), [])
+            }
+            do {
+                let recovered = try await PasskeyService.shared.recoverKey(
+                    wrappedKeys: candidateSet.current.map(\.wrappedKey),
+                    preferredCredentialId: prefer,
+                    immediatelyAvailable: silent
+                )
+                credentialId = recovered.credentialId
+                cek = recovered.key
+            } catch let err {
+                return (.failure(failureFromPasskeyError(err), message: err.localizedDescription), [])
+            }
+        } else {
+            let evaluated: EvaluatedCredential
+            do {
+                evaluated = try await PasskeyService.shared.evaluateCredential(
+                    credentialIds: candidateSet.credentialIds,
+                    preferredCredentialId: prefer,
+                    immediatelyAvailable: silent
+                )
+            } catch let err {
+                return (.failure(failureFromPasskeyError(err), message: err.localizedDescription), [])
+            }
+
+            switch candidateSet.selection(credentialId: evaluated.credentialId) {
+            case .current(let current):
+                do {
+                    cek = try PasskeyService.shared.unwrapKeyWithPRFResult(
+                        wrappedKey: current.wrappedKey,
+                        prfResult: evaluated.prfResult
+                    )
+                    credentialId = evaluated.credentialId
+                } catch let err {
+                    return (.failure(failureFromPasskeyError(err), message: err.localizedDescription), [])
+                }
+            case .legacy(let bundle):
+                let unwrapped: SyncEnclaveUnwrappedCek
+                do {
+                    unwrapped = try SyncEnclaveKeyBundle.unwrapLegacyJsonEnvelope(
+                        prfOutput: evaluated.prfResult.output,
+                        kekIvHex: bundle.kekIv,
+                        wrappedKeyHex: bundle.encryptedKeys
+                    )
+                } catch {
+                    return (.failure(.bundleDecryptFailed, message: error.localizedDescription), [])
+                }
+                credentialId = evaluated.credentialId
+                cek = unwrapped.cek
+                legacyAlternatives = unwrapped.legacyAlternativeKeys
+            case .missing:
+                return (.failure(.noRemoteBundle), [])
+            }
         }
 
         let keyIdHex: String
@@ -291,7 +345,7 @@ enum PasskeyKeyFlow {
             .success(
                 cek: cek,
                 keyIdHex: keyIdHex,
-                credentialId: passkey.credentialId,
+                credentialId: credentialId,
                 createdVia: nil
             ),
             legacyAlternatives
@@ -302,7 +356,7 @@ enum PasskeyKeyFlow {
     /// decrypt-only fallbacks so the migration sweep can unseal rows
     /// still sealed under a rotated-away key. Additive and idempotent;
     /// never touches the primary key.
-    private static func retainLegacyAlternatives(_ keys: [String]) {
+    static func retainLegacyAlternatives(_ keys: [String]) {
         for key in keys {
             try? EncryptionService.shared.addDecryptionKey(key)
         }
@@ -332,43 +386,41 @@ enum PasskeyKeyFlow {
     // MARK: - Legacy (v1) passkey recovery
 
     /// Recover the user's CEK from a passkey registered on the
-    /// pre-enclave webapp, then promote it into the enclave key
-    /// registry so future sessions use the v2 wire.
+    /// pre-enclave webapp and return immutable promotion material.
     ///
     /// The caller passes the legacy credential entries (from
     /// `LegacyPasskeyCredentials.fetch()`) and the enclave's current
-    /// key_id (or nil when no `user_keys` row exists yet). The flow:
+    /// key_id (or nil when no `user_keys` row exists yet). This method:
     ///   1. authenticate one of the legacy passkeys (PRF),
     ///   2. unwrap the AES-GCM legacy bundle under the PRF-derived KEK,
-    ///   3. derive the CEK's key_id and reconcile it with the enclave:
-    ///      - no enclave key  → register-key with an initial bundle,
-    ///      - matching key_id → add a bundle for this credential,
-    ///      - mismatched id   → fail (the legacy CEK is a rotated-away
-    ///        key; never clobber the current primary).
+    ///   3. derive the CEK's key_id and reject a known mismatch,
+    ///   4. return the recovered key and wrapped bundle for the manager
+    ///      to validate and promote under the current account.
     static func recoverFromLegacyPasskey(
         entries: [LegacyPasskeyCredentialEntry],
         enclaveKeyId: String?
-    ) async -> PasskeyFlowResult {
+    ) async -> LegacyPasskeyRecoveryResult {
         guard !entries.isEmpty else {
             return .failure(.noRemoteBundle)
         }
 
         let credentialIds = entries.map(\.id)
-        let passkey: PrfPasskeyResult
+        let evaluated: EvaluatedCredential
         do {
             // Use only locally-available credentials so the system does not
             // surface its cross-device "Use a Device Nearby" QR sheet. When
             // the legacy passkey isn't on this device, this fails fast and we
             // fall through to manual recovery (scan the webapp QR / paste key).
-            passkey = try await PasskeyService.shared.authenticatePasskey(
+            evaluated = try await PasskeyService.shared.evaluateCredential(
                 credentialIds: credentialIds,
-                silent: true
+                preferredCredentialId: nil,
+                immediatelyAvailable: true
             )
         } catch let err {
             return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
         }
 
-        guard let entry = entries.first(where: { $0.id == passkey.credentialId }) else {
+        guard let entry = entries.first(where: { $0.id == evaluated.credentialId }) else {
             return .failure(.noRemoteBundle)
         }
 
@@ -377,12 +429,11 @@ enum PasskeyKeyFlow {
             return .failure(.bundleDecryptFailed, message: "Legacy bundle is not valid base64")
         }
 
-        let kek = PasskeyService.deriveKeyEncryptionKey(from: passkey.prfOutput)
         let cek: Data
         let legacyAlternatives: [String]
         do {
-            let unwrapped = try SyncEnclaveKeyBundle.unwrapCekDetailed(
-                kek: kek,
+            let unwrapped = try SyncEnclaveKeyBundle.unwrapLegacyJsonEnvelope(
+                prfOutput: evaluated.prfResult.output,
                 kekIvHex: dataToHex(ivData),
                 wrappedKeyHex: dataToHex(ciphertextData)
             )
@@ -408,73 +459,29 @@ enum PasskeyKeyFlow {
 
         let bundle: SyncEnclaveBundleBody
         do {
-            bundle = try SyncEnclaveKeyBundle.wrapCek(
-                credentialId: passkey.credentialId,
-                kek: kek,
-                cek: cek
+            let wrapped = try PasskeyService.shared.wrapKeyWithPRFResult(
+                key: cek,
+                credentialId: evaluated.credentialId,
+                prfResult: evaluated.prfResult
             )
+            bundle = TinfoilWrappedKeyAdapter.bundleBody(wrapped)
         } catch {
             return .failure(.bundleDecryptFailed, message: error.localizedDescription)
         }
 
-        if enclaveKeyId == nil {
-            // No enclave key yet — register the recovered CEK + initial
-            // bundle so the user becomes a first-class v2 user.
-            do {
-                _ = try await SyncEnclaveAPI.registerKey(
-                    EnclaveKeyRegisterRequest(
-                        key: dataToBase64(cek),
-                        ifMatch: IfMatchSentinels.anyKey,
-                        createdVia: SyncEnclaveCreatedVia.recovery.rawValue,
-                        idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                        initialBundle: EnclaveKeyRegisterBundleInput(
-                            credentialId: bundle.credentialId,
-                            kekIvHex: bundle.kekIvHex,
-                            encryptedKeysHex: bundle.wrappedKeyHex
-                        )
-                    )
-                )
-            } catch let err as SyncEnclaveError {
-                // A racing setup may have landed first; the caller can
-                // re-run recovery against whatever the enclave now reports.
-                return .failure(failureFromEnclaveError(err), message: err.message)
-            } catch {
-                return .failure(.enclaveUnavailable, message: error.localizedDescription)
-            }
-        } else {
-            // Enclave key matches the recovered CEK but this credential
-            // has no bundle yet — add one so subsequent sessions unlock
-            // via the v2 wire instead of falling back to legacy. A
-            // failure here is non-fatal: the user is already unlocked
-            // locally and will simply hit the legacy path again next time.
-            do {
-                _ = try await SyncEnclaveAPI.addBundle(
-                    EnclaveAddBundleRequest(
-                        keyId: keyIdHex,
-                        key: dataToBase64(cek),
-                        credentialId: bundle.credentialId,
-                        kekIvHex: bundle.kekIvHex,
-                        encryptedKeysHex: bundle.wrappedKeyHex,
-                        idempotencyKey: newSyncEnclaveIdempotencyKey()
-                    )
-                )
-            } catch {
-                // Non-fatal — the CEK is already recovered locally.
-            }
-        }
-
-        // Only retain the bundle's historical keys once the recovery is
-        // accepted: a rejected recovery (rotated-away CEK) must not
-        // pollute the local key history with alternatives that were
-        // never adopted.
-        retainLegacyAlternatives(legacyAlternatives)
-
-        return .success(
+        return .success(LegacyPasskeyRecovery(
             cek: cek,
             keyIdHex: keyIdHex,
-            credentialId: passkey.credentialId,
-            createdVia: SyncEnclaveCreatedVia.recovery.rawValue
-        )
+            credentialId: evaluated.credentialId,
+            legacyAlternatives: legacyAlternatives,
+            promotion: LegacyPasskeyPromotion(
+                expectedEnclaveKeyId: enclaveKeyId,
+                keyB64: dataToBase64(cek),
+                credentialId: bundle.credentialId,
+                kekIvHex: bundle.kekIvHex,
+                encryptedKeysHex: bundle.wrappedKeyHex
+            )
+        ))
     }
 
     // MARK: - Multi-device: enroll new passkey for current CEK
@@ -484,28 +491,19 @@ enum PasskeyKeyFlow {
         keyIdHex: String,
         user: PasskeyUserInfo
     ) async -> PasskeyFlowResult {
-        let passkey: PrfPasskeyResult
+        let created: CreatedWrappedKey
         do {
-            passkey = try await PasskeyService.shared.createPasskey(
+            created = try await PasskeyService.shared.createAndWrapKey(
                 userId: user.userId,
                 userEmail: user.userEmail,
-                displayName: user.displayName
+                displayName: user.displayName,
+                key: cek
             )
         } catch let err {
             return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
         }
 
-        let kek = PasskeyService.deriveKeyEncryptionKey(from: passkey.prfOutput)
-        let bundle: SyncEnclaveBundleBody
-        do {
-            bundle = try SyncEnclaveKeyBundle.wrapCek(
-                credentialId: passkey.credentialId,
-                kek: kek,
-                cek: cek
-            )
-        } catch {
-            return .failure(.bundleDecryptFailed, message: error.localizedDescription)
-        }
+        let bundle = TinfoilWrappedKeyAdapter.bundleBody(created.wrappedKey)
 
         do {
             _ = try await SyncEnclaveAPI.addBundle(
@@ -527,7 +525,7 @@ enum PasskeyKeyFlow {
         return .success(
             cek: cek,
             keyIdHex: keyIdHex,
-            credentialId: passkey.credentialId,
+            credentialId: created.credentialId,
             createdVia: nil
         )
     }
@@ -554,7 +552,7 @@ enum PasskeyKeyFlow {
 
     // MARK: - Mapping
 
-    private static func failureFromPasskeyError(_ err: Error) -> PasskeyFlowFailure {
+    static func failureFromPasskeyError(_ err: Error) -> PasskeyFlowFailure {
         if let passkeyError = err as? PasskeyError {
             switch passkeyError {
             case .prfNotSupported, .prfOutputMissing:
@@ -563,6 +561,8 @@ enum PasskeyKeyFlow {
                 return .userCancelled
             case .authorizationFailed, .randomGenerationFailed, .invalidBase64url:
                 return .userCancelled
+            case .presentationAnchorUnavailable:
+                return .presentationUnavailable
             }
         }
         return .userCancelled
@@ -582,5 +582,14 @@ enum PasskeyKeyFlow {
             return .enclaveUnavailable
         }
         return .registerFailed
+    }
+
+    private static func generateCek() throws -> Data {
+        var bytes = [UInt8](repeating: 0, count: SyncEnclaveKeyBundle.cekByteCount)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard status == errSecSuccess else {
+            throw PasskeyError.randomGenerationFailed
+        }
+        return Data(bytes)
     }
 }

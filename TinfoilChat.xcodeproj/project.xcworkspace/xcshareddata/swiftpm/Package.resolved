@@ -150,8 +150,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/tinfoil-passkey-kit",
       "state" : {
-        "revision" : "803440267cf83d754ab8b1cf66b4dddd9f30e105",
-        "version" : "0.1.0"
+        "revision" : "233c5e840c2561338e63e9939c8a2f3fb8ad9a27",
+        "version" : "0.2.0"
       }
     },
     {
