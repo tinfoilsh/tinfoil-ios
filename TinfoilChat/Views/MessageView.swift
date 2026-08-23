@@ -838,11 +838,11 @@ struct MessageView: View {
                             RoundedRectangle(cornerRadius: 16)
                                 .fill(.thickMaterial)
                         } else {
-                            Color.userMessageBackground(isDarkMode: isDarkMode)
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color.userMessageBackground(isDarkMode: isDarkMode))
                         }
                     }
                 }
-                .cornerRadius(16)
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
                 // While a stream is in flight the table reloads its rows
                 // every UI tick, which can deallocate the SwiftUI subgraph
