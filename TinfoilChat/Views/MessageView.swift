@@ -844,6 +844,12 @@ struct MessageView: View {
                     }
                 }
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
+                .if(message.role == .user && !message.content.isEmpty) { view in
+                    view.highPriorityGesture(
+                        TapGesture(count: 2)
+                            .onEnded { showSelectableText = true }
+                    )
+                }
                 // While a stream is in flight the table reloads its rows
                 // every UI tick, which can deallocate the SwiftUI subgraph
                 // that backs an in-flight context menu and trip a deref of
@@ -862,6 +868,12 @@ struct MessageView: View {
                             UIPasteboard.general.string = message.content
                         } label: {
                             Label("Copy", systemImage: "doc.on.doc")
+                        }
+
+                        Button {
+                            showSelectableText = true
+                        } label: {
+                            Label("Select Text", systemImage: "text.cursor")
                         }
 
                         Button {
@@ -1491,7 +1503,6 @@ struct AdaptiveMarkdownText: View {
         StructuredText(markdown: content)
             .textual.highlighterTheme(.default)
             .textual.paragraphStyle(UserBubbleParagraphStyle())
-            .textual.textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, horizontalPadding)
     }
