@@ -338,15 +338,21 @@ struct PasskeyCompositionTests {
         #expect(plan == nil)
     }
 
-    @Test func promotionFailureAppliesKeyWithoutActivatingBackup() {
+    @Test func promotionFailureCompletesRecoveryIntoNormalSetupPath() {
         let resolution = PasskeyManager.legacyPromotionResolution(
             promotionSucceeded: false,
             identityValid: true
         )
+        var completionCount = 0
+        var completion: (() -> Void)? = { completionCount += 1 }
 
         #expect(resolution.applyKey)
         #expect(!resolution.markPasskeyActive)
-        #expect(resolution.preserveRetry)
+        #expect(resolution.makePasskeySetupAvailable)
+        PasskeyManager.consumeRecoveryCompletion(&completion)
+        PasskeyManager.consumeRecoveryCompletion(&completion)
+        #expect(completionCount == 1)
+        #expect(completion == nil)
     }
 
     @Test func staleAccountCannotRouteRefreshedRecoveryState() {
@@ -362,7 +368,7 @@ struct PasskeyCompositionTests {
         ))
     }
 
-    @Test func transientFailureRestoresCurrentLegacyRetryContext() {
+    @Test func applyFailureRestoresCurrentLegacyRetryContext() {
         let expected = PasskeyManager.LegacyRecoveryAccountSnapshot(
             userId: "user-a",
             generation: 4
@@ -372,6 +378,19 @@ struct PasskeyCompositionTests {
             expected,
             currentUserId: "user-a",
             currentGeneration: 4
+        ))
+    }
+
+    @Test func applyFailureDoesNotRestoreStaleLegacyRetryContext() {
+        let expected = PasskeyManager.LegacyRecoveryAccountSnapshot(
+            userId: "user-a",
+            generation: 4
+        )
+
+        #expect(!PasskeyManager.isExpectedLegacyRecoveryAccount(
+            expected,
+            currentUserId: "user-b",
+            currentGeneration: 5
         ))
     }
 

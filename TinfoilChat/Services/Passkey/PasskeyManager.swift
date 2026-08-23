@@ -498,8 +498,8 @@ final class PasskeyManager: ObservableObject {
                         retryContext: validatedContext,
                         completeRetry: true
                     )
-                    if case .active = outcome { return true }
-                    return false
+                    if case .failed = outcome { return false }
+                    return true
                 }
                 pendingLegacyRecovery = validatedContext
                 return false
@@ -531,7 +531,7 @@ final class PasskeyManager: ObservableObject {
                 appliedResult: .success,
                 isCurrentAccount: canMutateAccountKey,
                 dismiss: { self.showPasskeyRecoveryChoice = false },
-                resume: { self.consumeRecoveryCompletion() }
+                resume: { Self.consumeRecoveryCompletion(&self.onRecoveryComplete) }
             )
         case .failure:
             return false
@@ -542,7 +542,8 @@ final class PasskeyManager: ObservableObject {
         let success = await attemptNewUserPasskeySetup(authorizationMode: .explicitStartFresh)
         if success {
             showPasskeyRecoveryChoice = false
-            onRecoveryComplete?()
+            Self.clearRecoveryRetryContext(&pendingLegacyRecovery)
+            Self.consumeRecoveryCompletion(&onRecoveryComplete)
         }
         return success
     }
@@ -822,14 +823,14 @@ final class PasskeyManager: ObservableObject {
 
     enum LegacyRecoveryApplyOutcome {
         case active
-        case appliedPromotionPending
+        case appliedSetupAvailable
         case failed
     }
 
     struct LegacyPromotionResolution {
         let applyKey: Bool
         let markPasskeyActive: Bool
-        let preserveRetry: Bool
+        let makePasskeySetupAvailable: Bool
     }
 
     static func canApplyLegacyRecovery(
@@ -891,13 +892,13 @@ final class PasskeyManager: ObservableObject {
             return LegacyPromotionResolution(
                 applyKey: false,
                 markPasskeyActive: false,
-                preserveRetry: false
+                makePasskeySetupAvailable: false
             )
         }
         return LegacyPromotionResolution(
             applyKey: true,
             markPasskeyActive: promotionSucceeded,
-            preserveRetry: !promotionSucceeded
+            makePasskeySetupAvailable: !promotionSucceeded
         )
     }
 
@@ -908,18 +909,6 @@ final class PasskeyManager: ObservableObject {
     ) -> Bool {
         expectedAccount.userId == currentUserId
             && expectedAccount.generation == currentGeneration
-    }
-
-    static func shouldRestoreLegacyRetryAfterTransientFailure(
-        expectedAccount: LegacyRecoveryAccountSnapshot,
-        currentUserId: String?,
-        currentGeneration: Int
-    ) -> Bool {
-        isExpectedLegacyRecoveryAccount(
-            expectedAccount,
-            currentUserId: currentUserId,
-            currentGeneration: currentGeneration
-        )
     }
 
     private func applyValidatedLegacyRecovery(
@@ -991,8 +980,8 @@ final class PasskeyManager: ObservableObject {
             return .failed
         }
         guard canMutateAccountKey,
-              Self.shouldRestoreLegacyRetryAfterTransientFailure(
-                  expectedAccount: expectedAccount,
+              Self.isExpectedLegacyRecoveryAccount(
+                  expectedAccount,
                   currentUserId: Clerk.shared.user?.id,
                   currentGeneration: accountGeneration
               ) else {
@@ -1018,6 +1007,7 @@ final class PasskeyManager: ObservableObject {
         do {
             try await applyRecoveredCek(cek: recovery.cek)
         } catch {
+            restoreLegacyRetryIfCurrent(retryContext, expectedAccount: expectedAccount)
             return .failed
         }
         guard canMutateAccountKey,
@@ -1028,6 +1018,7 @@ final class PasskeyManager: ObservableObject {
               ) else {
             return .failed
         }
+        Self.clearRecoveryRetryContext(&pendingLegacyRecovery)
         if resolution.markPasskeyActive {
             persistEnclaveKeyId(recovery.keyIdHex)
             activatePasskey()
@@ -1036,21 +1027,19 @@ final class PasskeyManager: ObservableObject {
                     appliedResult: .success,
                     isCurrentAccount: true,
                     dismiss: { self.showPasskeyRecoveryChoice = false },
-                    resume: { self.consumeRecoveryCompletion() }
+                    resume: { Self.consumeRecoveryCompletion(&self.onRecoveryComplete) }
                 )
             }
             return .active
         }
 
         passkeyActive = false
-        passkeySetupAvailable = true
-        if resolution.preserveRetry {
-            pendingLegacyRecovery = retryContext
-            setDismissedRecoveryKeyId(nil)
-            surfaceRecoveryChoice(forKeyId: refreshedState.keyId)
-        }
-        if completeRetry { consumeRecoveryCompletion() }
-        return .appliedPromotionPending
+        passkeySetupAvailable = resolution.makePasskeySetupAvailable
+        passkeyAddDeviceAvailable = false
+        pendingRecoveryKeyId = nil
+        showPasskeyRecoveryChoice = false
+        if completeRetry { Self.consumeRecoveryCompletion(&onRecoveryComplete) }
+        return .appliedSetupAvailable
     }
 
     private func restoreLegacyRetryIfCurrent(
@@ -1072,10 +1061,10 @@ final class PasskeyManager: ObservableObject {
         }
     }
 
-    private func consumeRecoveryCompletion() {
-        let completion = onRecoveryComplete
-        onRecoveryComplete = nil
-        completion?()
+    static func consumeRecoveryCompletion(_ completion: inout (() -> Void)?) {
+        let callback = completion
+        completion = nil
+        callback?()
     }
 
     private func routeToCurrentRecoveryState(_ state: EnclaveKeyCurrentResponse) {
