@@ -349,8 +349,8 @@ struct PasskeyCompositionTests {
         #expect(resolution.applyKey)
         #expect(!resolution.markPasskeyActive)
         #expect(resolution.makePasskeySetupAvailable)
-        PasskeyManager.consumeRecoveryCompletion(&completion)
-        PasskeyManager.consumeRecoveryCompletion(&completion)
+        PasskeyManager.takeRecoveryCompletion(&completion)?()
+        PasskeyManager.takeRecoveryCompletion(&completion)?()
         #expect(completionCount == 1)
         #expect(completion == nil)
     }

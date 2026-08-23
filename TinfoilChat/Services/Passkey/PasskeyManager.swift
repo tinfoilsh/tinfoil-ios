@@ -531,7 +531,7 @@ final class PasskeyManager: ObservableObject {
                 appliedResult: .success,
                 isCurrentAccount: canMutateAccountKey,
                 dismiss: { self.showPasskeyRecoveryChoice = false },
-                resume: { Self.consumeRecoveryCompletion(&self.onRecoveryComplete) }
+                resume: { Self.takeRecoveryCompletion(&self.onRecoveryComplete)?() }
             )
         case .failure:
             return false
@@ -543,7 +543,7 @@ final class PasskeyManager: ObservableObject {
         if success {
             showPasskeyRecoveryChoice = false
             Self.clearRecoveryRetryContext(&pendingLegacyRecovery)
-            Self.consumeRecoveryCompletion(&onRecoveryComplete)
+            Self.takeRecoveryCompletion(&onRecoveryComplete)?()
         }
         return success
     }
@@ -1027,7 +1027,7 @@ final class PasskeyManager: ObservableObject {
                     appliedResult: .success,
                     isCurrentAccount: true,
                     dismiss: { self.showPasskeyRecoveryChoice = false },
-                    resume: { Self.consumeRecoveryCompletion(&self.onRecoveryComplete) }
+                    resume: { Self.takeRecoveryCompletion(&self.onRecoveryComplete)?() }
                 )
             }
             return .active
@@ -1038,7 +1038,7 @@ final class PasskeyManager: ObservableObject {
         passkeyAddDeviceAvailable = false
         pendingRecoveryKeyId = nil
         showPasskeyRecoveryChoice = false
-        if completeRetry { Self.consumeRecoveryCompletion(&onRecoveryComplete) }
+        if completeRetry { Self.takeRecoveryCompletion(&onRecoveryComplete)?() }
         return .appliedSetupAvailable
     }
 
@@ -1061,10 +1061,10 @@ final class PasskeyManager: ObservableObject {
         }
     }
 
-    static func consumeRecoveryCompletion(_ completion: inout (() -> Void)?) {
+    static func takeRecoveryCompletion(_ completion: inout (() -> Void)?) -> (() -> Void)? {
         let callback = completion
         completion = nil
-        callback?()
+        return callback
     }
 
     private func routeToCurrentRecoveryState(_ state: EnclaveKeyCurrentResponse) {
