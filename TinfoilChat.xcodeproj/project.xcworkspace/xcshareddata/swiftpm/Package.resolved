@@ -159,8 +159,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/tinfoil-swift",
       "state" : {
-        "revision" : "8d686f61d970a09dec6fd5b702f59fd8245cfd72",
-        "version" : "0.7.1"
+        "revision" : "7718b9a13f96f040aa2a82559a6b15941d1b0be1",
+        "version" : "0.7.2"
       }
     }
   ],
