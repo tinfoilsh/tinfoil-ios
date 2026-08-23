@@ -355,7 +355,7 @@ struct PasskeyCompositionTests {
         #expect(completion == nil)
     }
 
-    @Test func staleAccountCannotRouteRefreshedRecoveryState() {
+    @Test func restoreGuardRejectsStaleAccount() {
         let expected = PasskeyManager.LegacyRecoveryAccountSnapshot(
             userId: "user-a",
             generation: 4
@@ -368,7 +368,7 @@ struct PasskeyCompositionTests {
         ))
     }
 
-    @Test func applyFailureRestoresCurrentLegacyRetryContext() {
+    @Test func restoreGuardMatchesCurrentAccount() {
         let expected = PasskeyManager.LegacyRecoveryAccountSnapshot(
             userId: "user-a",
             generation: 4
@@ -378,19 +378,6 @@ struct PasskeyCompositionTests {
             expected,
             currentUserId: "user-a",
             currentGeneration: 4
-        ))
-    }
-
-    @Test func applyFailureDoesNotRestoreStaleLegacyRetryContext() {
-        let expected = PasskeyManager.LegacyRecoveryAccountSnapshot(
-            userId: "user-a",
-            generation: 4
-        )
-
-        #expect(!PasskeyManager.isExpectedLegacyRecoveryAccount(
-            expected,
-            currentUserId: "user-b",
-            currentGeneration: 5
         ))
     }
 
