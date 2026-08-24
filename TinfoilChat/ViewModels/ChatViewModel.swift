@@ -5105,7 +5105,9 @@ class ChatViewModel: ObservableObject {
                 chatId: chat.id,
                 messages: chat.messages,
                 newContent: newContent,
-                canUseActions: canUseCurrentChatActions && !hasPendingResponseRecovery,
+                canUseActions: canUseCurrentChatActions
+                    && !hasPendingResponseRecovery
+                    && pendingAttachments.isEmpty,
                 isLoading: isLoading
               ) else {
             return false

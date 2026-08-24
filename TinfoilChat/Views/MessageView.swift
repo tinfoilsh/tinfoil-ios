@@ -163,6 +163,14 @@ struct MessageView: View {
         (isLoading && isLastMessage) || (hasRecoveryDraft && message.isStreaming)
     }
 
+    private var canUseUserMessageActions: Bool {
+        viewModel.canUseCurrentChatActions
+            && !viewModel.isLoading
+            && viewModel.messageEditSession == nil
+            && viewModel.pendingAttachments.isEmpty
+            && !viewModel.hasPendingResponseRecovery
+    }
+
     private var recoveryContext: (pendingRecoveries: [PendingRecoveryEnvelope], activeTurnId: String?) {
         (
             pendingRecoveries: viewModel.currentChat?.pendingRecoveries ?? [],
@@ -631,17 +639,16 @@ struct MessageView: View {
                         AdaptiveMarkdownText(
                             content: message.content,
                             isDarkMode: isDarkMode,
-                            onResend: viewModel.isLoading || viewModel.messageEditSession != nil ? nil : {
+                            onResend: canUseUserMessageActions ? {
                                 viewModel.regenerateMessage(at: messageIndex)
-                            },
+                            } : nil,
                             onCopyAll: {
                                 UIPasteboard.general.string = message.content
                             },
-                            onEdit: viewModel.isLoading || viewModel.messageEditSession != nil ? nil : {
+                            onEdit: canUseUserMessageActions ? {
                                 viewModel.beginMessageEdit(at: messageIndex)
-                            },
-                            bubbleContextMenuEnabled: !viewModel.isLoading
-                                && viewModel.messageEditSession == nil
+                            } : nil,
+                            bubbleContextMenuEnabled: canUseUserMessageActions
                         )
                     } else if let segments = message.segments, !segments.isEmpty {
                         // Render events inline in the order they streamed.
@@ -826,8 +833,7 @@ struct MessageView: View {
                 .if(
                     message.role == .user
                         && !message.content.isEmpty
-                        && !viewModel.isLoading
-                        && viewModel.messageEditSession == nil
+                        && canUseUserMessageActions
                 ) { view in
                     view.contextMenu {
                         Button {
@@ -1487,7 +1493,7 @@ private struct InlineSelectableUserText: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UITextView {
-        let textView = UITextView()
+        let textView = InlineSelectableUITextView()
         textView.backgroundColor = .clear
         textView.isEditable = false
         textView.isSelectable = true
@@ -1500,8 +1506,7 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textView.setContentHuggingPriority(.defaultHigh, for: .vertical)
         textView.delegate = context.coordinator
-        context.coordinator.captureInitialSelectionLongPressRecognizers(in: textView)
-        context.coordinator.setBubbleContextMenuEnabled(bubbleContextMenuEnabled)
+        textView.bubbleContextMenuEnabled = bubbleContextMenuEnabled
         return textView
     }
 
@@ -1511,7 +1516,7 @@ private struct InlineSelectableUserText: UIViewRepresentable {
             onCopyAll: onCopyAll,
             onEdit: onEdit
         )
-        context.coordinator.setBubbleContextMenuEnabled(bubbleContextMenuEnabled)
+        (textView as? InlineSelectableUITextView)?.bubbleContextMenuEnabled = bubbleContextMenuEnabled
         textView.linkTextAttributes = [
             .foregroundColor: UIColor(Color.userMessageForeground(isDarkMode: isDarkMode)),
             .underlineStyle: NSUnderlineStyle.single.rawValue
@@ -1598,7 +1603,6 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         private var onResend: (() -> Void)?
         private var onCopyAll: () -> Void
         private var onEdit: (() -> Void)?
-        private var initialSelectionLongPressRecognizers: [UILongPressGestureRecognizer] = []
 
         init(
             onResend: (() -> Void)?,
@@ -1608,16 +1612,6 @@ private struct InlineSelectableUserText: UIViewRepresentable {
             self.onResend = onResend
             self.onCopyAll = onCopyAll
             self.onEdit = onEdit
-        }
-
-        func captureInitialSelectionLongPressRecognizers(in textView: UITextView) {
-            initialSelectionLongPressRecognizers = textView.gestureRecognizers?
-                .compactMap { $0 as? UILongPressGestureRecognizer }
-                .filter { $0.view === textView && $0.minimumPressDuration >= 0.45 } ?? []
-        }
-
-        func setBubbleContextMenuEnabled(_ isEnabled: Bool) {
-            initialSelectionLongPressRecognizers.forEach { $0.isEnabled = !isEnabled }
         }
 
         func update(
@@ -1658,6 +1652,20 @@ private struct InlineSelectableUserText: UIViewRepresentable {
             }
             return actions
         }
+    }
+}
+
+private final class InlineSelectableUITextView: UITextView {
+    var bubbleContextMenuEnabled = true
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if bubbleContextMenuEnabled,
+           gestureRecognizer is UILongPressGestureRecognizer,
+           gestureRecognizer.view === self,
+           selectedRange.length == 0 {
+            return false
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 }
 

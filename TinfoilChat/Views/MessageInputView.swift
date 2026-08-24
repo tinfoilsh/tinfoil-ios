@@ -117,6 +117,7 @@ struct MessageInputView: View {
             && !viewModel.isLoading
             && viewModel.canUseCurrentChatActions
             && !viewModel.hasPendingResponseRecovery
+            && viewModel.pendingAttachments.isEmpty
     }
 
     /// A draft that can actually be sent or queued right now: attachments
