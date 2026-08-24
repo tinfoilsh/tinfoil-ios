@@ -562,7 +562,7 @@ struct MessageInputView: View {
                 GlassEffectContainer {
                 VStack(spacing: 0) {
                 // Attachment preview bar
-                if !isEditingMessage && !viewModel.pendingAttachments.isEmpty {
+                if !viewModel.pendingAttachments.isEmpty {
                     AttachmentPreviewBar(
                         attachments: viewModel.pendingAttachments,
                         thumbnails: viewModel.pendingImageThumbnails,
@@ -617,7 +617,7 @@ struct MessageInputView: View {
 
                 VStack(spacing: 0) {
                 // Attachment preview bar
-                if !isEditingMessage && !viewModel.pendingAttachments.isEmpty {
+                if !viewModel.pendingAttachments.isEmpty {
                     AttachmentPreviewBar(
                         attachments: viewModel.pendingAttachments,
                         thumbnails: viewModel.pendingImageThumbnails,
@@ -681,24 +681,32 @@ struct MessageInputView: View {
     }
 
     private var messageEditHeader: some View {
-        HStack(spacing: 12) {
-            Text("Editing this message will restart the conversation from this point.")
-                .font(.subheadline)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text("Editing this message will restart the conversation from this point.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 8)
+
+                Button(action: cancelMessageEdit) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
                 .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Spacer(minLength: 8)
-
-            Button(action: cancelMessageEdit) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 32, height: 32)
+                .accessibleHitTarget()
+                .accessibilityLabel("Cancel edit")
+                .accessibilityHint("Restores your previous draft")
             }
-            .buttonStyle(.plain)
-            .foregroundColor(.secondary)
-            .accessibleHitTarget()
-            .accessibilityLabel("Cancel edit")
-            .accessibilityHint("Restores your previous draft")
+
+            if !viewModel.pendingAttachments.isEmpty {
+                Text("Remove pending attachments before saving this edit.")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

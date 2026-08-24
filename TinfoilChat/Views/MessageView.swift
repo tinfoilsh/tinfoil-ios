@@ -171,6 +171,10 @@ struct MessageView: View {
             && !viewModel.hasPendingResponseRecovery
     }
 
+    private var canShowUserMessageMenu: Bool {
+        !viewModel.isLoading && viewModel.messageEditSession == nil
+    }
+
     private var recoveryContext: (pendingRecoveries: [PendingRecoveryEnvelope], activeTurnId: String?) {
         (
             pendingRecoveries: viewModel.currentChat?.pendingRecoveries ?? [],
@@ -648,7 +652,7 @@ struct MessageView: View {
                             onEdit: canUseUserMessageActions ? {
                                 viewModel.beginMessageEdit(at: messageIndex)
                             } : nil,
-                            bubbleContextMenuEnabled: canUseUserMessageActions
+                            bubbleContextMenuEnabled: canShowUserMessageMenu
                         )
                     } else if let segments = message.segments, !segments.isEmpty {
                         // Render events inline in the order they streamed.
@@ -831,15 +835,17 @@ struct MessageView: View {
                     }
                 }
                 .if(
-                    message.role == .user
-                        && !message.content.isEmpty
-                        && canUseUserMessageActions
+                        message.role == .user
+                            && !message.content.isEmpty
+                        && canShowUserMessageMenu
                 ) { view in
                     view.contextMenu {
-                        Button {
-                            viewModel.regenerateMessage(at: messageIndex)
-                        } label: {
-                            Label("Resend", systemImage: "arrow.clockwise")
+                        if canUseUserMessageActions {
+                            Button {
+                                viewModel.regenerateMessage(at: messageIndex)
+                            } label: {
+                                Label("Resend", systemImage: "arrow.clockwise")
+                            }
                         }
 
                         Button {
@@ -848,10 +854,12 @@ struct MessageView: View {
                             Label("Copy", systemImage: "doc.on.doc")
                         }
 
-                        Button {
-                            viewModel.beginMessageEdit(at: messageIndex)
-                        } label: {
-                            Label("Edit", systemImage: "pencil")
+                        if canUseUserMessageActions {
+                            Button {
+                                viewModel.beginMessageEdit(at: messageIndex)
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
                         }
                     }
                 }
