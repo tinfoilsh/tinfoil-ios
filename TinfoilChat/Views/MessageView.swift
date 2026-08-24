@@ -1493,6 +1493,7 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textView.setContentHuggingPriority(.defaultHigh, for: .vertical)
         textView.delegate = context.coordinator
+        disableInitialSelectionLongPress(in: textView)
         return textView
     }
 
@@ -1511,6 +1512,16 @@ private struct InlineSelectableUserText: UIViewRepresentable {
             textView.attributedText = attributedText
             textView.invalidateIntrinsicContentSize()
         }
+    }
+
+    /// The surrounding SwiftUI bubble owns the initial long press for message
+    /// actions. Selection-handle gestures are installed separately and remain
+    /// enabled after a double tap selects text.
+    private func disableInitialSelectionLongPress(in textView: UITextView) {
+        textView.gestureRecognizers?
+            .compactMap { $0 as? UILongPressGestureRecognizer }
+            .filter { $0.view === textView && $0.minimumPressDuration >= 0.45 }
+            .forEach { $0.isEnabled = false }
     }
 
     func sizeThatFits(

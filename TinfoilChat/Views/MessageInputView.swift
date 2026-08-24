@@ -678,26 +678,32 @@ struct MessageInputView: View {
     }
 
     private var messageEditHeader: some View {
-        HStack {
-            Text("Editing message")
-                .font(.subheadline.weight(.semibold))
-                .accessibilityLabel("Editing message")
-                .accessibilityHint("Changes will replace this message and regenerate later responses")
+        HStack(spacing: 12) {
+            Text("Editing this message will restart the conversation from this point.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-            Spacer()
+            Spacer(minLength: 8)
 
             Button(action: cancelMessageEdit) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 24, height: 24)
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 32, height: 32)
             }
             .buttonStyle(.plain)
+            .foregroundColor(.secondary)
             .accessibilityLabel("Cancel edit")
             .accessibilityHint("Restores your previous draft")
         }
-        .foregroundColor(.secondary)
         .padding(.horizontal, 16)
-        .padding(.top, 12)
+        .padding(.vertical, 12)
+        .background {
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.secondary.opacity(0.1))
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
     }
 
     private var messageEditActions: some View {
@@ -716,7 +722,8 @@ struct MessageInputView: View {
                 .accessibilityLabel("Save edit")
                 .accessibilityHint("Replaces the message and regenerates later responses")
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, 12)
+        .padding(.trailing, 24)
         .frame(maxWidth: .infinity)
     }
 
