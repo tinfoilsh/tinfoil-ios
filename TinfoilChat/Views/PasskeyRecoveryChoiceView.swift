@@ -30,6 +30,11 @@ struct PasskeyRecoveryChoiceView: View {
         case startFresh
     }
 
+    private enum Layout {
+        static let sheetHeight: CGFloat = 520
+        static let failureSheetHeight: CGFloat = 580
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             Spacer().frame(height: 8)
@@ -140,7 +145,9 @@ struct PasskeyRecoveryChoiceView: View {
 
             Spacer().frame(height: 24)
         }
-        .presentationDetents([.height(520)])
+        .presentationDetents([
+            .height(recoveryFailed ? Layout.failureSheetHeight : Layout.sheetHeight)
+        ])
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(isLoading)
         .alert(
