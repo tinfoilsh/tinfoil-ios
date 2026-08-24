@@ -18,6 +18,7 @@ enum PasskeyRecoveryResult {
     case newUserSetupDone
     case manualSetupRequired
     case manualRecoveryRequired
+    case temporarilyUnavailable
     case recoveryFailed
 }
 
@@ -153,9 +154,7 @@ final class PasskeyManager: ObservableObject {
         do {
             state = try await SyncEnclaveAPI.keyCurrent()
         } catch {
-            guard canMutateAccountKey else { return .recoveryFailed }
-            surfaceRecoveryChoice(forKeyId: nil)
-            return .recoveryFailed
+            return canMutateAccountKey ? .temporarilyUnavailable : .recoveryFailed
         }
         guard canMutateAccountKey else { return .recoveryFailed }
 
@@ -413,11 +412,13 @@ final class PasskeyManager: ObservableObject {
         if let keyId = pendingRecoveryKeyId {
             setDismissedRecoveryKeyId(keyId)
         }
+        pendingRecoveryKeyId = nil
         showPasskeyRecoveryChoice = false
         Self.clearRecoveryRetryContext(&pendingLegacyRecovery)
     }
 
     func beginManualKeyRecovery() {
+        pendingRecoveryKeyId = nil
         showPasskeyRecoveryChoice = false
         Self.clearRecoveryRetryContext(&pendingLegacyRecovery)
     }
@@ -431,6 +432,10 @@ final class PasskeyManager: ObservableObject {
     }
 
     func recoveryChoiceDidDismiss() {
+        if let keyId = pendingRecoveryKeyId {
+            setDismissedRecoveryKeyId(keyId)
+        }
+        pendingRecoveryKeyId = nil
         Self.clearRecoveryRetryContext(&pendingLegacyRecovery)
     }
 
@@ -595,12 +600,10 @@ final class PasskeyManager: ObservableObject {
                     // a valid local CEK that matches the remote) would
                     // look like a `start_fresh` rotation on the next
                     // refresh tick and force the user through recovery.
-                    if cachedKeyIdHex() == nil {
-                        UserDefaults.standard.set(
-                            remoteKeyId,
-                            forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId
-                        )
-                    }
+                    UserDefaults.standard.set(
+                        remoteKeyId,
+                        forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId
+                    )
                 }
 
                 // The bundle map is keyed by credential id. If this
