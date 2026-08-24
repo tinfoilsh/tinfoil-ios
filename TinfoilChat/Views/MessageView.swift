@@ -142,10 +142,7 @@ struct MessageView: View {
     @State private var cachedParsedContent: (thinkingText: String, remainderText: String, contentHash: Int)? = nil
     @State private var showLongMessageSheet = false
     @State private var showRawContentModal = false
-    @State private var isEditMode = false
-    @State private var editedContent = ""
     @State private var showSourcesSheet = false
-    @State private var showUserMessageActions = false
     @State private var showShareSheet = false
     @State private var showThoughtsSheet = false
     @State private var showURLFetchSheet = false
@@ -624,43 +621,27 @@ struct MessageView: View {
                 
                 // Display long user messages as an attachment-style preview that expands on tap
                 else if message.role == .user && message.shouldDisplayAsAttachment {
-                    if isEditMode {
-                        UserMessageEditView(
-                            content: $editedContent,
-                            isDarkMode: isDarkMode,
-                            onSave: {
-                                viewModel.editMessage(at: messageIndex, newContent: editedContent)
-                                isEditMode = false
-                            },
-                            onCancel: {
-                                isEditMode = false
-                                editedContent = message.content
+                    LongMessageAttachmentView(message: message, isDarkMode: isDarkMode) {
+                        showLongMessageSheet = true
+                    }
+                    .if(!viewModel.isLoading && viewModel.messageEditSession == nil) { view in
+                        view.contextMenu {
+                            Button {
+                                viewModel.regenerateMessage(at: messageIndex)
+                            } label: {
+                                Label("Resend", systemImage: "arrow.clockwise")
                             }
-                        )
-                    } else {
-                        LongMessageAttachmentView(message: message, isDarkMode: isDarkMode) {
-                            showLongMessageSheet = true
-                        }
-                        .if(!viewModel.isLoading) { view in
-                            view.contextMenu {
-                                Button {
-                                    viewModel.regenerateMessage(at: messageIndex)
-                                } label: {
-                                    Label("Resend", systemImage: "arrow.clockwise")
-                                }
 
-                                Button {
-                                    UIPasteboard.general.string = message.content
-                                } label: {
-                                    Label("Copy", systemImage: "doc.on.doc")
-                                }
+                            Button {
+                                UIPasteboard.general.string = message.content
+                            } label: {
+                                Label("Copy", systemImage: "doc.on.doc")
+                            }
 
-                                Button {
-                                    editedContent = message.content
-                                    isEditMode = true
-                                } label: {
-                                    Label("Edit", systemImage: "pencil")
-                                }
+                            Button {
+                                viewModel.beginMessageEdit(at: messageIndex)
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
                             }
                         }
                     }
@@ -668,36 +649,20 @@ struct MessageView: View {
 
                 else if !message.content.isEmpty || !message.toolCalls.isEmpty {
                     if message.role == .user {
-                        if isEditMode {
-                            UserMessageEditView(
-                                content: $editedContent,
-                                isDarkMode: isDarkMode,
-                                onSave: {
-                                    viewModel.editMessage(at: messageIndex, newContent: editedContent)
-                                    isEditMode = false
-                                },
-                                onCancel: {
-                                    isEditMode = false
-                                    editedContent = message.content
-                                }
-                            )
-                        } else {
-                            AdaptiveMarkdownText(
-                                content: message.content,
-                                isDarkMode: isDarkMode,
-                                onResend: viewModel.isLoading ? nil : {
-                                    viewModel.regenerateMessage(at: messageIndex)
-                                },
-                                onCopyAll: {
-                                    UIPasteboard.general.string = message.content
-                                },
-                                onEdit: viewModel.isLoading ? nil : {
-                                    editedContent = message.content
-                                    isEditMode = true
-                                },
-                                contextMenuEnabled: !viewModel.isLoading
-                            )
-                        }
+                        AdaptiveMarkdownText(
+                            content: message.content,
+                            isDarkMode: isDarkMode,
+                            onResend: viewModel.isLoading || viewModel.messageEditSession != nil ? nil : {
+                                viewModel.regenerateMessage(at: messageIndex)
+                            },
+                            onCopyAll: {
+                                UIPasteboard.general.string = message.content
+                            },
+                            onEdit: viewModel.isLoading || viewModel.messageEditSession != nil ? nil : {
+                                viewModel.beginMessageEdit(at: messageIndex)
+                            },
+                            contextMenuEnabled: !viewModel.isLoading
+                        )
                     } else if let segments = message.segments, !segments.isEmpty {
                         // Render events inline in the order they streamed.
                         inlineSegmentsView(segments: segments)
@@ -879,17 +844,6 @@ struct MessageView: View {
                     }
                 }
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
-                .onChange(of: message.id) { _, _ in
-                    isEditMode = false
-                    editedContent = ""
-                }
-                .onChange(of: viewModel.editRequestedForMessageIndex) { _, newValue in
-                    if newValue == messageIndex && message.role == .user {
-                        editedContent = message.content
-                        isEditMode = true
-                        viewModel.editRequestedForMessageIndex = nil
-                    }
-                }
 
                 if showsPendingResponseRecovery {
                     PendingResponseRecoveryView(
@@ -1523,7 +1477,8 @@ private struct InlineSelectableUserText: UIViewRepresentable {
             onResend: onResend,
             onCopyAll: onCopyAll,
             onEdit: onEdit,
-            contextMenuEnabled: contextMenuEnabled
+            contextMenuEnabled: contextMenuEnabled,
+            previewBackgroundColor: UIColor(Color.userMessageBackground(isDarkMode: isDarkMode))
         )
     }
 
@@ -1550,7 +1505,8 @@ private struct InlineSelectableUserText: UIViewRepresentable {
             onResend: onResend,
             onCopyAll: onCopyAll,
             onEdit: onEdit,
-            contextMenuEnabled: contextMenuEnabled
+            contextMenuEnabled: contextMenuEnabled,
+            previewBackgroundColor: UIColor(Color.userMessageBackground(isDarkMode: isDarkMode))
         )
         textView.linkTextAttributes = [
             .foregroundColor: UIColor(Color.userMessageForeground(isDarkMode: isDarkMode)),
@@ -1639,29 +1595,34 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         private var onCopyAll: () -> Void
         private var onEdit: (() -> Void)?
         private var contextMenuEnabled: Bool
+        private var previewBackgroundColor: UIColor
 
         init(
             onResend: (() -> Void)?,
             onCopyAll: @escaping () -> Void,
             onEdit: (() -> Void)?,
-            contextMenuEnabled: Bool
+            contextMenuEnabled: Bool,
+            previewBackgroundColor: UIColor
         ) {
             self.onResend = onResend
             self.onCopyAll = onCopyAll
             self.onEdit = onEdit
             self.contextMenuEnabled = contextMenuEnabled
+            self.previewBackgroundColor = previewBackgroundColor
         }
 
         func update(
             onResend: (() -> Void)?,
             onCopyAll: @escaping () -> Void,
             onEdit: (() -> Void)?,
-            contextMenuEnabled: Bool
+            contextMenuEnabled: Bool,
+            previewBackgroundColor: UIColor
         ) {
             self.onResend = onResend
             self.onCopyAll = onCopyAll
             self.onEdit = onEdit
             self.contextMenuEnabled = contextMenuEnabled
+            self.previewBackgroundColor = previewBackgroundColor
         }
 
         func textView(
@@ -1683,6 +1644,30 @@ private struct InlineSelectableUserText: UIViewRepresentable {
                 guard let self else { return nil }
                 return UIMenu(children: self.messageActions(copyTitle: "Copy"))
             }
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
+        ) -> UITargetedPreview? {
+            targetedPreview(for: interaction)
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
+        ) -> UITargetedPreview? {
+            targetedPreview(for: interaction)
+        }
+
+        private func targetedPreview(
+            for interaction: UIContextMenuInteraction
+        ) -> UITargetedPreview? {
+            guard let view = interaction.view else { return nil }
+            let parameters = UIPreviewParameters()
+            parameters.backgroundColor = previewBackgroundColor
+            parameters.visiblePath = UIBezierPath(roundedRect: view.bounds, cornerRadius: 16)
+            return UITargetedPreview(view: view, parameters: parameters)
         }
 
         private func messageActions(copyTitle: String) -> [UIMenuElement] {
@@ -2198,79 +2183,6 @@ struct ErrorMessageView: View {
                         .stroke(accentColor.opacity(0.3), lineWidth: 1)
                 )
         )
-    }
-}
-
-struct UserMessageEditView: View {
-    @Binding var content: String
-    let isDarkMode: Bool
-    let onSave: () -> Void
-    let onCancel: () -> Void
-    @FocusState private var isFocused: Bool
-
-    private var textColor: Color {
-        isDarkMode ? .white : .black
-    }
-
-    private var secondaryTextColor: Color {
-        isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5)
-    }
-
-    private var buttonBackgroundColor: Color {
-        isDarkMode ? .white.opacity(0.1) : .black.opacity(0.1)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Messages below will be deleted and regenerated.")
-                .font(.system(size: 12))
-                .foregroundColor(secondaryTextColor)
-
-            TextField("Edit message...", text: $content, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.body)
-                .foregroundColor(textColor)
-                .lineLimit(1...4)
-                .focused($isFocused)
-                .onAppear {
-                    isFocused = true
-                }
-                .onSubmit {
-                    if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        onSave()
-                    }
-                }
-
-            HStack(spacing: 8) {
-                Spacer()
-
-                Button(action: onCancel) {
-                    Text("Cancel")
-                        .font(.system(.caption, weight: .medium))
-                        .foregroundColor(secondaryTextColor)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(buttonBackgroundColor)
-                        .cornerRadius(6)
-                }
-                .buttonStyle(PlainButtonStyle())
-
-                Button(action: {
-                    if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        onSave()
-                    }
-                }) {
-                    Text("Save")
-                        .font(.system(.caption, weight: .medium))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.accentPrimary)
-                        .cornerRadius(6)
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
-        }
     }
 }
 

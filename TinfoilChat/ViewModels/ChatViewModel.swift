@@ -154,6 +154,71 @@ func recoveryScanHasStalled(lastProgressAt: Date?, now: Date) -> Bool {
         >= Constants.ChatRecovery.scanStallTimeoutSeconds
 }
 
+struct MessageEditSession: Identifiable, Equatable {
+    let id: UUID
+    let chatId: String
+    let messageId: String
+    let originalContent: String
+}
+
+enum MessageEditSessionTransition {
+    static func begin(
+        id: UUID = UUID(),
+        chatId: String?,
+        messages: [Message],
+        messageIndex: Int,
+        canUseActions: Bool,
+        isLoading: Bool
+    ) -> MessageEditSession? {
+        guard canUseActions,
+              !isLoading,
+              let chatId,
+              messages.indices.contains(messageIndex),
+              messages[messageIndex].role == .user else {
+            return nil
+        }
+        let message = messages[messageIndex]
+        return MessageEditSession(
+            id: id,
+            chatId: chatId,
+            messageId: message.id,
+            originalContent: message.content
+        )
+    }
+
+    static func saveIndex(
+        for session: MessageEditSession,
+        chatId: String?,
+        messages: [Message],
+        newContent: String,
+        canUseActions: Bool,
+        isLoading: Bool
+    ) -> Int? {
+        guard canUseActions,
+              !isLoading,
+              session.chatId == chatId,
+              !newContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let messageIndex = messages.firstIndex(where: { $0.id == session.messageId }),
+              messages[messageIndex].role == .user else {
+            return nil
+        }
+        return messageIndex
+    }
+
+    static func reconcile(
+        _ session: MessageEditSession?,
+        chatId: String?,
+        messages: [Message]
+    ) -> MessageEditSession? {
+        guard let session,
+              session.chatId == chatId,
+              messages.contains(where: { $0.id == session.messageId && $0.role == .user }) else {
+            return nil
+        }
+        return session
+    }
+}
+
 @MainActor
 class ChatViewModel: ObservableObject {
     // Published properties for UI updates
@@ -171,6 +236,14 @@ class ChatViewModel: ObservableObject {
     var canRetryFailedChatHydration: Bool { failedChatHydration != nil && chatHydrationError != nil }
     @Published var currentChat: Chat? {
         didSet {
+            let reconciledEditSession = MessageEditSessionTransition.reconcile(
+                messageEditSession,
+                chatId: currentChat?.id,
+                messages: currentChat?.messages ?? []
+            )
+            if reconciledEditSession != messageEditSession {
+                messageEditSession = reconciledEditSession
+            }
             if currentChat?.id != oldValue?.id {
                 selectedChatImageTask?.cancel()
                 selectedChatImageTask = nil
@@ -252,7 +325,7 @@ class ChatViewModel: ObservableObject {
     @Published var imageViewerImages: [Attachment] = []
     @Published var imageViewerIndex: Int = 0
     @Published var showImageViewer: Bool = false
-    @Published var editRequestedForMessageIndex: Int? = nil
+    @Published private(set) var messageEditSession: MessageEditSession? = nil
 
     // Verification properties - consolidated to reduce update frequency
     struct VerificationInfo {
@@ -469,6 +542,7 @@ class ChatViewModel: ObservableObject {
     // Auth reference for Premium features
     @Published var authManager: AuthManager? {
         didSet {
+            cancelMessageEdit()
             // Load user-specific last sync date when auth changes
             if let userId = currentUserId {
                 lastSyncDate = UserDefaults.standard.object(forKey: Constants.StorageKeys.Sync.lastSyncDate(userId: userId)) as? Date
@@ -4971,7 +5045,9 @@ class ChatViewModel: ObservableObject {
 
     /// Regenerates the last assistant response by removing it and resending the last user message
     func regenerateLastResponse() {
-        guard let chat = currentChat,
+        guard messageEditSession == nil,
+              !hasPendingResponseRecovery,
+              let chat = currentChat,
               !isLoading else {
             return
         }
@@ -4998,21 +5074,41 @@ class ChatViewModel: ObservableObject {
         generateResponse()
     }
 
-    /// Edits a user message at a specific index, removing all messages after it and resending with new content
-    /// - Parameters:
-    ///   - messageIndex: The index of the user message to edit
-    ///   - newContent: The new content for the message
-    func editMessage(at messageIndex: Int, newContent: String) {
-        guard let chat = currentChat,
-              !isLoading,
-              messageIndex >= 0,
-              messageIndex < chat.messages.count,
-              chat.messages[messageIndex].role == .user else {
-            return
-        }
+    func beginMessageEdit(at messageIndex: Int) {
+        guard messageEditSession == nil,
+              acceptsChatSaves,
+              !isAccountTeardownInProgress else { return }
+        messageEditSession = MessageEditSessionTransition.begin(
+            chatId: currentChat?.id,
+            messages: messages,
+            messageIndex: messageIndex,
+            canUseActions: canUseCurrentChatActions && !hasPendingResponseRecovery,
+            isLoading: isLoading
+        )
+    }
 
+    func cancelMessageEdit() {
+        messageEditSession = nil
+    }
+
+    /// Replaces the edited user message and everything after it, then generates a new response.
+    @discardableResult
+    func saveMessageEdit(newContent: String) -> Bool {
+        guard let session = messageEditSession,
+              let chat = currentChat,
+              acceptsChatSaves,
+              !isAccountTeardownInProgress,
+              let messageIndex = MessageEditSessionTransition.saveIndex(
+                for: session,
+                chatId: chat.id,
+                messages: chat.messages,
+                newContent: newContent,
+                canUseActions: canUseCurrentChatActions && !hasPendingResponseRecovery,
+                isLoading: isLoading
+              ) else {
+            return false
+        }
         let trimmedContent = newContent.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedContent.isEmpty else { return }
 
         // Truncate to remove the edited message and all messages after it
         var updatedChat = chat
@@ -5032,13 +5128,17 @@ class ChatViewModel: ObservableObject {
         let userMessage = Message(role: .user, content: trimmedContent)
         addMessage(userMessage)
 
+        messageEditSession = nil
         generateResponse()
+        return true
     }
 
     /// Regenerates the response for a user message at a specific index
     /// - Parameter messageIndex: The index of the user message to regenerate from
     func regenerateMessage(at messageIndex: Int) {
-        guard let chat = currentChat,
+        guard messageEditSession == nil,
+              !hasPendingResponseRecovery,
+              let chat = currentChat,
               !isLoading,
               messageIndex >= 0,
               messageIndex < chat.messages.count,
@@ -5501,6 +5601,7 @@ class ChatViewModel: ObservableObject {
     }
 
     func resetSharedProfileSettingsForAccountTeardown() {
+        cancelMessageEdit()
         reasoningEffort = ReasoningEffort(rawValue: ProfileDefaults.reasoningEffort) ?? .medium
         thinkingEnabled = ProfileDefaults.thinkingEnabled
     }
@@ -5521,6 +5622,7 @@ class ChatViewModel: ObservableObject {
         lastKnownAuthState = isAuthenticated
 
         if authStateChanged {
+            cancelMessageEdit()
             // Clear cached session token and reinitialize client only when auth changes
             SessionTokenManager.shared.clearSessionToken()
             let accountId = isAuthenticated ? authManager?.localUserId : nil
@@ -5556,6 +5658,7 @@ class ChatViewModel: ObservableObject {
     
     /// Handle sign-out by clearing current chats but preserving them in storage
     func handleSignOut() async {
+        cancelMessageEdit()
         // Capture the signing-out user's id up front. Later steps (and
         // the auth manager's cleanup) clear the authenticated state, after
         // which currentUserId no longer resolves this user.
@@ -5653,6 +5756,7 @@ class ChatViewModel: ObservableObject {
         resumeRecoveryScans: Bool = true,
         reopenAccountOperations: Bool = true
     ) async {
+        cancelMessageEdit()
         clearHydratedFavorites()
         acceptsChatSaves = false
         let canceledSignInTask = cancelSignInOperation()

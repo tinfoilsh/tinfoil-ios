@@ -104,6 +104,19 @@ struct MessageInputView: View {
     // disappears even while the editor keeps focus (queued sends don't
     // dismiss the keyboard) without depending on render timing.
     @State private var editorHandle = CustomTextEditorHandle()
+    @State private var preservedMessageDraft: String?
+    @State private var activeMessageEditSessionID: UUID?
+    @State private var activeMessageEditChatID: String?
+
+    private var isEditingMessage: Bool {
+        viewModel.messageEditSession != nil
+    }
+
+    private var canSaveMessageEdit: Bool {
+        messageTextHasNonWhitespace
+            && !viewModel.isLoading
+            && viewModel.canUseCurrentChatActions
+    }
 
     /// A draft that can actually be sent or queued right now: attachments
     /// all processed, plus either non-whitespace text or at least one
@@ -242,9 +255,16 @@ struct MessageInputView: View {
         inputContent
             .onAppear {
                 messageTextHasNonWhitespace = hasNonWhitespaceContent(messageText)
+                handleMessageEditSessionChange(viewModel.messageEditSession)
             }
             .onChange(of: messageText) { _, newValue in
                 messageTextHasNonWhitespace = hasNonWhitespaceContent(newValue)
+            }
+            .onChange(of: viewModel.messageEditSession) { _, newSession in
+                handleMessageEditSessionChange(newSession)
+            }
+            .onChange(of: viewModel.currentChat?.id) { _, newChatId in
+                handleChatChange(newChatId)
             }
             .disabled(!viewModel.canUseCurrentChatActions)
             .onChange(of: textHeight) { _, newHeight in
@@ -464,7 +484,9 @@ struct MessageInputView: View {
 
     @ViewBuilder
     private var inputContent: some View {
-        if let pending = pendingInputToolCall {
+        if isEditingMessage {
+            standardInputContent
+        } else if let pending = pendingInputToolCall {
             genUIInputContainer(pending: pending)
         } else {
             standardInputContent
@@ -513,11 +535,11 @@ struct MessageInputView: View {
                          placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
                          shouldFocusInput: viewModel.shouldFocusInput,
                          handle: editorHandle,
-                         allowsImagePaste: viewModel.currentModel.isMultimodal,
+                         allowsImagePaste: !isEditingMessage && viewModel.currentModel.isMultimodal,
                          onFocusHandled: { viewModel.shouldFocusInput = false },
-                         onSendMessage: { text in viewModel.sendMessage(text: text) },
-                         onPasteImage: { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
-                         onPasteFile: { handle in viewModel.addDocumentAttachment(handle: handle) },
+                         onSendMessage: submitEditorText,
+                         onPasteImage: isEditingMessage ? nil : { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
+                         onPasteFile: isEditingMessage ? nil : { handle in viewModel.addDocumentAttachment(handle: handle) },
                          onPasteFileError: { message in viewModel.attachmentError = message })
             .frame(height: textHeight)
             .padding(.horizontal)
@@ -537,7 +559,7 @@ struct MessageInputView: View {
                 GlassEffectContainer {
                 VStack(spacing: 0) {
                 // Attachment preview bar
-                if !viewModel.pendingAttachments.isEmpty {
+                if !isEditingMessage && !viewModel.pendingAttachments.isEmpty {
                     AttachmentPreviewBar(
                         attachments: viewModel.pendingAttachments,
                         thumbnails: viewModel.pendingImageThumbnails,
@@ -547,28 +569,36 @@ struct MessageInputView: View {
                     .padding(.top, 8)
                 }
 
+                if isEditingMessage {
+                    messageEditHeader
+                }
+
                 // Text input area
                 messageTextEditor
 
                 // Bottom row with action buttons
                 HStack {
-                    attachButton
+                    if isEditingMessage {
+                        messageEditActions
+                    } else {
+                        attachButton
 
-                    modelSelectorButton
+                        modelSelectorButton
 
-                    if viewModel.currentModel.isReasoningModel {
-                        ReasoningEffortSelector(
-                            supportsEffort: viewModel.currentModel.supportsReasoningEffort,
-                            supportsToggle: viewModel.currentModel.supportsThinkingToggle,
-                            reasoningEffort: $viewModel.reasoningEffort,
-                            thinkingEnabled: $viewModel.thinkingEnabled
-                        )
-                        .padding(.leading, 4)
+                        if viewModel.currentModel.isReasoningModel {
+                            ReasoningEffortSelector(
+                                supportsEffort: viewModel.currentModel.supportsReasoningEffort,
+                                supportsToggle: viewModel.currentModel.supportsThinkingToggle,
+                                reasoningEffort: $viewModel.reasoningEffort,
+                                thinkingEnabled: $viewModel.thinkingEnabled
+                            )
+                            .padding(.leading, 4)
+                        }
+
+                        Spacer()
+
+                        trailingActionButton
                     }
-
-                    Spacer()
-
-                    trailingActionButton
                 }
                 .padding(.vertical, 8)
             }
@@ -584,7 +614,7 @@ struct MessageInputView: View {
 
                 VStack(spacing: 0) {
                 // Attachment preview bar
-                if !viewModel.pendingAttachments.isEmpty {
+                if !isEditingMessage && !viewModel.pendingAttachments.isEmpty {
                     AttachmentPreviewBar(
                         attachments: viewModel.pendingAttachments,
                         thumbnails: viewModel.pendingImageThumbnails,
@@ -594,28 +624,36 @@ struct MessageInputView: View {
                     .padding(.top, 8)
                 }
 
+                if isEditingMessage {
+                    messageEditHeader
+                }
+
                 // Text input area
                 messageTextEditor
 
                 // Bottom row with action buttons
                 HStack {
-                    attachButton
+                    if isEditingMessage {
+                        messageEditActions
+                    } else {
+                        attachButton
 
-                    modelSelectorButton
+                        modelSelectorButton
 
-                    if viewModel.currentModel.isReasoningModel {
-                        ReasoningEffortSelector(
-                            supportsEffort: viewModel.currentModel.supportsReasoningEffort,
-                            supportsToggle: viewModel.currentModel.supportsThinkingToggle,
-                            reasoningEffort: $viewModel.reasoningEffort,
-                            thinkingEnabled: $viewModel.thinkingEnabled
-                        )
-                        .padding(.leading, 4)
+                        if viewModel.currentModel.isReasoningModel {
+                            ReasoningEffortSelector(
+                                supportsEffort: viewModel.currentModel.supportsReasoningEffort,
+                                supportsToggle: viewModel.currentModel.supportsThinkingToggle,
+                                reasoningEffort: $viewModel.reasoningEffort,
+                                thinkingEnabled: $viewModel.thinkingEnabled
+                            )
+                            .padding(.leading, 4)
+                        }
+
+                        Spacer()
+
+                        trailingActionButton
                     }
-
-                    Spacer()
-
-                    trailingActionButton
                 }
                 .padding(.vertical, 8)
             }
@@ -637,6 +675,49 @@ struct MessageInputView: View {
             return Constants.UI.iPadInputBottomPadding
         }
         return 0
+    }
+
+    private var messageEditHeader: some View {
+        HStack {
+            Text("Editing message")
+                .font(.subheadline.weight(.semibold))
+                .accessibilityLabel("Editing message")
+                .accessibilityHint("Changes will replace this message and regenerate later responses")
+
+            Spacer()
+
+            Button(action: cancelMessageEdit) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cancel edit")
+            .accessibilityHint("Restores your previous draft")
+        }
+        .foregroundColor(.secondary)
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+    }
+
+    private var messageEditActions: some View {
+        HStack(spacing: 12) {
+            Spacer()
+
+            Button("Cancel", action: cancelMessageEdit)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Cancel edit")
+                .accessibilityHint("Restores your previous draft")
+
+            Button("Save", action: saveMessageEdit)
+                .fontWeight(.semibold)
+                .buttonStyle(.plain)
+                .disabled(!canSaveMessageEdit)
+                .accessibilityLabel("Save edit")
+                .accessibilityHint("Replaces the message and regenerates later responses")
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
@@ -779,6 +860,72 @@ struct MessageInputView: View {
         } else {
             sendOrCancelMessage()
         }
+    }
+
+    private func handleMessageEditSessionChange(_ session: MessageEditSession?) {
+        guard let session else {
+            guard activeMessageEditSessionID != nil else { return }
+            let restoredDraft = activeMessageEditChatID == viewModel.currentChat?.id
+                ? preservedMessageDraft ?? ""
+                : ""
+            activeMessageEditSessionID = nil
+            activeMessageEditChatID = nil
+            preservedMessageDraft = nil
+            editorHandle.replaceDraft(restoredDraft)
+            messageText = restoredDraft
+            return
+        }
+        guard activeMessageEditSessionID != session.id else { return }
+        if activeMessageEditSessionID == nil {
+            preservedMessageDraft = messageText
+        }
+        activeMessageEditSessionID = session.id
+        activeMessageEditChatID = session.chatId
+        editorHandle.replaceDraft(session.originalContent)
+        messageText = session.originalContent
+        viewModel.shouldFocusInput = true
+    }
+
+    private func handleChatChange(_ chatId: String?) {
+        guard activeMessageEditSessionID != nil,
+              activeMessageEditChatID != chatId else { return }
+        activeMessageEditSessionID = nil
+        activeMessageEditChatID = nil
+        preservedMessageDraft = nil
+        editorHandle.replaceDraft("")
+        messageText = ""
+        textHeight = Layout.defaultHeight
+        viewModel.cancelMessageEdit()
+    }
+
+    private func cancelMessageEdit() {
+        let restoredDraft = activeMessageEditChatID == viewModel.currentChat?.id
+            ? preservedMessageDraft ?? ""
+            : ""
+        activeMessageEditSessionID = nil
+        activeMessageEditChatID = nil
+        preservedMessageDraft = nil
+        editorHandle.replaceDraft(restoredDraft)
+        messageText = restoredDraft
+        viewModel.cancelMessageEdit()
+    }
+
+    private func saveMessageEdit() {
+        guard submitEditorText(messageText) else { return }
+        editorHandle.clearDraft()
+        textHeight = Layout.defaultHeight
+    }
+
+    private func submitEditorText(_ text: String) -> Bool {
+        guard isEditingMessage else {
+            return viewModel.sendMessage(text: text)
+        }
+        guard viewModel.saveMessageEdit(newContent: text) else { return false }
+        activeMessageEditSessionID = nil
+        activeMessageEditChatID = nil
+        preservedMessageDraft = nil
+        messageText = ""
+        return true
     }
 
     private func sendOrCancelMessage() {
@@ -1389,9 +1536,26 @@ struct ModelSelectorSheetView: View {
 /// a render pass to propagate an emptied binding back into UIKit.
 final class CustomTextEditorHandle {
     fileprivate weak var coordinator: CustomTextEditor.Coordinator?
+    private var pendingDraftReplacement: String?
+
+    fileprivate func attach(_ coordinator: CustomTextEditor.Coordinator) {
+        self.coordinator = coordinator
+        if let pendingDraftReplacement {
+            self.pendingDraftReplacement = nil
+            coordinator.replaceDraft(with: pendingDraftReplacement)
+        }
+    }
 
     func clearDraft() {
         coordinator?.clearDraft()
+    }
+
+    func replaceDraft(_ text: String) {
+        guard let coordinator else {
+            pendingDraftReplacement = text
+            return
+        }
+        coordinator.replaceDraft(with: text)
     }
 }
 
@@ -1433,7 +1597,6 @@ struct CustomTextEditor: UIViewRepresentable {
 
         context.coordinator.textView = textView
         context.coordinator.currentTextSnapshot = text
-        handle?.coordinator = context.coordinator
 
         // Initialize with placeholder or actual text
         if text.isEmpty {
@@ -1446,13 +1609,14 @@ struct CustomTextEditor: UIViewRepresentable {
             }
         }
 
+        handle?.attach(context.coordinator)
         context.coordinator.refreshAccessibility(textView)
         return textView
     }
     
     func updateUIView(_ uiView: UITextView, context: Context) {
         context.coordinator.parent = self
-        handle?.coordinator = context.coordinator
+        handle?.attach(context.coordinator)
         if let pastingView = uiView as? PastingTextView {
             pastingView.allowsImagePaste = allowsImagePaste
             pastingView.onPasteImage = onPasteImage
@@ -1484,6 +1648,14 @@ struct CustomTextEditor: UIViewRepresentable {
                 text = ""
             } else {
                 context.coordinator.clearedDraft = nil
+            }
+        }
+        if let replacement = context.coordinator.draftReplacement {
+            if text == replacement.replaced {
+                text = replacement.replacement
+                self.text = replacement.replacement
+            } else if text != replacement.replacement {
+                context.coordinator.draftReplacement = nil
             }
         }
 
@@ -1543,6 +1715,7 @@ struct CustomTextEditor: UIViewRepresentable {
         /// be recognized and ignored or it gets written back into the emptied
         /// editor and then resynced into the binding, undoing the clear.
         var clearedDraft: String?
+        var draftReplacement: (replaced: String, replacement: String)?
         private var lastMeasurement: (text: String, width: CGFloat, pointSize: CGFloat, height: CGFloat)?
 
         init(_ parent: CustomTextEditor) {
@@ -1557,6 +1730,7 @@ struct CustomTextEditor: UIViewRepresentable {
         /// text gets resynced right back into it.
         func clearDraft() {
             guard let textView else { return }
+            draftReplacement = nil
             clearedDraft = immutableTextSnapshot(from: textView)
             if isEditing {
                 textView.text = ""
@@ -1570,6 +1744,22 @@ struct CustomTextEditor: UIViewRepresentable {
             parent.text = ""
             currentTextSnapshot = ""
             parent.textHeight = MessageInputView.Layout.defaultHeight
+            refreshAccessibility(textView)
+        }
+
+        func replaceDraft(with text: String) {
+            guard let textView else { return }
+            let replacedDraft = parent.text
+            clearedDraft = nil
+            draftReplacement = (replacedDraft, text)
+            textView.text = text
+            textView.textColor = UIColor { traitCollection in
+                return traitCollection.userInterfaceStyle == .dark ? .white : .black
+            }
+            parent.text = text
+            currentTextSnapshot = text
+            textView.selectedRange = NSRange(location: text.utf16.count, length: 0)
+            parent.textHeight = measuredHeight(for: textView)
             refreshAccessibility(textView)
         }
 
