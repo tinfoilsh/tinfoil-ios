@@ -5082,7 +5082,9 @@ class ChatViewModel: ObservableObject {
             chatId: currentChat?.id,
             messages: messages,
             messageIndex: messageIndex,
-            canUseActions: canUseCurrentChatActions && !hasPendingResponseRecovery,
+            canUseActions: canUseCurrentChatActions
+                && !hasPendingResponseRecovery
+                && pendingAttachments.isEmpty,
             isLoading: isLoading
         )
     }

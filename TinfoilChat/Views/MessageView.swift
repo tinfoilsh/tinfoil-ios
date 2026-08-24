@@ -639,7 +639,9 @@ struct MessageView: View {
                             },
                             onEdit: viewModel.isLoading || viewModel.messageEditSession != nil ? nil : {
                                 viewModel.beginMessageEdit(at: messageIndex)
-                            }
+                            },
+                            bubbleContextMenuEnabled: !viewModel.isLoading
+                                && viewModel.messageEditSession == nil
                         )
                     } else if let segments = message.segments, !segments.isEmpty {
                         // Render events inline in the order they streamed.
@@ -1432,6 +1434,7 @@ struct AdaptiveMarkdownText: View {
     let onResend: (() -> Void)?
     let onCopyAll: () -> Void
     let onEdit: (() -> Void)?
+    let bubbleContextMenuEnabled: Bool
 
     init(
         content: String,
@@ -1439,7 +1442,8 @@ struct AdaptiveMarkdownText: View {
         horizontalPadding: CGFloat = 0,
         onResend: (() -> Void)? = nil,
         onCopyAll: @escaping () -> Void = {},
-        onEdit: (() -> Void)? = nil
+        onEdit: (() -> Void)? = nil,
+        bubbleContextMenuEnabled: Bool = true
     ) {
         self.content = content
         self.isDarkMode = isDarkMode
@@ -1447,6 +1451,7 @@ struct AdaptiveMarkdownText: View {
         self.onResend = onResend
         self.onCopyAll = onCopyAll
         self.onEdit = onEdit
+        self.bubbleContextMenuEnabled = bubbleContextMenuEnabled
     }
 
     var body: some View {
@@ -1455,7 +1460,8 @@ struct AdaptiveMarkdownText: View {
             isDarkMode: isDarkMode,
             onResend: onResend,
             onCopyAll: onCopyAll,
-            onEdit: onEdit
+            onEdit: onEdit,
+            bubbleContextMenuEnabled: bubbleContextMenuEnabled
         )
             .padding(.horizontal, horizontalPadding)
     }
@@ -1470,6 +1476,7 @@ private struct InlineSelectableUserText: UIViewRepresentable {
     let onResend: (() -> Void)?
     let onCopyAll: () -> Void
     let onEdit: (() -> Void)?
+    let bubbleContextMenuEnabled: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -1493,7 +1500,8 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textView.setContentHuggingPriority(.defaultHigh, for: .vertical)
         textView.delegate = context.coordinator
-        disableInitialSelectionLongPress(in: textView)
+        context.coordinator.captureInitialSelectionLongPressRecognizers(in: textView)
+        context.coordinator.setBubbleContextMenuEnabled(bubbleContextMenuEnabled)
         return textView
     }
 
@@ -1503,6 +1511,7 @@ private struct InlineSelectableUserText: UIViewRepresentable {
             onCopyAll: onCopyAll,
             onEdit: onEdit
         )
+        context.coordinator.setBubbleContextMenuEnabled(bubbleContextMenuEnabled)
         textView.linkTextAttributes = [
             .foregroundColor: UIColor(Color.userMessageForeground(isDarkMode: isDarkMode)),
             .underlineStyle: NSUnderlineStyle.single.rawValue
@@ -1512,16 +1521,6 @@ private struct InlineSelectableUserText: UIViewRepresentable {
             textView.attributedText = attributedText
             textView.invalidateIntrinsicContentSize()
         }
-    }
-
-    /// The surrounding SwiftUI bubble owns the initial long press for message
-    /// actions. Selection-handle gestures are installed separately and remain
-    /// enabled after a double tap selects text.
-    private func disableInitialSelectionLongPress(in textView: UITextView) {
-        textView.gestureRecognizers?
-            .compactMap { $0 as? UILongPressGestureRecognizer }
-            .filter { $0.view === textView && $0.minimumPressDuration >= 0.45 }
-            .forEach { $0.isEnabled = false }
     }
 
     func sizeThatFits(
@@ -1599,6 +1598,7 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         private var onResend: (() -> Void)?
         private var onCopyAll: () -> Void
         private var onEdit: (() -> Void)?
+        private var initialSelectionLongPressRecognizers: [UILongPressGestureRecognizer] = []
 
         init(
             onResend: (() -> Void)?,
@@ -1608,6 +1608,16 @@ private struct InlineSelectableUserText: UIViewRepresentable {
             self.onResend = onResend
             self.onCopyAll = onCopyAll
             self.onEdit = onEdit
+        }
+
+        func captureInitialSelectionLongPressRecognizers(in textView: UITextView) {
+            initialSelectionLongPressRecognizers = textView.gestureRecognizers?
+                .compactMap { $0 as? UILongPressGestureRecognizer }
+                .filter { $0.view === textView && $0.minimumPressDuration >= 0.45 } ?? []
+        }
+
+        func setBubbleContextMenuEnabled(_ isEnabled: Bool) {
+            initialSelectionLongPressRecognizers.forEach { $0.isEnabled = !isEnabled }
         }
 
         func update(

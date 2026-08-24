@@ -116,6 +116,7 @@ struct MessageInputView: View {
         messageTextHasNonWhitespace
             && !viewModel.isLoading
             && viewModel.canUseCurrentChatActions
+            && !viewModel.hasPendingResponseRecovery
     }
 
     /// A draft that can actually be sent or queued right now: attachments
@@ -536,6 +537,7 @@ struct MessageInputView: View {
                          shouldFocusInput: viewModel.shouldFocusInput,
                          handle: editorHandle,
                          allowsImagePaste: !isEditingMessage && viewModel.currentModel.isMultimodal,
+                         rejectsAttachmentPaste: isEditingMessage,
                          onFocusHandled: { viewModel.shouldFocusInput = false },
                          onSendMessage: submitEditorText,
                          onPasteImage: isEditingMessage ? nil : { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
@@ -693,6 +695,7 @@ struct MessageInputView: View {
             }
             .buttonStyle(.plain)
             .foregroundColor(.secondary)
+            .accessibleHitTarget()
             .accessibilityLabel("Cancel edit")
             .accessibilityHint("Restores your previous draft")
         }
@@ -1574,6 +1577,7 @@ struct CustomTextEditor: UIViewRepresentable {
     var shouldFocusInput: Bool
     var handle: CustomTextEditorHandle? = nil
     var allowsImagePaste: Bool = false
+    var rejectsAttachmentPaste: Bool = false
     var onFocusHandled: () -> Void
     /// Returns whether the message was accepted, so the editor only clears
     /// itself when the draft was actually sent or queued.
@@ -1585,6 +1589,7 @@ struct CustomTextEditor: UIViewRepresentable {
     func makeUIView(context: Context) -> UITextView {
         let textView = PastingTextView()
         textView.allowsImagePaste = allowsImagePaste
+        textView.rejectsAttachmentPaste = rejectsAttachmentPaste
         textView.onPasteImage = onPasteImage
         textView.onPasteFile = onPasteFile
         textView.onPasteFileError = onPasteFileError
@@ -1626,6 +1631,7 @@ struct CustomTextEditor: UIViewRepresentable {
         handle?.attach(context.coordinator)
         if let pastingView = uiView as? PastingTextView {
             pastingView.allowsImagePaste = allowsImagePaste
+            pastingView.rejectsAttachmentPaste = rejectsAttachmentPaste
             pastingView.onPasteImage = onPasteImage
             pastingView.onPasteFile = onPasteFile
             pastingView.onPasteFileError = onPasteFileError
@@ -1897,6 +1903,7 @@ struct CustomTextEditor: UIViewRepresentable {
 /// addition to plain text, turning them into attachments.
 final class PastingTextView: UITextView {
     var allowsImagePaste = false
+    var rejectsAttachmentPaste = false
     var onPasteImage: ((Data, String) -> Void)?
     var onPasteFile: ((ManagedStagedFile) -> Void)?
     var onPasteFileError: ((String) -> Void)?
@@ -1930,6 +1937,12 @@ final class PastingTextView: UITextView {
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)) {
+            if rejectsAttachmentPaste {
+                let state = pasteboardState()
+                if state.hasImages || state.hasFileURLs {
+                    return false
+                }
+            }
             if allowsImagePaste && onPasteImage != nil && pasteboardState().hasImages {
                 return true
             }
@@ -1942,6 +1955,13 @@ final class PastingTextView: UITextView {
 
     override func paste(_ sender: Any?) {
         let pasteboard = UIPasteboard.general
+
+        if rejectsAttachmentPaste {
+            let state = pasteboardState()
+            if state.hasImages || state.hasFileURLs {
+                return
+            }
+        }
 
         if allowsImagePaste, pasteboard.hasImages,
            let onPasteImage, let images = pasteboard.images, !images.isEmpty {
