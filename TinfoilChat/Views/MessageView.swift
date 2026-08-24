@@ -621,30 +621,9 @@ struct MessageView: View {
                 
                 // Display long user messages as an attachment-style preview that expands on tap
                 else if message.role == .user && message.shouldDisplayAsAttachment {
-                    LongMessageAttachmentView(message: message, isDarkMode: isDarkMode) {
-                        showLongMessageSheet = true
-                    }
-                    .if(!viewModel.isLoading && viewModel.messageEditSession == nil) { view in
-                        view.contextMenu {
-                            Button {
-                                viewModel.regenerateMessage(at: messageIndex)
-                            } label: {
-                                Label("Resend", systemImage: "arrow.clockwise")
-                            }
-
-                            Button {
-                                UIPasteboard.general.string = message.content
-                            } label: {
-                                Label("Copy", systemImage: "doc.on.doc")
-                            }
-
-                            Button {
-                                viewModel.beginMessageEdit(at: messageIndex)
-                            } label: {
-                                Label("Edit", systemImage: "pencil")
-                            }
+                        LongMessageAttachmentView(message: message, isDarkMode: isDarkMode) {
+                            showLongMessageSheet = true
                         }
-                    }
                 }
 
                 else if !message.content.isEmpty || !message.toolCalls.isEmpty {
@@ -660,8 +639,7 @@ struct MessageView: View {
                             },
                             onEdit: viewModel.isLoading || viewModel.messageEditSession != nil ? nil : {
                                 viewModel.beginMessageEdit(at: messageIndex)
-                            },
-                            contextMenuEnabled: !viewModel.isLoading
+                            }
                         )
                     } else if let segments = message.segments, !segments.isEmpty {
                         // Render events inline in the order they streamed.
@@ -840,6 +818,32 @@ struct MessageView: View {
                         } else {
                             RoundedRectangle(cornerRadius: 16)
                                 .fill(Color.userMessageBackground(isDarkMode: isDarkMode))
+                        }
+                    }
+                }
+                .if(
+                    message.role == .user
+                        && !message.content.isEmpty
+                        && !viewModel.isLoading
+                        && viewModel.messageEditSession == nil
+                ) { view in
+                    view.contextMenu {
+                        Button {
+                            viewModel.regenerateMessage(at: messageIndex)
+                        } label: {
+                            Label("Resend", systemImage: "arrow.clockwise")
+                        }
+
+                        Button {
+                            UIPasteboard.general.string = message.content
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                        }
+
+                        Button {
+                            viewModel.beginMessageEdit(at: messageIndex)
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
                         }
                     }
                 }
@@ -1428,7 +1432,6 @@ struct AdaptiveMarkdownText: View {
     let onResend: (() -> Void)?
     let onCopyAll: () -> Void
     let onEdit: (() -> Void)?
-    let contextMenuEnabled: Bool
 
     init(
         content: String,
@@ -1436,8 +1439,7 @@ struct AdaptiveMarkdownText: View {
         horizontalPadding: CGFloat = 0,
         onResend: (() -> Void)? = nil,
         onCopyAll: @escaping () -> Void = {},
-        onEdit: (() -> Void)? = nil,
-        contextMenuEnabled: Bool = true
+        onEdit: (() -> Void)? = nil
     ) {
         self.content = content
         self.isDarkMode = isDarkMode
@@ -1445,7 +1447,6 @@ struct AdaptiveMarkdownText: View {
         self.onResend = onResend
         self.onCopyAll = onCopyAll
         self.onEdit = onEdit
-        self.contextMenuEnabled = contextMenuEnabled
     }
 
     var body: some View {
@@ -1454,8 +1455,7 @@ struct AdaptiveMarkdownText: View {
             isDarkMode: isDarkMode,
             onResend: onResend,
             onCopyAll: onCopyAll,
-            onEdit: onEdit,
-            contextMenuEnabled: contextMenuEnabled
+            onEdit: onEdit
         )
             .padding(.horizontal, horizontalPadding)
     }
@@ -1470,15 +1470,12 @@ private struct InlineSelectableUserText: UIViewRepresentable {
     let onResend: (() -> Void)?
     let onCopyAll: () -> Void
     let onEdit: (() -> Void)?
-    let contextMenuEnabled: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             onResend: onResend,
             onCopyAll: onCopyAll,
-            onEdit: onEdit,
-            contextMenuEnabled: contextMenuEnabled,
-            previewBackgroundColor: UIColor(Color.userMessageBackground(isDarkMode: isDarkMode))
+            onEdit: onEdit
         )
     }
 
@@ -1496,7 +1493,6 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textView.setContentHuggingPriority(.defaultHigh, for: .vertical)
         textView.delegate = context.coordinator
-        textView.addInteraction(UIContextMenuInteraction(delegate: context.coordinator))
         return textView
     }
 
@@ -1504,9 +1500,7 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         context.coordinator.update(
             onResend: onResend,
             onCopyAll: onCopyAll,
-            onEdit: onEdit,
-            contextMenuEnabled: contextMenuEnabled,
-            previewBackgroundColor: UIColor(Color.userMessageBackground(isDarkMode: isDarkMode))
+            onEdit: onEdit
         )
         textView.linkTextAttributes = [
             .foregroundColor: UIColor(Color.userMessageForeground(isDarkMode: isDarkMode)),
@@ -1590,39 +1584,29 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         return UIFont(descriptor: descriptor, size: bodyFont.pointSize)
     }
 
-    final class Coordinator: NSObject, UITextViewDelegate, UIContextMenuInteractionDelegate {
+    final class Coordinator: NSObject, UITextViewDelegate {
         private var onResend: (() -> Void)?
         private var onCopyAll: () -> Void
         private var onEdit: (() -> Void)?
-        private var contextMenuEnabled: Bool
-        private var previewBackgroundColor: UIColor
 
         init(
             onResend: (() -> Void)?,
             onCopyAll: @escaping () -> Void,
-            onEdit: (() -> Void)?,
-            contextMenuEnabled: Bool,
-            previewBackgroundColor: UIColor
+            onEdit: (() -> Void)?
         ) {
             self.onResend = onResend
             self.onCopyAll = onCopyAll
             self.onEdit = onEdit
-            self.contextMenuEnabled = contextMenuEnabled
-            self.previewBackgroundColor = previewBackgroundColor
         }
 
         func update(
             onResend: (() -> Void)?,
             onCopyAll: @escaping () -> Void,
-            onEdit: (() -> Void)?,
-            contextMenuEnabled: Bool,
-            previewBackgroundColor: UIColor
+            onEdit: (() -> Void)?
         ) {
             self.onResend = onResend
             self.onCopyAll = onCopyAll
             self.onEdit = onEdit
-            self.contextMenuEnabled = contextMenuEnabled
-            self.previewBackgroundColor = previewBackgroundColor
         }
 
         func textView(
@@ -1633,41 +1617,6 @@ private struct InlineSelectableUserText: UIViewRepresentable {
             var actions = suggestedActions
             actions.append(contentsOf: messageActions(copyTitle: "Copy All"))
             return UIMenu(children: actions)
-        }
-
-        func contextMenuInteraction(
-            _ interaction: UIContextMenuInteraction,
-            configurationForMenuAtLocation location: CGPoint
-        ) -> UIContextMenuConfiguration? {
-            guard contextMenuEnabled else { return nil }
-            return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-                guard let self else { return nil }
-                return UIMenu(children: self.messageActions(copyTitle: "Copy"))
-            }
-        }
-
-        func contextMenuInteraction(
-            _ interaction: UIContextMenuInteraction,
-            previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
-        ) -> UITargetedPreview? {
-            targetedPreview(for: interaction)
-        }
-
-        func contextMenuInteraction(
-            _ interaction: UIContextMenuInteraction,
-            previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
-        ) -> UITargetedPreview? {
-            targetedPreview(for: interaction)
-        }
-
-        private func targetedPreview(
-            for interaction: UIContextMenuInteraction
-        ) -> UITargetedPreview? {
-            guard let view = interaction.view else { return nil }
-            let parameters = UIPreviewParameters()
-            parameters.backgroundColor = previewBackgroundColor
-            parameters.visiblePath = UIBezierPath(roundedRect: view.bounds, cornerRadius: 16)
-            return UITargetedPreview(view: view, parameters: parameters)
         }
 
         private func messageActions(copyTitle: String) -> [UIMenuElement] {
