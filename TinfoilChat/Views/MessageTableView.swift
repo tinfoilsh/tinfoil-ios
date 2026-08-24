@@ -503,13 +503,14 @@ struct MessageTableView: UIViewRepresentable {
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
             // Only treat taps on non-interactive areas as background taps. Taps on buttons,
-            // editable text fields, and the inline message editor must not dismiss the keyboard.
+            // text fields, editors, and selectable text must remain with their controls.
             var view = touch.view
             while let current = view {
                 if current is UIControl || current is UITextField {
                     return false
                 }
-                if let textView = current as? UITextView, textView.isEditable {
+                if let textView = current as? UITextView,
+                   textView.isEditable || textView.isSelectable {
                     return false
                 }
                 view = current.superview
@@ -534,6 +535,8 @@ struct MessageTableView: UIViewRepresentable {
             let cell = tableView.dequeueReusableCell(withIdentifier: cellIdentifier) ?? UITableViewCell(style: .default, reuseIdentifier: cellIdentifier)
             cell.selectionStyle = .none
             cell.backgroundColor = .clear
+            cell.clipsToBounds = false
+            cell.contentView.clipsToBounds = false
 
             if parent.messages.isEmpty {
                 cell.contentConfiguration = UIHostingConfiguration {

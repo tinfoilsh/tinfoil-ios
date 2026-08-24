@@ -142,11 +142,7 @@ struct MessageView: View {
     @State private var cachedParsedContent: (thinkingText: String, remainderText: String, contentHash: Int)? = nil
     @State private var showLongMessageSheet = false
     @State private var showRawContentModal = false
-    @State private var isEditMode = false
-    @State private var editedContent = ""
-    @State private var showSelectableText = false
     @State private var showSourcesSheet = false
-    @State private var showUserMessageActions = false
     @State private var showShareSheet = false
     @State private var showThoughtsSheet = false
     @State private var showURLFetchSheet = false
@@ -155,7 +151,7 @@ struct MessageView: View {
     @State private var activeSearchInstanceSources: IdentifiedGroup<WebSearchSource>? = nil
 
     private var isAnyMessageSheetPresented: Bool {
-        showLongMessageSheet || showRawContentModal || showSelectableText || showSourcesSheet || showShareSheet || showThoughtsSheet || showURLFetchSheet || activeWebSearchGroup != nil || activeURLFetchGroup != nil || activeSearchInstanceSources != nil
+        showLongMessageSheet || showRawContentModal || showSourcesSheet || showShareSheet || showThoughtsSheet || showURLFetchSheet || activeWebSearchGroup != nil || activeURLFetchGroup != nil || activeSearchInstanceSources != nil
     }
 
     private var inlineAssistantTextSelectionEnabled: Bool {
@@ -165,6 +161,18 @@ struct MessageView: View {
 
     private var isRenderingStream: Bool {
         (isLoading && isLastMessage) || (hasRecoveryDraft && message.isStreaming)
+    }
+
+    private var canUseUserMessageActions: Bool {
+        viewModel.canUseCurrentChatActions
+            && !viewModel.isLoading
+            && viewModel.messageEditSession == nil
+            && viewModel.pendingAttachments.isEmpty
+            && !viewModel.hasPendingResponseRecovery
+    }
+
+    private var canShowUserMessageMenu: Bool {
+        !viewModel.isLoading && viewModel.messageEditSession == nil
     }
 
     private var recoveryContext: (pendingRecoveries: [PendingRecoveryEnvelope], activeTurnId: String?) {
@@ -625,44 +633,27 @@ struct MessageView: View {
                 
                 // Display long user messages as an attachment-style preview that expands on tap
                 else if message.role == .user && message.shouldDisplayAsAttachment {
-                    if isEditMode {
-                        UserMessageEditView(
-                            content: $editedContent,
-                            isDarkMode: isDarkMode,
-                            onSave: {
-                                viewModel.editMessage(at: messageIndex, newContent: editedContent)
-                                isEditMode = false
-                            },
-                            onCancel: {
-                                isEditMode = false
-                                editedContent = message.content
-                            }
-                        )
-                    } else {
                         LongMessageAttachmentView(message: message, isDarkMode: isDarkMode) {
                             showLongMessageSheet = true
                         }
-                    }
                 }
 
                 else if !message.content.isEmpty || !message.toolCalls.isEmpty {
                     if message.role == .user {
-                        if isEditMode {
-                            UserMessageEditView(
-                                content: $editedContent,
-                                isDarkMode: isDarkMode,
-                                onSave: {
-                                    viewModel.editMessage(at: messageIndex, newContent: editedContent)
-                                    isEditMode = false
-                                },
-                                onCancel: {
-                                    isEditMode = false
-                                    editedContent = message.content
-                                }
-                            )
-                        } else {
-                            AdaptiveMarkdownText(content: message.content, isDarkMode: isDarkMode)
-                        }
+                        AdaptiveMarkdownText(
+                            content: message.content,
+                            isDarkMode: isDarkMode,
+                            onResend: canUseUserMessageActions ? {
+                                viewModel.regenerateMessage(at: messageIndex)
+                            } : nil,
+                            onCopyAll: {
+                                UIPasteboard.general.string = message.content
+                            },
+                            onEdit: canUseUserMessageActions ? {
+                                viewModel.beginMessageEdit(at: messageIndex)
+                            } : nil,
+                            bubbleContextMenuEnabled: canShowUserMessageMenu
+                        )
                     } else if let segments = message.segments, !segments.isEmpty {
                         // Render events inline in the order they streamed.
                         inlineSegmentsView(segments: segments)
@@ -838,24 +829,23 @@ struct MessageView: View {
                             RoundedRectangle(cornerRadius: 16)
                                 .fill(.thickMaterial)
                         } else {
-                            Color.userMessageBackground(isDarkMode: isDarkMode)
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color.userMessageBackground(isDarkMode: isDarkMode))
                         }
                     }
                 }
-                .cornerRadius(16)
-                .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
-                // While a stream is in flight the table reloads its rows
-                // every UI tick, which can deallocate the SwiftUI subgraph
-                // that backs an in-flight context menu and trip a deref of
-                // a freed AG attribute (ContextMenuResponder.startTrackingUpdates
-                // EXC_BAD_ACCESS). Withhold the menu entirely until streaming
-                // finishes; long-press still works between turns.
-                .if(message.role == .user && !message.content.isEmpty && !viewModel.isLoading) { view in
+                .if(
+                        message.role == .user
+                            && !message.content.isEmpty
+                        && canShowUserMessageMenu
+                ) { view in
                     view.contextMenu {
-                        Button {
-                            viewModel.regenerateMessage(at: messageIndex)
-                        } label: {
-                            Label("Resend", systemImage: "arrow.clockwise")
+                        if canUseUserMessageActions {
+                            Button {
+                                viewModel.regenerateMessage(at: messageIndex)
+                            } label: {
+                                Label("Resend", systemImage: "arrow.clockwise")
+                            }
                         }
 
                         Button {
@@ -864,25 +854,16 @@ struct MessageView: View {
                             Label("Copy", systemImage: "doc.on.doc")
                         }
 
-                        Button {
-                            editedContent = message.content
-                            isEditMode = true
-                        } label: {
-                            Label("Edit", systemImage: "pencil")
+                        if canUseUserMessageActions {
+                            Button {
+                                viewModel.beginMessageEdit(at: messageIndex)
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
                         }
                     }
                 }
-                .onChange(of: message.id) { _, _ in
-                    isEditMode = false
-                    editedContent = ""
-                }
-                .onChange(of: viewModel.editRequestedForMessageIndex) { _, newValue in
-                    if newValue == messageIndex && message.role == .user {
-                        editedContent = message.content
-                        isEditMode = true
-                        viewModel.editRequestedForMessageIndex = nil
-                    }
-                }
+                .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
 
                 if showsPendingResponseRecovery {
                     PendingResponseRecoveryView(
@@ -912,11 +893,6 @@ struct MessageView: View {
                 .presentationDetents([.medium, .large])
                 .iPadSheetSizing()
                 .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
-        }
-        .sheet(isPresented: $showSelectableText) {
-            UserMessageSelectView(content: message.content)
-                .presentationDetents([.medium, .large])
-                .iPadSheetSizing()
         }
         .sheet(isPresented: $showSourcesSheet) {
             if let sources = message.webSearchState?.sources {
@@ -1464,36 +1440,240 @@ struct MarkdownText: View {
     }
 }
 
-/// Paragraph style for user message bubbles. Matches the GitHub look but drops
-/// the outer block spacing so the bubble hugs its text instead of relying on a
-/// negative bottom padding to trim the trailing gap.
-private struct UserBubbleParagraphStyle: StructuredText.ParagraphStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .textual.lineSpacing(.fontScaled(0.25))
-            .textual.blockSpacing(.init(top: 0, bottom: 0))
-    }
-}
-
 /// A specialized markdown text view for user messages
 struct AdaptiveMarkdownText: View {
     let content: String
     let isDarkMode: Bool
     let horizontalPadding: CGFloat
+    let onResend: (() -> Void)?
+    let onCopyAll: () -> Void
+    let onEdit: (() -> Void)?
+    let bubbleContextMenuEnabled: Bool
 
-    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0) {
+    init(
+        content: String,
+        isDarkMode: Bool,
+        horizontalPadding: CGFloat = 0,
+        onResend: (() -> Void)? = nil,
+        onCopyAll: @escaping () -> Void = {},
+        onEdit: (() -> Void)? = nil,
+        bubbleContextMenuEnabled: Bool = true
+    ) {
         self.content = content
         self.isDarkMode = isDarkMode
         self.horizontalPadding = horizontalPadding
+        self.onResend = onResend
+        self.onCopyAll = onCopyAll
+        self.onEdit = onEdit
+        self.bubbleContextMenuEnabled = bubbleContextMenuEnabled
     }
 
     var body: some View {
-        StructuredText(markdown: content)
-            .textual.highlighterTheme(.default)
-            .textual.paragraphStyle(UserBubbleParagraphStyle())
-            .textual.textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
+        InlineSelectableUserText(
+            content: content,
+            isDarkMode: isDarkMode,
+            onResend: onResend,
+            onCopyAll: onCopyAll,
+            onEdit: onEdit,
+            bubbleContextMenuEnabled: bubbleContextMenuEnabled
+        )
             .padding(.horizontal, horizontalPadding)
+    }
+}
+
+/// Textual and SwiftUI selection surfaces cannot drag handles reliably inside
+/// UIHostingConfiguration table cells. A non-scrolling UITextView keeps the
+/// system selection interaction inline without changing the bubble layout.
+private struct InlineSelectableUserText: UIViewRepresentable {
+    let content: String
+    let isDarkMode: Bool
+    let onResend: (() -> Void)?
+    let onCopyAll: () -> Void
+    let onEdit: (() -> Void)?
+    let bubbleContextMenuEnabled: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            onResend: onResend,
+            onCopyAll: onCopyAll,
+            onEdit: onEdit
+        )
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = InlineSelectableUITextView()
+        textView.backgroundColor = .clear
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isScrollEnabled = false
+        textView.adjustsFontForContentSizeCategory = true
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        textView.textContainer.widthTracksTextView = false
+        textView.textContainer.heightTracksTextView = false
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textView.setContentHuggingPriority(.defaultHigh, for: .vertical)
+        textView.delegate = context.coordinator
+        textView.bubbleContextMenuEnabled = bubbleContextMenuEnabled
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        context.coordinator.update(
+            onResend: onResend,
+            onCopyAll: onCopyAll,
+            onEdit: onEdit
+        )
+        (textView as? InlineSelectableUITextView)?.bubbleContextMenuEnabled = bubbleContextMenuEnabled
+        textView.linkTextAttributes = [
+            .foregroundColor: UIColor(Color.userMessageForeground(isDarkMode: isDarkMode)),
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ]
+        let attributedText = makeAttributedText()
+        if !textView.attributedText.isEqual(to: attributedText) {
+            textView.attributedText = attributedText
+            textView.invalidateIntrinsicContentSize()
+        }
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView textView: UITextView,
+        context: Context
+    ) -> CGSize? {
+        let maximumWidth = proposal.width ?? UIScreen.main.bounds.width * 0.85
+        textView.textContainer.size = CGSize(width: maximumWidth, height: .greatestFiniteMagnitude)
+        textView.layoutManager.ensureLayout(for: textView.textContainer)
+
+        let initialRect = textView.layoutManager.usedRect(for: textView.textContainer)
+        let measuredWidth = min(maximumWidth, ceil(initialRect.width))
+        textView.textContainer.size = CGSize(width: measuredWidth, height: .greatestFiniteMagnitude)
+        textView.layoutManager.ensureLayout(for: textView.textContainer)
+        let finalRect = textView.layoutManager.usedRect(for: textView.textContainer)
+
+        return CGSize(
+            width: measuredWidth,
+            height: ceil(max(finalRect.height, UIFont.preferredFont(forTextStyle: .body).lineHeight))
+        )
+    }
+
+    private func makeAttributedText() -> NSAttributedString {
+        var parsed = (try? AttributedString(
+            markdown: content,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(content)
+        let runs = parsed.runs.map { ($0.range, $0.inlinePresentationIntent) }
+        let bodyFont = UIFont.preferredFont(forTextStyle: .body)
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineSpacing = 2
+
+        parsed.uiKit.font = bodyFont
+        parsed.uiKit.foregroundColor = UIColor(Color.userMessageForeground(isDarkMode: isDarkMode))
+        parsed.uiKit.paragraphStyle = paragraphStyle
+
+        for (range, intent) in runs {
+            guard let intent else { continue }
+            parsed[range].uiKit.font = font(for: intent, bodyFont: bodyFont)
+            if intent.contains(.strikethrough) {
+                parsed[range].uiKit.strikethroughStyle = .single
+            }
+        }
+
+        return NSAttributedString(parsed)
+    }
+
+    private func font(
+        for intent: InlinePresentationIntent,
+        bodyFont: UIFont
+    ) -> UIFont {
+        if intent.contains(.code) {
+            return UIFont.monospacedSystemFont(
+                ofSize: bodyFont.pointSize,
+                weight: intent.contains(.stronglyEmphasized) ? .bold : .regular
+            )
+        }
+
+        var traits: UIFontDescriptor.SymbolicTraits = []
+        if intent.contains(.stronglyEmphasized) {
+            traits.insert(.traitBold)
+        }
+        if intent.contains(.emphasized) {
+            traits.insert(.traitItalic)
+        }
+        guard !traits.isEmpty,
+              let descriptor = bodyFont.fontDescriptor.withSymbolicTraits(traits) else {
+            return bodyFont
+        }
+        return UIFont(descriptor: descriptor, size: bodyFont.pointSize)
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        private var onResend: (() -> Void)?
+        private var onCopyAll: () -> Void
+        private var onEdit: (() -> Void)?
+
+        init(
+            onResend: (() -> Void)?,
+            onCopyAll: @escaping () -> Void,
+            onEdit: (() -> Void)?
+        ) {
+            self.onResend = onResend
+            self.onCopyAll = onCopyAll
+            self.onEdit = onEdit
+        }
+
+        func update(
+            onResend: (() -> Void)?,
+            onCopyAll: @escaping () -> Void,
+            onEdit: (() -> Void)?
+        ) {
+            self.onResend = onResend
+            self.onCopyAll = onCopyAll
+            self.onEdit = onEdit
+        }
+
+        func textView(
+            _ textView: UITextView,
+            editMenuForTextIn range: NSRange,
+            suggestedActions: [UIMenuElement]
+        ) -> UIMenu? {
+            var actions = suggestedActions
+            actions.append(contentsOf: messageActions(copyTitle: "Copy All"))
+            return UIMenu(children: actions)
+        }
+
+        private func messageActions(copyTitle: String) -> [UIMenuElement] {
+            var actions: [UIMenuElement] = [
+                UIAction(title: copyTitle, image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+                    self?.onCopyAll()
+                }
+            ]
+            if let onResend {
+                actions.append(UIAction(title: "Resend", image: UIImage(systemName: "arrow.clockwise")) { _ in
+                    onResend()
+                })
+            }
+            if let onEdit {
+                actions.append(UIAction(title: "Edit", image: UIImage(systemName: "pencil")) { _ in
+                    onEdit()
+                })
+            }
+            return actions
+        }
+    }
+}
+
+private final class InlineSelectableUITextView: UITextView {
+    var bubbleContextMenuEnabled = true
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if bubbleContextMenuEnabled,
+           gestureRecognizer is UILongPressGestureRecognizer,
+           gestureRecognizer.view === self,
+           selectedRange.length == 0 {
+            return false
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 }
 
@@ -1989,79 +2169,6 @@ struct ErrorMessageView: View {
                         .stroke(accentColor.opacity(0.3), lineWidth: 1)
                 )
         )
-    }
-}
-
-struct UserMessageEditView: View {
-    @Binding var content: String
-    let isDarkMode: Bool
-    let onSave: () -> Void
-    let onCancel: () -> Void
-    @FocusState private var isFocused: Bool
-
-    private var textColor: Color {
-        isDarkMode ? .white : .black
-    }
-
-    private var secondaryTextColor: Color {
-        isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5)
-    }
-
-    private var buttonBackgroundColor: Color {
-        isDarkMode ? .white.opacity(0.1) : .black.opacity(0.1)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Messages below will be deleted and regenerated.")
-                .font(.system(size: 12))
-                .foregroundColor(secondaryTextColor)
-
-            TextField("Edit message...", text: $content, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.body)
-                .foregroundColor(textColor)
-                .lineLimit(1...4)
-                .focused($isFocused)
-                .onAppear {
-                    isFocused = true
-                }
-                .onSubmit {
-                    if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        onSave()
-                    }
-                }
-
-            HStack(spacing: 8) {
-                Spacer()
-
-                Button(action: onCancel) {
-                    Text("Cancel")
-                        .font(.system(.caption, weight: .medium))
-                        .foregroundColor(secondaryTextColor)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(buttonBackgroundColor)
-                        .cornerRadius(6)
-                }
-                .buttonStyle(PlainButtonStyle())
-
-                Button(action: {
-                    if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        onSave()
-                    }
-                }) {
-                    Text("Save")
-                        .font(.system(.caption, weight: .medium))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.accentPrimary)
-                        .cornerRadius(6)
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
-        }
     }
 }
 
