@@ -694,7 +694,8 @@ struct MessageView: View {
                                 onEdit: viewModel.isLoading ? nil : {
                                     editedContent = message.content
                                     isEditMode = true
-                                }
+                                },
+                                contextMenuEnabled: !viewModel.isLoading
                             )
                         }
                     } else if let segments = message.segments, !segments.isEmpty {
@@ -1473,6 +1474,7 @@ struct AdaptiveMarkdownText: View {
     let onResend: (() -> Void)?
     let onCopyAll: () -> Void
     let onEdit: (() -> Void)?
+    let contextMenuEnabled: Bool
 
     init(
         content: String,
@@ -1480,7 +1482,8 @@ struct AdaptiveMarkdownText: View {
         horizontalPadding: CGFloat = 0,
         onResend: (() -> Void)? = nil,
         onCopyAll: @escaping () -> Void = {},
-        onEdit: (() -> Void)? = nil
+        onEdit: (() -> Void)? = nil,
+        contextMenuEnabled: Bool = true
     ) {
         self.content = content
         self.isDarkMode = isDarkMode
@@ -1488,6 +1491,7 @@ struct AdaptiveMarkdownText: View {
         self.onResend = onResend
         self.onCopyAll = onCopyAll
         self.onEdit = onEdit
+        self.contextMenuEnabled = contextMenuEnabled
     }
 
     var body: some View {
@@ -1496,7 +1500,8 @@ struct AdaptiveMarkdownText: View {
             isDarkMode: isDarkMode,
             onResend: onResend,
             onCopyAll: onCopyAll,
-            onEdit: onEdit
+            onEdit: onEdit,
+            contextMenuEnabled: contextMenuEnabled
         )
             .padding(.horizontal, horizontalPadding)
     }
@@ -1511,9 +1516,15 @@ private struct InlineSelectableUserText: UIViewRepresentable {
     let onResend: (() -> Void)?
     let onCopyAll: () -> Void
     let onEdit: (() -> Void)?
+    let contextMenuEnabled: Bool
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onResend: onResend, onCopyAll: onCopyAll, onEdit: onEdit)
+        Coordinator(
+            onResend: onResend,
+            onCopyAll: onCopyAll,
+            onEdit: onEdit,
+            contextMenuEnabled: contextMenuEnabled
+        )
     }
 
     func makeUIView(context: Context) -> UITextView {
@@ -1530,6 +1541,7 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textView.setContentHuggingPriority(.defaultHigh, for: .vertical)
         textView.delegate = context.coordinator
+        textView.addInteraction(UIContextMenuInteraction(delegate: context.coordinator))
         return textView
     }
 
@@ -1537,7 +1549,8 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         context.coordinator.update(
             onResend: onResend,
             onCopyAll: onCopyAll,
-            onEdit: onEdit
+            onEdit: onEdit,
+            contextMenuEnabled: contextMenuEnabled
         )
         textView.linkTextAttributes = [
             .foregroundColor: UIColor(Color.userMessageForeground(isDarkMode: isDarkMode)),
@@ -1621,29 +1634,34 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         return UIFont(descriptor: descriptor, size: bodyFont.pointSize)
     }
 
-    final class Coordinator: NSObject, UITextViewDelegate {
+    final class Coordinator: NSObject, UITextViewDelegate, UIContextMenuInteractionDelegate {
         private var onResend: (() -> Void)?
         private var onCopyAll: () -> Void
         private var onEdit: (() -> Void)?
+        private var contextMenuEnabled: Bool
 
         init(
             onResend: (() -> Void)?,
             onCopyAll: @escaping () -> Void,
-            onEdit: (() -> Void)?
+            onEdit: (() -> Void)?,
+            contextMenuEnabled: Bool
         ) {
             self.onResend = onResend
             self.onCopyAll = onCopyAll
             self.onEdit = onEdit
+            self.contextMenuEnabled = contextMenuEnabled
         }
 
         func update(
             onResend: (() -> Void)?,
             onCopyAll: @escaping () -> Void,
-            onEdit: (() -> Void)?
+            onEdit: (() -> Void)?,
+            contextMenuEnabled: Bool
         ) {
             self.onResend = onResend
             self.onCopyAll = onCopyAll
             self.onEdit = onEdit
+            self.contextMenuEnabled = contextMenuEnabled
         }
 
         func textView(
@@ -1652,9 +1670,27 @@ private struct InlineSelectableUserText: UIViewRepresentable {
             suggestedActions: [UIMenuElement]
         ) -> UIMenu? {
             var actions = suggestedActions
-            actions.append(UIAction(title: "Copy All", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
-                self?.onCopyAll()
-            })
+            actions.append(contentsOf: messageActions(copyTitle: "Copy All"))
+            return UIMenu(children: actions)
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            configurationForMenuAtLocation location: CGPoint
+        ) -> UIContextMenuConfiguration? {
+            guard contextMenuEnabled else { return nil }
+            return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+                guard let self else { return nil }
+                return UIMenu(children: self.messageActions(copyTitle: "Copy"))
+            }
+        }
+
+        private func messageActions(copyTitle: String) -> [UIMenuElement] {
+            var actions: [UIMenuElement] = [
+                UIAction(title: copyTitle, image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+                    self?.onCopyAll()
+                }
+            ]
             if let onResend {
                 actions.append(UIAction(title: "Resend", image: UIImage(systemName: "arrow.clockwise")) { _ in
                     onResend()
@@ -1665,7 +1701,7 @@ private struct InlineSelectableUserText: UIViewRepresentable {
                     onEdit()
                 })
             }
-            return UIMenu(children: actions)
+            return actions
         }
     }
 }
