@@ -44,6 +44,7 @@ struct ContentView: View {
         }
         .onAppear {
             chatViewModel.authManager = authManager
+            chatViewModel.setAppPresentationReady(scenePhase == .active)
             authManager.setChatViewModel(chatViewModel)
             requestAppReviewIfEligible()
             importSharedAttachmentsIfReady()
@@ -130,6 +131,8 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
+            chatViewModel.setAppPresentationReady(newPhase == .active)
+
             if newPhase == .active {
                 importSharedAttachmentsIfReady()
             }

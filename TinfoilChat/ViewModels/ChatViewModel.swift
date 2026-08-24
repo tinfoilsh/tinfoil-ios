@@ -365,6 +365,8 @@ class ChatViewModel: ObservableObject {
     private let cloudStorage = CloudStorageService.shared
     private let streamingTracker = StreamingTracker.shared
     private let projectStorage = ProjectStorageService.shared
+    private var isAppPresentationReady = false
+    private var needsSignInWhenPresentationReady = false
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
     private var signInTask: Task<Void, Never>?
     private var legacyMigrationTask: Task<Void, Never>?
@@ -1345,6 +1347,8 @@ class ChatViewModel: ObservableObject {
                 guard let self, self.authManager?.isAuthenticated == true else { return }
                 self.setupAutoSyncTimer()
                 self.scanPendingRecoveries()
+                guard !self.isSignInInProgress,
+                      !self.needsSignInWhenPresentationReady else { return }
 
                 guard SettingsManager.shared.isCloudSyncEnabled,
                       EncryptionService.shared.hasEncryptionKey()
@@ -1402,6 +1406,9 @@ class ChatViewModel: ObservableObject {
             .sink { [weak self] isConnected in
                 guard let self = self, isConnected else { return }
                 self.scanPendingRecoveries()
+                if !EncryptionService.shared.hasEncryptionKey() {
+                    self.handleSignIn()
+                }
 
                 // Only retry if verification failed (has error) and not currently initializing
                 guard self.verificationError != nil && !self.isVerifying && !self.isClientInitializing else { return }
@@ -5594,6 +5601,7 @@ class ChatViewModel: ObservableObject {
         activeSignInToken = nil
         accountOperationFence.invalidate()
         isSignInInProgress = false
+        needsSignInWhenPresentationReady = false
         hasAnonymousChatsToSync = false
         return canceledTask
     }
@@ -5970,6 +5978,14 @@ class ChatViewModel: ObservableObject {
         return (userId, token)
     }
 
+    func setAppPresentationReady(_ isReady: Bool) {
+        isAppPresentationReady = isReady
+        if isReady && needsSignInWhenPresentationReady {
+            needsSignInWhenPresentationReady = false
+            handleSignIn()
+        }
+    }
+
     /// Handle sign-in by loading user's saved chats and triggering sync
     func handleSignIn() {
         guard !isAccountTeardownInProgress, acceptsChatSaves else { return }
@@ -5980,6 +5996,11 @@ class ChatViewModel: ObservableObject {
             }
             return
         }
+        guard isAppPresentationReady else {
+            needsSignInWhenPresentationReady = true
+            return
+        }
+        needsSignInWhenPresentationReady = false
 
         passkeyManager.resumeAccountOperations()
 
@@ -6103,6 +6124,11 @@ class ChatViewModel: ObservableObject {
 
             // If no cloud key exists, try passkey recovery before falling back
             if !EncryptionService.shared.hasEncryptionKey() {
+                guard isAppPresentationReady else {
+                    needsSignInWhenPresentationReady = true
+                    finishSignIn(token, userId: userId)
+                    return
+                }
                 let passkeyResult = await passkeyManager.attemptPasskeyKeyRecovery()
                 guard isCurrentSignIn(token, userId: userId) else { return }
                 switch passkeyResult {
@@ -6116,6 +6142,10 @@ class ChatViewModel: ObservableObject {
                 case .manualRecoveryRequired:
                     cloudSyncOnboardingMode = .recovery
                     showCloudSyncOnboarding = true
+                    finishSignIn(token, userId: userId)
+                    return
+                case .temporarilyUnavailable:
+                    needsSignInWhenPresentationReady = true
                     finishSignIn(token, userId: userId)
                     return
                 case .recoveryFailed:
@@ -6145,6 +6175,11 @@ class ChatViewModel: ObservableObject {
             // passkey when possible; otherwise prompt the user to
             // recover so this stale device enters v2.
             if SettingsManager.shared.isCloudSyncEnabled {
+                guard isAppPresentationReady else {
+                    needsSignInWhenPresentationReady = true
+                    finishSignIn(token, userId: userId)
+                    return
+                }
                 let mismatchResult = await passkeyManager.resolveKeyMismatchAtLaunch()
                 guard isCurrentSignIn(token, userId: userId) else { return }
                 if mismatchResult == .manualRecoveryRequired {
@@ -6733,6 +6768,8 @@ class ChatViewModel: ObservableObject {
     
     /// Perform a full sync with the cloud
     func performFullSync() async {
+        guard !isSignInInProgress, !needsSignInWhenPresentationReady else { return }
+
         // Gate sync when cloud sync is disabled
         if !SettingsManager.shared.isCloudSyncEnabled {
             return

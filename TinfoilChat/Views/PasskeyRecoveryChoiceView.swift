@@ -23,6 +23,7 @@ struct PasskeyRecoveryChoiceView: View {
     @State private var isLoading = false
     @State private var loadingAction: LoadingAction?
     @State private var isStartFreshConfirmationPresented = false
+    @State private var recoveryFailed = false
 
     private enum LoadingAction {
         case tryAgain
@@ -37,23 +38,32 @@ struct PasskeyRecoveryChoiceView: View {
                 Circle()
                     .fill(Color.secondary.opacity(0.15))
                     .frame(width: 64, height: 64)
-                Image(systemName: "key.slash")
+                Image(systemName: "lock.open")
                     .font(.system(size: 28))
                     .foregroundColor(.primary)
             }
             .accessibilityHidden(true)
 
-            Text("Passkey Not Found")
+            Text("Unlock Your Chats")
                 .font(.title2)
                 .fontWeight(.bold)
                 .accessibilityAddTraits(.isHeader)
 
-            Text("We couldn't find a matching passkey on this device. Your passkey might be in iCloud Keychain or a password manager that hasn't synced yet.")
+            Text("Your encrypted chats are stored in the cloud. Authenticate with your passkey to recover your encryption key on this device.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal)
+
+            if recoveryFailed {
+                Text("Passkey authentication failed. You can try again or enter your encryption key manually.")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal)
+            }
 
             Spacer()
 
@@ -65,7 +75,7 @@ struct PasskeyRecoveryChoiceView: View {
                             ProgressView()
                                 .tint(.white)
                         } else {
-                            Label("Try Again", systemImage: "arrow.clockwise")
+                            Label("Unlock with Passkey", systemImage: "key.fill")
                         }
                     }
                     .font(.subheadline)
@@ -151,11 +161,13 @@ struct PasskeyRecoveryChoiceView: View {
     private func handleTryAgain() {
         isLoading = true
         loadingAction = .tryAgain
+        recoveryFailed = false
         Task {
             let success = await onTryAgain()
             await MainActor.run {
                 isLoading = false
                 loadingAction = nil
+                recoveryFailed = !success
                 if success { dismiss() }
             }
         }
