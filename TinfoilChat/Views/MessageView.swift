@@ -641,6 +641,28 @@ struct MessageView: View {
                         LongMessageAttachmentView(message: message, isDarkMode: isDarkMode) {
                             showLongMessageSheet = true
                         }
+                        .if(!viewModel.isLoading) { view in
+                            view.contextMenu {
+                                Button {
+                                    viewModel.regenerateMessage(at: messageIndex)
+                                } label: {
+                                    Label("Resend", systemImage: "arrow.clockwise")
+                                }
+
+                                Button {
+                                    UIPasteboard.general.string = message.content
+                                } label: {
+                                    Label("Copy", systemImage: "doc.on.doc")
+                                }
+
+                                Button {
+                                    editedContent = message.content
+                                    isEditMode = true
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -660,7 +682,20 @@ struct MessageView: View {
                                 }
                             )
                         } else {
-                            AdaptiveMarkdownText(content: message.content, isDarkMode: isDarkMode)
+                            AdaptiveMarkdownText(
+                                content: message.content,
+                                isDarkMode: isDarkMode,
+                                onResend: viewModel.isLoading ? nil : {
+                                    viewModel.regenerateMessage(at: messageIndex)
+                                },
+                                onCopyAll: {
+                                    UIPasteboard.general.string = message.content
+                                },
+                                onEdit: viewModel.isLoading ? nil : {
+                                    editedContent = message.content
+                                    isEditMode = true
+                                }
+                            )
                         }
                     } else if let segments = message.segments, !segments.isEmpty {
                         // Render events inline in the order they streamed.
@@ -843,34 +878,6 @@ struct MessageView: View {
                     }
                 }
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
-                // While a stream is in flight the table reloads its rows
-                // every UI tick, which can deallocate the SwiftUI subgraph
-                // that backs an in-flight context menu and trip a deref of
-                // a freed AG attribute (ContextMenuResponder.startTrackingUpdates
-                // EXC_BAD_ACCESS). Withhold the menu entirely until streaming
-                // finishes; long-press still works between turns.
-                .if(message.role == .user && !message.content.isEmpty && !viewModel.isLoading) { view in
-                    view.contextMenu {
-                        Button {
-                            viewModel.regenerateMessage(at: messageIndex)
-                        } label: {
-                            Label("Resend", systemImage: "arrow.clockwise")
-                        }
-
-                        Button {
-                            UIPasteboard.general.string = message.content
-                        } label: {
-                            Label("Copy", systemImage: "doc.on.doc")
-                        }
-
-                        Button {
-                            editedContent = message.content
-                            isEditMode = true
-                        } label: {
-                            Label("Edit", systemImage: "pencil")
-                        }
-                    }
-                }
                 .onChange(of: message.id) { _, _ in
                     isEditMode = false
                     editedContent = ""
@@ -1463,28 +1470,203 @@ struct AdaptiveMarkdownText: View {
     let content: String
     let isDarkMode: Bool
     let horizontalPadding: CGFloat
+    let onResend: (() -> Void)?
+    let onCopyAll: () -> Void
+    let onEdit: (() -> Void)?
 
-    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0) {
+    init(
+        content: String,
+        isDarkMode: Bool,
+        horizontalPadding: CGFloat = 0,
+        onResend: (() -> Void)? = nil,
+        onCopyAll: @escaping () -> Void = {},
+        onEdit: (() -> Void)? = nil
+    ) {
         self.content = content
         self.isDarkMode = isDarkMode
         self.horizontalPadding = horizontalPadding
-    }
-
-    private var attributedContent: AttributedString {
-        (try? AttributedString(
-            markdown: content,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        )) ?? AttributedString(content)
+        self.onResend = onResend
+        self.onCopyAll = onCopyAll
+        self.onEdit = onEdit
     }
 
     var body: some View {
-        Text(attributedContent)
-            .font(.body)
-            .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode))
-            .textSelection(.enabled)
-            .lineSpacing(2)
-            .fixedSize(horizontal: false, vertical: true)
+        InlineSelectableUserText(
+            content: content,
+            isDarkMode: isDarkMode,
+            onResend: onResend,
+            onCopyAll: onCopyAll,
+            onEdit: onEdit
+        )
             .padding(.horizontal, horizontalPadding)
+    }
+}
+
+/// Textual and SwiftUI selection surfaces cannot drag handles reliably inside
+/// UIHostingConfiguration table cells. A non-scrolling UITextView keeps the
+/// system selection interaction inline without changing the bubble layout.
+private struct InlineSelectableUserText: UIViewRepresentable {
+    let content: String
+    let isDarkMode: Bool
+    let onResend: (() -> Void)?
+    let onCopyAll: () -> Void
+    let onEdit: (() -> Void)?
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onResend: onResend, onCopyAll: onCopyAll, onEdit: onEdit)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.backgroundColor = .clear
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isScrollEnabled = false
+        textView.adjustsFontForContentSizeCategory = true
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        textView.textContainer.widthTracksTextView = false
+        textView.textContainer.heightTracksTextView = false
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textView.setContentHuggingPriority(.defaultHigh, for: .vertical)
+        textView.delegate = context.coordinator
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        context.coordinator.update(
+            onResend: onResend,
+            onCopyAll: onCopyAll,
+            onEdit: onEdit
+        )
+        textView.linkTextAttributes = [
+            .foregroundColor: UIColor(Color.userMessageForeground(isDarkMode: isDarkMode)),
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ]
+        let attributedText = makeAttributedText()
+        if !textView.attributedText.isEqual(to: attributedText) {
+            textView.attributedText = attributedText
+            textView.invalidateIntrinsicContentSize()
+        }
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView textView: UITextView,
+        context: Context
+    ) -> CGSize? {
+        let maximumWidth = proposal.width ?? UIScreen.main.bounds.width * 0.85
+        textView.textContainer.size = CGSize(width: maximumWidth, height: .greatestFiniteMagnitude)
+        textView.layoutManager.ensureLayout(for: textView.textContainer)
+
+        let initialRect = textView.layoutManager.usedRect(for: textView.textContainer)
+        let measuredWidth = min(maximumWidth, ceil(initialRect.width))
+        textView.textContainer.size = CGSize(width: measuredWidth, height: .greatestFiniteMagnitude)
+        textView.layoutManager.ensureLayout(for: textView.textContainer)
+        let finalRect = textView.layoutManager.usedRect(for: textView.textContainer)
+
+        return CGSize(
+            width: measuredWidth,
+            height: ceil(max(finalRect.height, UIFont.preferredFont(forTextStyle: .body).lineHeight))
+        )
+    }
+
+    private func makeAttributedText() -> NSAttributedString {
+        var parsed = (try? AttributedString(
+            markdown: content,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(content)
+        let runs = parsed.runs.map { ($0.range, $0.inlinePresentationIntent) }
+        let bodyFont = UIFont.preferredFont(forTextStyle: .body)
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineSpacing = 2
+
+        parsed.uiKit.font = bodyFont
+        parsed.uiKit.foregroundColor = UIColor(Color.userMessageForeground(isDarkMode: isDarkMode))
+        parsed.uiKit.paragraphStyle = paragraphStyle
+
+        for (range, intent) in runs {
+            guard let intent else { continue }
+            parsed[range].uiKit.font = font(for: intent, bodyFont: bodyFont)
+            if intent.contains(.strikethrough) {
+                parsed[range].uiKit.strikethroughStyle = .single
+            }
+        }
+
+        return NSAttributedString(parsed)
+    }
+
+    private func font(
+        for intent: InlinePresentationIntent,
+        bodyFont: UIFont
+    ) -> UIFont {
+        if intent.contains(.code) {
+            return UIFont.monospacedSystemFont(
+                ofSize: bodyFont.pointSize,
+                weight: intent.contains(.stronglyEmphasized) ? .bold : .regular
+            )
+        }
+
+        var traits: UIFontDescriptor.SymbolicTraits = []
+        if intent.contains(.stronglyEmphasized) {
+            traits.insert(.traitBold)
+        }
+        if intent.contains(.emphasized) {
+            traits.insert(.traitItalic)
+        }
+        guard !traits.isEmpty,
+              let descriptor = bodyFont.fontDescriptor.withSymbolicTraits(traits) else {
+            return bodyFont
+        }
+        return UIFont(descriptor: descriptor, size: bodyFont.pointSize)
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        private var onResend: (() -> Void)?
+        private var onCopyAll: () -> Void
+        private var onEdit: (() -> Void)?
+
+        init(
+            onResend: (() -> Void)?,
+            onCopyAll: @escaping () -> Void,
+            onEdit: (() -> Void)?
+        ) {
+            self.onResend = onResend
+            self.onCopyAll = onCopyAll
+            self.onEdit = onEdit
+        }
+
+        func update(
+            onResend: (() -> Void)?,
+            onCopyAll: @escaping () -> Void,
+            onEdit: (() -> Void)?
+        ) {
+            self.onResend = onResend
+            self.onCopyAll = onCopyAll
+            self.onEdit = onEdit
+        }
+
+        func textView(
+            _ textView: UITextView,
+            editMenuForTextIn range: NSRange,
+            suggestedActions: [UIMenuElement]
+        ) -> UIMenu? {
+            var actions = suggestedActions
+            actions.append(UIAction(title: "Copy All", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+                self?.onCopyAll()
+            })
+            if let onResend {
+                actions.append(UIAction(title: "Resend", image: UIImage(systemName: "arrow.clockwise")) { _ in
+                    onResend()
+                })
+            }
+            if let onEdit {
+                actions.append(UIAction(title: "Edit", image: UIImage(systemName: "pencil")) { _ in
+                    onEdit()
+                })
+            }
+            return UIMenu(children: actions)
+        }
     }
 }
 
