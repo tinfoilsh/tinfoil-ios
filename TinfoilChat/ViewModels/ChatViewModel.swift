@@ -1686,11 +1686,14 @@ class ChatViewModel: ObservableObject {
             shouldBeLocal = activeStorageTab == .local
         }
 
+        let responseLanguage = language ?? ProfileManager.shared.language
+
         // A reused blank represents a fresh chat, so reset its preference to
         // the current global default before selecting it.
         if shouldBeLocal {
             if let index = localChats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
                 localChats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
+                localChats[index].language = responseLanguage
                 selectChat(localChats[index])
                 shouldFocusInput = focusInput
                 return
@@ -1698,6 +1701,7 @@ class ChatViewModel: ObservableObject {
         } else {
             if let index = chats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
                 chats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
+                chats[index].language = responseLanguage
                 selectChat(chats[index])
                 shouldFocusInput = focusInput
                 return
@@ -1707,7 +1711,7 @@ class ChatViewModel: ObservableObject {
         // Create new chat with temporary ID (instant, no network call)
         let newChat = Chat.create(
             modelType: modelType ?? currentModel,
-            language: language,
+            language: responseLanguage,
             userId: currentUserId,
             isLocalOnly: shouldBeLocal,
             projectId: targetProjectId
@@ -3909,21 +3913,10 @@ class ChatViewModel: ObservableObject {
                 // Replace MODEL_NAME placeholder with current model name
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: representativeModel.fullName)
                 
-                // Replace language placeholder - use ProfileManager language first, then settings preference
-                let languageToUse: String
-                if !profileManager.language.isEmpty && profileManager.language != "English" {
-                    // Use the language from ProfileManager
-                    languageToUse = profileManager.language
-                } else if settingsManager.selectedLanguage != "System" {
-                    // Use the language from settings
-                    languageToUse = settingsManager.selectedLanguage
-                } else if let chatLanguage = streamChat.language {
-                    // Fall back to chat's language if set
-                    languageToUse = chatLanguage
-                } else {
-                    // Default to English
-                    languageToUse = "English"
-                }
+                let languageToUse = ResponseLanguageResolver.resolve(
+                    chatLanguage: streamChat.language,
+                    profileLanguage: profileManager.language
+                )
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
                 
                 let personalizationXML = profileManager.getPersonalizationPrompt() ?? ""
@@ -5603,7 +5596,7 @@ class ChatViewModel: ObservableObject {
                 : nil
             let blankChat = Chat.create(
                 modelType: currentModel,
-                language: nil,
+                language: ProfileManager.shared.language,
                 userId: currentUserId,
                 isLocalOnly: isLocal,
                 webSearchEnabled: webSearchEnabled

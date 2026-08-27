@@ -558,8 +558,7 @@ struct ChatContainer: View {
         if timeSinceBackground > backgroundTimeThreshold && 
            !viewModel.messages.isEmpty && 
            authManager.isAuthenticated {
-            let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
-            viewModel.createNewChat(language: language)
+            viewModel.createNewChat()
             messageText = ""
         }
     }
@@ -629,8 +628,7 @@ struct ChatContainer: View {
     /// Creates a new chat if the current chat has messages
     private func createNewChat() {
         if !viewModel.messages.isEmpty {
-            let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
-            viewModel.createNewChat(language: language)
+            viewModel.createNewChat()
             messageText = ""
         }
     }

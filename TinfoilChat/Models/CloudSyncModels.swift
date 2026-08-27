@@ -551,7 +551,7 @@ struct ProfileData: Codable {
 
 enum ProfileDefaults {
     static let isDarkMode = true
-    static let language = "English"
+    static let language = ResponseLanguageResolver.systemSelection
     static let nickname = ""
     static let profession = ""
     static let traits: [String] = []

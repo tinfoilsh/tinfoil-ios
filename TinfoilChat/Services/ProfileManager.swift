@@ -259,9 +259,7 @@ class ProfileManager: ObservableObject {
         if let themeMode = profile.themeMode {
             self.themeMode = themeMode
         }
-        if let language = profile.language {
-            self.language = language
-        }
+        self.language = profile.language ?? ProfileDefaults.language
         if let nickname = profile.nickname {
             self.nickname = nickname
         }
