@@ -533,6 +533,96 @@ struct PasskeyCompositionTests {
         #expect(decoded.prfOutput == Data(repeating: 9, count: 32))
     }
 
+    @Test func bundleInventoryVerificationUsesLocalAndRemoteKeyIds() {
+        let state = currentKeyState(keyId: "current-key", credentialIds: ["AQ"])
+
+        let matching = PasskeyManager.passkeyBundleInventory(
+            state: state,
+            localKeyId: "current-key"
+        )
+        let mismatching = PasskeyManager.passkeyBundleInventory(
+            state: state,
+            localKeyId: "rotated-key"
+        )
+        let unverified = PasskeyManager.passkeyBundleInventory(
+            state: state,
+            localKeyId: nil
+        )
+
+        #expect(matching.verification == .match)
+        #expect(mismatching.verification == .mismatch)
+        #expect(unverified.verification == .unverified)
+    }
+
+    @Test func failedInventoryRefreshPreservesBundlesButDisablesRemoval() {
+        let inventory = PasskeyManager.passkeyBundleInventory(
+            state: currentKeyState(keyId: "current-key", credentialIds: ["AQ", "Ag"]),
+            localKeyId: "current-key"
+        )
+
+        let failedRefresh = inventory.preservingBundlesAsUnverified()
+
+        #expect(Set(failedRefresh.bundles.map(\.credentialId)) == Set(["AQ", "Ag"]))
+        #expect(failedRefresh.verification == .unverified)
+    }
+
+    @Test func passkeyRemovalRejectsRotationBetweenInventoryAndMutation() {
+        let inventoryState = currentKeyState(keyId: "old-key", credentialIds: ["AQ"])
+        let mutationState = currentKeyState(keyId: "rotated-key", credentialIds: ["AQ"])
+
+        #expect(PasskeyManager.passkeyBundleInventory(
+            state: inventoryState,
+            localKeyId: "old-key"
+        ).verification == .match)
+        #expect(PasskeyManager.passkeyBundleRemovalDecision(
+            credentialId: "AQ",
+            state: mutationState,
+            localKeyId: "old-key"
+        ) == .reject(.keyMismatch))
+    }
+
+    @Test func passkeyRemovalAllowsFinalBundleWithoutBackupGate() {
+        let state = currentKeyState(keyId: "current-key", credentialIds: ["AQ"])
+
+        #expect(PasskeyManager.passkeyBundleRemovalDecision(
+            credentialId: "AQ",
+            state: state,
+            localKeyId: "current-key"
+        ) == .remove)
+    }
+
+    @Test func missingPasskeyBundleRemovalIsIdempotent() {
+        let state = currentKeyState(keyId: "current-key", credentialIds: ["Ag"])
+
+        #expect(PasskeyManager.passkeyBundleRemovalDecision(
+            credentialId: "AQ",
+            state: state,
+            localKeyId: "current-key"
+        ) == .alreadyMissing)
+        #expect(PasskeyManager.passkeyBundleRemovalError(from: SyncEnclaveError(
+            message: "missing",
+            status: 404,
+            code: WireCodes.notFound
+        )) == .missing)
+    }
+
+    @Test func passkeyRemovalErrorsRemainTyped() {
+        #expect(PasskeyManager.passkeyBundleRemovalError(from: SyncEnclaveError(
+            message: "sign in",
+            status: 401,
+            code: WireCodes.authActionRequired
+        )) == .authentication)
+        #expect(PasskeyManager.passkeyBundleRemovalError(from: SyncEnclaveError(
+            message: "rotated",
+            status: 409,
+            code: WireCodes.staleKey
+        )) == .keyMismatch)
+        #expect(PasskeyManager.passkeyBundleRemovalError(from: SyncEnclaveError(
+            message: "unavailable",
+            status: 503
+        )) == .server)
+    }
+
     @Test func keyIdentifierMatchesTinfoilVector() throws {
         let cek = Data((0..<32).map(UInt8.init))
 
@@ -584,6 +674,22 @@ struct PasskeyCompositionTests {
             bundleVersion: nil,
             createdAt: nil,
             updatedAt: nil
+        )
+    }
+
+    private func currentKeyState(
+        keyId: String?,
+        credentialIds: [String]
+    ) -> EnclaveKeyCurrentResponse {
+        EnclaveKeyCurrentResponse(
+            keyId: keyId,
+            etag: nil,
+            bundles: Dictionary(uniqueKeysWithValues: credentialIds.map { id in
+                (id, bundle(id: id, wrappedByteCount: 48))
+            }),
+            createdVia: nil,
+            createdAt: nil,
+            hasData: false
         )
     }
 }

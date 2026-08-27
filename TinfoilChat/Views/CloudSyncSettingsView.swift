@@ -56,9 +56,16 @@ struct CloudSyncSettingsView: View {
     
     @State private var copiedToClipboard: Bool = false
     @State private var showBackupKeySheet: Bool = false
-    @State private var passkeyBundles: [EnclaveKeyCurrentBundle] = []
+    @State private var passkeyInventoryState = PasskeyBundleInventory(
+        bundles: [],
+        verification: .unverified
+    )
     @State private var removingPasskeyId: String? = nil
     @State private var passkeyBundleError: String? = nil
+
+    private var passkeyBundles: [EnclaveKeyCurrentBundle] {
+        passkeyInventoryState.bundles
+    }
     
     var body: some View {
         List {
@@ -473,6 +480,9 @@ struct CloudSyncSettingsView: View {
                 .fontWeight(.medium)
                 .foregroundColor(.secondary)
                 .textCase(.uppercase)
+            Text(passkeyInventoryGuidance(bundleCount: sorted.count))
+                .font(.caption)
+                .foregroundColor(passkeyInventoryState.verification == .match ? .secondary : .orange)
             ForEach(sorted, id: \.credentialId) { bundle in
                 passkeyBundleRow(
                     bundle: bundle,
@@ -535,9 +545,11 @@ struct CloudSyncSettingsView: View {
                 Text(isRemoving ? "Removing…" : "Remove")
                     .font(.caption)
                     .fontWeight(.medium)
-                    .foregroundColor(isRemoving ? .secondary : .red)
+                    .foregroundColor(
+                        isRemoving || passkeyInventoryState.verification != .match ? .secondary : .red
+                    )
             }
-            .disabled(removingPasskeyId != nil)
+            .disabled(removingPasskeyId != nil || passkeyInventoryState.verification != .match)
             .buttonStyle(.bordered)
             .controlSize(.small)
         }
@@ -546,18 +558,19 @@ struct CloudSyncSettingsView: View {
 
     private func refreshPasskeyBundles() async {
         guard settings.isCloudSyncEnabled else {
-            passkeyBundles = []
+            passkeyInventoryState = PasskeyBundleInventory(bundles: [], verification: .unverified)
             passkeyBundleError = nil
             return
         }
         do {
-            passkeyBundles = try await passkeyManager.listPasskeyBundles()
+            passkeyInventoryState = try await passkeyManager.passkeyBundleInventory()
             passkeyBundleError = nil
         } catch {
             // Keep the previous inventory: clearing it would make a
             // load failure indistinguishable from "no passkeys
             // registered" for a security-relevant list.
-            passkeyBundleError = "Couldn't load registered passkeys. Please try again later."
+            passkeyInventoryState = passkeyInventoryState.preservingBundlesAsUnverified()
+            passkeyBundleError = inventoryErrorMessage(for: error)
         }
     }
 
@@ -568,10 +581,50 @@ struct CloudSyncSettingsView: View {
         removingPasskeyId = credentialId
         defer { removingPasskeyId = nil }
         do {
-            try await passkeyManager.removePasskeyBundle(credentialId: credentialId)
+            _ = try await passkeyManager.removePasskeyBundle(credentialId: credentialId)
             await refreshPasskeyBundles()
         } catch {
-            passkeyBundleError = "Couldn't remove the passkey. Please try again."
+            passkeyBundleError = removalErrorMessage(for: error)
+        }
+    }
+
+    private func passkeyInventoryGuidance(bundleCount: Int) -> String {
+        switch passkeyInventoryState.verification {
+        case .match where bundleCount == 1:
+            return "You can remove this final cloud recovery bundle. Cloud sync remains available on this device, but passkey recovery is unavailable until you add another. This does not delete the passkey stored by the platform."
+        case .match:
+            return "Remove revokes a platform's cloud recovery bundle. It does not delete the passkey stored by that platform."
+        case .mismatch:
+            return "Removal is disabled because this device does not have the current cloud encryption key. Recover the current key first."
+        case .unverified:
+            return "Removal is disabled until this device and the current cloud encryption key can be verified."
+        }
+    }
+
+    private func inventoryErrorMessage(for error: Error) -> String {
+        switch PasskeyManager.passkeyBundleRemovalError(from: error) {
+        case .authentication:
+            return "Sign in again to verify registered passkeys."
+        default:
+            return "Couldn't verify registered passkeys. The previous list may be out of date."
+        }
+    }
+
+    private func removalErrorMessage(for error: Error) -> String {
+        guard let removalError = error as? PasskeyBundleRemovalError else {
+            return "Couldn't remove the passkey. Please try again."
+        }
+        switch removalError {
+        case .missing:
+            return "This cloud recovery bundle was already removed."
+        case .keyMismatch:
+            return "The cloud encryption key changed. Recover the current key before removing a passkey."
+        case .unverifiable:
+            return "This device's encryption key couldn't be verified. Removal is disabled."
+        case .authentication:
+            return "Sign in again to manage registered passkeys."
+        case .server:
+            return "Couldn't remove the passkey because the server is unavailable. Please try again."
         }
     }
 
