@@ -5,6 +5,16 @@ import Testing
 @MainActor
 @Suite("Attachment Processing Store Tests")
 struct AttachmentProcessingStoreTests {
+    @Test("A newer import rejects stale error publication")
+    func newerImportRejectsStaleErrorPublication() {
+        var fence = AttachmentErrorPublicationFence()
+        let firstImport = fence.begin()
+        let secondImport = fence.begin()
+
+        #expect(!fence.accepts(firstImport))
+        #expect(fence.accepts(secondImport))
+    }
+
     @Test("Removal cancels processing and prevents late publication")
     func removalPreventsLatePublication() async {
         let store = AttachmentProcessingStore()

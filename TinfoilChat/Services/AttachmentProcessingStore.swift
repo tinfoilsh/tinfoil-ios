@@ -1,5 +1,18 @@
 import Foundation
 
+struct AttachmentErrorPublicationFence {
+    private(set) var generation = 0
+
+    mutating func begin() -> Int {
+        generation &+= 1
+        return generation
+    }
+
+    func accepts(_ generation: Int) -> Bool {
+        self.generation == generation
+    }
+}
+
 @MainActor
 final class AttachmentProcessingStore {
     struct Publication {

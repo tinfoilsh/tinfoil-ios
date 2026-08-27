@@ -456,6 +456,7 @@ class ChatViewModel: ObservableObject {
     @Published var attachmentError: String? = nil
     @Published var pendingImageThumbnails: [String: String] = [:]
     private let attachmentProcessingStore = AttachmentProcessingStore()
+    private var attachmentErrorPublicationFence = AttachmentErrorPublicationFence()
     var isProcessingAttachment: Bool {
         pendingAttachments.contains { $0.processingState == .processing }
     }
@@ -3317,8 +3318,11 @@ class ChatViewModel: ObservableObject {
         fileName: String,
         sharedImportRequestID: UUID? = nil,
         managedFile: ManagedStagedFile? = nil,
-        preserveExistingErrors: Bool = false
+        preserveExistingErrors: Bool = false,
+        errorPublicationGeneration: Int? = nil
     ) {
+        let errorPublicationGeneration = errorPublicationGeneration
+            ?? attachmentErrorPublicationFence.begin()
         attachmentError = nil
 
         let attachmentId = UUID().uuidString.lowercased()
@@ -3356,6 +3360,7 @@ class ChatViewModel: ObservableObject {
                 if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
                     pendingAttachments[index] = attachment
                 }
+                guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
                 let message = preserveExistingErrors
                     ? "\(fileName): \(error.localizedDescription)"
                     : error.localizedDescription
@@ -3377,18 +3382,28 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    func addDocumentAttachment(handle: ManagedStagedFile, preserveExistingErrors: Bool = false) {
+    func addDocumentAttachment(
+        handle: ManagedStagedFile,
+        preserveExistingErrors: Bool = false,
+        errorPublicationGeneration: Int? = nil
+    ) {
         addDocumentAttachment(
             url: handle.url,
             fileName: handle.fileName,
             managedFile: handle,
-            preserveExistingErrors: preserveExistingErrors
+            preserveExistingErrors: preserveExistingErrors,
+            errorPublicationGeneration: errorPublicationGeneration
         )
     }
 
     func addDocumentAttachments(_ batch: DocumentPickerBatch) {
+        let errorPublicationGeneration = attachmentErrorPublicationFence.begin()
         for handle in batch.files {
-            addDocumentAttachment(handle: handle, preserveExistingErrors: true)
+            addDocumentAttachment(
+                handle: handle,
+                preserveExistingErrors: true,
+                errorPublicationGeneration: errorPublicationGeneration
+            )
         }
         attachmentError = ManagedFileBatchErrorMessage.attachments(batch.failures)
     }
@@ -3398,6 +3413,7 @@ class ChatViewModel: ObservableObject {
         fileName: String,
         sharedImportRequestID: UUID? = nil
     ) {
+        let errorPublicationGeneration = attachmentErrorPublicationFence.begin()
         attachmentError = nil
 
         let attachmentId = UUID().uuidString.lowercased()
@@ -3439,6 +3455,7 @@ class ChatViewModel: ObservableObject {
                 if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
                     pendingAttachments[index] = attachment
                 }
+                guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
                 attachmentError = error.localizedDescription
             }
         }
