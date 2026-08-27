@@ -9,6 +9,10 @@ import Foundation
 import Combine
 import SwiftUI
 
+private enum ProfileLocalSaveError: Error {
+    case keychainWriteFailed
+}
+
 extension Notification.Name {
     static let profileSharedSettingsDidChange = Notification.Name("com.tinfoil.chat.profile.shared-settings-did-change")
 }
@@ -191,6 +195,19 @@ class ProfileManager: ObservableObject {
         }
     }
 
+    private func persistProfileToKeychainSynchronously(_ profile: ProfileData) throws {
+        let data = try JSONEncoder().encode(profile)
+        let helper = keychainHelper
+        let key = keychainKey
+        let service = keychainService
+        let saved = keychainQueue.sync {
+            helper.save(data, for: key, service: service)
+        }
+        guard saved else {
+            throw ProfileLocalSaveError.keychainWriteFailed
+        }
+    }
+
     private func persistBaselineToKeychain(_ profile: ProfileData) {
         guard let data = try? JSONEncoder().encode(profile) else {
             return
@@ -243,6 +260,53 @@ class ProfileManager: ObservableObject {
             fieldClocks: localFieldClocks,
             clockVersion: localClockVersion
         )
+    }
+
+    var personalizationDraft: PersonalizationDraft {
+        PersonalizationDraft(
+            isEnabled: isUsingPersonalization,
+            nickname: nickname,
+            profession: profession,
+            traits: traits,
+            additionalContext: additionalContext
+        )
+    }
+
+    func savePersonalization(_ draft: PersonalizationDraft) throws {
+        let changedFields = draft.changedProfileFields(comparedTo: personalizationDraft)
+        var clocks = localFieldClocks ?? lastSyncedProfile?.fieldClocks ?? [:]
+
+        if !changedFields.isEmpty {
+            let observedMax = changedFields.compactMap { clocks[$0]?.v }.max()
+            let tick = try EditClockStore.nextClock(observedMax: observedMax)
+            for field in changedFields {
+                clocks[field] = tick
+            }
+        }
+
+        var profile = createProfileData()
+        profile.isUsingPersonalization = draft.isEnabled
+        profile.nickname = draft.nickname
+        profile.profession = draft.profession
+        profile.traits = draft.traits
+        profile.additionalContext = draft.additionalContext
+        profile.fieldClocks = clocks.isEmpty ? nil : clocks
+        profile.clockVersion = lastSyncedVersion
+        try persistProfileToKeychainSynchronously(profile)
+
+        isApplyingProfile = true
+        isUsingPersonalization = draft.isEnabled
+        nickname = draft.nickname
+        profession = draft.profession
+        traits = draft.traits
+        additionalContext = draft.additionalContext
+        localFieldClocks = profile.fieldClocks
+        localClockVersion = profile.clockVersion
+        isApplyingProfile = false
+
+        if !changedFields.isEmpty {
+            markLocalProfileChanged()
+        }
     }
     
     /// Apply profile data to published properties

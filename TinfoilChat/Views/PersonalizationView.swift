@@ -120,18 +120,24 @@ struct FlowResult {
     }
 }
 
+@MainActor
 struct PersonalizationView: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var profileManager = ProfileManager.shared
+    @ObservedObject private var profileManager: ProfileManager
     @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var editor: PersonalizationEditorState
     @State private var isSaving: Bool = false
-    @State private var isPersonalizationEnabled = ProfileDefaults.isUsingPersonalization
-    @State private var nickname = ProfileDefaults.nickname
-    @State private var profession = ProfileDefaults.profession
-    @State private var traits = ProfileDefaults.traits
-    @State private var additionalContext = ProfileDefaults.additionalContext
+    @State private var saveError: String?
 
     private let availableTraits = SettingsManager.shared.availableTraits
+
+    init() {
+        let profileManager = ProfileManager.shared
+        _profileManager = ObservedObject(wrappedValue: profileManager)
+        _editor = StateObject(wrappedValue: PersonalizationEditorState(
+            draft: profileManager.personalizationDraft
+        ))
+    }
     
     var body: some View {
         List {
@@ -151,11 +157,13 @@ struct PersonalizationView: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Save") {
                     isSaving = true
-                    profileManager.isUsingPersonalization = isPersonalizationEnabled
-                    profileManager.nickname = nickname
-                    profileManager.profession = profession
-                    profileManager.traits = traits
-                    profileManager.additionalContext = additionalContext
+                    do {
+                        try profileManager.savePersonalization(editor.draft)
+                    } catch {
+                        saveError = error.localizedDescription
+                        isSaving = false
+                        return
+                    }
                     Task { @MainActor in
                         await profileManager.syncToCloud()
                         isSaving = false
@@ -179,18 +187,26 @@ struct PersonalizationView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
         .task {
+            let loadGeneration = editor.beginLoad()
             await profileManager.syncFromCloud()
-            isPersonalizationEnabled = profileManager.isUsingPersonalization
-            nickname = profileManager.nickname
-            profession = profileManager.profession
-            traits = profileManager.traits
-            additionalContext = profileManager.additionalContext
+            editor.applyLoadedDraft(
+                profileManager.personalizationDraft,
+                generation: loadGeneration
+            )
+        }
+        .alert("Could Not Save Personalization", isPresented: Binding(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(saveError ?? "")
         }
     }
 
     private var enableSection: some View {
         Section {
-            Toggle("Personalize responses", isOn: $isPersonalizationEnabled)
+            Toggle("Personalize responses", isOn: $editor.isEnabled)
                 .tint(Color.accentPrimary)
         } footer: {
             Text("Use these details to tailor responses. Turning this off keeps your details saved.")
@@ -200,7 +216,7 @@ struct PersonalizationView: View {
     
     private var nicknameSection: some View {
         Section {
-            TextField("Nickname", text: $nickname)
+            TextField("Nickname", text: $editor.nickname)
         } header: {
             Text("What should Tin call you?")
         }
@@ -209,7 +225,7 @@ struct PersonalizationView: View {
 
     private var professionSection: some View {
         Section {
-            TextField("Profession", text: $profession)
+            TextField("Profession", text: $editor.profession)
         } header: {
             Text("What's your occupation?")
         }
@@ -220,7 +236,7 @@ struct PersonalizationView: View {
         Section {
             TraitSelectionView(
                 availableTraits: availableTraits,
-                selectedTraits: $traits
+                selectedTraits: $editor.traits
             )
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 4)
@@ -232,7 +248,7 @@ struct PersonalizationView: View {
 
     private var additionalContextSection: some View {
         Section {
-            TextField("Anything else Tin should know about you?", text: $additionalContext, axis: .vertical)
+            TextField("Anything else Tin should know about you?", text: $editor.additionalContext, axis: .vertical)
                 .lineLimit(3...6)
         } header: {
             Text("Additional context")
@@ -243,10 +259,7 @@ struct PersonalizationView: View {
     private var clearSection: some View {
         Section {
             Button(role: .destructive) {
-                nickname = ""
-                profession = ""
-                traits = []
-                additionalContext = ""
+                editor.clearDetails()
             } label: {
                 HStack {
                     Text("Clear details")
