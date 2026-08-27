@@ -46,6 +46,7 @@ struct MessageInputContentTests {
     }
 
     @Test("rechecks access after delayed microphone permission")
+    @MainActor
     func delayedMicrophonePermissionAccess() {
         #expect(ChatViewModel.audioRecordingStartDecision(
             canUseAudioInput: true,

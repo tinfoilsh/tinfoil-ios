@@ -46,6 +46,15 @@ enum SubscriptionAccessPolicy {
     }
 }
 
+struct SubscriptionRefreshContext: Equatable {
+    let userId: String
+    let accountLifecycleGeneration: UInt
+
+    func isCurrent(userId: String?, accountLifecycleGeneration: UInt) -> Bool {
+        self.userId == userId && self.accountLifecycleGeneration == accountLifecycleGeneration
+    }
+}
+
 @MainActor
 class AuthManager: ObservableObject {
     private static let userIdKey = "id"
@@ -68,6 +77,7 @@ class AuthManager: ObservableObject {
     private var accountTeardownId: UUID?
     private var subscriptionExpiryTask: Task<Void, Never>?
     private var subscriptionExpiryTaskId: UUID?
+    private var accountLifecycleGeneration: UInt = 0
     
     // UserDefaults keys
     private let authStateKey = Constants.StorageKeys.Auth.state
@@ -128,6 +138,22 @@ class AuthManager: ObservableObject {
         subscriptionExpiryTask = nil
         subscriptionExpiryTaskId = nil
     }
+
+    private func invalidateAccountLifecycle() {
+        accountLifecycleGeneration &+= 1
+    }
+
+    private func isCurrentSubscriptionRefresh(
+        _ context: SubscriptionRefreshContext,
+        clerk expectedClerk: Clerk
+    ) -> Bool {
+        clerk === expectedClerk
+            && expectedClerk.user?.id == context.userId
+            && context.isCurrent(
+                userId: localUserId,
+                accountLifecycleGeneration: accountLifecycleGeneration
+            )
+    }
     
     // Reference to ChatViewModel for handling chat state
     private weak var chatViewModel: ChatViewModel?
@@ -182,11 +208,15 @@ class AuthManager: ObservableObject {
     }
     
     func setClerk(_ clerk: Clerk) {
+        if self.clerk !== clerk {
+            invalidateAccountLifecycle()
+        }
         self.clerk = clerk
         // Check if clerk is already loaded and has a user
         if let user = clerk.user {
             if let cachedUserId = localUserId,
                cachedUserId != user.id {
+                invalidateAccountLifecycle()
                 hasTriggeredSignIn = true
                 accountSwitchTask = Task { @MainActor [weak self] in
                     guard let self else { return }
@@ -330,6 +360,7 @@ class AuthManager: ObservableObject {
     }
     
     private func clearAuthState() async {
+        invalidateAccountLifecycle()
         if let accountTeardownTask {
             await accountTeardownTask.value
             return
@@ -391,6 +422,7 @@ class AuthManager: ObservableObject {
     }
     
     func signOut() async {
+        invalidateAccountLifecycle()
         do {
             // If we have a Clerk instance, use it, otherwise fall back to Clerk.shared
             let clerk = self.clerk ?? Clerk.shared
@@ -403,9 +435,16 @@ class AuthManager: ObservableObject {
     /// Fetches subscription status directly from the API
     @discardableResult
     func fetchSubscriptionStatus() async -> Bool {
-        guard let clerk = clerk else { return false }
-        guard let session = clerk.session else { return false }
+        guard let expectedClerk = clerk,
+              let expectedUserId = expectedClerk.user?.id,
+              expectedUserId == localUserId else { return false }
+        let refreshContext = SubscriptionRefreshContext(
+            userId: expectedUserId,
+            accountLifecycleGeneration: accountLifecycleGeneration
+        )
+        guard let session = expectedClerk.session else { return false }
         guard let token = try? await session.getToken() ?? session.lastActiveToken?.jwt else { return false }
+        guard isCurrentSubscriptionRefresh(refreshContext, clerk: expectedClerk) else { return false }
         
         do {
             let apiURL = "\(Constants.API.baseURL)/api/app/user-metadata"
@@ -418,6 +457,7 @@ class AuthManager: ObservableObject {
             request.addValue("application/json", forHTTPHeaderField: "Content-Type")
             
             let (data, response) = try await URLSession.shared.data(for: request)
+            guard isCurrentSubscriptionRefresh(refreshContext, clerk: expectedClerk) else { return false }
             
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else { return false }
@@ -427,36 +467,35 @@ class AuthManager: ObservableObject {
                 let chatStatus = publicMetadata["chat_subscription_status"] as? String
                 let expiresAt = publicMetadata["chat_subscription_expires_at"] as? String
 
-                await MainActor.run {
-                    self.updateSubscriptionAccess(
-                        status: chatStatus,
-                        expiresAt: expiresAt
-                    )
+                guard isCurrentSubscriptionRefresh(refreshContext, clerk: expectedClerk) else { return false }
+                updateSubscriptionAccess(
+                    status: chatStatus,
+                    expiresAt: expiresAt
+                )
 
-                    // Update local user data
-                    if self.localUserData != nil {
-                        if let chatStatus {
-                            self.localUserData?["subscription_status"] = chatStatus
-                        } else {
-                            self.localUserData?.removeValue(forKey: "subscription_status")
-                        }
-                        if let expiresAt {
-                            self.localUserData?["subscription_expires_at"] = expiresAt
-                        } else {
-                            self.localUserData?.removeValue(forKey: "subscription_expires_at")
-                        }
+                // Update local user data
+                if localUserData != nil {
+                    if let chatStatus {
+                        localUserData?["subscription_status"] = chatStatus
+                    } else {
+                        localUserData?.removeValue(forKey: "subscription_status")
                     }
-                    
-                    // Update UserDefaults
-                    if let userData = self.localUserData,
-                       let encodedData = try? JSONSerialization.data(withJSONObject: userData) {
-                        UserDefaults.standard.set(encodedData, forKey: userDataKey)
+                    if let expiresAt {
+                        localUserData?["subscription_expires_at"] = expiresAt
+                    } else {
+                        localUserData?.removeValue(forKey: "subscription_expires_at")
                     }
-                    
-                    // Save subscription state
-                    UserDefaults.standard.set(self.hasActiveSubscription, forKey: self.subscriptionKey)
-                    
                 }
+
+                // Update UserDefaults
+                if let userData = localUserData,
+                   let encodedData = try? JSONSerialization.data(withJSONObject: userData) {
+                    UserDefaults.standard.set(encodedData, forKey: userDataKey)
+                }
+
+                // Save subscription state
+                UserDefaults.standard.set(hasActiveSubscription, forKey: subscriptionKey)
+
                 return true
             }
             return false
@@ -468,6 +507,7 @@ class AuthManager: ObservableObject {
     
     /// Deletes the user's account and clears all local data
     func deleteAccount() async throws {
+        invalidateAccountLifecycle()
         do {
             guard let clerk = self.clerk else {
                 throw NSError(domain: "AuthError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Clerk instance not set"])

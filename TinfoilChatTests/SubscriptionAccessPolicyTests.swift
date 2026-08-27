@@ -82,4 +82,24 @@ struct SubscriptionAccessPolicyTests {
         #expect(!SubscriptionAccessPolicy.requiresCredentialRefresh(previous: false, current: false))
         #expect(!SubscriptionAccessPolicy.requiresCredentialRefresh(previous: true, current: true))
     }
+
+    @Test("rejects a delayed refresh after switching accounts")
+    func delayedAccountSwitch() async {
+        let refresh = SubscriptionRefreshContext(userId: "account-a", accountLifecycleGeneration: 4)
+
+        await Task.yield()
+
+        #expect(!refresh.isCurrent(userId: "account-b", accountLifecycleGeneration: 4))
+        #expect(!refresh.isCurrent(userId: "account-a", accountLifecycleGeneration: 5))
+    }
+
+    @Test("rejects a delayed refresh after restarting the same account lifecycle")
+    func delayedSameAccountLifecycleChange() async {
+        let refresh = SubscriptionRefreshContext(userId: "account", accountLifecycleGeneration: 8)
+
+        await Task.yield()
+
+        #expect(!refresh.isCurrent(userId: "account", accountLifecycleGeneration: 9))
+        #expect(refresh.isCurrent(userId: "account", accountLifecycleGeneration: 8))
+    }
 }
