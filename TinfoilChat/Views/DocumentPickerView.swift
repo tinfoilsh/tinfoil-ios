@@ -24,6 +24,64 @@ struct DocumentPickerBatch: Sendable {
     let failures: [ManagedFileError]
 }
 
+enum ManagedStagedFileKind: Equatable {
+    case document
+    case image
+}
+
+enum DocumentPickerBatchAdmission {
+    struct Result {
+        let files: [(file: ManagedStagedFile, kind: ManagedStagedFileKind)]
+        let failures: [ManagedFileError]
+    }
+
+    enum Error: LocalizedError {
+        case imageModelUnsupported
+
+        var errorDescription: String? {
+            switch self {
+            case .imageModelUnsupported:
+                return "The current model does not support image attachments."
+            }
+        }
+    }
+
+    static func classify(_ file: ManagedStagedFile) -> ManagedStagedFileKind {
+        if let identifier = file.contentTypeIdentifier {
+            let contentType = UTType(identifier)
+            if contentType != .data {
+                return contentType.conforms(to: .image) ? .image : .document
+            }
+        }
+
+        let fileExtension = URL(fileURLWithPath: file.fileName).pathExtension
+        if let contentType = UTType(filenameExtension: fileExtension),
+           contentType.conforms(to: .image) {
+            return .image
+        }
+        return .document
+    }
+
+    static func admit(
+        _ files: [ManagedStagedFile],
+        modelSupportsImages: Bool
+    ) -> Result {
+        var admitted: [(file: ManagedStagedFile, kind: ManagedStagedFileKind)] = []
+        var failures: [ManagedFileError] = []
+
+        for file in files {
+            let kind = classify(file)
+            if kind == .image, !modelSupportsImages {
+                failures.append(ManagedFileError(fileName: file.fileName, error: Error.imageModelUnsupported))
+                file.discard()
+            } else {
+                admitted.append((file, kind))
+            }
+        }
+        return Result(files: admitted, failures: failures)
+    }
+}
+
 struct DocumentPickerAllowedKinds: OptionSet, Sendable {
     let rawValue: Int
 

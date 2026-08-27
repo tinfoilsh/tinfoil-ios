@@ -66,6 +66,98 @@ struct DocumentPickerBatchTests {
         #expect(callbackCount == 0)
     }
 
+    @Test("Staged type metadata takes priority with an extension fallback")
+    func classifiesStagedFiles() throws {
+        let fixture = try makeFixture(fileNames: ["metadata.txt", "named.jpg", "fallback.png"])
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+        let metadataImage = try fixture.store.stage(
+            sourceURL: fixture.sourceURLs[0],
+            fileName: "metadata.txt",
+            contentTypeIdentifier: UTType.png.identifier
+        )
+        let metadataDocument = try fixture.store.stage(
+            sourceURL: fixture.sourceURLs[1],
+            fileName: "named.jpg",
+            contentTypeIdentifier: UTType.pdf.identifier
+        )
+        let extensionImage = try fixture.store.stage(
+            sourceURL: fixture.sourceURLs[2],
+            fileName: "fallback.png",
+            contentTypeIdentifier: UTType.data.identifier
+        )
+        defer { [metadataImage, metadataDocument, extensionImage].forEach { $0.discard() } }
+
+        #expect(DocumentPickerBatchAdmission.classify(metadataImage) == .image)
+        #expect(DocumentPickerBatchAdmission.classify(metadataDocument) == .document)
+        #expect(DocumentPickerBatchAdmission.classify(extensionImage) == .image)
+    }
+
+    @Test("A model change rejects images, cleans them up, and preserves document order")
+    func rejectsImagesAfterModelChange() throws {
+        let fixture = try makeFixture(fileNames: ["first.txt", "image.png", "third.pdf"])
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+        let files = try fixture.sourceURLs.map {
+            try fixture.store.stage(sourceURL: $0, fileName: $0.lastPathComponent)
+        }
+
+        let result = DocumentPickerBatchAdmission.admit(files, modelSupportsImages: false)
+        defer { result.files.forEach { $0.file.discard() } }
+
+        #expect(result.files.map { $0.file.fileName } == ["first.txt", "third.pdf"])
+        #expect(result.files.map(\.kind) == [.document, .document])
+        #expect(result.failures.map(\.fileName) == ["image.png"])
+        #expect(!FileManager.default.fileExists(atPath: files[1].url.path))
+        #expect(FileManager.default.fileExists(atPath: files[0].url.path))
+        #expect(FileManager.default.fileExists(atPath: files[2].url.path))
+    }
+
+    @Test("Image admission strictly rejects invalid image bytes")
+    func rejectsInvalidImageData() async throws {
+        let fixture = try makeFixture(fileNames: ["invalid.png"])
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+
+        await #expect(throws: ImageProcessingService.ProcessingError.invalidImageData) {
+            try await ImageProcessingService.shared.processImage(at: fixture.sourceURLs[0])
+        }
+    }
+
+    @Test("Files images retain the ten MiB image read bound")
+    func rejectsOversizedImage() async throws {
+        let fixture = try makeFixture(fileNames: [])
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+        let oversizedURL = fixture.rootURL.appendingPathComponent("oversized.png")
+        FileManager.default.createFile(atPath: oversizedURL.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: oversizedURL)
+        try handle.truncate(atOffset: UInt64(Constants.Attachments.maxImageSizeBytes + 1))
+        try handle.close()
+
+        await #expect(throws: BoundedFileIO.Error.fileTooLarge(
+            size: Constants.Attachments.maxImageSizeBytes + 1,
+            maximum: Constants.Attachments.maxImageSizeBytes
+        )) {
+            try await ImageProcessingService.shared.processImage(at: oversizedURL)
+        }
+    }
+
+    @Test("Files image processing cleans up its staged handle after rejection")
+    @MainActor
+    func rejectedImageProcessingCleansUpHandle() async throws {
+        let fixture = try makeFixture(fileNames: ["invalid.png"])
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+        let staged = try fixture.store.stage(
+            sourceURL: fixture.sourceURLs[0],
+            fileName: "invalid.png"
+        )
+        let store = AttachmentProcessingStore()
+
+        let task = store.start(id: "invalid-image", stagedFile: staged) { _ in
+            _ = try? await ImageProcessingService.shared.processImage(at: staged.url)
+        }
+        await task.value
+
+        #expect(!FileManager.default.fileExists(atPath: staged.url.path))
+    }
+
     @Test("Project batches continue after failures and combine the result message")
     func processesProjectBatchSequentially() async throws {
         let fixture = try makeFixture(fileNames: ["first.txt", "failed.txt", "third.txt"])

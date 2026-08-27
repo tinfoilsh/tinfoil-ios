@@ -306,7 +306,9 @@ struct MessageInputView: View {
             }
             .sheet(isPresented: $viewModel.showDocumentPicker) {
                 DocumentPickerView(
-                    allowedKinds: [.documents],
+                    allowedKinds: viewModel.currentModel.isMultimodal
+                        ? [.documents, .images]
+                        : [.documents],
                     allowsMultipleSelection: true,
                     onDocumentsPicked: { batch in
                         viewModel.addDocumentAttachments(batch)

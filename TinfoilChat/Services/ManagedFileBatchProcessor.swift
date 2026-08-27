@@ -90,4 +90,14 @@ enum ManagedFileBatchErrorMessage {
             .map { "\($0.fileName): \($0.message)" }
             .joined(separator: "\n")
     }
+
+    static func attachments(successCount: Int, failures: [ManagedFileError]) -> String? {
+        guard !failures.isEmpty else { return nil }
+        let totalCount = successCount + failures.count
+        let headline = successCount == 0
+            ? "No attachments were added."
+            : "Added \(successCount) of \(totalCount) attachments."
+        let details = failures.map { "\($0.fileName): \($0.message)" }
+        return ([headline] + details).joined(separator: "\n")
+    }
 }

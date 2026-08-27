@@ -3412,14 +3412,40 @@ class ChatViewModel: ObservableObject {
 
     func addDocumentAttachments(_ batch: DocumentPickerBatch) {
         let errorPublicationGeneration = attachmentErrorPublicationFence.begin()
-        for handle in batch.files {
-            addDocumentAttachment(
-                handle: handle,
-                preserveExistingErrors: true,
-                errorPublicationGeneration: errorPublicationGeneration
-            )
+        let admission = DocumentPickerBatchAdmission.admit(
+            batch.files,
+            modelSupportsImages: currentModel.isMultimodal
+        )
+        var failures = batch.failures + admission.failures
+        var successCount = admission.files.count
+
+        for (handle, kind) in admission.files {
+            switch kind {
+            case .document:
+                addDocumentAttachment(
+                    handle: handle,
+                    preserveExistingErrors: true,
+                    errorPublicationGeneration: errorPublicationGeneration
+                )
+            case .image:
+                addImageAttachment(
+                    handle: handle,
+                    errorPublicationGeneration: errorPublicationGeneration
+                ) { [weak self] failure in
+                    guard let self else { return }
+                    successCount -= 1
+                    failures.append(failure)
+                    attachmentError = ManagedFileBatchErrorMessage.attachments(
+                        successCount: successCount,
+                        failures: failures
+                    )
+                }
+            }
         }
-        attachmentError = ManagedFileBatchErrorMessage.attachments(batch.failures)
+        attachmentError = ManagedFileBatchErrorMessage.attachments(
+            successCount: successCount,
+            failures: failures
+        )
     }
 
     func addImageAttachment(
@@ -3524,6 +3550,55 @@ class ChatViewModel: ObservableObject {
                 )
             case let .failure(failure):
                 publishFailure(failure)
+            }
+        }
+    }
+
+    func addImageAttachment(
+        handle: ManagedStagedFile,
+        errorPublicationGeneration: Int? = nil,
+        onAdmissionFailure: @escaping (ManagedFileError) -> Void = { _ in }
+    ) {
+        let errorPublicationGeneration = errorPublicationGeneration
+            ?? attachmentErrorPublicationFence.begin()
+        attachmentError = nil
+
+        let attachmentId = UUID().uuidString.lowercased()
+        var attachment = Attachment(
+            id: attachmentId,
+            type: .image,
+            fileName: handle.fileName,
+            processingState: .processing
+        )
+        pendingAttachments.append(attachment)
+
+        attachmentProcessingStore.start(id: attachmentId, stagedFile: handle) { [weak self] publication in
+            guard let self else { return }
+            do {
+                let processed = try await ImageProcessingService.shared.processImage(at: handle.url)
+                try Task.checkCancellation()
+                guard publication.isCurrent else { return }
+
+                attachment.mimeType = Constants.Attachments.defaultImageMimeType
+                attachment.base64 = processed.base64
+                attachment.thumbnailBase64 = processed.thumbnailBase64
+                attachment.fileSize = processed.compressedSize
+                attachment.processingState = .completed
+
+                let sizeKB = processed.compressedSize / 1024
+                attachment.description = "\(handle.fileName) — \(processed.width)×\(processed.height) JPEG, \(sizeKB) KB"
+
+                if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
+                    pendingAttachments[index] = attachment
+                }
+                pendingImageThumbnails[attachmentId] = processed.thumbnailBase64
+            } catch is CancellationError {
+            } catch {
+                guard publication.isCurrent else { return }
+                pendingAttachments.removeAll { $0.id == attachmentId }
+                pendingImageThumbnails.removeValue(forKey: attachmentId)
+                guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
+                onAdmissionFailure(ManagedFileError(fileName: handle.fileName, error: error))
             }
         }
     }
