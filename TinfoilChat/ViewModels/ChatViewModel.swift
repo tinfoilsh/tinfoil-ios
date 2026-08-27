@@ -7160,6 +7160,7 @@ extension ChatViewModel {
         if !AudioRecordingService.shared.hasPermission {
             hasMicrophonePermission = await AudioRecordingService.shared.requestPermission()
         }
+        guard !isAccountTeardownInProgress else { return }
 
         switch Self.audioRecordingStartDecision(
             canUseAudioInput: canUseAudioInput,

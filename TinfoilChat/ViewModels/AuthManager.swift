@@ -92,9 +92,11 @@ class AuthManager: ObservableObject {
         hasActiveSubscription = isActive
         guard shouldRefreshCredentials else { return }
 
-        SessionTokenManager.shared.clearSessionToken()
         Task {
-            _ = await SessionTokenManager.shared.fetchFreshSessionToken()
+            let token = await SessionTokenManager.shared.fetchFreshSessionToken()
+            if token.isEmpty {
+                SessionTokenManager.shared.clearSessionToken()
+            }
         }
     }
 
@@ -184,12 +186,10 @@ class AuthManager: ObservableObject {
         
         isAuthenticated = UserDefaults.standard.bool(forKey: authStateKey)
         hasActiveSubscription = UserDefaults.standard.bool(forKey: subscriptionKey)
-        if let status = localUserData?["subscription_status"] as? String {
-            updateSubscriptionAccess(
-                status: status,
-                expiresAt: localUserData?["subscription_expires_at"] as? String
-            )
-        }
+        updateSubscriptionAccess(
+            status: localUserData?["subscription_status"] as? String,
+            expiresAt: localUserData?["subscription_expires_at"] as? String
+        )
         
     }
     
