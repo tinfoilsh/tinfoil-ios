@@ -15,9 +15,41 @@ enum ManagedFileBatchProcessor {
         var failures: [ManagedFileError] = []
 
         for (index, file) in files.enumerated() {
+            if Task.isCancelled {
+                for rejectedFile in files.dropFirst(index) {
+                    rejectedFile.discard()
+                }
+                return ManagedFileBatchProcessingResult(
+                    successes: successes,
+                    failures: failures,
+                    wasCancelled: true
+                )
+            }
             do {
-                successes.append(try await operation(file))
+                let success = try await operation(file)
+                successes.append(success)
+                if Task.isCancelled {
+                    file.discard()
+                    for rejectedFile in files.dropFirst(index + 1) {
+                        rejectedFile.discard()
+                    }
+                    return ManagedFileBatchProcessingResult(
+                        successes: successes,
+                        failures: failures,
+                        wasCancelled: true
+                    )
+                }
             } catch is CancellationError {
+                file.discard()
+                for rejectedFile in files.dropFirst(index + 1) {
+                    rejectedFile.discard()
+                }
+                return ManagedFileBatchProcessingResult(
+                    successes: successes,
+                    failures: failures,
+                    wasCancelled: true
+                )
+            } catch where Task.isCancelled {
                 file.discard()
                 for rejectedFile in files.dropFirst(index + 1) {
                     rejectedFile.discard()

@@ -3316,7 +3316,8 @@ class ChatViewModel: ObservableObject {
         url: URL,
         fileName: String,
         sharedImportRequestID: UUID? = nil,
-        managedFile: ManagedStagedFile? = nil
+        managedFile: ManagedStagedFile? = nil,
+        preserveExistingErrors: Bool = false
     ) {
         attachmentError = nil
 
@@ -3355,7 +3356,14 @@ class ChatViewModel: ObservableObject {
                 if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
                     pendingAttachments[index] = attachment
                 }
-                attachmentError = error.localizedDescription
+                let message = preserveExistingErrors
+                    ? "\(fileName): \(error.localizedDescription)"
+                    : error.localizedDescription
+                if preserveExistingErrors, let attachmentError, !attachmentError.isEmpty {
+                    self.attachmentError = "\(attachmentError)\n\(message)"
+                } else {
+                    attachmentError = message
+                }
             }
         }
         if let managedFile {
@@ -3369,17 +3377,18 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    func addDocumentAttachment(handle: ManagedStagedFile) {
+    func addDocumentAttachment(handle: ManagedStagedFile, preserveExistingErrors: Bool = false) {
         addDocumentAttachment(
             url: handle.url,
             fileName: handle.fileName,
-            managedFile: handle
+            managedFile: handle,
+            preserveExistingErrors: preserveExistingErrors
         )
     }
 
     func addDocumentAttachments(_ batch: DocumentPickerBatch) {
         for handle in batch.files {
-            addDocumentAttachment(handle: handle)
+            addDocumentAttachment(handle: handle, preserveExistingErrors: true)
         }
         attachmentError = ManagedFileBatchErrorMessage.attachments(batch.failures)
     }

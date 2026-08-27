@@ -155,7 +155,7 @@ struct DocumentPickerView: UIViewControllerRepresentable {
         }
 
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            Task {
+            Task { @MainActor in
                 let batch = await DocumentPickerBatchStager.stageOffMain(urls: urls)
                 onDocumentsPicked(batch)
             }
