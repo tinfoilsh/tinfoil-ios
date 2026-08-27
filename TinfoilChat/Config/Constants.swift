@@ -440,6 +440,7 @@ enum Constants {
             static let selectedLanguage = "tinfoil-settings-selected-language"
             static let webSearchEnabled = "tinfoil-settings-web-search-enabled"
             static let webSearchAvailable = "tinfoil-settings-web-search-available"
+            static let piiCheckEnabled = "tinfoil-settings-pii-check-enabled"
             static let genUIEnabled = "tinfoil-settings-genui-enabled"
             static let reasoningEffort = "tinfoil-settings-reasoning-effort"
             static let thinkingEnabled = "tinfoil-settings-thinking-enabled"

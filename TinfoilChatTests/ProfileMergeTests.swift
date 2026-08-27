@@ -194,16 +194,33 @@ struct ProfileMergeTests {
             nickname: "a",
             traits: ["x"],
             thinkingEnabled: true,
-            webSearchAvailable: true
+            webSearchAvailable: true,
+            piiCheckEnabled: true
         )
         let local = ProfileData(
             nickname: "b",
             traits: ["x", "y"],
             thinkingEnabled: true,
-            webSearchAvailable: false
+            webSearchAvailable: false,
+            piiCheckEnabled: false
         )
         let fields = ProfileMerge.changedProfileFields(local: local, baseline: baseline)
-        #expect(Set(fields) == Set(["nickname", "traits", "webSearchAvailable"]))
+        #expect(Set(fields) == Set(["nickname", "traits", "webSearchAvailable", "piiCheckEnabled"]))
+    }
+
+    @Test("PII setting uses the higher trusted field clock")
+    func mergesPIISettingByClock() {
+        var local = ProfileData(piiCheckEnabled: true)
+        local.fieldClocks = ["piiCheckEnabled": EditClock(v: 1, w: "A")]
+        var remote = ProfileData(piiCheckEnabled: false)
+        remote.fieldClocks = ["piiCheckEnabled": EditClock(v: 2, w: "B")]
+
+        let result = ProfileMerge.mergeProfiles(
+            local: trusted(local), remote: trusted(remote)
+        )
+
+        #expect(result.merged.piiCheckEnabled == false)
+        #expect(result.merged.fieldClocks?["piiCheckEnabled"] == EditClock(v: 2, w: "B"))
     }
 
     @Test("dirty profile without baseline preserves local pins and remote settings")
@@ -274,6 +291,7 @@ struct ProfileMergeTests {
                     reasoningEffort: ProfileDefaults.reasoningEffort,
                     thinkingEnabled: ProfileDefaults.thinkingEnabled,
                     webSearchAvailable: ProfileDefaults.webSearchAvailable,
+                    piiCheckEnabled: ProfileDefaults.piiCheckEnabled,
                     genUIEnabled: ProfileDefaults.genUIEnabled,
                     pinnedChatIds: ["chat-a"]
                 ),
@@ -289,6 +307,7 @@ struct ProfileMergeTests {
         #expect(reconciled.isUsingPersonalization == nil)
         #expect(reconciled.reasoningEffort == nil)
         #expect(reconciled.thinkingEnabled == nil)
+        #expect(reconciled.piiCheckEnabled == nil)
         #expect(reconciled.genUIEnabled == nil)
         #expect(reconciled.pinnedChatIds == ["chat-a"])
     }
