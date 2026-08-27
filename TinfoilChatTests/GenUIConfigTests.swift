@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import OpenAI
 import Testing
 @testable import TinfoilChat
 
