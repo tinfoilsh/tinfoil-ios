@@ -1,5 +1,4 @@
 {
-  "originHash" : "4ac80f0a580e046777bf0dbe0208566c80c6e4952fdaf05ee5f9258f4b2fba63",
   "pins" : [
     {
       "identity" : "clerk-ios",
@@ -17,15 +16,6 @@
       "state" : {
         "revision" : "93cc1fa1ad61e19f9a34fb23cb5b5d5635d3edb0",
         "version" : "0.3.1"
-      }
-    },
-    {
-      "identity" : "gzipswift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/1024jp/GzipSwift",
-      "state" : {
-        "revision" : "41d37421fe2cbbfae4a5593dc29d12999fb73cd7",
-        "version" : "7.0.0"
       }
     },
     {

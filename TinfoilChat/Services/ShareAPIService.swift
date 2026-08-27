@@ -12,7 +12,7 @@ import ClerkKit
 /// Service for share API operations
 enum ShareAPIService {
 
-    /// Upload encrypted shared chat data to the server as v1 binary.
+    /// Upload enclave-sealed shared chat data to the server as v1 binary.
     /// Endpoint: PUT {baseURL}/api/shares/{chatId}
     /// Requires authentication via Clerk Bearer token.
     static func uploadSharedChat(chatId: String, encryptedData: Data) async throws {
@@ -23,12 +23,7 @@ enum ShareAPIService {
 
         let token = try await getAuthToken()
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        request.setValue("1", forHTTPHeaderField: "X-Format-Version")
-        request.httpBody = encryptedData
+        let request = makeUploadRequest(url: url, encryptedData: encryptedData, token: token)
 
         let (_, response) = try await URLSession.shared.data(for: request)
 
@@ -37,6 +32,16 @@ enum ShareAPIService {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
             throw ShareAPIError.uploadFailed(statusCode: statusCode)
         }
+    }
+
+    static func makeUploadRequest(url: URL, encryptedData: Data, token: String) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.setValue(ShareV2Contract.uploadFormatVersion, forHTTPHeaderField: "X-Format-Version")
+        request.httpBody = encryptedData
+        return request
     }
 
     // MARK: - Auth Helper

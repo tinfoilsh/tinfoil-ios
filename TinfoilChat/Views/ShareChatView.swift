@@ -242,16 +242,20 @@ struct ShareChatView: View {
 
         Task.detached {
             do {
-                let shareableData = ShareChatView.buildShareableData(
-                    messages: capturedMessages, chatTitle: title, chatCreatedAt: createdAt
+                let shareableData = SharePayloadBuilder.build(
+                    messages: capturedMessages,
+                    chatTitle: title,
+                    chatCreatedAt: createdAt
                 )
-                let key = ShareEncryptionService.generateShareKey()
-                let encryptedBinary = try ShareEncryptionService.encryptForShare(shareableData, key: key)
-                let keyBase64url = ShareEncryptionService.exportKeyToBase64url(key)
+                let plaintext = try SharePayloadBuilder.encode(shareableData)
+                let response = try await SyncEnclaveAPI.shareSeal(
+                    EnclaveShareSealRequest(plaintext: dataToBase64(plaintext))
+                )
+                let sealed = try ShareV2Contract.validate(response)
 
-                try await ShareAPIService.uploadSharedChat(chatId: chatId, encryptedData: encryptedBinary)
+                try await ShareAPIService.uploadSharedChat(chatId: chatId, encryptedData: sealed.ciphertext)
 
-                let url = "\(Constants.Share.shareBaseURL)/share/\(chatId)#\(keyBase64url)"
+                let url = ShareV2Contract.shareURL(chatId: chatId, shareKey: sealed.shareKey)
 
                 await MainActor.run {
                     shareUrl = url
@@ -275,53 +279,4 @@ struct ShareChatView: View {
         }
     }
 
-    nonisolated private static func buildShareableData(messages: [Message], chatTitle: String?, chatCreatedAt: Date?) -> ShareableChatData {
-        let shareableMessages = messages.map { msg in
-            let docContent: String? = {
-                let docs = msg.attachments.filter { $0.type == .document && $0.textContent != nil }
-                guard !docs.isEmpty else { return nil }
-                return docs.map { "Document title: \($0.fileName)\nDocument contents:\n\($0.textContent ?? "")" }
-                    .joined(separator: "\n\n")
-            }()
-
-            let docs: [ShareableChatData.ShareableDocument]? = msg.attachments.isEmpty
-                ? nil
-                : msg.attachments.map { ShareableChatData.ShareableDocument(name: $0.fileName) }
-
-            let shareableAttachments: [ShareableChatData.ShareableAttachment]? = msg.attachments.isEmpty
-                ? nil
-                : msg.attachments.map { att in
-                    ShareableChatData.ShareableAttachment(
-                        id: att.id,
-                        type: att.type == .image ? "image" : "document",
-                        fileName: att.fileName,
-                        mimeType: att.mimeType,
-                        thumbnailBase64: att.thumbnailBase64,
-                        encryptionKey: att.encryptionKey,
-                        textContent: att.textContent,
-                        description: att.description
-                    )
-                }
-
-            return ShareableChatData.ShareableMessage(
-                role: msg.role.rawValue,
-                content: msg.content,
-                documentContent: docContent,
-                documents: docs,
-                timestamp: msg.timestamp.timeIntervalSince1970 * 1000,
-                thoughts: msg.thoughts,
-                thinkingDuration: msg.thinkingDuration ?? msg.generationTimeSeconds,
-                isError: msg.isError,
-                attachments: shareableAttachments
-            )
-        }
-
-        return ShareableChatData(
-            v: Constants.Share.formatVersion,
-            title: chatTitle ?? "Shared Chat",
-            messages: shareableMessages,
-            createdAt: (chatCreatedAt ?? Date()).timeIntervalSince1970 * 1000
-        )
-    }
 }
-
