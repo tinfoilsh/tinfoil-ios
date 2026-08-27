@@ -284,6 +284,46 @@ struct ModelSelection {
     }
 }
 
+enum ModelAvailability {
+    static func realModels(from models: [AppModelConfig]) -> [ModelType] {
+        models.filter { model in
+            (model.type == "chat" || model.type == "code")
+                && model.chat == true
+                && !(model.paid == false && model.chat == true)
+        }.map { ModelType(from: $0) }
+    }
+
+    static func tierModels(_ tier: String, from models: [ModelType]) -> [ModelType] {
+        models.filter { $0.attributes.contains(tier) }
+    }
+
+    static func autoModels(from models: [ModelType]) -> [ModelType] {
+        var autoModels: [ModelType] = []
+        let smart = tierModels(AutoModel.smartTier, from: models)
+        if !smart.isEmpty {
+            autoModels.append(ModelType.auto(tier: AutoModel.smartTier, members: smart))
+        }
+        let fast = tierModels(AutoModel.fastTier, from: models)
+        if !fast.isEmpty {
+            autoModels.append(ModelType.auto(tier: AutoModel.fastTier, members: fast))
+        }
+        return autoModels
+    }
+
+    static func selectableModels(from models: [ModelType]) -> [ModelType] {
+        autoModels(from: models) + models
+    }
+
+    static func defaultModel(from models: [ModelType]) -> ModelType? {
+        autoModels(from: models).first { $0.id == AutoModel.fastId } ?? models.first
+    }
+
+    static func resolveSavedModel(id: String?, from models: [ModelType]) -> ModelType? {
+        guard let id else { return defaultModel(from: models) }
+        return selectableModels(from: models).first { $0.id == id } ?? defaultModel(from: models)
+    }
+}
+
 /// Application-wide configuration settings
 @MainActor
 class AppConfig: ObservableObject {
@@ -389,27 +429,19 @@ class AppConfig: ObservableObject {
     
     // Update available models from app models
     private func updateAvailableModels() {
-        // Filter models for UI display - exclude title and other non-chat types
-        let chatCompatibleModels = appModels.filter { model in
-            Self.isModelSupportedInApp(model)
-        }
-        availableModels = chatCompatibleModels.map { ModelType(from: $0) }
+        availableModels = ModelAvailability.realModels(from: appModels)
     }
 
     // Load the last selected model from UserDefaults
     private func loadLastSelectedModel() {
-        if let savedModelId = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.selectedModel),
-           let model = findSelectableModel(id: savedModelId) {
-            currentModel = model
-        } else {
-            currentModel = defaultModel
-        }
+        let savedModelId = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.selectedModel)
+        currentModel = ModelAvailability.resolveSavedModel(id: savedModelId, from: availableModels)
     }
 
     // Default selection: prefer Auto Fast, fall back to the first available
     // model if no fast-tier models exist in the config.
-    private var defaultModel: ModelType? {
-        findSelectableModel(id: AutoModel.fastId) ?? availableModels.first
+    var defaultModel: ModelType? {
+        ModelAvailability.defaultModel(from: availableModels)
     }
     
     // MARK: - Public interface
@@ -491,15 +523,6 @@ class AppConfig: ObservableObject {
         availableModels
     }
     
-    /// Check if a model should be shown in the app's model selection
-    private static func isModelSupportedInApp(_ model: AppModelConfig) -> Bool {
-        // Only show models explicitly marked as chat models in the UI
-        // Code, title, and other specialized models are not shown
-
-        // Only include models with type "chat"
-        return model.type == "chat"
-    }
-
     /// Get all model types available for selection (all models accessible to all users)
     func filteredModelTypes(isAuthenticated: Bool = false, hasActiveSubscription: Bool = false) -> [ModelType] {
         return availableModels
@@ -509,7 +532,7 @@ class AppConfig: ObservableObject {
 
     /// Real chat models advertising the given capability tier.
     func tierModels(_ tier: String) -> [ModelType] {
-        availableModels.filter { $0.isChat && $0.attributes.contains(tier) }
+        ModelAvailability.tierModels(tier, from: availableModels)
     }
 
     func reasoningHistoryPolicy(for model: ModelType) -> ReasoningHistoryPolicy {
@@ -523,21 +546,12 @@ class AppConfig: ObservableObject {
 
     /// Synthetic Auto entries for tiers that currently have at least one member.
     var autoModels: [ModelType] {
-        var models: [ModelType] = []
-        let smart = tierModels(AutoModel.smartTier)
-        if !smart.isEmpty {
-            models.append(ModelType.auto(tier: AutoModel.smartTier, members: smart))
-        }
-        let fast = tierModels(AutoModel.fastTier)
-        if !fast.isEmpty {
-            models.append(ModelType.auto(tier: AutoModel.fastTier, members: fast))
-        }
-        return models
+        ModelAvailability.autoModels(from: availableModels)
     }
 
     /// Models shown in the picker: Auto entries first, then real models.
     var selectableModels: [ModelType] {
-        autoModels + availableModels
+        ModelAvailability.selectableModels(from: availableModels)
     }
 
     /// Resolve a selectable id (Auto or real) back to a ModelType.
