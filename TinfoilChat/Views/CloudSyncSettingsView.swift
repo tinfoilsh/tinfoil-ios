@@ -58,7 +58,9 @@ struct CloudSyncSettingsView: View {
     @State private var showBackupKeySheet: Bool = false
     @State private var passkeyInventoryState = PasskeyBundleInventory(
         bundles: [],
-        verification: .unverified
+        verification: .unverified,
+        legacyCredentials: [],
+        legacyStatus: .absent
     )
     @State private var removingPasskeyId: String? = nil
     @State private var passkeyBundleError: String? = nil
@@ -351,6 +353,7 @@ struct CloudSyncSettingsView: View {
     private var passkeySection: some View {
         if passkeyManager.passkeyActive
             || !passkeyBundles.isEmpty
+            || passkeyInventoryState.legacyStatus != .absent
             || passkeyBundleError != nil
             || passkeyManager.passkeyAddDeviceAvailable
             || passkeyManager.passkeySetupAvailable
@@ -383,7 +386,9 @@ struct CloudSyncSettingsView: View {
                     .padding(.vertical, 2)
                 }
 
-                if !passkeyBundles.isEmpty || passkeyBundleError != nil {
+                if !passkeyBundles.isEmpty
+                    || passkeyInventoryState.legacyStatus != .absent
+                    || passkeyBundleError != nil {
                     passkeyBundleInventory
                 }
 
@@ -475,7 +480,7 @@ struct CloudSyncSettingsView: View {
             return (a.createdAt ?? "") > (b.createdAt ?? "")
         }
         return VStack(alignment: .leading, spacing: 8) {
-            Text("Registered platforms (\(sorted.count))")
+            Text("Recovery methods (\(sorted.count + passkeyInventoryState.legacyCredentials.count))")
                 .font(.caption)
                 .fontWeight(.medium)
                 .foregroundColor(.secondary)
@@ -488,6 +493,9 @@ struct CloudSyncSettingsView: View {
                     bundle: bundle,
                     isCurrentPlatform: bundle.credentialId == localCredentialId
                 )
+            }
+            ForEach(passkeyInventoryState.legacyCredentials, id: \.id) { credential in
+                legacyPasskeyRow(credential)
             }
             if let passkeyBundleError {
                 Text(passkeyBundleError)
@@ -556,15 +564,53 @@ struct CloudSyncSettingsView: View {
         .padding(.vertical, 4)
     }
 
+    private func legacyPasskeyRow(_ credential: LegacyPasskeyCredentialEntry) -> some View {
+        let credLabel = credential.id.count <= 12
+            ? credential.id
+            : "\(credential.id.prefix(6))…\(credential.id.suffix(4))"
+        return HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.badge.key.fill")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("Legacy")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                }
+                Text("\(credLabel) · Read-only recovery")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Text("Not removable")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+
     private func refreshPasskeyBundles() async {
         guard settings.isCloudSyncEnabled else {
-            passkeyInventoryState = PasskeyBundleInventory(bundles: [], verification: .unverified)
+            passkeyInventoryState = PasskeyBundleInventory(
+                bundles: [],
+                verification: .unverified,
+                legacyCredentials: [],
+                legacyStatus: .absent
+            )
             passkeyBundleError = nil
             return
         }
         do {
-            passkeyInventoryState = try await passkeyManager.passkeyBundleInventory()
-            passkeyBundleError = nil
+            let refreshed = try await passkeyManager.passkeyBundleInventory()
+            passkeyInventoryState = refreshed.preservingLegacyCredentials(
+                from: passkeyInventoryState
+            )
+            passkeyBundleError = refreshed.legacyStatus == .unverified
+                ? "Couldn't verify legacy passkey recovery. The previous legacy list may be out of date."
+                : nil
         } catch {
             // Keep the previous inventory: clearing it would make a
             // load failure indistinguishable from "no passkeys
@@ -584,7 +630,9 @@ struct CloudSyncSettingsView: View {
             let result: PasskeyBundleRemovalResult = try await passkeyManager.removePasskeyBundle(
                 credentialId: credentialId
             )
-            passkeyInventoryState = result.inventory
+            passkeyInventoryState = result.inventory.preservingLegacyCredentials(
+                from: passkeyInventoryState
+            )
             await refreshPasskeyBundles()
         } catch {
             passkeyBundleError = removalErrorMessage(for: error)
@@ -592,6 +640,18 @@ struct CloudSyncSettingsView: View {
     }
 
     private func passkeyInventoryGuidance(bundleCount: Int) -> String {
+        if passkeyInventoryState.legacyStatus == .unverified {
+            return "Legacy passkey recovery couldn't be verified. Removal is disabled until all recovery methods can be checked."
+        }
+        if passkeyInventoryState.legacyStatus == .present, bundleCount == 0 {
+            return "The current cloud recovery bundle is removed, but legacy passkey recovery remains. Legacy entries are read-only here."
+        }
+        if passkeyInventoryState.legacyStatus == .present, bundleCount == 1 {
+            return "Removing this cloud recovery bundle leaves legacy passkey recovery available. Legacy entries are read-only here and are not deleted."
+        }
+        if passkeyInventoryState.legacyStatus == .present {
+            return "Legacy passkey recovery remains available. Legacy entries are read-only here and are not deleted."
+        }
         switch passkeyInventoryState.verification {
         case .match where bundleCount == 1:
             return "You can remove this final cloud recovery bundle. Cloud sync remains available on this device, but passkey recovery is unavailable until you add another. This does not delete the passkey stored by the platform."
