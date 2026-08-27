@@ -225,13 +225,9 @@ struct ChatQueryBuilder {
         let tools: [ChatQuery.ChatCompletionToolParam]? = enabledTools.isEmpty ? nil : enabledTools
 
         // Mirror the webapp: when GenUI tools are present, send
-        // `tool_choice: "auto"` and opt in to parallel tool calls so the
-        // model can emit multiple `render_*` calls in a single response
-        // (e.g., timer + chart + recipe + map at once). Without these
-        // flags some providers return only a single tool call.
+        // `tool_choice: "auto"` and leave parallel tool calls unspecified.
         let toolChoice: ChatQuery.ChatCompletionFunctionCallOptionParam? =
             (tools?.isEmpty == false) ? .auto : nil
-        let parallelToolCalls: Bool? = (tools?.isEmpty == false) ? true : nil
 
         let requestModel: String
         let extraBody: [String: OpenAIJSON]?
@@ -264,7 +260,7 @@ struct ChatQueryBuilder {
         return ChatQuery(
             messages: messages,
             model: requestModel,
-            parallelToolCalls: parallelToolCalls,
+            parallelToolCalls: nil,
             responseFormat: responseFormat,
             toolChoice: toolChoice,
             tools: tools,

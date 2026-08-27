@@ -70,6 +70,17 @@ struct GenUIConfigTests {
         #expect(hint.hasPrefix("Remote guidance\n"))
         #expect(hint.contains("render_stat_cards"))
         #expect(!hint.contains("render_timeline"))
+
+        let query = ChatQueryBuilder.buildQuery(
+            modelId: "gpt-oss-120b",
+            systemPrompt: "Base prompt",
+            rules: "",
+            conversationMessages: [],
+            genUIRegistry: registry
+        )
+        #expect(query.tools?.count == 2)
+        #expect(query.toolChoice == .auto)
+        #expect(query.parallelToolCalls == nil)
     }
 
     @Test func emptyAllowlistRemovesAllRequestCapabilities() async {
