@@ -67,6 +67,13 @@ enum PasskeyBundleRemovalDecision: Equatable {
     case reject(PasskeyBundleRemovalError)
 }
 
+struct PasskeyBundleAvailability: Equatable {
+    let active: Bool
+    let setupAvailable: Bool
+    let addDeviceAvailable: Bool
+    let keyMatches: Bool
+}
+
 // MARK: - PasskeyManager
 
 @MainActor
@@ -606,75 +613,18 @@ final class PasskeyManager: ObservableObject {
     }
 
     /// Check passkey state for users who already have keys loaded.
-    func checkPasskeyStateForExistingKey() async {
+    func checkPasskeyStateForExistingKey(preserveStateOnFailure: Bool = false) async {
         do {
             let state = try await SyncEnclaveAPI.keyCurrent()
             guard canMutateAccountKey else { return }
-            if let remoteKeyId = state.keyId, !state.bundles.isEmpty {
-                // Derive the local key id so we can tell whether this
-                // device is actually on the current key or is holding a
-                // stale CEK that a `start_fresh` elsewhere rotated away.
-                let localKeyId: String? = {
-                    guard let cek = try? EncryptionService.shared.getKeyBytesOrThrow() else {
-                        return nil
-                    }
-                    return try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
-                }()
-                let isOnCurrentKey = localKeyId == remoteKeyId
-
-                if isOnCurrentKey {
-                    // The device is genuinely on the current key, so the
-                    // user is no longer in a locked/skipped state. Drop
-                    // any persisted recovery skip (e.g. left over from a
-                    // manual unlock that bypassed the passkey flow). A
-                    // stale device keeps its skip so it stays suppressed.
-                    setDismissedRecoveryKeyId(nil)
-                    // Persist the keyId now so the periodic sync check has
-                    // a baseline. Without this, a normal app launch (with
-                    // a valid local CEK that matches the remote) would
-                    // look like a `start_fresh` rotation on the next
-                    // refresh tick and force the user through recovery.
-                    UserDefaults.standard.set(
-                        remoteKeyId,
-                        forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId
-                    )
-                }
-
-                // The bundle map is keyed by credential id. If this
-                // device's last-known credential id is among the
-                // bundles, the device has its own backup and we can
-                // light up the "passkey active" UI. Otherwise the
-                // user has bundles on *other* devices but none here
-                // yet — surface the add-this-device prompt instead.
-                let localCredentialId = UserDefaults.standard.string(
-                    forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId
-                )
-                let hasBundleForThisDevice = localCredentialId.flatMap { id in
-                    state.bundles.values.contains { $0.credentialId == id }
-                } ?? false
-
-                if hasBundleForThisDevice {
-                    passkeyActive = true
-                    passkeyAddDeviceAvailable = false
-                    passkeySetupAvailable = false
-                } else {
-                    passkeyActive = false
-                    passkeyAddDeviceAvailable = true
-                    passkeySetupAvailable = false
-                }
-                startSyncCheck()
-                return
-            }
-            // The enclave definitively reports no registered key or no
-            // bundles at all, so any previously lit "passkey active"
-            // state is stale and must not survive the transition.
-            passkeyActive = false
+            applyPasskeyAvailability(state: state, localKeyId: localKeyIdHex())
         } catch {
             guard canMutateAccountKey else { return }
-            // fall through to "setup available"
+            guard !preserveStateOnFailure else { return }
+            passkeyActive = false
+            passkeySetupAvailable = false
+            passkeyAddDeviceAvailable = false
         }
-        passkeySetupAvailable = true
-        passkeyAddDeviceAvailable = false
     }
 
     /// Re-evaluate per-device bundle state without prompting any
@@ -702,15 +652,6 @@ final class PasskeyManager: ObservableObject {
         guard accountOperationsEnabled else { throw CancellationError() }
         let operationTask = Task {
             try Task.checkCancellation()
-            let cek: Data
-            let keyIdHex: String
-            do {
-                cek = try EncryptionService.shared.getKeyBytesOrThrow()
-                keyIdHex = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
-            } catch {
-                throw PasskeyBundleRemovalError.unverifiable
-            }
-
             let currentState: EnclaveKeyCurrentResponse
             do {
                 currentState = try await SyncEnclaveAPI.keyCurrent()
@@ -721,6 +662,19 @@ final class PasskeyManager: ObservableObject {
             try Task.checkCancellation()
             guard accountOperationsEnabled else { throw CancellationError() }
 
+            guard currentState.bundles.values.contains(where: { $0.credentialId == credentialId }) else {
+                return .alreadyMissing
+            }
+
+            let cek: Data
+            let keyIdHex: String
+            do {
+                cek = try EncryptionService.shared.getKeyBytesOrThrow()
+                keyIdHex = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+            } catch {
+                throw PasskeyBundleRemovalError.unverifiable
+            }
+
             switch Self.passkeyBundleRemovalDecision(
                 credentialId: credentialId,
                 state: currentState,
@@ -729,7 +683,8 @@ final class PasskeyManager: ObservableObject {
             case .remove:
                 break
             case .alreadyMissing:
-                await refreshBundleState()
+                applyPasskeyAvailability(state: currentState, localKeyId: keyIdHex)
+                await checkPasskeyStateForExistingKey(preserveStateOnFailure: true)
                 return .alreadyMissing
             case .reject(let error):
                 throw error
@@ -751,7 +706,12 @@ final class PasskeyManager: ObservableObject {
             }
             try Task.checkCancellation()
             guard accountOperationsEnabled else { throw CancellationError() }
-            await refreshBundleState()
+            let updatedState = Self.removingPasskeyBundle(
+                credentialId: credentialId,
+                from: currentState
+            )
+            applyPasskeyAvailability(state: updatedState, localKeyId: keyIdHex)
+            await checkPasskeyStateForExistingKey(preserveStateOnFailure: true)
             return outcome
         }
         guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
@@ -864,16 +824,70 @@ final class PasskeyManager: ObservableObject {
         state: EnclaveKeyCurrentResponse,
         localKeyId: String?
     ) -> PasskeyBundleRemovalDecision {
+        guard state.bundles.values.contains(where: { $0.credentialId == credentialId }) else {
+            return .alreadyMissing
+        }
         guard let localKeyId, let remoteKeyId = state.keyId else {
             return .reject(.unverifiable)
         }
         guard localKeyId == remoteKeyId else {
             return .reject(.keyMismatch)
         }
-        guard state.bundles.values.contains(where: { $0.credentialId == credentialId }) else {
-            return .alreadyMissing
-        }
         return .remove
+    }
+
+    static func passkeyBundleAvailability(
+        state: EnclaveKeyCurrentResponse,
+        localKeyId: String?,
+        localCredentialId: String?
+    ) -> PasskeyBundleAvailability {
+        guard let remoteKeyId = state.keyId else {
+            return PasskeyBundleAvailability(
+                active: false,
+                setupAvailable: true,
+                addDeviceAvailable: false,
+                keyMatches: false
+            )
+        }
+        guard let localKeyId, localKeyId == remoteKeyId else {
+            return PasskeyBundleAvailability(
+                active: false,
+                setupAvailable: false,
+                addDeviceAvailable: false,
+                keyMatches: false
+            )
+        }
+        guard !state.bundles.isEmpty else {
+            return PasskeyBundleAvailability(
+                active: false,
+                setupAvailable: true,
+                addDeviceAvailable: false,
+                keyMatches: true
+            )
+        }
+        let hasLocalBundle = localCredentialId.map { credentialId in
+            state.bundles.values.contains { $0.credentialId == credentialId }
+        } ?? false
+        return PasskeyBundleAvailability(
+            active: hasLocalBundle,
+            setupAvailable: false,
+            addDeviceAvailable: !hasLocalBundle,
+            keyMatches: true
+        )
+    }
+
+    static func removingPasskeyBundle(
+        credentialId: String,
+        from state: EnclaveKeyCurrentResponse
+    ) -> EnclaveKeyCurrentResponse {
+        EnclaveKeyCurrentResponse(
+            keyId: state.keyId,
+            etag: state.etag,
+            bundles: state.bundles.filter { $0.value.credentialId != credentialId },
+            createdVia: state.createdVia,
+            createdAt: state.createdAt,
+            hasData: state.hasData
+        )
     }
 
     static func passkeyBundleRemovalError(from error: Error) -> PasskeyBundleRemovalError {
@@ -896,6 +910,33 @@ final class PasskeyManager: ObservableObject {
     private func localKeyIdHex() -> String? {
         guard let cek = try? EncryptionService.shared.getKeyBytesOrThrow() else { return nil }
         return try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+    }
+
+    private func applyPasskeyAvailability(
+        state: EnclaveKeyCurrentResponse,
+        localKeyId: String?
+    ) {
+        let availability = Self.passkeyBundleAvailability(
+            state: state,
+            localKeyId: localKeyId,
+            localCredentialId: UserDefaults.standard.string(
+                forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId
+            )
+        )
+        passkeyActive = availability.active
+        passkeySetupAvailable = availability.setupAvailable
+        passkeyAddDeviceAvailable = availability.addDeviceAvailable
+
+        if state.keyId != nil, !state.bundles.isEmpty { startSyncCheck() }
+        guard availability.keyMatches, let remoteKeyId = state.keyId else { return }
+        // The device is genuinely on the current key, so the user is no
+        // longer in a locked/skipped state. Persist a baseline for the
+        // periodic rotation check and clear any prior recovery skip.
+        setDismissedRecoveryKeyId(nil)
+        UserDefaults.standard.set(
+            remoteKeyId,
+            forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId
+        )
     }
 
     static func recoveryRetryContext(

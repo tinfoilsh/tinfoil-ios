@@ -581,6 +581,27 @@ struct PasskeyCompositionTests {
         ) == .reject(.keyMismatch))
     }
 
+    @Test func mismatchedKeyCannotReportPasskeyActive() {
+        let state = currentKeyState(keyId: "rotated-key", credentialIds: ["AQ"])
+
+        let availability = PasskeyManager.passkeyBundleAvailability(
+            state: state,
+            localKeyId: "old-key",
+            localCredentialId: "AQ"
+        )
+        let emptyMismatch = PasskeyManager.passkeyBundleAvailability(
+            state: currentKeyState(keyId: "rotated-key", credentialIds: []),
+            localKeyId: "old-key",
+            localCredentialId: "AQ"
+        )
+
+        #expect(!availability.active)
+        #expect(!availability.setupAvailable)
+        #expect(!availability.addDeviceAvailable)
+        #expect(!availability.keyMatches)
+        #expect(!emptyMismatch.setupAvailable)
+    }
+
     @Test func passkeyRemovalAllowsFinalBundleWithoutBackupGate() {
         let state = currentKeyState(keyId: "current-key", credentialIds: ["AQ"])
 
@@ -589,6 +610,25 @@ struct PasskeyCompositionTests {
             state: state,
             localKeyId: "current-key"
         ) == .remove)
+    }
+
+    @Test func finalBundleRemovalStaysInactiveWhenRefreshFails() {
+        let state = currentKeyState(keyId: "current-key", credentialIds: ["AQ"])
+        let updatedState = PasskeyManager.removingPasskeyBundle(
+            credentialId: "AQ",
+            from: state
+        )
+
+        let deterministicAvailability = PasskeyManager.passkeyBundleAvailability(
+            state: updatedState,
+            localKeyId: "current-key",
+            localCredentialId: "AQ"
+        )
+
+        #expect(updatedState.bundles.isEmpty)
+        #expect(!deterministicAvailability.active)
+        #expect(deterministicAvailability.setupAvailable)
+        #expect(!deterministicAvailability.addDeviceAvailable)
     }
 
     @Test func missingPasskeyBundleRemovalIsIdempotent() {
@@ -604,6 +644,16 @@ struct PasskeyCompositionTests {
             status: 404,
             code: WireCodes.notFound
         )) == .missing)
+    }
+
+    @Test func bundleMissingAfterRotationRemainsIdempotent() {
+        let rotatedState = currentKeyState(keyId: "rotated-key", credentialIds: ["Ag"])
+
+        #expect(PasskeyManager.passkeyBundleRemovalDecision(
+            credentialId: "AQ",
+            state: rotatedState,
+            localKeyId: "old-key"
+        ) == .alreadyMissing)
     }
 
     @Test func passkeyRemovalErrorsRemainTyped() {
