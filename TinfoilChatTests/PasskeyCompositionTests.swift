@@ -637,7 +637,7 @@ struct PasskeyCompositionTests {
             credentialId: "AQ",
             from: state
         )
-        let legacyLookup = LegacyPasskeyCredentialLookup.available([legacyEntry(id: "legacy")])
+        let legacyLookup = LegacyPasskeyCredentialLookup.available([legacyEntry(id: "AQ")])
         let inventory = PasskeyManager.passkeyBundleInventory(
             state: updatedState,
             localKeyId: "current-key",
@@ -647,14 +647,45 @@ struct PasskeyCompositionTests {
             state: updatedState,
             localKeyId: "current-key",
             localCredentialId: "AQ",
-            legacyStatus: inventory.legacyStatus
+            legacyStatus: inventory.legacyStatus,
+            legacyCredentialIds: Set(inventory.legacyCredentials.map(\.id))
         )
 
         #expect(inventory.bundles.isEmpty)
-        #expect(inventory.legacyCredentials.map(\.id) == ["legacy"])
+        #expect(inventory.legacyCredentials.map(\.id) == ["AQ"])
         #expect(inventory.legacyStatus == .present)
         #expect(availability.active)
         #expect(!availability.setupAvailable)
+    }
+
+    @Test func otherLegacyCredentialDoesNotMakeCurrentDeviceActive() {
+        let state = currentKeyState(keyId: "current-key", credentialIds: [])
+        let inventory = PasskeyManager.passkeyBundleInventory(
+            state: state,
+            localKeyId: "current-key",
+            legacyLookup: .available([legacyEntry(id: "other")])
+        )
+
+        let nonmatching = PasskeyManager.passkeyBundleAvailability(
+            state: state,
+            localKeyId: "current-key",
+            localCredentialId: "AQ",
+            legacyStatus: inventory.legacyStatus,
+            legacyCredentialIds: Set(inventory.legacyCredentials.map(\.id))
+        )
+        let unavailableLocalId = PasskeyManager.passkeyBundleAvailability(
+            state: state,
+            localKeyId: "current-key",
+            localCredentialId: nil,
+            legacyStatus: inventory.legacyStatus,
+            legacyCredentialIds: Set(inventory.legacyCredentials.map(\.id))
+        )
+
+        #expect(inventory.legacyCredentials.map(\.id) == ["other"])
+        #expect(!nonmatching.active)
+        #expect(nonmatching.addDeviceAvailable)
+        #expect(!unavailableLocalId.active)
+        #expect(unavailableLocalId.addDeviceAvailable)
     }
 
     @Test func legacyLookupFailureLeavesRecoveryUnverified() {

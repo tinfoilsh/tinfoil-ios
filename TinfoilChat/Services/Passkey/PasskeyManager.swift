@@ -948,13 +948,16 @@ final class PasskeyManager: ObservableObject {
         state: EnclaveKeyCurrentResponse,
         localKeyId: String?,
         localCredentialId: String?,
-        legacyStatus: LegacyPasskeyRecoveryStatus = .absent
+        legacyStatus: LegacyPasskeyRecoveryStatus = .absent,
+        legacyCredentialIds: Set<String> = []
     ) -> PasskeyBundleAvailability {
+        let hasMatchingLegacyCredential = legacyStatus == .present
+            && (localCredentialId.map { legacyCredentialIds.contains($0) } ?? false)
         guard let remoteKeyId = state.keyId else {
             return PasskeyBundleAvailability(
-                active: legacyStatus == .present,
+                active: hasMatchingLegacyCredential,
                 setupAvailable: legacyStatus == .absent,
-                addDeviceAvailable: false,
+                addDeviceAvailable: legacyStatus == .present && !hasMatchingLegacyCredential,
                 keyMatches: false,
                 legacyStatus: legacyStatus
             )
@@ -970,9 +973,9 @@ final class PasskeyManager: ObservableObject {
         }
         guard !state.bundles.isEmpty else {
             return PasskeyBundleAvailability(
-                active: legacyStatus == .present,
+                active: hasMatchingLegacyCredential,
                 setupAvailable: legacyStatus == .absent,
-                addDeviceAvailable: false,
+                addDeviceAvailable: legacyStatus == .present && !hasMatchingLegacyCredential,
                 keyMatches: true,
                 legacyStatus: legacyStatus
             )
@@ -981,9 +984,9 @@ final class PasskeyManager: ObservableObject {
             state.bundles.values.contains { $0.credentialId == credentialId }
         } ?? false
         return PasskeyBundleAvailability(
-            active: hasLocalBundle || legacyStatus == .present,
+            active: hasLocalBundle || hasMatchingLegacyCredential,
             setupAvailable: false,
-            addDeviceAvailable: !hasLocalBundle,
+            addDeviceAvailable: !hasLocalBundle && !hasMatchingLegacyCredential,
             keyMatches: true,
             legacyStatus: legacyStatus
         )
@@ -1031,11 +1034,14 @@ final class PasskeyManager: ObservableObject {
         legacyLookup: LegacyPasskeyCredentialLookup
     ) {
         let legacyStatus: LegacyPasskeyRecoveryStatus
+        let legacyCredentialIds: Set<String>
         switch legacyLookup {
         case .available(let entries):
             legacyStatus = entries.isEmpty ? .absent : .present
+            legacyCredentialIds = Set(entries.map(\.id))
         case .unverified:
             legacyStatus = .unverified
+            legacyCredentialIds = []
         }
         let availability = Self.passkeyBundleAvailability(
             state: state,
@@ -1043,7 +1049,8 @@ final class PasskeyManager: ObservableObject {
             localCredentialId: UserDefaults.standard.string(
                 forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId
             ),
-            legacyStatus: legacyStatus
+            legacyStatus: legacyStatus,
+            legacyCredentialIds: legacyCredentialIds
         )
         passkeyActive = availability.active
         passkeySetupAvailable = availability.setupAvailable
