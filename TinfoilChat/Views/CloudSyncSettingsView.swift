@@ -581,11 +581,10 @@ struct CloudSyncSettingsView: View {
         removingPasskeyId = credentialId
         defer { removingPasskeyId = nil }
         do {
-            _ = try await passkeyManager.removePasskeyBundle(credentialId: credentialId)
-            passkeyInventoryState = PasskeyBundleInventory(
-                bundles: passkeyBundles.filter { $0.credentialId != credentialId },
-                verification: .unverified
+            let result: PasskeyBundleRemovalResult = try await passkeyManager.removePasskeyBundle(
+                credentialId: credentialId
             )
+            passkeyInventoryState = result.inventory
             await refreshPasskeyBundles()
         } catch {
             passkeyBundleError = removalErrorMessage(for: error)

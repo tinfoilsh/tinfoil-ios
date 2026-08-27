@@ -656,6 +656,42 @@ struct PasskeyCompositionTests {
         ) == .alreadyMissing)
     }
 
+    @Test func absentFinalBundleProducesInactiveSetupState() {
+        let state = currentKeyState(keyId: "current-key", credentialIds: [])
+
+        #expect(PasskeyManager.passkeyBundleRemovalDecision(
+            credentialId: "AQ",
+            state: state,
+            localKeyId: "current-key"
+        ) == .alreadyMissing)
+
+        let availability = PasskeyManager.passkeyBundleAvailability(
+            state: state,
+            localKeyId: "current-key",
+            localCredentialId: "AQ"
+        )
+        #expect(!availability.active)
+        #expect(availability.setupAvailable)
+    }
+
+    @Test func absentBundlePreservesActiveRemainingLocalBundle() {
+        let state = currentKeyState(keyId: "current-key", credentialIds: ["Ag"])
+
+        #expect(PasskeyManager.passkeyBundleRemovalDecision(
+            credentialId: "AQ",
+            state: state,
+            localKeyId: "current-key"
+        ) == .alreadyMissing)
+
+        let availability = PasskeyManager.passkeyBundleAvailability(
+            state: state,
+            localKeyId: "current-key",
+            localCredentialId: "Ag"
+        )
+        #expect(availability.active)
+        #expect(!availability.setupAvailable)
+    }
+
     @Test func passkeyRemovalErrorsRemainTyped() {
         #expect(PasskeyManager.passkeyBundleRemovalError(from: SyncEnclaveError(
             message: "sign in",

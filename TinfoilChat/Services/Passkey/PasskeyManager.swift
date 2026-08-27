@@ -53,6 +53,11 @@ enum PasskeyBundleRemovalOutcome: Equatable {
     case alreadyMissing
 }
 
+struct PasskeyBundleRemovalResult {
+    let outcome: PasskeyBundleRemovalOutcome
+    let inventory: PasskeyBundleInventory
+}
+
 enum PasskeyBundleRemovalError: Error, Equatable {
     case missing
     case keyMismatch
@@ -641,16 +646,16 @@ final class PasskeyManager: ObservableObject {
     /// Used by Settings so stale inventory can remain visible without
     /// being actionable when the current state cannot be verified.
     func passkeyBundleInventory() async throws -> PasskeyBundleInventory {
-        let state = try await SyncEnclaveAPI.keyCurrent()
-        let localKeyId = localKeyIdHex()
+        let state: EnclaveKeyCurrentResponse = try await SyncEnclaveAPI.keyCurrent()
+        let localKeyId: String? = localKeyIdHex()
         return Self.passkeyBundleInventory(state: state, localKeyId: localKeyId)
     }
 
     /// Remove a passkey bundle from the enclave's current key, then
     /// re-evaluate the local passkey state.
-    func removePasskeyBundle(credentialId: String) async throws -> PasskeyBundleRemovalOutcome {
+    func removePasskeyBundle(credentialId: String) async throws -> PasskeyBundleRemovalResult {
         guard accountOperationsEnabled else { throw CancellationError() }
-        let operationTask = Task {
+        let operationTask: Task<PasskeyBundleRemovalResult, Error> = Task {
             try Task.checkCancellation()
             let currentState: EnclaveKeyCurrentResponse
             do {
@@ -663,7 +668,17 @@ final class PasskeyManager: ObservableObject {
             guard accountOperationsEnabled else { throw CancellationError() }
 
             guard currentState.bundles.values.contains(where: { $0.credentialId == credentialId }) else {
-                return .alreadyMissing
+                let localKeyId: String? = localKeyIdHex()
+                applyPasskeyAvailability(state: currentState, localKeyId: localKeyId)
+                let result = PasskeyBundleRemovalResult(
+                    outcome: .alreadyMissing,
+                    inventory: Self.passkeyBundleInventory(
+                        state: currentState,
+                        localKeyId: localKeyId
+                    )
+                )
+                await checkPasskeyStateForExistingKey(preserveStateOnFailure: true)
+                return result
             }
 
             let cek: Data
@@ -684,8 +699,15 @@ final class PasskeyManager: ObservableObject {
                 break
             case .alreadyMissing:
                 applyPasskeyAvailability(state: currentState, localKeyId: keyIdHex)
+                let result = PasskeyBundleRemovalResult(
+                    outcome: .alreadyMissing,
+                    inventory: Self.passkeyBundleInventory(
+                        state: currentState,
+                        localKeyId: keyIdHex
+                    )
+                )
                 await checkPasskeyStateForExistingKey(preserveStateOnFailure: true)
-                return .alreadyMissing
+                return result
             case .reject(let error):
                 throw error
             }
@@ -711,8 +733,15 @@ final class PasskeyManager: ObservableObject {
                 from: currentState
             )
             applyPasskeyAvailability(state: updatedState, localKeyId: keyIdHex)
+            let result = PasskeyBundleRemovalResult(
+                outcome: outcome,
+                inventory: Self.passkeyBundleInventory(
+                    state: updatedState,
+                    localKeyId: keyIdHex
+                )
+            )
             await checkPasskeyStateForExistingKey(preserveStateOnFailure: true)
-            return outcome
+            return result
         }
         guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
             operationTask.cancel()
