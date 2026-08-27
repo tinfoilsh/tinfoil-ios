@@ -1,22 +1,19 @@
 import Foundation
 
+struct SharedImportAttachmentBatch {
+    enum Admission {
+        case image(data: Data, fileName: String, requestID: UUID)
+        case document(file: ManagedStagedFile, requestID: UUID)
+        case failure(ManagedFileError)
+    }
+
+    let admissions: [Admission]
+}
+
 @MainActor
 protocol SharedImportAttachmentReceiving: AnyObject {
     var pendingAttachments: [Attachment] { get }
-    var attachmentError: String? { get set }
-
-    func addImageAttachment(
-        data: Data,
-        fileName: String,
-        sharedImportRequestID: UUID?
-    )
-
-    func addDocumentAttachment(
-        url: URL,
-        fileName: String,
-        sharedImportRequestID: UUID?,
-        managedFile: ManagedStagedFile?
-    )
+    func addSharedImportAttachments(_ batch: SharedImportAttachmentBatch)
 }
 
 extension ChatViewModel: SharedImportAttachmentReceiving {}
@@ -42,33 +39,34 @@ final class SharedImportCoordinator {
         let importedRequestIDs = Set(
             receiver.pendingAttachments.compactMap(\.sharedImportRequestID)
         )
+        var admissions: [SharedImportAttachmentBatch.Admission] = []
         for request in store.pendingRequests() where !importedRequestIDs.contains(request.id) {
             do {
                 switch request.item.kind {
                 case .image:
                     let data = try store.payloadData(for: request)
-                    receiver.addImageAttachment(
+                    admissions.append(.image(
                         data: data,
                         fileName: request.item.originalFileName,
-                        sharedImportRequestID: request.id
-                    )
+                        requestID: request.id
+                    ))
                 case .document:
                     let payloadURL = try store.payloadURL(for: request)
                     let managedFile = try managedFileStore.stage(
                         sourceURL: payloadURL,
                         fileName: request.item.originalFileName
                     )
-                    receiver.addDocumentAttachment(
-                        url: managedFile.url,
-                        fileName: request.item.originalFileName,
-                        sharedImportRequestID: request.id,
-                        managedFile: managedFile
-                    )
+                    admissions.append(.document(file: managedFile, requestID: request.id))
                 }
             } catch {
-                receiver.attachmentError = error.localizedDescription
+                admissions.append(.failure(ManagedFileError(
+                    fileName: request.item.originalFileName,
+                    error: error
+                )))
             }
         }
+        guard !admissions.isEmpty else { return }
+        receiver.addSharedImportAttachments(SharedImportAttachmentBatch(admissions: admissions))
     }
 
     func acknowledge(requestID: UUID) {

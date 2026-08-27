@@ -3319,11 +3319,15 @@ class ChatViewModel: ObservableObject {
         sharedImportRequestID: UUID? = nil,
         managedFile: ManagedStagedFile? = nil,
         preserveExistingErrors: Bool = false,
-        errorPublicationGeneration: Int? = nil
+        errorPublicationGeneration: Int? = nil,
+        onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil
     ) {
+        let startsNewErrorPublication = errorPublicationGeneration == nil
         let errorPublicationGeneration = errorPublicationGeneration
             ?? attachmentErrorPublicationFence.begin()
-        attachmentError = nil
+        if startsNewErrorPublication {
+            attachmentError = nil
+        }
 
         let attachmentId = UUID().uuidString.lowercased()
         var attachment = Attachment(
@@ -3361,8 +3365,13 @@ class ChatViewModel: ObservableObject {
                     pendingAttachments[index] = attachment
                 }
                 guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
+                let failure = ManagedFileError(fileName: fileName, error: error)
+                if let onProcessingFailure {
+                    onProcessingFailure(failure)
+                    return
+                }
                 let message = preserveExistingErrors
-                    ? "\(fileName): \(error.localizedDescription)"
+                    ? "\(fileName): \(failure.message)"
                     : error.localizedDescription
                 if preserveExistingErrors, let attachmentError, !attachmentError.isEmpty {
                     self.attachmentError = "\(attachmentError)\n\(message)"
@@ -3385,14 +3394,16 @@ class ChatViewModel: ObservableObject {
     func addDocumentAttachment(
         handle: ManagedStagedFile,
         preserveExistingErrors: Bool = false,
-        errorPublicationGeneration: Int? = nil
+        errorPublicationGeneration: Int? = nil,
+        onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil
     ) {
         addDocumentAttachment(
             url: handle.url,
             fileName: handle.fileName,
             managedFile: handle,
             preserveExistingErrors: preserveExistingErrors,
-            errorPublicationGeneration: errorPublicationGeneration
+            errorPublicationGeneration: errorPublicationGeneration,
+            onProcessingFailure: onProcessingFailure
         )
     }
 
@@ -3411,10 +3422,16 @@ class ChatViewModel: ObservableObject {
     func addImageAttachment(
         data: Data,
         fileName: String,
-        sharedImportRequestID: UUID? = nil
+        sharedImportRequestID: UUID? = nil,
+        errorPublicationGeneration: Int? = nil,
+        onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil
     ) {
-        let errorPublicationGeneration = attachmentErrorPublicationFence.begin()
-        attachmentError = nil
+        let startsNewErrorPublication = errorPublicationGeneration == nil
+        let errorPublicationGeneration = errorPublicationGeneration
+            ?? attachmentErrorPublicationFence.begin()
+        if startsNewErrorPublication {
+            attachmentError = nil
+        }
 
         let attachmentId = UUID().uuidString.lowercased()
         var attachment = Attachment(
@@ -3456,7 +3473,51 @@ class ChatViewModel: ObservableObject {
                     pendingAttachments[index] = attachment
                 }
                 guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
-                attachmentError = error.localizedDescription
+                let failure = ManagedFileError(fileName: fileName, error: error)
+                if let onProcessingFailure {
+                    onProcessingFailure(failure)
+                } else {
+                    attachmentError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func addSharedImportAttachments(_ batch: SharedImportAttachmentBatch) {
+        let generation = attachmentErrorPublicationFence.beginBatch(count: batch.admissions.count)
+        attachmentError = nil
+
+        for (index, admission) in batch.admissions.enumerated() {
+            let publishFailure: @MainActor (ManagedFileError) -> Void = { [weak self] failure in
+                guard let self,
+                      let failures = attachmentErrorPublicationFence.recordBatchFailure(
+                          failure,
+                          at: index,
+                          generation: generation
+                      ) else { return }
+                attachmentError = ManagedFileBatchErrorMessage.attachments(failures)
+            }
+
+            switch admission {
+            case let .image(data, fileName, requestID):
+                addImageAttachment(
+                    data: data,
+                    fileName: fileName,
+                    sharedImportRequestID: requestID,
+                    errorPublicationGeneration: generation,
+                    onProcessingFailure: publishFailure
+                )
+            case let .document(file, requestID):
+                addDocumentAttachment(
+                    url: file.url,
+                    fileName: file.fileName,
+                    sharedImportRequestID: requestID,
+                    managedFile: file,
+                    errorPublicationGeneration: generation,
+                    onProcessingFailure: publishFailure
+                )
+            case let .failure(failure):
+                publishFailure(failure)
             }
         }
     }

@@ -15,6 +15,38 @@ struct AttachmentProcessingStoreTests {
         #expect(fence.accepts(secondImport))
     }
 
+    @Test("Shared import failures retain batch order after async completion")
+    func sharedImportFailuresRetainBatchOrder() async {
+        var fence = AttachmentErrorPublicationFence()
+        let generation = fence.beginBatch(count: 2)
+        let first = ManagedFileError(fileName: "first.txt", error: TestError.failed)
+        let second = ManagedFileError(fileName: "second.txt", error: TestError.failed)
+
+        await Task.yield()
+        _ = fence.recordBatchFailure(second, at: 1, generation: generation)
+        await Task.yield()
+        let failures = fence.recordBatchFailure(first, at: 0, generation: generation)
+
+        #expect(failures?.map(\.fileName) == ["first.txt", "second.txt"])
+    }
+
+    @Test("A newer import suppresses older asynchronous batch failures")
+    func newerImportSuppressesOlderBatchFailures() async {
+        var fence = AttachmentErrorPublicationFence()
+        let olderGeneration = fence.beginBatch(count: 2)
+
+        await Task.yield()
+        let newerGeneration = fence.beginBatch(count: 1)
+        let staleFailures = fence.recordBatchFailure(
+            ManagedFileError(fileName: "stale.txt", error: TestError.failed),
+            at: 0,
+            generation: olderGeneration
+        )
+
+        #expect(staleFailures == nil)
+        #expect(fence.accepts(newerGeneration))
+    }
+
     @Test("Removal cancels processing and prevents late publication")
     func removalPreventsLatePublication() async {
         let store = AttachmentProcessingStore()
@@ -134,5 +166,9 @@ struct AttachmentProcessingStoreTests {
             directoryURL: rootURL.appendingPathComponent("ManagedFileStaging", isDirectory: true)
         )
         return (try store.stage(sourceURL: sourceURL, fileName: fileName), rootURL)
+    }
+
+    private enum TestError: Error {
+        case failed
     }
 }
