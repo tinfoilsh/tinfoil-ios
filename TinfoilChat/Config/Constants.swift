@@ -37,6 +37,9 @@ enum Constants {
         static let configURL = URL(string: "https://api.tinfoil.sh/api/config/mobile")!
         static let modelsURL = URL(string: "https://api.tinfoil.sh/api/config/models?mobile=true&chat=true")!
         static let allModelsURL = URL(string: "https://api.tinfoil.sh/api/config/models")!
+        static let systemPromptURL = URL(string: "https://api.tinfoil.sh/api/config/system-prompt")!
+        static let genUIConfigCacheMaxAge: TimeInterval = 7 * 24 * 60 * 60
+        static let genUIConfigCacheKey = "tinfoil-config-cached-genui"
 
         enum ErrorDomain {
             static let domain = "Tinfoil"

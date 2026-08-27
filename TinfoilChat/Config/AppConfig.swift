@@ -349,6 +349,9 @@ class AppConfig: ObservableObject {
             }
 
             // Fetch config and models in parallel
+            Task {
+                await GenUIConfigService.shared.refresh()
+            }
             async let configData = URLSession.shared.data(from: configURL)
             async let modelsData = URLSession.shared.data(from: allModelsURL)
 

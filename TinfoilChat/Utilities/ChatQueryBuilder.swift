@@ -70,6 +70,7 @@ struct ChatQueryBuilder {
         reasoningEffort: ReasoningEffort = .medium,
         thinkingEnabled: Bool = true,
         genUIEnabled: Bool = true,
+        genUIRegistry: GenUIRegistry = .shared,
         autoCandidates: [ModelType]? = nil,
         includeTimeReminder: Bool = false,
         responseFormat: ChatQuery.ResponseFormat? = nil
@@ -90,8 +91,7 @@ struct ChatQueryBuilder {
         // of which transport carries the system instructions (system role
         // vs synthetic <system> user message).
         var effectiveSystemPrompt = systemPrompt
-        if genUIEnabled {
-            let hint = GenUIRegistry.shared.buildPromptHint()
+        if genUIEnabled, let hint = genUIRegistry.buildPromptHint() {
             effectiveSystemPrompt = systemPrompt.isEmpty ? hint : systemPrompt + "\n\n" + hint
         }
 
@@ -221,9 +221,8 @@ struct ChatQueryBuilder {
             messages.append(.user(.init(content: .string(TimeReminder.formatCurrentTimeReminder()))))
         }
 
-        let tools: [ChatQuery.ChatCompletionToolParam]? = genUIEnabled
-            ? GenUIRegistry.shared.buildToolParams()
-            : nil
+        let enabledTools = genUIEnabled ? genUIRegistry.buildToolParams() : []
+        let tools: [ChatQuery.ChatCompletionToolParam]? = enabledTools.isEmpty ? nil : enabledTools
 
         // Mirror the webapp: when GenUI tools are present, send
         // `tool_choice: "auto"` and opt in to parallel tool calls so the
