@@ -9,15 +9,19 @@ import SwiftUI
 import ClerkKit
 import SafariServices
 
-/// Search results, unlike the root list, do surface project chats (the
-/// index covers every synced chat and the webapp shows them too); only
-/// temporary and undecryptable chats are excluded.
-func isSearchResultSidebarChat(_ chat: ChatListSummary) -> Bool {
-    !chat.isTemporary && !chat.decryptionFailed
+/// Search results, unlike the root list, surface project chats for Premium
+/// users; temporary and undecryptable chats are always excluded.
+func isSearchResultSidebarChat(_ chat: ChatListSummary, hasPremiumAccess: Bool) -> Bool {
+    !chat.isTemporary
+        && !chat.decryptionFailed
+        && PremiumProjectPolicy.includesChat(
+            projectId: chat.projectId,
+            hasPremiumAccess: hasPremiumAccess
+        )
 }
 
 func isRootSidebarChat(_ chat: ChatListSummary) -> Bool {
-    isSearchResultSidebarChat(chat) && chat.projectId == nil
+    !chat.isTemporary && !chat.decryptionFailed && chat.projectId == nil
 }
 
 func resolveSidebarSearchChat(
@@ -112,14 +116,14 @@ struct ChatSidebar: View {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
             return viewModel.cloudSidebarSummaries.filter {
-                isSearchResultSidebarChat($0)
+                isSearchResultSidebarChat($0, hasPremiumAccess: viewModel.hasPremiumAccess)
                     && !$0.isBlankChat
                     && $0.title.lowercased().contains(needle)
             }
         }
         return chatSearch.results
             .map { ChatListSummary(from: $0) }
-            .filter(isSearchResultSidebarChat)
+            .filter { isSearchResultSidebarChat($0, hasPremiumAccess: viewModel.hasPremiumAccess) }
     }
 
     private var displayedChats: [ChatListSummary] {
@@ -223,6 +227,11 @@ struct ChatSidebar: View {
                 viewModel.shouldExpandProjectsInSidebar = false
             }
         }
+        .onChange(of: viewModel.hasPremiumAccess) { _, hasPremiumAccess in
+            if !hasPremiumAccess {
+                isProjectsExpanded = false
+            }
+        }
     }
 
     private func applyNavigationRequest(
@@ -298,10 +307,12 @@ struct ChatSidebar: View {
                                 .padding(.top, 16)
                                 .id(ChatNavigationDestination.favorites)
 
-                            projectsSection
-                                .padding(.horizontal, 16)
-                                .padding(.top, 8)
-                                .id(ChatNavigationDestination.projects)
+                            if viewModel.hasPremiumAccess {
+                                projectsSection
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, 8)
+                                    .id(ChatNavigationDestination.projects)
+                            }
                         }
 
                         chatsSectionHeader
@@ -491,7 +502,7 @@ struct ChatSidebar: View {
                             )
                         }
                     }
-                    if authManager.isAuthenticated && !chat.isBlankChat && !chat.decryptionFailed {
+                    if viewModel.hasPremiumAccess && !chat.isBlankChat && !chat.decryptionFailed {
                         ForEach(viewModel.projects.filter { $0.decryptionFailed != true }) { project in
                             Button {
                                 Task {
@@ -557,17 +568,26 @@ struct ChatSidebar: View {
             .accessibilityValue(isFavoritesExpanded ? "Expanded" : "Collapsed")
 
             if isFavoritesExpanded {
-                if viewModel.favoriteChats.isEmpty {
+                if visibleFavoriteChats.isEmpty {
                     Text("Pin cloud chats for quick access.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 14)
                 } else {
-                    ForEach(viewModel.favoriteChats) { chat in
+                    ForEach(visibleFavoriteChats) { chat in
                         favoriteChatRow(chat, projectColors: projectColors)
                     }
                 }
             }
+        }
+    }
+
+    private var visibleFavoriteChats: [Chat] {
+        viewModel.favoriteChats.filter {
+            PremiumProjectPolicy.includesChat(
+                projectId: $0.projectId,
+                hasPremiumAccess: viewModel.hasPremiumAccess
+            )
         }
     }
 
@@ -611,7 +631,7 @@ struct ChatSidebar: View {
                 Label("Unpin", systemImage: "pin.slash")
             }
 
-            if chat.projectId != nil {
+            if viewModel.hasPremiumAccess && chat.projectId != nil {
                 Button {
                     Task {
                         await viewModel.removeChatFromProject(chatId: chat.id)
@@ -621,18 +641,20 @@ struct ChatSidebar: View {
                 }
             }
 
-            ForEach(viewModel.projects.filter {
-                $0.decryptionFailed != true && $0.id != chat.projectId
-            }) { project in
-                Button {
-                    Task {
-                        await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
-                    }
-                } label: {
-                    Label {
-                        Text(chat.projectId == nil ? "Add to \(project.name)" : "Move to \(project.name)")
-                    } icon: {
-                        ProjectFolderIcon(color: project.color, size: 22)
+            if viewModel.hasPremiumAccess {
+                ForEach(viewModel.projects.filter {
+                    $0.decryptionFailed != true && $0.id != chat.projectId
+                }) { project in
+                    Button {
+                        Task {
+                            await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
+                        }
+                    } label: {
+                        Label {
+                            Text(chat.projectId == nil ? "Add to \(project.name)" : "Move to \(project.name)")
+                        } icon: {
+                            ProjectFolderIcon(color: project.color, size: 22)
+                        }
                     }
                 }
             }

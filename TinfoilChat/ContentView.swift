@@ -44,6 +44,7 @@ struct ContentView: View {
         }
         .onAppear {
             chatViewModel.authManager = authManager
+            refreshHomeScreenQuickActions()
             chatViewModel.setAppPresentationReady(scenePhase == .active)
             authManager.setChatViewModel(chatViewModel)
             requestAppReviewIfEligible()
@@ -154,6 +155,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
+            refreshHomeScreenQuickActions()
             chatViewModel.updateModelBasedOnAuthStatus(
                 isAuthenticated: isAuthenticated,
                 hasActiveSubscription: authManager.hasActiveSubscription
@@ -181,6 +183,7 @@ struct ContentView: View {
             performPendingIntentActionsIfReady()
         }
         .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
+            refreshHomeScreenQuickActions()
             // Update available models when subscription status changes
             chatViewModel.updateModelBasedOnAuthStatus(
                 isAuthenticated: authManager.isAuthenticated,
@@ -265,10 +268,20 @@ struct ContentView: View {
                 chatViewModel.shouldFocusInput = true
             }
         case .showProjects:
+            guard chatViewModel.hasPremiumAccess else { return }
             chatViewModel.requestNavigation(to: .projects)
         case .showFavorites:
             chatViewModel.requestNavigation(to: .favorites)
         }
+    }
+
+    private func refreshHomeScreenQuickActions() {
+        HomeScreenQuickActionSceneDelegate.refreshQuickActions(
+            hasPremiumAccess: PremiumProjectPolicy.hasAccess(
+                isAuthenticated: authManager.isAuthenticated,
+                hasActiveSubscription: authManager.hasActiveSubscription
+            )
+        )
     }
 }
 

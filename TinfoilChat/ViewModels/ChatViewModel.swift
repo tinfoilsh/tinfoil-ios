@@ -539,6 +539,7 @@ class ChatViewModel: ObservableObject {
     private var pendingBackupTasks: [UUID: Task<Void, Never>] = [:]
     private var activeFullSyncId: UUID?
     private var lastKnownAuthState: Bool?
+    private var lastKnownProjectAccess: Bool?
     @Published private var genUIRetryStates: [GenUIRetryKey: GenUIRetryState] = [:]
     private var activeGenUIRetryIds: [GenUIRetryKey: UUID] = [:]
     
@@ -864,7 +865,17 @@ class ChatViewModel: ObservableObject {
     // This is now only used for premium models
     var hasPremiumAccess: Bool {
         guard let authManager = authManager else { return false }
-        return authManager.isAuthenticated && authManager.hasActiveSubscription
+        return PremiumProjectPolicy.hasAccess(
+            isAuthenticated: authManager.isAuthenticated,
+            hasActiveSubscription: authManager.hasActiveSubscription
+        )
+    }
+
+    var canSendInCurrentContext: Bool {
+        PremiumProjectPolicy.includesChat(
+            projectId: currentChat?.projectId,
+            hasPremiumAccess: hasPremiumAccess
+        )
     }
     
     // Computed property to check if user has access to chat features
@@ -1606,6 +1617,10 @@ class ChatViewModel: ObservableObject {
     }
 
     func requestNavigation(to destination: ChatNavigationDestination) {
+        guard PremiumProjectPolicy.allowsNavigation(
+            to: destination,
+            hasPremiumAccess: hasPremiumAccess
+        ) else { return }
         navigationRequest = ChatNavigationRequest(destination: destination)
     }
 
@@ -1630,6 +1645,11 @@ class ChatViewModel: ObservableObject {
     func createNewChat(language: String? = nil, modelType: ModelType? = nil, isLocalOnly: Bool? = nil, projectId: String? = nil, focusInput: Bool = true) {
         // Allow creating new chats for all authenticated users
         guard hasChatAccess else { return }
+        let targetProjectId = projectId ?? activeProject?.id
+        guard targetProjectId == nil || PremiumProjectPolicy.allowsMutation(
+            .createProjectChat,
+            hasPremiumAccess: hasPremiumAccess
+        ) else { return }
         
         // Exit temporary mode when the user explicitly creates a fresh chat.
         if isTemporaryMode {
@@ -1646,7 +1666,6 @@ class ChatViewModel: ObservableObject {
             previousChatIdBeforeTemporary = nil
         }
 
-        let targetProjectId = projectId ?? activeProject?.id
         let shouldBeLocal: Bool
         if targetProjectId != nil {
             shouldBeLocal = false
@@ -1700,7 +1719,7 @@ class ChatViewModel: ObservableObject {
         projectListLoadGeneration += 1
         let generation = projectListLoadGeneration
         let accountGeneration = projectListAccountGeneration
-        guard hasChatAccess,
+        guard hasPremiumAccess,
               isProjectAccountActive,
               let userId = currentUserId,
               SettingsManager.shared.isCloudSyncEnabled else {
@@ -1723,7 +1742,8 @@ class ChatViewModel: ObservableObject {
                   generation == projectListLoadGeneration,
                   generation > latestAppliedProjectListLoadGeneration,
                   currentUserId == userId,
-                  SettingsManager.shared.isCloudSyncEnabled else { return }
+                  SettingsManager.shared.isCloudSyncEnabled,
+                  hasPremiumAccess else { return }
             latestAppliedProjectListLoadGeneration = generation
             projects = loadedProjects
         } catch is CancellationError {
@@ -1758,7 +1778,10 @@ class ChatViewModel: ObservableObject {
 
     @discardableResult
     func createProject(name: String? = nil, color: String? = nil) async -> Project? {
-        guard hasChatAccess, isProjectAccountActive else { return nil }
+        guard PremiumProjectPolicy.allowsMutation(
+            .createProject,
+            hasPremiumAccess: hasPremiumAccess
+        ), isProjectAccountActive else { return nil }
         let accountGeneration = projectListAccountGeneration
 
         isLoadingProject = true
@@ -1773,22 +1796,23 @@ class ChatViewModel: ObservableObject {
             let project = try await projectStorage.createProject(
                 CreateProjectData(name: resolvedName, color: color)
             )
-            guard isCurrentProjectAccount(accountGeneration) else { return nil }
+            guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return nil }
             projects.insert(project, at: 0)
             await enterProject(projectId: project.id)
-            guard isCurrentProjectAccount(accountGeneration) else { return nil }
+            guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return nil }
             return project
         } catch {
-            guard isCurrentProjectAccount(accountGeneration) else { return nil }
+            guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return nil }
             projectError = error.localizedDescription
             return nil
         }
     }
 
     func enterProject(projectId: String) async {
+        guard hasPremiumAccess else { return }
         let accountGeneration = projectListAccountGeneration
         guard await loadActiveProject(projectId: projectId) else { return }
-        guard isCurrentProjectAccount(accountGeneration) else { return }
+        guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return }
         createNewChat(isLocalOnly: false, projectId: projectId, focusInput: false)
     }
 
@@ -1801,7 +1825,7 @@ class ChatViewModel: ObservableObject {
     /// resources load.
     @discardableResult
     func loadActiveProject(projectId: String) async -> Bool {
-        guard hasChatAccess, isProjectAccountActive, !Task.isCancelled else { return false }
+        guard hasPremiumAccess, isProjectAccountActive, !Task.isCancelled else { return false }
         let accountGeneration = projectListAccountGeneration
 
         projectLoadGeneration += 1
@@ -1819,7 +1843,8 @@ class ChatViewModel: ObservableObject {
             let project = try await projectStorage.getProject(projectId)
             guard !Task.isCancelled,
                   generation == projectLoadGeneration,
-                  isCurrentProjectAccount(accountGeneration) else { return false }
+                  isCurrentProjectAccount(accountGeneration),
+                  hasPremiumAccess else { return false }
             guard let project else {
                 throw CloudStorageError.downloadFailed
             }
@@ -1827,11 +1852,13 @@ class ChatViewModel: ObservableObject {
             let documents = try await projectStorage.listDocuments(projectId: projectId, includeContent: true)
             guard !Task.isCancelled,
                   generation == projectLoadGeneration,
-                  isCurrentProjectAccount(accountGeneration) else { return false }
+                  isCurrentProjectAccount(accountGeneration),
+                  hasPremiumAccess else { return false }
             let syncResult = await cloudSync.smartSync(projectId: projectId)
             guard !Task.isCancelled,
                   generation == projectLoadGeneration,
-                  isCurrentProjectAccount(accountGeneration) else { return false }
+                  isCurrentProjectAccount(accountGeneration),
+                  hasPremiumAccess else { return false }
             if syncResult.downloaded > 0 || syncResult.uploaded > 0,
                let userId = currentUserId {
                 let index = try await chatLoadingService.loadIndex(userId: userId, storage: .cloud)
@@ -1884,17 +1911,22 @@ class ChatViewModel: ObservableObject {
     }
 
     func returnToProjectLanding() {
-        guard let projectId = activeProject?.id else { return }
+        guard hasPremiumAccess, let projectId = activeProject?.id else { return }
         isViewingProjectChat = false
         createNewChat(isLocalOnly: false, projectId: projectId, focusInput: false)
     }
 
     func openProjectChat(_ chat: ChatListSummary) {
+        guard hasPremiumAccess, chat.projectId != nil else { return }
         _ = selectChat(id: chat.id, isLocalOnly: false)
         isViewingProjectChat = true
     }
 
     func openSummaryChat(id: String, projectId: String?, isLocalOnly: Bool) {
+        guard PremiumProjectPolicy.includesChat(
+            projectId: projectId,
+            hasPremiumAccess: hasPremiumAccess
+        ) else { return }
         guard let projectId, activeProject?.id != projectId else {
             if projectId == nil {
                 beginSelection(id: id)
@@ -1933,7 +1965,10 @@ class ChatViewModel: ObservableObject {
     }
 
     func startNewProjectChat() {
-        guard let projectId = activeProject?.id else { return }
+        guard PremiumProjectPolicy.allowsMutation(
+            .createProjectChat,
+            hasPremiumAccess: hasPremiumAccess
+        ), let projectId = activeProject?.id else { return }
         createNewChat(isLocalOnly: false, projectId: projectId)
         isViewingProjectChat = true
     }
@@ -1948,6 +1983,10 @@ class ChatViewModel: ObservableObject {
     /// conversation keeps its documents and instructions, and root
     /// chats leave any active project first.
     func openSearchResult(_ chat: Chat) {
+        guard PremiumProjectPolicy.includesChat(
+            projectId: chat.projectId,
+            hasPremiumAccess: hasPremiumAccess
+        ) else { return }
         guard let userId = currentUserId else { return }
         beginSelection(id: chat.id)
         let selectionGeneration = chatSelectionFence.generation
@@ -2032,7 +2071,10 @@ class ChatViewModel: ObservableObject {
     }
 
     func updateActiveProject(name: String? = nil, color: String? = nil, description: String? = nil, systemInstructions: String? = nil, memory: [MemoryFact]? = nil) async {
-        guard let project = activeProject else { return }
+        guard PremiumProjectPolicy.allowsMutation(
+            .editProject,
+            hasPremiumAccess: hasPremiumAccess
+        ), let project = activeProject else { return }
         let accountGeneration = projectListAccountGeneration
 
         projectError = nil
@@ -2045,13 +2087,13 @@ class ChatViewModel: ObservableObject {
                 memory: memory
             )
             let updated = try await projectStorage.updateProject(project.id, data: update)
-            guard isCurrentProjectAccount(accountGeneration) else { return }
+            guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return }
             activeProject = updated
             if let index = projects.firstIndex(where: { $0.id == updated.id }) {
                 projects[index] = updated
             }
         } catch {
-            guard isCurrentProjectAccount(accountGeneration) else { return }
+            guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return }
             projectError = error.localizedDescription
         }
     }
@@ -2140,17 +2182,20 @@ class ChatViewModel: ObservableObject {
     }
 
     func deleteActiveProject() async {
-        guard let project = activeProject else { return }
+        guard PremiumProjectPolicy.allowsMutation(
+            .deleteProject,
+            hasPremiumAccess: hasPremiumAccess
+        ), let project = activeProject else { return }
         let accountGeneration = projectListAccountGeneration
 
         projectError = nil
         do {
             try await projectStorage.deleteProject(project.id)
-            guard isCurrentProjectAccount(accountGeneration) else { return }
+            guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return }
             projects.removeAll { $0.id == project.id }
             exitProject()
         } catch {
-            guard isCurrentProjectAccount(accountGeneration) else { return }
+            guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return }
             projectError = error.localizedDescription
         }
     }
@@ -2163,7 +2208,10 @@ class ChatViewModel: ObservableObject {
         handles: [ManagedStagedFile],
         pickerFailures: [ManagedFileError] = []
     ) async {
-        guard let project = activeProject else {
+        guard PremiumProjectPolicy.allowsMutation(
+            .manageDocuments,
+            hasPremiumAccess: hasPremiumAccess
+        ), let project = activeProject else {
             handles.forEach { $0.discard() }
             return
         }
@@ -2185,7 +2233,8 @@ class ChatViewModel: ObservableObject {
                 url: handle.url,
                 filename: handle.fileName
             )
-            guard self.isCurrentProjectAccount(accountGeneration) else { throw CancellationError() }
+            guard self.isCurrentProjectAccount(accountGeneration),
+                  self.hasPremiumAccess else { throw CancellationError() }
             let contentType = DocumentConversionService.mimeType(for: handle.fileName)
             let document = try await self.projectStorage.uploadDocument(
                 projectId: project.id,
@@ -2194,10 +2243,13 @@ class ChatViewModel: ObservableObject {
                 content: markdown,
                 sizeBytes: sizeBytes
             )
-            guard self.isCurrentProjectAccount(accountGeneration) else { throw CancellationError() }
+            guard self.isCurrentProjectAccount(accountGeneration),
+                  self.hasPremiumAccess else { throw CancellationError() }
             return document
         }
-        guard !result.wasCancelled, isCurrentProjectAccount(accountGeneration) else { return }
+        guard !result.wasCancelled,
+              isCurrentProjectAccount(accountGeneration),
+              hasPremiumAccess else { return }
 
         projectDocuments.append(contentsOf: result.successes)
         projectError = ManagedFileBatchErrorMessage.projectUpload(
@@ -2207,7 +2259,10 @@ class ChatViewModel: ObservableObject {
     }
 
     func deleteProjectDocument(_ documentId: String) async {
-        guard let project = activeProject else { return }
+        guard PremiumProjectPolicy.allowsMutation(
+            .manageDocuments,
+            hasPremiumAccess: hasPremiumAccess
+        ), let project = activeProject else { return }
         let accountGeneration = projectListAccountGeneration
 
         let existing = projectDocuments
@@ -2215,7 +2270,7 @@ class ChatViewModel: ObservableObject {
         do {
             try await projectStorage.deleteDocument(projectId: project.id, documentId: documentId)
         } catch {
-            guard isCurrentProjectAccount(accountGeneration) else { return }
+            guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return }
             projectDocuments = existing
             projectError = error.localizedDescription
         }
@@ -2230,14 +2285,18 @@ class ChatViewModel: ObservableObject {
     }
 
     private func updateChatProject(chatId: String, projectId: String?) async {
-        guard hasChatAccess, isProjectAccountActive, let userId = currentUserId else { return }
+        guard PremiumProjectPolicy.allowsMutation(
+            .moveChat,
+            hasPremiumAccess: hasPremiumAccess
+        ), isProjectAccountActive, let userId = currentUserId else { return }
         let accountGeneration = projectListAccountGeneration
         guard chatMutationGate.begin(chatId: chatId) else { return }
         defer { chatMutationGate.end(chatId: chatId) }
 
         let wasCurrent = currentChat?.id == chatId
         guard var chat = await materializeChatForOperation(id: chatId),
-              currentUserId == userId else { return }
+              currentUserId == userId,
+              hasPremiumAccess else { return }
         var didCommitStorageTransition = false
         defer {
             materializationOperationIds.remove(chatId)
@@ -2269,7 +2328,8 @@ class ChatViewModel: ObservableObject {
                 loadingService: chatLoadingService,
                 validateAccount: { [weak self] in
                     guard self?.currentUserId == userId,
-                          self?.isCurrentProjectAccount(accountGeneration) == true
+                          self?.isCurrentProjectAccount(accountGeneration) == true,
+                          self?.hasPremiumAccess == true
                     else { throw CancellationError() }
                 }
             )
@@ -2277,12 +2337,14 @@ class ChatViewModel: ObservableObject {
             return
         } catch {
             guard currentUserId == userId,
-                  isCurrentProjectAccount(accountGeneration) else { return }
+                  isCurrentProjectAccount(accountGeneration),
+                  hasPremiumAccess else { return }
             syncErrors.append(error.localizedDescription)
             return
         }
         guard currentUserId == userId,
-              isCurrentProjectAccount(accountGeneration) else { return }
+              isCurrentProjectAccount(accountGeneration),
+              hasPremiumAccess else { return }
 
         removeSummary(id: chatId, isLocalOnly: wasLocal)
         if wasLocal {
@@ -2305,18 +2367,21 @@ class ChatViewModel: ObservableObject {
         // next sync retries it, like any other offline edit.
         await cloudSync.backupChat(chatId, ensureLatestUpload: true)
         guard currentUserId == userId,
-              isCurrentProjectAccount(accountGeneration) else { return }
+              isCurrentProjectAccount(accountGeneration),
+              hasPremiumAccess else { return }
         do {
             _ = try await refreshCloudSummaryIndex(userId: userId)
             guard currentUserId == userId,
-                  isCurrentProjectAccount(accountGeneration) else { return }
+                  isCurrentProjectAccount(accountGeneration),
+                  hasPremiumAccess else { return }
         } catch is CancellationError {
         } catch {
-            guard isCurrentProjectAccount(accountGeneration) else { return }
+            guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return }
             syncErrors.append(error.localizedDescription)
         }
         guard currentUserId == userId,
-              isCurrentProjectAccount(accountGeneration) else { return }
+              isCurrentProjectAccount(accountGeneration),
+              hasPremiumAccess else { return }
 
         if wasCurrent, activeProject?.id != projectId {
             createNewChat(isLocalOnly: false, projectId: activeProject?.id)
@@ -2467,6 +2532,10 @@ class ChatViewModel: ObservableObject {
         let fallbackSource = isLocalOnly ? chats : localChats
         if let chat = preferredSource.first(where: { $0.id == id })
             ?? fallbackSource.first(where: { $0.id == id }) {
+            guard PremiumProjectPolicy.includesChat(
+                projectId: chat.projectId,
+                hasPremiumAccess: hasPremiumAccess
+            ) else { return false }
             guard chat.isLocalOnly || !DeletedChatsTracker.shared.isDeleted(id) else {
                 return false
             }
@@ -2476,13 +2545,20 @@ class ChatViewModel: ObservableObject {
         let preferredSummaries = isLocalOnly ? localSidebarSummaries : cloudSidebarSummaries
         let fallbackSummaries = isLocalOnly ? cloudSidebarSummaries : localSidebarSummaries
         let storage: ChatStorageTab
-        if preferredSummaries.contains(where: { $0.id == id }) {
+        let summary: ChatListSummary
+        if let preferredSummary = preferredSummaries.first(where: { $0.id == id }) {
             storage = isLocalOnly ? .local : .cloud
-        } else if fallbackSummaries.contains(where: { $0.id == id }) {
+            summary = preferredSummary
+        } else if let fallbackSummary = fallbackSummaries.first(where: { $0.id == id }) {
             storage = isLocalOnly ? .cloud : .local
+            summary = fallbackSummary
         } else {
             return false
         }
+        guard PremiumProjectPolicy.includesChat(
+            projectId: summary.projectId,
+            hasPremiumAccess: hasPremiumAccess
+        ) else { return false }
         guard storage == .local || !DeletedChatsTracker.shared.isDeleted(id) else {
             return false
         }
@@ -2525,6 +2601,10 @@ class ChatViewModel: ObservableObject {
     }
 
     func selectChat(_ chat: Chat) {
+        guard PremiumProjectPolicy.includesChat(
+            projectId: chat.projectId,
+            hasPremiumAccess: hasPremiumAccess
+        ) else { return }
         guard chat.isLocalOnly || !DeletedChatsTracker.shared.isDeleted(chat.id) else { return }
         projectLoadGeneration += 1
         failedChatHydration = nil
@@ -2572,6 +2652,10 @@ class ChatViewModel: ObservableObject {
 
     private func installSelectedChat(_ chat: Chat, generation: Int) {
         guard chatSelectionFence.accepts(id: chat.id, generation: generation),
+              PremiumProjectPolicy.includesChat(
+                projectId: chat.projectId,
+                hasPremiumAccess: hasPremiumAccess
+              ),
               chat.isLocalOnly || !DeletedChatsTracker.shared.isDeleted(chat.id),
               selectedChatId == chat.id else { return }
         selectedChatImageTask?.cancel()
@@ -3166,6 +3250,10 @@ class ChatViewModel: ObservableObject {
     @discardableResult
     func sendMessage(text: String) -> Bool {
         guard canUseCurrentChatActions else { return false }
+        guard currentChat?.projectId == nil || PremiumProjectPolicy.allowsMutation(
+            .sendProjectChat,
+            hasPremiumAccess: hasPremiumAccess
+        ) else { return false }
         let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasAttachments = !pendingAttachments.isEmpty
         guard hasText || hasAttachments else { return false }
@@ -3275,6 +3363,7 @@ class ChatViewModel: ObservableObject {
     /// user is typing is never interrupted.
     private func drainMessageQueue(chatId: String) {
         guard currentChat?.id == chatId,
+              canSendInCurrentContext,
               !streamState.isStreaming(chatId: chatId),
               !hasPendingResponseRecovery,
               var queue = messageQueues[chatId],
@@ -5820,6 +5909,20 @@ class ChatViewModel: ObservableObject {
         // Only reinitialize client if auth state actually changed (not just subscription)
         let authStateChanged = lastKnownAuthState != isAuthenticated
         lastKnownAuthState = isAuthenticated
+        let hasProjectAccess = PremiumProjectPolicy.hasAccess(
+            isAuthenticated: isAuthenticated,
+            hasActiveSubscription: hasActiveSubscription
+        )
+        let projectAccessChanged = lastKnownProjectAccess != hasProjectAccess
+        lastKnownProjectAccess = hasProjectAccess
+
+        if projectAccessChanged {
+            if hasProjectAccess {
+                Task { await loadProjects() }
+            } else {
+                revokeProjectAccess()
+            }
+        }
 
         if authStateChanged {
             cancelMessageEdit()
@@ -5853,6 +5956,28 @@ class ChatViewModel: ObservableObject {
                 self.ensureBlankChatAtTop()
                 self.scanPendingRecoveries()
             }
+        }
+    }
+
+    private func revokeProjectAccess() {
+        projectListLoadGeneration += 1
+        projectLoadGeneration += 1
+        chatSelectionFence.invalidate()
+        chatSelectionTask?.cancel()
+        chatSelectionTask = nil
+        pendingSearchResultChatId = nil
+        projects = []
+        isLoadingProjects = false
+        isLoadingProject = false
+        isUploadingProjectDocument = false
+        shouldExpandProjectsInSidebar = false
+        if navigationRequest?.destination == .projects {
+            navigationRequest = nil
+        }
+        let wasViewingProjectChat = currentChat?.projectId != nil
+        leaveProjectContext()
+        if wasViewingProjectChat && hasChatAccess {
+            createNewChat(isLocalOnly: false, focusInput: false)
         }
     }
     

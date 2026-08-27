@@ -6,33 +6,6 @@
 	<string>Tinfoil needs access to your camera to take photos and scan QR codes.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Tinfoil needs access to your microphone for voice dictation.</string>
-	<key>UIApplicationShortcutItems</key>
-	<array>
-		<dict>
-			<key>UIApplicationShortcutItemIconSymbolName</key>
-			<string>square.and.pencil</string>
-			<key>UIApplicationShortcutItemTitle</key>
-			<string>New Chat</string>
-			<key>UIApplicationShortcutItemType</key>
-			<string>sh.tinfoil.TinfoilChat.new-chat</string>
-		</dict>
-		<dict>
-			<key>UIApplicationShortcutItemIconSymbolName</key>
-			<string>folder</string>
-			<key>UIApplicationShortcutItemTitle</key>
-			<string>Projects</string>
-			<key>UIApplicationShortcutItemType</key>
-			<string>sh.tinfoil.TinfoilChat.projects</string>
-		</dict>
-		<dict>
-			<key>UIApplicationShortcutItemIconSymbolName</key>
-			<string>pin</string>
-			<key>UIApplicationShortcutItemTitle</key>
-			<string>Favorites</string>
-			<key>UIApplicationShortcutItemType</key>
-			<string>sh.tinfoil.TinfoilChat.favorites</string>
-		</dict>
-	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UILaunchScreen</key>

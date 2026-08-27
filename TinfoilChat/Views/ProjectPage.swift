@@ -38,6 +38,7 @@ struct ProjectPage: View {
                                     .onChange(of: isNameFieldFocused) { _, focused in
                                         if !focused { commitName() }
                                     }
+                                    .disabled(!viewModel.hasPremiumAccess)
                                 if !project.description.isEmpty {
                                     Text(project.description)
                                         .font(.subheadline)
@@ -86,7 +87,7 @@ struct ProjectPage: View {
                     } label: {
                         Label("New project chat", systemImage: "square.and.pencil")
                     }
-                    .disabled(project == nil)
+                    .disabled(project == nil || !viewModel.hasPremiumAccess)
 
                     if viewModel.activeProjectChats.isEmpty {
                         Text("No project chats yet")
@@ -280,6 +281,7 @@ struct ProjectDetailsView: View {
                 TextField("What is this project about?", text: $editingDescription, axis: .vertical)
                     .lineLimit(3...8)
                     .onChange(of: editingDescription) { _, _ in hasPendingChanges = true }
+                    .disabled(!viewModel.hasPremiumAccess)
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
@@ -287,6 +289,7 @@ struct ProjectDetailsView: View {
                 TextField("How should Tin behave in this project?", text: $editingInstructions, axis: .vertical)
                     .lineLimit(5...15)
                     .onChange(of: editingInstructions) { _, _ in hasPendingChanges = true }
+                    .disabled(!viewModel.hasPremiumAccess)
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
         }
@@ -306,7 +309,7 @@ struct ProjectDetailsView: View {
                             .fontWeight(.semibold)
                     }
                 }
-                .disabled(!hasPendingChanges || project == nil || isSaving)
+                .disabled(!hasPendingChanges || project == nil || isSaving || !viewModel.hasPremiumAccess)
                 .accessibilityLabel("Save")
             }
         }
@@ -386,7 +389,7 @@ struct ProjectDocumentsView: View {
                 } label: {
                     Image(systemName: "plus")
                 }
-                .disabled(viewModel.isUploadingProjectDocument)
+                .disabled(viewModel.isUploadingProjectDocument || !viewModel.hasPremiumAccess)
                 .accessibilityLabel("Add document")
             }
         }
@@ -428,14 +431,16 @@ struct ProjectDocumentsView: View {
             }
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button(role: .destructive) {
-                Task {
-                    await viewModel.deleteProjectDocument(document.id)
+            if viewModel.hasPremiumAccess {
+                Button(role: .destructive) {
+                    Task {
+                        await viewModel.deleteProjectDocument(document.id)
+                    }
+                } label: {
+                    Label("Delete", systemImage: "trash")
                 }
-            } label: {
-                Label("Delete", systemImage: "trash")
+                .tint(.red)
             }
-            .tint(.red)
         }
     }
 
@@ -479,7 +484,7 @@ struct ProjectSettingsView: View {
                 } label: {
                     Label("Delete project", systemImage: "trash")
                 }
-                .disabled(project == nil)
+                .disabled(project == nil || !viewModel.hasPremiumAccess)
             } footer: {
                 Text("Deletes the project, its context documents, and removes this project from all associated chats.")
             }

@@ -168,7 +168,7 @@ struct ChatSearchControllerTests {
     }
 
     @Test
-    func searchResultFilterKeepsProjectChatsButDropsTemporaryAndEncrypted() {
+    func searchResultFilterHidesProjectChatsWithoutPremium() {
         let root = ChatSearchServiceTests.makeChat(id: "root", title: "Root")
         var project = ChatSearchServiceTests.makeChat(id: "project", title: "Project")
         project.projectId = "project-1"
@@ -180,10 +180,14 @@ struct ChatSearchControllerTests {
 
         let summaries = [root, project, temporary, encrypted, blank]
             .map { ChatListSummary(from: $0) }
-        let visible = summaries
-            .filter(isSearchResultSidebarChat)
+        let premiumVisible = summaries
+            .filter { isSearchResultSidebarChat($0, hasPremiumAccess: true) }
             .map(\.id)
-        #expect(visible == ["root", "project", "blank"])
+        let freeVisible = summaries
+            .filter { isSearchResultSidebarChat($0, hasPremiumAccess: false) }
+            .map(\.id)
+        #expect(premiumVisible == ["root", "project", "blank"])
+        #expect(freeVisible == ["root", "blank"])
 
         // The root chat list itself still excludes project chats.
         #expect(summaries.filter(isRootSidebarChat).map(\.id) == ["root", "blank"])

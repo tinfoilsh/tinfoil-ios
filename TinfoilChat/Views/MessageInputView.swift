@@ -203,6 +203,7 @@ struct MessageInputView: View {
     /// recovered; voice greys out while a recording is being transcribed.
     private var isTrailingActionDisabled: Bool {
         guard viewModel.canUseCurrentChatActions else { return true }
+        guard viewModel.canSendInCurrentContext || trailingAction == .stop else { return true }
         switch trailingAction {
         case .voice: return viewModel.isTranscribing
         case .send:
