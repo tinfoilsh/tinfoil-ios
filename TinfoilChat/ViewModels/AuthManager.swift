@@ -14,18 +14,35 @@ enum SubscriptionAccessPolicy {
         previous != current
     }
 
-    static func isActive(status: String, expiresAt: String?, now: Date = Date()) -> Bool {
-        guard ["active", "trialing", "canceled"].contains(status) else { return false }
-        guard let expiresAt, !expiresAt.isEmpty else { return true }
-
+    static func expirationDate(from expiresAt: String?) -> Date? {
+        guard let expiresAt, !expiresAt.isEmpty else { return nil }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let expirationDate = formatter.date(from: expiresAt) {
-            return expirationDate > now
+            return expirationDate
         }
         formatter.formatOptions = [.withInternetDateTime]
-        guard let expirationDate = formatter.date(from: expiresAt) else { return false }
-        return expirationDate > now
+        return formatter.date(from: expiresAt)
+    }
+
+    static func isActive(status: String?, expiresAt: String?, now: Date = Date()) -> Bool {
+        switch status {
+        case "active", "trialing":
+            guard let expiresAt, !expiresAt.isEmpty else { return true }
+            guard let expirationDate = expirationDate(from: expiresAt) else { return false }
+            return expirationDate > now
+        case "canceled":
+            guard let expirationDate = expirationDate(from: expiresAt) else { return false }
+            return expirationDate > now
+        default:
+            return false
+        }
+    }
+
+    static func scheduledExpiration(status: String?, expiresAt: String?, now: Date = Date()) -> Date? {
+        guard isActive(status: status, expiresAt: expiresAt, now: now),
+              let expirationDate = expirationDate(from: expiresAt) else { return nil }
+        return expirationDate
     }
 }
 
@@ -49,13 +66,15 @@ class AuthManager: ObservableObject {
     private var accountSwitchTask: Task<Void, Never>?
     private var accountTeardownTask: Task<Void, Never>?
     private var accountTeardownId: UUID?
+    private var subscriptionExpiryTask: Task<Void, Never>?
+    private var subscriptionExpiryTaskId: UUID?
     
     // UserDefaults keys
     private let authStateKey = Constants.StorageKeys.Auth.state
     private let userDataKey = Constants.StorageKeys.Auth.userData
     private let subscriptionKey = Constants.StorageKeys.Auth.subscription
 
-    private func updateSubscriptionAccess(_ isActive: Bool) {
+    private func applySubscriptionAccess(_ isActive: Bool) {
         let shouldRefreshCredentials = SubscriptionAccessPolicy.requiresCredentialRefresh(
             previous: hasActiveSubscription,
             current: isActive
@@ -67,6 +86,47 @@ class AuthManager: ObservableObject {
         Task {
             _ = await SessionTokenManager.shared.fetchFreshSessionToken()
         }
+    }
+
+    private func updateSubscriptionAccess(status: String?, expiresAt: String?) {
+        let now = Date()
+        applySubscriptionAccess(SubscriptionAccessPolicy.isActive(
+            status: status,
+            expiresAt: expiresAt,
+            now: now
+        ))
+        scheduleSubscriptionExpiration(status: status, expiresAt: expiresAt, now: now)
+    }
+
+    private func scheduleSubscriptionExpiration(status: String?, expiresAt: String?, now: Date) {
+        cancelSubscriptionExpiration()
+        guard let expirationDate = SubscriptionAccessPolicy.scheduledExpiration(
+            status: status,
+            expiresAt: expiresAt,
+            now: now
+        ) else { return }
+
+        let taskId = UUID()
+        let delay = expirationDate.timeIntervalSince(now)
+        subscriptionExpiryTaskId = taskId
+        subscriptionExpiryTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(delay))
+            } catch {
+                return
+            }
+            guard let self, self.subscriptionExpiryTaskId == taskId else { return }
+            self.subscriptionExpiryTask = nil
+            self.subscriptionExpiryTaskId = nil
+            self.applySubscriptionAccess(false)
+            self.saveAuthState()
+        }
+    }
+
+    private func cancelSubscriptionExpiration() {
+        subscriptionExpiryTask?.cancel()
+        subscriptionExpiryTask = nil
+        subscriptionExpiryTaskId = nil
     }
     
     // Reference to ChatViewModel for handling chat state
@@ -98,6 +158,12 @@ class AuthManager: ObservableObject {
         
         isAuthenticated = UserDefaults.standard.bool(forKey: authStateKey)
         hasActiveSubscription = UserDefaults.standard.bool(forKey: subscriptionKey)
+        if let status = localUserData?["subscription_status"] as? String {
+            updateSubscriptionAccess(
+                status: status,
+                expiresAt: localUserData?["subscription_expires_at"] as? String
+            )
+        }
         
     }
     
@@ -183,18 +249,21 @@ class AuthManager: ObservableObject {
                     expiresAt = expiresAtString.replacingOccurrences(of: "\"", with: "")
                 }
 
-                updateSubscriptionAccess(SubscriptionAccessPolicy.isActive(
+                updateSubscriptionAccess(
                     status: cleanedStatus,
                     expiresAt: expiresAt
-                ))
+                )
 
                 // Store in localUserData
                 localUserData?["subscription_status"] = cleanedStatus
+                if let expiresAt {
+                    localUserData?["subscription_expires_at"] = expiresAt
+                }
             } else {
-                updateSubscriptionAccess(false)
+                updateSubscriptionAccess(status: nil, expiresAt: nil)
             }
         } else {
-            updateSubscriptionAccess(false)
+            updateSubscriptionAccess(status: nil, expiresAt: nil)
         }
         
         // Save updated state to UserDefaults
@@ -253,6 +322,7 @@ class AuthManager: ObservableObject {
             } else {
                 isAuthenticated = false
             }
+            cancelSubscriptionExpiration()
             hasActiveSubscription = false
         }
 
@@ -308,6 +378,7 @@ class AuthManager: ObservableObject {
         }
         EncryptionService.shared.clearKey()
         await DeviceEncryptionService.shared.clearKey()
+        cancelSubscriptionExpiration()
         localUserData = nil
         isAuthenticated = false
         hasActiveSubscription = false
@@ -351,20 +422,29 @@ class AuthManager: ObservableObject {
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else { return false }
             
-            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let publicMetadata = json["public_metadata"] as? [String: Any],
-               let chatStatus = publicMetadata["chat_subscription_status"] as? String {
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let publicMetadata = json["public_metadata"] as? [String: Any] ?? [:]
+                let chatStatus = publicMetadata["chat_subscription_status"] as? String
                 let expiresAt = publicMetadata["chat_subscription_expires_at"] as? String
 
                 await MainActor.run {
-                    self.updateSubscriptionAccess(SubscriptionAccessPolicy.isActive(
+                    self.updateSubscriptionAccess(
                         status: chatStatus,
                         expiresAt: expiresAt
-                    ))
+                    )
 
                     // Update local user data
                     if self.localUserData != nil {
-                        self.localUserData?["subscription_status"] = chatStatus
+                        if let chatStatus {
+                            self.localUserData?["subscription_status"] = chatStatus
+                        } else {
+                            self.localUserData?.removeValue(forKey: "subscription_status")
+                        }
+                        if let expiresAt {
+                            self.localUserData?["subscription_expires_at"] = expiresAt
+                        } else {
+                            self.localUserData?.removeValue(forKey: "subscription_expires_at")
+                        }
                     }
                     
                     // Update UserDefaults

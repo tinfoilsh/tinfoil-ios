@@ -6,9 +6,19 @@ import Testing
 struct SubscriptionAccessPolicyTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
-    @Test("allows eligible statuses without an expiration", arguments: ["active", "trialing", "canceled"])
+    @Test("allows renewable statuses without an expiration", arguments: ["active", "trialing"])
     func eligibleStatusWithoutExpiration(status: String) {
         #expect(SubscriptionAccessPolicy.isActive(status: status, expiresAt: nil, now: now))
+    }
+
+    @Test("requires a future expiration for canceled status")
+    func canceledStatusExpiration() {
+        #expect(!SubscriptionAccessPolicy.isActive(status: "canceled", expiresAt: nil, now: now))
+        #expect(SubscriptionAccessPolicy.isActive(
+            status: "canceled",
+            expiresAt: "2027-01-15T08:00:01Z",
+            now: now
+        ))
     }
 
     @Test("applies expiration to every eligible status", arguments: ["active", "trialing", "canceled"])
@@ -33,6 +43,36 @@ struct SubscriptionAccessPolicyTests {
     @Test("rejects malformed expiration")
     func malformedExpiration() {
         #expect(!SubscriptionAccessPolicy.isActive(status: "active", expiresAt: "tomorrow", now: now))
+    }
+
+    @Test("missing status is inactive")
+    func missingStatus() {
+        #expect(!SubscriptionAccessPolicy.isActive(status: nil, expiresAt: nil, now: now))
+    }
+
+    @Test("schedules only future expirations")
+    func scheduledExpiration() {
+        let futureExpiration = Date(timeIntervalSince1970: 1_800_000_001)
+        #expect(SubscriptionAccessPolicy.scheduledExpiration(
+            status: "active",
+            expiresAt: "2027-01-15T08:00:01Z",
+            now: now
+        ) == futureExpiration)
+        #expect(SubscriptionAccessPolicy.scheduledExpiration(
+            status: "active",
+            expiresAt: "2027-01-15T07:59:59Z",
+            now: now
+        ) == nil)
+        #expect(SubscriptionAccessPolicy.scheduledExpiration(
+            status: "trialing",
+            expiresAt: nil,
+            now: now
+        ) == nil)
+        #expect(SubscriptionAccessPolicy.scheduledExpiration(
+            status: nil,
+            expiresAt: "2027-01-15T08:00:01Z",
+            now: now
+        ) == nil)
     }
 
     @Test("refreshes credentials only when access changes")

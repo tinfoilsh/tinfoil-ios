@@ -44,4 +44,23 @@ struct MessageInputContentTests {
             isStartingRecording: true
         ))
     }
+
+    @Test("rechecks access after delayed microphone permission")
+    func delayedMicrophonePermissionAccess() {
+        #expect(ChatViewModel.audioRecordingStartDecision(
+            canUseAudioInput: true,
+            requestedAccountId: "account",
+            currentAccountId: "account"
+        ) == .start)
+        #expect(ChatViewModel.audioRecordingStartDecision(
+            canUseAudioInput: false,
+            requestedAccountId: "account",
+            currentAccountId: "account"
+        ) == .showUpgrade)
+        #expect(ChatViewModel.audioRecordingStartDecision(
+            canUseAudioInput: true,
+            requestedAccountId: "account-a",
+            currentAccountId: "account-b"
+        ) == .accountChanged)
+    }
 }
