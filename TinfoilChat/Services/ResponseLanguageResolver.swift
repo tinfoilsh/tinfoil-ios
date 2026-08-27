@@ -9,13 +9,10 @@ enum ResponseLanguageResolver {
     }
 
     static func resolve(
-        chatLanguage: String?,
         profileLanguage: String?,
         preferredLanguages: [String] = Locale.preferredLanguages
     ) -> String {
-        let selection = explicitSelection(chatLanguage)
-            ?? explicitSelection(profileLanguage)
-            ?? systemSelection
+        let selection = explicitSelection(profileLanguage) ?? systemSelection
 
         guard selection == systemSelection else { return selection }
         guard let preferredLanguage = preferredLanguages.first else { return "English" }

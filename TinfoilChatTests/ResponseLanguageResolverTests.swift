@@ -6,7 +6,6 @@ struct ResponseLanguageResolverTests {
     @Test("missing selections use the device language")
     func missingSelectionUsesDeviceLanguage() {
         let resolved = ResponseLanguageResolver.resolve(
-            chatLanguage: nil,
             profileLanguage: nil,
             preferredLanguages: ["fr"]
         )
@@ -19,28 +18,35 @@ struct ResponseLanguageResolverTests {
     @Test("System resolves at send time")
     func systemResolvesAtSendTime() {
         let resolved = ResponseLanguageResolver.resolve(
-            chatLanguage: ResponseLanguageResolver.systemSelection,
-            profileLanguage: "Spanish",
+            profileLanguage: ResponseLanguageResolver.systemSelection,
             preferredLanguages: ["de"]
         )
 
         #expect(resolved == "German")
     }
 
-    @Test("explicit chat and profile values are preserved")
+    @Test("explicit profile values are preserved")
     func preservesExplicitValues() {
-        let chatSelection = ResponseLanguageResolver.resolve(
-            chatLanguage: "Portuguese",
-            profileLanguage: "Spanish",
-            preferredLanguages: ["de"]
-        )
         let profileSelection = ResponseLanguageResolver.resolve(
-            chatLanguage: nil,
             profileLanguage: "Spanish",
             preferredLanguages: ["de"]
         )
 
-        #expect(chatSelection == "Portuguese")
         #expect(profileSelection == "Spanish")
+    }
+
+    @Test("changing the profile language affects the current chat")
+    func currentChatUsesChangedProfileLanguage() {
+        let initial = ResponseLanguageResolver.resolve(
+            profileLanguage: "English",
+            preferredLanguages: ["de"]
+        )
+        let changed = ResponseLanguageResolver.resolve(
+            profileLanguage: "Japanese",
+            preferredLanguages: ["de"]
+        )
+
+        #expect(initial == "English")
+        #expect(changed == "Japanese")
     }
 }

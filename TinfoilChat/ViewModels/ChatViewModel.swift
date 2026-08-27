@@ -1649,7 +1649,7 @@ class ChatViewModel: ObservableObject {
     }
 
     /// Creates a new chat and sets it as the current chat
-    func createNewChat(language: String? = nil, modelType: ModelType? = nil, isLocalOnly: Bool? = nil, projectId: String? = nil, focusInput: Bool = true) {
+    func createNewChat(modelType: ModelType? = nil, isLocalOnly: Bool? = nil, projectId: String? = nil, focusInput: Bool = true) {
         // Allow creating new chats for all authenticated users
         guard hasChatAccess else { return }
         let targetProjectId = projectId ?? activeProject?.id
@@ -1686,14 +1686,11 @@ class ChatViewModel: ObservableObject {
             shouldBeLocal = activeStorageTab == .local
         }
 
-        let responseLanguage = language ?? ProfileManager.shared.language
-
         // A reused blank represents a fresh chat, so reset its preference to
         // the current global default before selecting it.
         if shouldBeLocal {
             if let index = localChats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
                 localChats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
-                localChats[index].language = responseLanguage
                 selectChat(localChats[index])
                 shouldFocusInput = focusInput
                 return
@@ -1701,7 +1698,6 @@ class ChatViewModel: ObservableObject {
         } else {
             if let index = chats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
                 chats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
-                chats[index].language = responseLanguage
                 selectChat(chats[index])
                 shouldFocusInput = focusInput
                 return
@@ -1711,7 +1707,7 @@ class ChatViewModel: ObservableObject {
         // Create new chat with temporary ID (instant, no network call)
         let newChat = Chat.create(
             modelType: modelType ?? currentModel,
-            language: responseLanguage,
+            language: nil,
             userId: currentUserId,
             isLocalOnly: shouldBeLocal,
             projectId: targetProjectId
@@ -3914,7 +3910,6 @@ class ChatViewModel: ObservableObject {
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: representativeModel.fullName)
                 
                 let languageToUse = ResponseLanguageResolver.resolve(
-                    chatLanguage: streamChat.language,
                     profileLanguage: profileManager.language
                 )
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
@@ -5596,7 +5591,7 @@ class ChatViewModel: ObservableObject {
                 : nil
             let blankChat = Chat.create(
                 modelType: currentModel,
-                language: ProfileManager.shared.language,
+                language: nil,
                 userId: currentUserId,
                 isLocalOnly: isLocal,
                 webSearchEnabled: webSearchEnabled
