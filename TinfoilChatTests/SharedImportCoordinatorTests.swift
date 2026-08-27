@@ -88,6 +88,38 @@ struct SharedImportCoordinatorTests {
         #expect(receiver.batches.count == 1)
         #expect(fileNames == ["first.png", "second.txt"])
     }
+
+    @Test("Failed shared processing keeps its request eligible for retry")
+    func failedProcessingCanRetry() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString.lowercased(), isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let importStore = try SharedImportStore(
+            inboxURL: rootURL.appendingPathComponent("ShareInbox", isDirectory: true)
+        )
+        let managedStore = ManagedFileStore(
+            directoryURL: rootURL.appendingPathComponent("ManagedFileStaging", isDirectory: true)
+        )
+        let request = try importStore.enqueue(
+            data: Data("shared document".utf8),
+            typeIdentifier: UTType.plainText.identifier,
+            originalFileName: "retry.txt"
+        )
+        let coordinator = SharedImportCoordinator(
+            storeProvider: { importStore },
+            managedFileStore: managedStore
+        )
+        let receiver = RecordingSharedImportReceiver()
+
+        coordinator.importPendingAttachments(into: receiver)
+        receiver.discardFailedProcessing()
+        coordinator.importPendingAttachments(into: receiver)
+        defer { receiver.documents.forEach { _ = $0.managedFile.discard() } }
+
+        #expect(receiver.batches.count == 2)
+        #expect(receiver.pendingAttachments.compactMap(\.sharedImportRequestID) == [request.id])
+        #expect(importStore.pendingRequests() == [request])
+    }
 }
 
 @MainActor
@@ -125,5 +157,11 @@ private final class RecordingSharedImportReceiver: SharedImportAttachmentReceivi
                 break
             }
         }
+    }
+
+    func discardFailedProcessing() {
+        documents.forEach { _ = $0.managedFile.discard() }
+        documents = []
+        pendingAttachments = []
     }
 }

@@ -3360,16 +3360,19 @@ class ChatViewModel: ObservableObject {
             } catch is CancellationError {
             } catch {
                 guard publication.isCurrent else { return }
+                let failure = ManagedFileError(fileName: fileName, error: error)
+                if let onProcessingFailure {
+                    pendingAttachments.removeAll { $0.id == attachmentId }
+                    pendingImageThumbnails.removeValue(forKey: attachmentId)
+                    guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
+                    onProcessingFailure(failure)
+                    return
+                }
                 attachment.processingState = .failed
                 if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
                     pendingAttachments[index] = attachment
                 }
                 guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
-                let failure = ManagedFileError(fileName: fileName, error: error)
-                if let onProcessingFailure {
-                    onProcessingFailure(failure)
-                    return
-                }
                 let message = preserveExistingErrors
                     ? "\(fileName): \(failure.message)"
                     : error.localizedDescription
@@ -3468,17 +3471,20 @@ class ChatViewModel: ObservableObject {
             } catch is CancellationError {
             } catch {
                 guard publication.isCurrent else { return }
+                let failure = ManagedFileError(fileName: fileName, error: error)
+                if let onProcessingFailure {
+                    pendingAttachments.removeAll { $0.id == attachmentId }
+                    pendingImageThumbnails.removeValue(forKey: attachmentId)
+                    guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
+                    onProcessingFailure(failure)
+                    return
+                }
                 attachment.processingState = .failed
                 if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
                     pendingAttachments[index] = attachment
                 }
                 guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
-                let failure = ManagedFileError(fileName: fileName, error: error)
-                if let onProcessingFailure {
-                    onProcessingFailure(failure)
-                } else {
-                    attachmentError = error.localizedDescription
-                }
+                attachmentError = error.localizedDescription
             }
         }
     }
