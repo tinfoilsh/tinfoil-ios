@@ -122,18 +122,25 @@ struct FlowResult {
 
 struct PersonalizationView: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var isSaving: Bool = false
+    @State private var isPersonalizationEnabled = ProfileDefaults.isUsingPersonalization
+    @State private var nickname = ProfileDefaults.nickname
+    @State private var profession = ProfileDefaults.profession
+    @State private var traits = ProfileDefaults.traits
+    @State private var additionalContext = ProfileDefaults.additionalContext
+
+    private let availableTraits = SettingsManager.shared.availableTraits
     
     var body: some View {
         List {
+            enableSection
             nicknameSection
             professionSection
             traitsSection
             additionalContextSection
-            resetSection
+            clearSection
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -143,11 +150,12 @@ struct PersonalizationView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Save") {
-                    // Align flags and push to cloud
                     isSaving = true
-                    let shouldEnable = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
-                    profileManager.isUsingPersonalization = shouldEnable
-                    settings.isPersonalizationEnabled = shouldEnable
+                    profileManager.isUsingPersonalization = isPersonalizationEnabled
+                    profileManager.nickname = nickname
+                    profileManager.profession = profession
+                    profileManager.traits = traits
+                    profileManager.additionalContext = additionalContext
                     Task { @MainActor in
                         await profileManager.syncToCloud()
                         isSaving = false
@@ -172,18 +180,27 @@ struct PersonalizationView: View {
         .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
         .task {
             await profileManager.syncFromCloud()
+            isPersonalizationEnabled = profileManager.isUsingPersonalization
+            nickname = profileManager.nickname
+            profession = profileManager.profession
+            traits = profileManager.traits
+            additionalContext = profileManager.additionalContext
         }
+    }
+
+    private var enableSection: some View {
+        Section {
+            Toggle("Personalize responses", isOn: $isPersonalizationEnabled)
+                .tint(Color.accentPrimary)
+        } footer: {
+            Text("Use these details to tailor responses. Turning this off keeps your details saved.")
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
     }
     
     private var nicknameSection: some View {
         Section {
-            TextField("Nickname", text: $profileManager.nickname)
-                .onChange(of: profileManager.nickname) { _, newValue in
-                    let shouldEnable = !newValue.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
-                    profileManager.isUsingPersonalization = shouldEnable
-                    settings.nickname = newValue
-                    settings.isPersonalizationEnabled = shouldEnable
-                }
+            TextField("Nickname", text: $nickname)
         } header: {
             Text("What should Tin call you?")
         }
@@ -192,13 +209,7 @@ struct PersonalizationView: View {
 
     private var professionSection: some View {
         Section {
-            TextField("Profession", text: $profileManager.profession)
-                .onChange(of: profileManager.profession) { _, newValue in
-                    let shouldEnable = !profileManager.nickname.isEmpty || !newValue.isEmpty || !profileManager.traits.isEmpty || !profileManager.additionalContext.isEmpty
-                    profileManager.isUsingPersonalization = shouldEnable
-                    settings.profession = newValue
-                    settings.isPersonalizationEnabled = shouldEnable
-                }
+            TextField("Profession", text: $profession)
         } header: {
             Text("What's your occupation?")
         }
@@ -208,17 +219,11 @@ struct PersonalizationView: View {
     private var traitsSection: some View {
         Section {
             TraitSelectionView(
-                availableTraits: settings.availableTraits,
-                selectedTraits: $profileManager.traits
+                availableTraits: availableTraits,
+                selectedTraits: $traits
             )
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 4)
-            .onChange(of: profileManager.traits) { _, newValue in
-                let shouldEnable = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !newValue.isEmpty || !profileManager.additionalContext.isEmpty
-                profileManager.isUsingPersonalization = shouldEnable
-                settings.selectedTraits = newValue
-                settings.isPersonalizationEnabled = shouldEnable
-            }
         } header: {
             Text("Conversational traits")
         }
@@ -227,37 +232,24 @@ struct PersonalizationView: View {
 
     private var additionalContextSection: some View {
         Section {
-            TextField("Anything else Tin should know about you?", text: $profileManager.additionalContext, axis: .vertical)
+            TextField("Anything else Tin should know about you?", text: $additionalContext, axis: .vertical)
                 .lineLimit(3...6)
-                .onChange(of: profileManager.additionalContext) { _, newValue in
-                    let shouldEnable = !profileManager.nickname.isEmpty || !profileManager.profession.isEmpty || !profileManager.traits.isEmpty || !newValue.isEmpty
-                    profileManager.isUsingPersonalization = shouldEnable
-                    settings.additionalContext = newValue
-                    settings.isPersonalizationEnabled = shouldEnable
-                }
         } header: {
             Text("Additional context")
         }
         .listRowBackground(Color.cardSurface(for: colorScheme))
     }
 
-    private var resetSection: some View {
+    private var clearSection: some View {
         Section {
             Button(role: .destructive) {
-                profileManager.nickname = ""
-                profileManager.profession = ""
-                profileManager.traits = []
-                profileManager.additionalContext = ""
-                profileManager.isUsingPersonalization = false
-
-                settings.resetPersonalization()
-
-                Task {
-                    await profileManager.syncToCloud()
-                }
+                nickname = ""
+                profession = ""
+                traits = []
+                additionalContext = ""
             } label: {
                 HStack {
-                    Text("Reset All")
+                    Text("Clear details")
                     Spacer()
                 }
             }

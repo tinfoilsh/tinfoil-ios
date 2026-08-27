@@ -223,6 +223,36 @@ struct ProfileMergeTests {
         #expect(result.merged.fieldClocks?["piiCheckEnabled"] == EditClock(v: 2, w: "B"))
     }
 
+    @Test("missing personalization flag defaults on without rewriting the field")
+    func missingPersonalizationFlagDefaultsOn() {
+        let profile = ProfileData(nickname: "Ada")
+
+        #expect(profile.usesPersonalization == true)
+        #expect(profile.isUsingPersonalization == nil)
+    }
+
+    @Test("explicit personalization suppression retains profile details")
+    func explicitPersonalizationSuppressionRetainsDetails() {
+        let baseline = ProfileData(
+            nickname: "Ada",
+            profession: "Engineer",
+            isUsingPersonalization: true
+        )
+        let local = baseline
+        var remote = ProfileData(isUsingPersonalization: false)
+        remote.version = 2
+
+        let result = ProfileMerge.mergeProfiles(
+            baseline: baseline,
+            local: local,
+            remote: remote
+        )
+
+        #expect(result.merged.usesPersonalization == false)
+        #expect(result.merged.nickname == "Ada")
+        #expect(result.merged.profession == "Engineer")
+    }
+
     @Test("dirty profile without baseline preserves local pins and remote settings")
     func reconcilesPinnedChatsWithoutBaseline() throws {
         let local = ProfileData(

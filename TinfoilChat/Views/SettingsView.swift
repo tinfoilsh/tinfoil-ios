@@ -245,49 +245,6 @@ class SettingsManager: ObservableObject {
             ?? ProfileDefaults.piiCheckEnabled
     }
 
-    // Generate user preferences XML for system prompt.
-    // Treats `isPersonalizationEnabled` as a soft preference: when any field is
-    // populated we still inject it so the model has the user's context. This
-    // matches `ProfileManager.getPersonalizationPrompt()`.
-    func generateUserPreferencesXML() -> String {
-        let trimmedNickname = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedProfession = profession.trimmingCharacters(in: .whitespacesAndNewlines)
-        let nonEmptyTraits = selectedTraits.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let trimmedContext = additionalContext.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let hasAnyField = !trimmedNickname.isEmpty
-            || !trimmedProfession.isEmpty
-            || !nonEmptyTraits.isEmpty
-            || !trimmedContext.isEmpty
-
-        guard hasAnyField else { return "" }
-
-        var xml = "The user has provided personal preferences for this conversation. Adapt your responses according to these settings while maintaining accuracy and helpfulness.\n\n<user_preferences>"
-
-        if !trimmedNickname.isEmpty {
-            xml += "\n  <nickname>\(trimmedNickname)</nickname>"
-        }
-
-        if !trimmedProfession.isEmpty {
-            xml += "\n  <profession>\(trimmedProfession)</profession>"
-        }
-
-        if !nonEmptyTraits.isEmpty {
-            xml += "\n  <traits>"
-            for trait in nonEmptyTraits {
-                xml += "\n    <trait>\(trait)</trait>"
-            }
-            xml += "\n  </traits>"
-        }
-
-        if !trimmedContext.isEmpty {
-            xml += "\n  <additional_context>\n    \(trimmedContext)\n  </additional_context>"
-        }
-
-        xml += "\n</user_preferences>"
-        return xml
-    }
-    
     // Reset all personalization settings
     func resetPersonalization() {
         nickname = ProfileDefaults.nickname
@@ -706,7 +663,7 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                     Spacer()
-                    if profileManager.isUsingPersonalization || settings.isPersonalizationEnabled {
+                    if profileManager.isUsingPersonalization {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.caption)
                             .foregroundColor(.green)
