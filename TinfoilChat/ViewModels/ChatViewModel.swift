@@ -7132,7 +7132,10 @@ extension ChatViewModel {
 
     /// Start recording audio
     func startAudioRecording() async {
-        guard canUseAudioInput else { return }
+        guard canUseAudioInput else {
+            audioError = "Voice input requires Premium."
+            return
+        }
 
         audioError = nil
 

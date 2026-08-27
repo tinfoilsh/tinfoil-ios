@@ -9,6 +9,26 @@ import SwiftUI
 import ClerkKit
 import Combine
 
+enum SubscriptionAccessPolicy {
+    static func requiresCredentialRefresh(previous: Bool, current: Bool) -> Bool {
+        previous != current
+    }
+
+    static func isActive(status: String, expiresAt: String?, now: Date = Date()) -> Bool {
+        guard ["active", "trialing", "canceled"].contains(status) else { return false }
+        guard let expiresAt, !expiresAt.isEmpty else { return true }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let expirationDate = formatter.date(from: expiresAt) {
+            return expirationDate > now
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        guard let expirationDate = formatter.date(from: expiresAt) else { return false }
+        return expirationDate > now
+    }
+}
+
 @MainActor
 class AuthManager: ObservableObject {
     private static let userIdKey = "id"
@@ -35,24 +55,18 @@ class AuthManager: ObservableObject {
     private let userDataKey = Constants.StorageKeys.Auth.userData
     private let subscriptionKey = Constants.StorageKeys.Auth.subscription
 
-    private func isSubscriptionActive(status: String, expiresAt: String?) -> Bool {
-        if status == "active" || status == "trialing" {
-            return true
-        }
+    private func updateSubscriptionAccess(_ isActive: Bool) {
+        let shouldRefreshCredentials = SubscriptionAccessPolicy.requiresCredentialRefresh(
+            previous: hasActiveSubscription,
+            current: isActive
+        )
+        hasActiveSubscription = isActive
+        guard shouldRefreshCredentials else { return }
 
-        if status == "canceled", let expiresAt = expiresAt {
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let expirationDate = formatter.date(from: expiresAt) {
-                return expirationDate > Date()
-            }
-            formatter.formatOptions = [.withInternetDateTime]
-            if let expirationDate = formatter.date(from: expiresAt) {
-                return expirationDate > Date()
-            }
+        SessionTokenManager.shared.clearSessionToken()
+        Task {
+            _ = await SessionTokenManager.shared.fetchFreshSessionToken()
         }
-
-        return false
     }
     
     // Reference to ChatViewModel for handling chat state
@@ -169,15 +183,18 @@ class AuthManager: ObservableObject {
                     expiresAt = expiresAtString.replacingOccurrences(of: "\"", with: "")
                 }
 
-                hasActiveSubscription = isSubscriptionActive(status: cleanedStatus, expiresAt: expiresAt)
+                updateSubscriptionAccess(SubscriptionAccessPolicy.isActive(
+                    status: cleanedStatus,
+                    expiresAt: expiresAt
+                ))
 
                 // Store in localUserData
                 localUserData?["subscription_status"] = cleanedStatus
             } else {
-                hasActiveSubscription = false
+                updateSubscriptionAccess(false)
             }
         } else {
-            hasActiveSubscription = false
+            updateSubscriptionAccess(false)
         }
         
         // Save updated state to UserDefaults
@@ -340,8 +357,10 @@ class AuthManager: ObservableObject {
                 let expiresAt = publicMetadata["chat_subscription_expires_at"] as? String
 
                 await MainActor.run {
-                    let wasActive = self.hasActiveSubscription
-                    self.hasActiveSubscription = self.isSubscriptionActive(status: chatStatus, expiresAt: expiresAt)
+                    self.updateSubscriptionAccess(SubscriptionAccessPolicy.isActive(
+                        status: chatStatus,
+                        expiresAt: expiresAt
+                    ))
 
                     // Update local user data
                     if self.localUserData != nil {
@@ -357,20 +376,6 @@ class AuthManager: ObservableObject {
                     // Save subscription state
                     UserDefaults.standard.set(self.hasActiveSubscription, forKey: self.subscriptionKey)
                     
-                    // Post notification only when subscription status actually changed
-                    if self.hasActiveSubscription != wasActive {
-                        NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
-                    }
-
-                    // If subscription became active, swap the free-tier key for a
-                    // subscriber token. Refetch in place rather than clearing first so
-                    // in-flight requests keep using the still-valid key until the new
-                    // token is stored, instead of briefly sending an empty bearer.
-                    if self.hasActiveSubscription && !wasActive {
-                        Task {
-                            let _ = await SessionTokenManager.shared.fetchFreshSessionToken()
-                        }
-                    }
                 }
                 return true
             }

@@ -30,7 +30,6 @@ struct ChatContainer: View {
     @State private var showAuthView = false
     @State private var showSettings = false
     @State private var lastBackgroundTime: Date?
-    @State private var shouldCreateNewChatAfterSubscription = false
     @State private var showPremiumModal = false
     @State private var isVerificationBadgeExpanded = false
     @State private var sidebarNavigationRequest: ChatNavigationRequest?
@@ -159,27 +158,13 @@ struct ChatContainer: View {
         .sheet(isPresented: $showPremiumModal) {
             GatedPaywallView {
                 showPremiumModal = false
-                shouldCreateNewChatAfterSubscription = true
             }
                 .onDisappear {
                     // Quick check when paywall is dismissed
                     Task {
                         await authManager.fetchSubscriptionStatus()
-                        if authManager.hasActiveSubscription {
-                            shouldCreateNewChatAfterSubscription = true
-                        }
                     }
                 }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SubscriptionStatusUpdated"))) { _ in
-            // Force refresh when subscription status changes
-            if authManager.hasActiveSubscription && shouldCreateNewChatAfterSubscription {
-                shouldCreateNewChatAfterSubscription = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
-                    viewModel.createNewChat(language: language)
-                }
-            }
         }
     }
     

@@ -12,4 +12,36 @@ struct MessageInputContentTests {
     func whitespaceOnlyContent(text: String) {
         #expect(!hasNonWhitespaceContent(text))
     }
+
+    @Test("hides audio input when Premium access is unavailable")
+    func hidesUnavailableAudioInput() {
+        #expect(!shouldShowAudioInput(
+            canUseAudioInput: false,
+            isRecording: false,
+            isTranscribing: false,
+            isStartingRecording: false
+        ))
+    }
+
+    @Test("keeps audio controls visible while an operation is active")
+    func preservesActiveAudioOperationControls() {
+        #expect(shouldShowAudioInput(
+            canUseAudioInput: false,
+            isRecording: true,
+            isTranscribing: false,
+            isStartingRecording: false
+        ))
+        #expect(shouldShowAudioInput(
+            canUseAudioInput: false,
+            isRecording: false,
+            isTranscribing: true,
+            isStartingRecording: false
+        ))
+        #expect(shouldShowAudioInput(
+            canUseAudioInput: false,
+            isRecording: false,
+            isTranscribing: false,
+            isStartingRecording: true
+        ))
+    }
 }

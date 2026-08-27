@@ -38,6 +38,15 @@ func hasNonWhitespaceContent(_ text: String) -> Bool {
     text.contains { !$0.isWhitespace }
 }
 
+func shouldShowAudioInput(
+    canUseAudioInput: Bool,
+    isRecording: Bool,
+    isTranscribing: Bool,
+    isStartingRecording: Bool
+) -> Bool {
+    canUseAudioInput || isRecording || isTranscribing || isStartingRecording
+}
+
 /// Input area for typing messages, including attachments and send button
 struct MessageInputView: View {
     // MARK: - Constants
@@ -68,11 +77,6 @@ struct MessageInputView: View {
 
     private var isDarkMode: Bool { colorScheme == .dark }
 
-    // Check for subscription status
-    private var hasPremiumAccess: Bool {
-        authManager.isAuthenticated && authManager.hasActiveSubscription
-    }
-    
     // Check only for authentication status
     private var isUserAuthenticated: Bool {
         authManager.isAuthenticated
@@ -80,7 +84,12 @@ struct MessageInputView: View {
 
     // Check if audio input should be shown
     private var showAudioButton: Bool {
-        AppConfig.shared.audioModel != nil
+        shouldShowAudioInput(
+            canUseAudioInput: viewModel.canUseAudioInput,
+            isRecording: viewModel.isRecording,
+            isTranscribing: viewModel.isTranscribing,
+            isStartingRecording: isHoldToRecordActive
+        )
     }
 
     // Tracks a press-and-hold recording so a release is what stops it and
@@ -815,7 +824,7 @@ struct MessageInputView: View {
     }
 
     private var allowsHoldToRecord: Bool {
-        showAudioButton
+        viewModel.canUseAudioInput
             && trailingAction != .stop
             && !viewModel.isRecording
             && !viewModel.isTranscribing
@@ -861,7 +870,7 @@ struct MessageInputView: View {
     /// the text. Only the stop role is excluded, since holding stop must
     /// keep meaning stop.
     private func beginHoldToRecord() -> Bool {
-        guard showAudioButton,
+        guard viewModel.canUseAudioInput,
               trailingAction != .stop,
               !viewModel.isRecording,
               !viewModel.isTranscribing else { return false }
