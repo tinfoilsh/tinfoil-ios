@@ -302,7 +302,9 @@ class ProfileManager: ObservableObject {
         if let codeExecutionEnabled = profile.codeExecutionEnabled {
             self.codeExecutionEnabled = codeExecutionEnabled
         }
-        SettingsManager.shared.piiCheckEnabled = profile.effectivePIICheckEnabled
+        if let piiCheckEnabled = profile.piiCheckEnabled {
+            SettingsManager.shared.piiCheckEnabled = piiCheckEnabled
+        }
         if let genUIEnabled = profile.genUIEnabled {
             SettingsManager.shared.genUIEnabled = genUIEnabled
         }
