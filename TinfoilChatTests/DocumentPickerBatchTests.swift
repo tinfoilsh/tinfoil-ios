@@ -104,7 +104,7 @@ struct DocumentPickerBatchTests {
         defer { result.files.forEach { $0.file.discard() } }
 
         #expect(result.files.map { $0.file.fileName } == ["first.txt", "third.pdf"])
-        #expect(result.files.map(\.kind) == [.document, .document])
+        #expect(result.files.map { $0.kind } == [.document, .document])
         #expect(result.failures.map(\.fileName) == ["image.png"])
         #expect(!FileManager.default.fileExists(atPath: files[1].url.path))
         #expect(FileManager.default.fileExists(atPath: files[0].url.path))

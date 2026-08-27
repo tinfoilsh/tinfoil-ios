@@ -47,11 +47,10 @@ enum DocumentPickerBatchAdmission {
     }
 
     static func classify(_ file: ManagedStagedFile) -> ManagedStagedFileKind {
-        if let identifier = file.contentTypeIdentifier {
-            let contentType = UTType(identifier)
-            if contentType != .data {
-                return contentType.conforms(to: .image) ? .image : .document
-            }
+        if let identifier = file.contentTypeIdentifier,
+           let contentType = UTType(identifier),
+           contentType != .data {
+            return contentType.conforms(to: .image) ? .image : .document
         }
 
         let fileExtension = URL(fileURLWithPath: file.fileName).pathExtension
