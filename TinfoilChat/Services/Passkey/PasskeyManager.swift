@@ -649,11 +649,6 @@ final class PasskeyManager: ObservableObject {
             let legacyLookup: LegacyPasskeyCredentialLookup = await LegacyPasskeyCredentials.lookup()
             guard canMutateAccountKey else { return }
             guard case .available = legacyLookup else {
-                if !preserveStateOnFailure {
-                    passkeyActive = false
-                    passkeySetupAvailable = false
-                    passkeyAddDeviceAvailable = false
-                }
                 return
             }
             applyPasskeyAvailability(
@@ -805,7 +800,6 @@ final class PasskeyManager: ObservableObject {
                     legacyLookup: legacyLookup
                 )
             )
-            await checkPasskeyStateForExistingKey(preserveStateOnFailure: true)
             return result
         }
         guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
@@ -1056,7 +1050,12 @@ final class PasskeyManager: ObservableObject {
         passkeySetupAvailable = availability.setupAvailable
         passkeyAddDeviceAvailable = availability.addDeviceAvailable
 
-        if state.keyId != nil, !state.bundles.isEmpty { startSyncCheck() }
+        if state.keyId != nil, !state.bundles.isEmpty {
+            startSyncCheck()
+        } else {
+            syncCheckTask?.cancel()
+            syncCheckTask = nil
+        }
         guard availability.keyMatches, let remoteKeyId = state.keyId else { return }
         // The device is genuinely on the current key, so the user is no
         // longer in a locked/skipped state. Persist a baseline for the

@@ -612,6 +612,7 @@ struct CloudSyncSettingsView: View {
                 ? "Couldn't verify legacy passkey recovery. The previous legacy list may be out of date."
                 : nil
         } catch {
+            guard !Task.isCancelled else { return }
             // Keep the previous inventory: clearing it would make a
             // load failure indistinguishable from "no passkeys
             // registered" for a security-relevant list.
@@ -635,6 +636,10 @@ struct CloudSyncSettingsView: View {
             )
             await refreshPasskeyBundles()
         } catch {
+            if let removalError = error as? PasskeyBundleRemovalError,
+               removalError == .keyMismatch || removalError == .unverifiable {
+                passkeyInventoryState = passkeyInventoryState.preservingBundlesAsUnverified()
+            }
             passkeyBundleError = removalErrorMessage(for: error)
         }
     }
