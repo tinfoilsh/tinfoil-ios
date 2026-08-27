@@ -31,4 +31,20 @@ struct PersonalizationPromptTests {
         #expect(prompt.contains("<trait>direct</trait>"))
         #expect(prompt.contains("<additional_context>\n    Use examples\n  </additional_context>"))
     }
+
+    @Test("escapes every user-controlled XML text node")
+    func escapesUserControlledValues() throws {
+        let prompt = try #require(PersonalizationPromptBuilder.build(
+            isEnabled: true,
+            nickname: "A & B",
+            profession: "<Engineer>",
+            traits: ["direct </trait>"],
+            additionalContext: "Use \"examples\" & 'quotes'"
+        ))
+
+        #expect(prompt.contains("<nickname>A &amp; B</nickname>"))
+        #expect(prompt.contains("<profession>&lt;Engineer&gt;</profession>"))
+        #expect(prompt.contains("<trait>direct &lt;/trait&gt;</trait>"))
+        #expect(prompt.contains("Use &quot;examples&quot; &amp; &apos;quotes&apos;"))
+    }
 }

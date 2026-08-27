@@ -9,8 +9,15 @@ import Foundation
 import Combine
 import SwiftUI
 
-private enum ProfileLocalSaveError: Error {
+enum ProfileLocalSaveError: LocalizedError {
     case keychainWriteFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .keychainWriteFailed:
+            return "Personalization couldn't be saved securely. Please try again."
+        }
+    }
 }
 
 extension Notification.Name {

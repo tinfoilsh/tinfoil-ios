@@ -1077,6 +1077,7 @@ struct LanguagePickerView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        let normalizedSelection = ResponseLanguageResolver.normalizedSelection(profileManager.language)
         List(languages, id: \.self) { language in
             Button(action: {
                 profileManager.language = language
@@ -1085,14 +1086,14 @@ struct LanguagePickerView: View {
                 HStack {
                     Text(ResponseLanguageResolver.displayName(for: language))
                     Spacer()
-                    if profileManager.language == language {
+                    if normalizedSelection == language {
                         Image(systemName: "checkmark")
                             .foregroundColor(.accentColor)
                     }
                 }
             }
             .foregroundColor(.primary)
-            .accessibilityAddTraits(profileManager.language == language ? .isSelected : [])
+            .accessibilityAddTraits(normalizedSelection == language ? .isSelected : [])
             .listRowBackground(Color.cardSurface(for: colorScheme))
         }
         .scrollContentBackground(.hidden)

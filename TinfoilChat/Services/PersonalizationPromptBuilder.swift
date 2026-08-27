@@ -26,26 +26,35 @@ enum PersonalizationPromptBuilder {
         var xml = "The user has provided personal preferences for this conversation. Adapt your responses according to these settings while maintaining accuracy and helpfulness.\n\n<user_preferences>"
 
         if !trimmedNickname.isEmpty {
-            xml += "\n  <nickname>\(trimmedNickname)</nickname>"
+            xml += "\n  <nickname>\(escapeXML(trimmedNickname))</nickname>"
         }
 
         if !trimmedProfession.isEmpty {
-            xml += "\n  <profession>\(trimmedProfession)</profession>"
+            xml += "\n  <profession>\(escapeXML(trimmedProfession))</profession>"
         }
 
         if !nonEmptyTraits.isEmpty {
             xml += "\n  <traits>"
             for trait in nonEmptyTraits {
-                xml += "\n    <trait>\(trait)</trait>"
+                xml += "\n    <trait>\(escapeXML(trait))</trait>"
             }
             xml += "\n  </traits>"
         }
 
         if !trimmedContext.isEmpty {
-            xml += "\n  <additional_context>\n    \(trimmedContext)\n  </additional_context>"
+            xml += "\n  <additional_context>\n    \(escapeXML(trimmedContext))\n  </additional_context>"
         }
 
         xml += "\n</user_preferences>"
         return xml
+    }
+
+    private static func escapeXML(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
     }
 }

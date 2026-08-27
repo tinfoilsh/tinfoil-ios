@@ -194,6 +194,9 @@ struct PersonalizationView: View {
                 generation: loadGeneration
             )
         }
+        .onChange(of: profileManager.personalizationDraft) { _, draft in
+            editor.applyRefreshedDraft(draft)
+        }
         .alert("Could Not Save Personalization", isPresented: Binding(
             get: { saveError != nil },
             set: { if !$0 { saveError = nil } }

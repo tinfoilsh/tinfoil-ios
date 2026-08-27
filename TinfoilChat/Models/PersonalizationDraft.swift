@@ -36,6 +36,7 @@ final class PersonalizationEditorState: ObservableObject {
     @Published var additionalContext: String { didSet { registerEdit() } }
 
     private(set) var generation = 0
+    private var baselineGeneration = 0
     private var isApplyingLoadedDraft = false
 
     init(draft: PersonalizationDraft = .defaults) {
@@ -63,6 +64,20 @@ final class PersonalizationEditorState: ObservableObject {
     @discardableResult
     func applyLoadedDraft(_ draft: PersonalizationDraft, generation loadGeneration: Int) -> Bool {
         guard loadGeneration == generation else { return false }
+        apply(draft)
+        baselineGeneration = generation
+        return true
+    }
+
+    @discardableResult
+    func applyRefreshedDraft(_ draft: PersonalizationDraft) -> Bool {
+        guard generation == baselineGeneration else { return false }
+        apply(draft)
+        baselineGeneration = generation
+        return true
+    }
+
+    private func apply(_ draft: PersonalizationDraft) {
         isApplyingLoadedDraft = true
         isEnabled = draft.isEnabled
         nickname = draft.nickname
@@ -70,7 +85,6 @@ final class PersonalizationEditorState: ObservableObject {
         traits = draft.traits
         additionalContext = draft.additionalContext
         isApplyingLoadedDraft = false
-        return true
     }
 
     func clearDetails() {
