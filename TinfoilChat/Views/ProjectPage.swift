@@ -392,13 +392,15 @@ struct ProjectDocumentsView: View {
         }
         .sheet(isPresented: $showDocumentPicker) {
             DocumentPickerView(
-                onDocumentPicked: { handle in
+                allowedKinds: [.documents],
+                allowsMultipleSelection: true,
+                onDocumentsPicked: { batch in
                     Task {
-                        await viewModel.uploadProjectDocument(handle: handle)
+                        await viewModel.uploadProjectDocuments(
+                            handles: batch.files,
+                            pickerFailures: batch.failures
+                        )
                     }
-                },
-                onError: { error in
-                    viewModel.projectError = error.localizedDescription
                 }
             )
         }

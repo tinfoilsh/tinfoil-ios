@@ -2155,8 +2155,17 @@ class ChatViewModel: ObservableObject {
     }
 
     func uploadProjectDocument(handle: ManagedStagedFile) async {
-        defer { handle.discard() }
-        guard let project = activeProject else { return }
+        await uploadProjectDocuments(handles: [handle])
+    }
+
+    func uploadProjectDocuments(
+        handles: [ManagedStagedFile],
+        pickerFailures: [ManagedFileError] = []
+    ) async {
+        guard let project = activeProject else {
+            handles.forEach { $0.discard() }
+            return
+        }
         let accountGeneration = projectListAccountGeneration
 
         isUploadingProjectDocument = true
@@ -2166,7 +2175,7 @@ class ChatViewModel: ObservableObject {
                 isUploadingProjectDocument = false
             }
         }
-        do {
+        let result = await ManagedFileBatchProcessor.process(files: handles) { handle in
             let resourceValues = try handle.url.resourceValues(forKeys: [.fileSizeKey])
             guard let sizeBytes = resourceValues.fileSize else {
                 throw CocoaError(.fileReadUnknown)
@@ -2175,21 +2184,25 @@ class ChatViewModel: ObservableObject {
                 url: handle.url,
                 filename: handle.fileName
             )
-            guard isCurrentProjectAccount(accountGeneration) else { return }
+            guard self.isCurrentProjectAccount(accountGeneration) else { throw CancellationError() }
             let contentType = DocumentConversionService.mimeType(for: handle.fileName)
-            let document = try await projectStorage.uploadDocument(
+            let document = try await self.projectStorage.uploadDocument(
                 projectId: project.id,
                 filename: handle.fileName,
                 contentType: contentType,
                 content: markdown,
                 sizeBytes: sizeBytes
             )
-            guard isCurrentProjectAccount(accountGeneration) else { return }
-            projectDocuments.append(document)
-        } catch {
-            guard isCurrentProjectAccount(accountGeneration) else { return }
-            projectError = error.localizedDescription
+            guard self.isCurrentProjectAccount(accountGeneration) else { throw CancellationError() }
+            return document
         }
+        guard !result.wasCancelled, isCurrentProjectAccount(accountGeneration) else { return }
+
+        projectDocuments.append(contentsOf: result.successes)
+        projectError = ManagedFileBatchErrorMessage.projectUpload(
+            successCount: result.successes.count,
+            failures: pickerFailures + result.failures
+        )
     }
 
     func deleteProjectDocument(_ documentId: String) async {
@@ -3362,6 +3375,13 @@ class ChatViewModel: ObservableObject {
             fileName: handle.fileName,
             managedFile: handle
         )
+    }
+
+    func addDocumentAttachments(_ batch: DocumentPickerBatch) {
+        for handle in batch.files {
+            addDocumentAttachment(handle: handle)
+        }
+        attachmentError = ManagedFileBatchErrorMessage.attachments(batch.failures)
     }
 
     func addImageAttachment(
