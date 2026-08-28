@@ -6177,8 +6177,9 @@ class ChatViewModel: ObservableObject {
     /// Backs the Settings and sidebar "unlock cloud sync" affordances.
     /// Routes the manual setup / recovery outcomes to the onboarding
     /// sheet, matching the sign-in flow.
-    func reattemptPasskeyRecovery() async {
-        guard let operationUserId = currentUserId else { return }
+    @discardableResult
+    func reattemptPasskeyRecovery() async -> PasskeyRecoveryResult? {
+        guard let operationUserId = currentUserId else { return nil }
         let operationTask = Task { [passkeyManager] in
             guard !Task.isCancelled else { return nil as PasskeyRecoveryResult? }
             let result = await passkeyManager.reenableRecoveryPrompt()
@@ -6187,12 +6188,12 @@ class ChatViewModel: ObservableObject {
         }
         guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
             operationTask.cancel()
-            return
+            return nil
         }
         defer { accountOperationTracker.end(operationToken) }
 
-        guard let result = await operationTask.value else { return }
-        guard currentUserId == operationUserId else { return }
+        guard let result = await operationTask.value else { return nil }
+        guard currentUserId == operationUserId else { return nil }
         switch result {
         case .manualSetupRequired:
             cloudSyncOnboardingMode = .setup
@@ -6209,6 +6210,7 @@ class ChatViewModel: ObservableObject {
         default:
             break
         }
+        return result
     }
 
     private func retryPendingAnonymousChatReencryption(
@@ -7385,8 +7387,9 @@ class ChatViewModel: ObservableObject {
         return result
     }
 
-    func createPasskeyBackup() async {
-        guard let operationUserId = currentUserId else { return }
+    @discardableResult
+    func createPasskeyBackup() async -> Bool {
+        guard let operationUserId = currentUserId else { return false }
         let operationTask = Task { [passkeyManager] in
             guard !Task.isCancelled else { return false }
             let succeeded = await passkeyManager.createPasskeyBackup()
@@ -7395,15 +7398,16 @@ class ChatViewModel: ObservableObject {
         }
         guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
             operationTask.cancel()
-            return
+            return false
         }
         defer { accountOperationTracker.end(operationToken) }
 
         let succeeded = await operationTask.value
-        guard currentUserId == operationUserId else { return }
-        guard succeeded else { return }
+        guard currentUserId == operationUserId else { return false }
+        guard succeeded else { return false }
         let migrationToken = currentAccountOperationToken(userId: operationUserId)
         startLegacyMigration(token: migrationToken, userId: operationUserId)
+        return true
     }
 
     private func ensureCurrentAccount(_ userId: String) throws {
