@@ -95,6 +95,11 @@ struct ChatContainer: View {
         .onChange(of: viewModel.navigationRequest) { _, request in
             handleNavigationRequest(request)
         }
+        .onChange(of: viewModel.hasPremiumAccess) { _, hasPremiumAccess in
+            if !hasPremiumAccess {
+                sidebarNavigationRequest = nil
+            }
+        }
         .onChange(of: colorScheme) { _, _ in
             setupNavigationBarAppearance()
         }
@@ -488,7 +493,9 @@ struct ChatContainer: View {
     }
 
     private var isShowingProjectLanding: Bool {
-        viewModel.activeProject != nil && !viewModel.isViewingProjectChat
+        viewModel.hasPremiumAccess
+            && viewModel.activeProject != nil
+            && !viewModel.isViewingProjectChat
     }
 
     private var isInProjectChat: Bool {
@@ -509,6 +516,14 @@ struct ChatContainer: View {
 
     private func handleNavigationRequest(_ request: ChatNavigationRequest?) {
         guard let request else { return }
+        guard PremiumProjectPolicy.allowsNavigation(
+            to: request.destination,
+            hasPremiumAccess: viewModel.hasPremiumAccess
+        ) else {
+            sidebarNavigationRequest = nil
+            viewModel.consumeNavigationRequest(id: request.id)
+            return
+        }
 
         switch request.destination {
         case .chat:
