@@ -9,10 +9,10 @@ import SwiftUI
 import AVFoundation
 
 struct CloudSyncSettingsView: View {
-    @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
     @ObservedObject var viewModel: ChatViewModel
     @ObservedObject var authManager: AuthManager
+    let onRequestCloseSettings: () -> Void
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var passkeyManager = PasskeyManager.shared
     @ObservedObject private var syncHealth = SyncHealthStore.shared
@@ -27,23 +27,7 @@ struct CloudSyncSettingsView: View {
                         viewModel.reloadEncryptionKey()
                         Task { await viewModel.performFullSync() }
                     } else {
-                        Task {
-                            let result = await viewModel.retryPasskeySetup()
-                            switch result {
-                            case .manualSetupRequired:
-                                await MainActor.run {
-                                    viewModel.cloudSyncOnboardingMode = .setup
-                                    viewModel.showCloudSyncOnboarding = true
-                                }
-                            case .manualRecoveryRequired:
-                                await MainActor.run {
-                                    viewModel.cloudSyncOnboardingMode = .recovery
-                                    viewModel.showCloudSyncOnboarding = true
-                                }
-                            default:
-                                break
-                            }
-                        }
+                        Task { await enableCloudSync() }
                     }
                 } else {
                     settings.isCloudSyncEnabled = false
@@ -56,6 +40,8 @@ struct CloudSyncSettingsView: View {
     
     @State private var copiedToClipboard: Bool = false
     @State private var showBackupKeySheet: Bool = false
+    @State private var isEnablingCloudSync = false
+    @State private var cloudSyncSetupError: String?
     @State private var passkeyInventoryState = PasskeyBundleInventory(
         bundles: [],
         verification: .unverified,
@@ -72,8 +58,14 @@ struct CloudSyncSettingsView: View {
     var body: some View {
         List {
             Section {
-                Toggle("Cloud Sync", isOn: cloudSyncBinding)
-                    .tint(Color.accentPrimary)
+                HStack {
+                    Toggle("Cloud Sync", isOn: cloudSyncBinding)
+                        .tint(Color.accentPrimary)
+                        .disabled(isEnablingCloudSync)
+                    if isEnablingCloudSync {
+                        ProgressView()
+                    }
+                }
             } footer: {
                 Text("Encrypt and back up your chats so they sync across devices.")
                     .font(.caption)
@@ -265,9 +257,59 @@ struct CloudSyncSettingsView: View {
             UINavigationBar.appearance().compactAppearance = appearance
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
-            .sheet(isPresented: $showBackupKeySheet) {
-                BackupEncryptionKeySheet()
+        .alert("Couldn't Enable Cloud Sync", isPresented: Binding(
+            get: { cloudSyncSetupError != nil },
+            set: { if !$0 { cloudSyncSetupError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(cloudSyncSetupError ?? "Please try again.")
+        }
+        .sheet(isPresented: $showBackupKeySheet) {
+            BackupEncryptionKeySheet()
+        }
+    }
+
+    @MainActor
+    private func enableCloudSync() async {
+        guard !isEnablingCloudSync else { return }
+        isEnablingCloudSync = true
+        cloudSyncSetupError = nil
+        defer { isEnablingCloudSync = false }
+
+        await handlePasskeyRecoveryResult(await viewModel.retryPasskeySetup())
+    }
+
+    @MainActor
+    private func handlePasskeyRecoveryResult(_ result: PasskeyRecoveryResult?) async {
+        switch result {
+        case .some(.success), .some(.newUserSetupDone):
+            guard EncryptionService.shared.hasEncryptionKey() else {
+                cloudSyncSetupError = "The encryption key could not be loaded. Please try again."
+                return
             }
+            settings.isCloudSyncEnabled = true
+            viewModel.reloadEncryptionKey()
+            await viewModel.performFullSync()
+        case .some(.manualSetupRequired):
+            viewModel.cloudSyncOnboardingMode = .setup
+            viewModel.showCloudSyncOnboarding = true
+            onRequestCloseSettings()
+        case .some(.manualRecoveryRequired):
+            viewModel.cloudSyncOnboardingMode = .recovery
+            viewModel.showCloudSyncOnboarding = true
+            onRequestCloseSettings()
+        case .some(.temporarilyUnavailable):
+            cloudSyncSetupError = "Passkey recovery is temporarily unavailable. Check your connection and try again."
+        case .some(.recoveryFailed):
+            if passkeyManager.showPasskeyRecoveryChoice {
+                onRequestCloseSettings()
+            } else {
+                cloudSyncSetupError = "Passkey authentication failed. Try again or restore your encryption key manually."
+            }
+        case nil:
+            cloudSyncSetupError = "Passkey recovery could not start. Please try again."
+        }
     }
     
     /// Gate-driven status rows from the sync-health store: explains
@@ -285,6 +327,7 @@ struct CloudSyncSettingsView: View {
                     Button {
                         viewModel.cloudSyncOnboardingMode = .recovery
                         viewModel.showCloudSyncOnboarding = true
+                        onRequestCloseSettings()
                     } label: {
                         Text("Recover Key")
                             .font(.caption)
@@ -397,43 +440,34 @@ struct CloudSyncSettingsView: View {
                         title: "Unlock Cloud Sync",
                         subtitle: "Use your passkey to unlock and resume syncing chats across devices."
                     ) {
-                        await MainActor.run { dismiss() }
-                        await viewModel.reattemptPasskeyRecovery()
+                        await handlePasskeyRecoveryResult(await viewModel.reattemptPasskeyRecovery())
                     }
                 } else if passkeyManager.passkeyAddDeviceAvailable && EncryptionService.shared.hasEncryptionKey() {
                     passkeyActionButton(
                         title: "Set Up Passkey on This Device",
                         subtitle: "Your other devices use a passkey already. Add one here for one-tap access."
                     ) {
-                        await viewModel.createPasskeyBackup()
+                        guard await viewModel.createPasskeyBackup() else {
+                            cloudSyncSetupError = "Passkey setup failed. Please try again."
+                            return
+                        }
                     }
                 } else if passkeyManager.passkeySetupAvailable && EncryptionService.shared.hasEncryptionKey() {
                     passkeyActionButton(
                         title: "Add Passkey for seamless sync",
                         subtitle: "Use Face ID or Touch ID to sync chats across devices"
                     ) {
-                        await viewModel.createPasskeyBackup()
+                        guard await viewModel.createPasskeyBackup() else {
+                            cloudSyncSetupError = "Passkey setup failed. Please try again."
+                            return
+                        }
                     }
                 } else if passkeyManager.passkeySetupAvailable && !EncryptionService.shared.hasEncryptionKey() {
                     passkeyActionButton(
                         title: "Add Passkey for seamless sync",
                         subtitle: "Create a passkey to sync chats across devices"
                     ) {
-                        let result = await viewModel.retryPasskeySetup()
-                        switch result {
-                        case .manualSetupRequired:
-                            await MainActor.run {
-                                viewModel.cloudSyncOnboardingMode = .setup
-                                viewModel.showCloudSyncOnboarding = true
-                            }
-                        case .manualRecoveryRequired:
-                            await MainActor.run {
-                                viewModel.cloudSyncOnboardingMode = .recovery
-                                viewModel.showCloudSyncOnboarding = true
-                            }
-                        default:
-                            break
-                        }
+                        await handlePasskeyRecoveryResult(await viewModel.retryPasskeySetup())
                     }
                 }
             } header: {
