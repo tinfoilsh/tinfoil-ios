@@ -23,7 +23,7 @@ import Foundation
 /// `users.passkey_credentials` JSONB. `iv` and `encryptedKeys` are
 /// base64-encoded; the ciphertext is an AES-GCM-wrapped JSON envelope
 /// (`{ primary, alternatives }`) under the passkey-PRF-derived KEK.
-struct LegacyPasskeyCredentialEntry: Decodable, Sendable {
+struct LegacyPasskeyCredentialEntry: Decodable {
     let id: String
     let iv: String
     let encryptedKeys: String
@@ -41,27 +41,17 @@ struct LegacyPasskeyCredentialEntry: Decodable, Sendable {
     }
 }
 
-enum LegacyPasskeyCredentialLookup: Sendable {
-    case available([LegacyPasskeyCredentialEntry])
-    case unverified
-}
-
 enum LegacyPasskeyCredentials {
 
     /// Fetch the legacy passkey credentials for the authenticated user.
-    /// Returns an empty array on any non-success for recovery callers.
-    /// Inventory callers use `lookup()` to distinguish absence from a
-    /// lookup failure.
+    /// Returns an empty array on any non-success (404/401/network/parse)
+    /// so callers can treat "no legacy passkey" and "fetch failed"
+    /// identically — both mean the legacy recovery path is unavailable.
     static func fetch() async -> [LegacyPasskeyCredentialEntry] {
-        guard case .available(let entries) = await lookup() else { return [] }
-        return entries
-    }
-
-    static func lookup() async -> LegacyPasskeyCredentialLookup {
-        guard let token = await authToken() else { return .unverified }
+        guard let token = await authToken() else { return [] }
 
         let urlString = "\(Constants.API.baseURL)\(Constants.API.legacyPasskeyCredentialsPath)"
-        guard let url = URL(string: urlString) else { return .unverified }
+        guard let url = URL(string: urlString) else { return [] }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -69,13 +59,13 @@ enum LegacyPasskeyCredentials {
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return .unverified }
-            if http.statusCode == 404 { return .available([]) }
-            guard (200...299).contains(http.statusCode) else { return .unverified }
+            guard let http = response as? HTTPURLResponse else { return [] }
+            if http.statusCode == 404 || http.statusCode == 401 { return [] }
+            guard (200...299).contains(http.statusCode) else { return [] }
             let decoded = try JSONDecoder().decode([LegacyPasskeyCredentialEntry].self, from: data)
-            return .available(decoded)
+            return decoded
         } catch {
-            return .unverified
+            return []
         }
     }
 
