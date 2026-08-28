@@ -86,6 +86,8 @@ enum Constants {
             static let drawerIconWidth: CGFloat = 22
             static let drawerChevronSize: CGFloat = 12
             static let drawerChevronWidth: CGFloat = 16
+            static let drawerChevronExpandedRotation = 180.0
+            static let drawerAnimationDuration = 0.25
         }
     }
 
