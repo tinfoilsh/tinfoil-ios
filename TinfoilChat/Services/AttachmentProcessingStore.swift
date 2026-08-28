@@ -1,5 +1,40 @@
 import Foundation
 
+struct AttachmentErrorPublicationFence {
+    private(set) var generation = 0
+    private var batchGeneration: Int?
+    private var batchFailures: [ManagedFileError?] = []
+
+    mutating func begin() -> Int {
+        generation &+= 1
+        batchGeneration = nil
+        batchFailures = []
+        return generation
+    }
+
+    mutating func beginBatch(count: Int) -> Int {
+        let generation = begin()
+        batchGeneration = generation
+        batchFailures = Array(repeating: nil, count: count)
+        return generation
+    }
+
+    func accepts(_ generation: Int) -> Bool {
+        self.generation == generation
+    }
+
+    mutating func recordBatchFailure(
+        _ failure: ManagedFileError,
+        at index: Int,
+        generation: Int
+    ) -> [ManagedFileError]? {
+        guard accepts(generation), batchGeneration == generation,
+              batchFailures.indices.contains(index) else { return nil }
+        batchFailures[index] = failure
+        return batchFailures.compactMap { $0 }
+    }
+}
+
 @MainActor
 final class AttachmentProcessingStore {
     struct Publication {

@@ -306,11 +306,10 @@ struct MessageInputView: View {
             }
             .sheet(isPresented: $viewModel.showDocumentPicker) {
                 DocumentPickerView(
-                    onDocumentPicked: { handle in
-                        viewModel.addDocumentAttachment(handle: handle)
-                    },
-                    onError: { error in
-                        viewModel.attachmentError = error.localizedDescription
+                    allowedKinds: [.documents],
+                    allowsMultipleSelection: true,
+                    onDocumentsPicked: { batch in
+                        viewModel.addDocumentAttachments(batch)
                     }
                 )
             }

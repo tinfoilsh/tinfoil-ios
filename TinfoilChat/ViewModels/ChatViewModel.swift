@@ -456,6 +456,7 @@ class ChatViewModel: ObservableObject {
     @Published var attachmentError: String? = nil
     @Published var pendingImageThumbnails: [String: String] = [:]
     private let attachmentProcessingStore = AttachmentProcessingStore()
+    private var attachmentErrorPublicationFence = AttachmentErrorPublicationFence()
     var isProcessingAttachment: Bool {
         pendingAttachments.contains { $0.processingState == .processing }
     }
@@ -2155,8 +2156,17 @@ class ChatViewModel: ObservableObject {
     }
 
     func uploadProjectDocument(handle: ManagedStagedFile) async {
-        defer { handle.discard() }
-        guard let project = activeProject else { return }
+        await uploadProjectDocuments(handles: [handle])
+    }
+
+    func uploadProjectDocuments(
+        handles: [ManagedStagedFile],
+        pickerFailures: [ManagedFileError] = []
+    ) async {
+        guard let project = activeProject else {
+            handles.forEach { $0.discard() }
+            return
+        }
         let accountGeneration = projectListAccountGeneration
 
         isUploadingProjectDocument = true
@@ -2166,7 +2176,7 @@ class ChatViewModel: ObservableObject {
                 isUploadingProjectDocument = false
             }
         }
-        do {
+        let result = await ManagedFileBatchProcessor.process(files: handles) { handle in
             let resourceValues = try handle.url.resourceValues(forKeys: [.fileSizeKey])
             guard let sizeBytes = resourceValues.fileSize else {
                 throw CocoaError(.fileReadUnknown)
@@ -2175,21 +2185,25 @@ class ChatViewModel: ObservableObject {
                 url: handle.url,
                 filename: handle.fileName
             )
-            guard isCurrentProjectAccount(accountGeneration) else { return }
+            guard self.isCurrentProjectAccount(accountGeneration) else { throw CancellationError() }
             let contentType = DocumentConversionService.mimeType(for: handle.fileName)
-            let document = try await projectStorage.uploadDocument(
+            let document = try await self.projectStorage.uploadDocument(
                 projectId: project.id,
                 filename: handle.fileName,
                 contentType: contentType,
                 content: markdown,
                 sizeBytes: sizeBytes
             )
-            guard isCurrentProjectAccount(accountGeneration) else { return }
-            projectDocuments.append(document)
-        } catch {
-            guard isCurrentProjectAccount(accountGeneration) else { return }
-            projectError = error.localizedDescription
+            guard self.isCurrentProjectAccount(accountGeneration) else { throw CancellationError() }
+            return document
         }
+        guard !result.wasCancelled, isCurrentProjectAccount(accountGeneration) else { return }
+
+        projectDocuments.append(contentsOf: result.successes)
+        projectError = ManagedFileBatchErrorMessage.projectUpload(
+            successCount: result.successes.count,
+            failures: pickerFailures + result.failures
+        )
     }
 
     func deleteProjectDocument(_ documentId: String) async {
@@ -3303,9 +3317,17 @@ class ChatViewModel: ObservableObject {
         url: URL,
         fileName: String,
         sharedImportRequestID: UUID? = nil,
-        managedFile: ManagedStagedFile? = nil
+        managedFile: ManagedStagedFile? = nil,
+        preserveExistingErrors: Bool = false,
+        errorPublicationGeneration: Int? = nil,
+        onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil
     ) {
-        attachmentError = nil
+        let startsNewErrorPublication = errorPublicationGeneration == nil
+        let errorPublicationGeneration = errorPublicationGeneration
+            ?? attachmentErrorPublicationFence.begin()
+        if startsNewErrorPublication {
+            attachmentError = nil
+        }
 
         let attachmentId = UUID().uuidString.lowercased()
         var attachment = Attachment(
@@ -3338,11 +3360,27 @@ class ChatViewModel: ObservableObject {
             } catch is CancellationError {
             } catch {
                 guard publication.isCurrent else { return }
+                let failure = ManagedFileError(fileName: fileName, error: error)
+                if let onProcessingFailure {
+                    pendingAttachments.removeAll { $0.id == attachmentId }
+                    pendingImageThumbnails.removeValue(forKey: attachmentId)
+                    guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
+                    onProcessingFailure(failure)
+                    return
+                }
                 attachment.processingState = .failed
                 if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
                     pendingAttachments[index] = attachment
                 }
-                attachmentError = error.localizedDescription
+                guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
+                let message = preserveExistingErrors
+                    ? "\(fileName): \(failure.message)"
+                    : error.localizedDescription
+                if preserveExistingErrors, let attachmentError, !attachmentError.isEmpty {
+                    self.attachmentError = "\(attachmentError)\n\(message)"
+                } else {
+                    attachmentError = message
+                }
             }
         }
         if let managedFile {
@@ -3356,20 +3394,47 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    func addDocumentAttachment(handle: ManagedStagedFile) {
+    func addDocumentAttachment(
+        handle: ManagedStagedFile,
+        preserveExistingErrors: Bool = false,
+        errorPublicationGeneration: Int? = nil,
+        onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil
+    ) {
         addDocumentAttachment(
             url: handle.url,
             fileName: handle.fileName,
-            managedFile: handle
+            managedFile: handle,
+            preserveExistingErrors: preserveExistingErrors,
+            errorPublicationGeneration: errorPublicationGeneration,
+            onProcessingFailure: onProcessingFailure
         )
+    }
+
+    func addDocumentAttachments(_ batch: DocumentPickerBatch) {
+        let errorPublicationGeneration = attachmentErrorPublicationFence.begin()
+        for handle in batch.files {
+            addDocumentAttachment(
+                handle: handle,
+                preserveExistingErrors: true,
+                errorPublicationGeneration: errorPublicationGeneration
+            )
+        }
+        attachmentError = ManagedFileBatchErrorMessage.attachments(batch.failures)
     }
 
     func addImageAttachment(
         data: Data,
         fileName: String,
-        sharedImportRequestID: UUID? = nil
+        sharedImportRequestID: UUID? = nil,
+        errorPublicationGeneration: Int? = nil,
+        onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil
     ) {
-        attachmentError = nil
+        let startsNewErrorPublication = errorPublicationGeneration == nil
+        let errorPublicationGeneration = errorPublicationGeneration
+            ?? attachmentErrorPublicationFence.begin()
+        if startsNewErrorPublication {
+            attachmentError = nil
+        }
 
         let attachmentId = UUID().uuidString.lowercased()
         var attachment = Attachment(
@@ -3406,11 +3471,59 @@ class ChatViewModel: ObservableObject {
             } catch is CancellationError {
             } catch {
                 guard publication.isCurrent else { return }
+                let failure = ManagedFileError(fileName: fileName, error: error)
+                if let onProcessingFailure {
+                    pendingAttachments.removeAll { $0.id == attachmentId }
+                    pendingImageThumbnails.removeValue(forKey: attachmentId)
+                    guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
+                    onProcessingFailure(failure)
+                    return
+                }
                 attachment.processingState = .failed
                 if let index = pendingAttachments.firstIndex(where: { $0.id == attachmentId }) {
                     pendingAttachments[index] = attachment
                 }
+                guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
                 attachmentError = error.localizedDescription
+            }
+        }
+    }
+
+    func addSharedImportAttachments(_ batch: SharedImportAttachmentBatch) {
+        let generation = attachmentErrorPublicationFence.beginBatch(count: batch.admissions.count)
+        attachmentError = nil
+
+        for (index, admission) in batch.admissions.enumerated() {
+            let publishFailure: @MainActor (ManagedFileError) -> Void = { [weak self] failure in
+                guard let self,
+                      let failures = attachmentErrorPublicationFence.recordBatchFailure(
+                          failure,
+                          at: index,
+                          generation: generation
+                      ) else { return }
+                attachmentError = ManagedFileBatchErrorMessage.attachments(failures)
+            }
+
+            switch admission {
+            case let .image(data, fileName, requestID):
+                addImageAttachment(
+                    data: data,
+                    fileName: fileName,
+                    sharedImportRequestID: requestID,
+                    errorPublicationGeneration: generation,
+                    onProcessingFailure: publishFailure
+                )
+            case let .document(file, requestID):
+                addDocumentAttachment(
+                    url: file.url,
+                    fileName: file.fileName,
+                    sharedImportRequestID: requestID,
+                    managedFile: file,
+                    errorPublicationGeneration: generation,
+                    onProcessingFailure: publishFailure
+                )
+            case let .failure(failure):
+                publishFailure(failure)
             }
         }
     }
