@@ -25,6 +25,10 @@ enum PremiumProjectPolicy {
         projectId == nil || hasPremiumAccess
     }
 
+    static func shouldLeaveChatOnAccessRevocation(projectId: String?) -> Bool {
+        projectId != nil
+    }
+
     static func allowsMutation(_ mutation: Mutation, hasPremiumAccess: Bool) -> Bool {
         mutation == .deleteAllProjects || hasPremiumAccess
     }

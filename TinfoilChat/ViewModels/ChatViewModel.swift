@@ -5961,6 +5961,7 @@ class ChatViewModel: ObservableObject {
 
     private func revokeProjectAccess() {
         projectListLoadGeneration += 1
+        projectListAccountGeneration += 1
         projectLoadGeneration += 1
         chatSelectionFence.invalidate()
         chatSelectionTask?.cancel()
@@ -5974,9 +5975,19 @@ class ChatViewModel: ObservableObject {
         if navigationRequest?.destination == .projects {
             navigationRequest = nil
         }
-        let wasViewingProjectChat = currentChat?.projectId != nil
+        let projectChatId = currentChat.flatMap { chat in
+            PremiumProjectPolicy.shouldLeaveChatOnAccessRevocation(projectId: chat.projectId)
+                ? chat.id
+                : nil
+        }
+        if let projectChatId {
+            discardMessageQueue(chatId: projectChatId)
+            if cancelGeneration(chatId: projectChatId, announce: false) == nil {
+                cancelRecoveredGeneration(chatId: projectChatId)
+            }
+        }
         leaveProjectContext()
-        if wasViewingProjectChat && hasChatAccess {
+        if projectChatId != nil && hasChatAccess {
             createNewChat(isLocalOnly: false, focusInput: false)
         }
     }
