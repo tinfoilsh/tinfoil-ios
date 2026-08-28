@@ -24,12 +24,6 @@ struct PremiumProjectPolicyTests {
         #expect(PremiumProjectPolicy.includesChat(projectId: nil, hasPremiumAccess: false))
     }
 
-    @Test
-    func accessRevocationLeavesOnlyProjectChats() {
-        #expect(PremiumProjectPolicy.shouldLeaveChatOnAccessRevocation(projectId: "project-1"))
-        #expect(!PremiumProjectPolicy.shouldLeaveChatOnAccessRevocation(projectId: nil))
-    }
-
     @Test(arguments: [
         PremiumProjectPolicy.Mutation.createProject,
         .editProject,

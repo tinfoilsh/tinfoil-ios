@@ -2972,6 +2972,17 @@ class ChatViewModel: ObservableObject {
         return nil
     }
 
+    private func isProjectChat(_ id: String) -> Bool {
+        if currentChat?.id == id, currentChat?.projectId != nil {
+            return true
+        }
+        if let location = findChatLocation(id), chat(at: location).projectId != nil {
+            return true
+        }
+        return cloudSidebarSummaries.contains { $0.id == id && $0.projectId != nil }
+            || localSidebarSummaries.contains { $0.id == id && $0.projectId != nil }
+    }
+
     private func upsertSummary(for chat: Chat) {
         let summary = ChatListSummary(from: chat)
         if chat.isLocalOnly {
@@ -5960,9 +5971,19 @@ class ChatViewModel: ObservableObject {
     }
 
     private func revokeProjectAccess() {
+        let projectStreamChatIds = streamTasks.keys.filter(isProjectChat)
+        let projectQueuedChatIds = messageQueues.keys.filter(isProjectChat)
+        let wasViewingProjectChat = currentChat.map { isProjectChat($0.id) } ?? false
+
         projectListLoadGeneration += 1
         projectListAccountGeneration += 1
         projectLoadGeneration += 1
+        for chatId in projectStreamChatIds {
+            _ = cancelGeneration(chatId: chatId, announce: false)
+        }
+        for chatId in projectQueuedChatIds {
+            discardMessageQueue(chatId: chatId)
+        }
         chatSelectionFence.invalidate()
         chatSelectionTask?.cancel()
         chatSelectionTask = nil
@@ -5975,19 +5996,8 @@ class ChatViewModel: ObservableObject {
         if navigationRequest?.destination == .projects {
             navigationRequest = nil
         }
-        let projectChatId = currentChat.flatMap { chat in
-            PremiumProjectPolicy.shouldLeaveChatOnAccessRevocation(projectId: chat.projectId)
-                ? chat.id
-                : nil
-        }
-        if let projectChatId {
-            discardMessageQueue(chatId: projectChatId)
-            if cancelGeneration(chatId: projectChatId, announce: false) == nil {
-                cancelRecoveredGeneration(chatId: projectChatId)
-            }
-        }
         leaveProjectContext()
-        if projectChatId != nil && hasChatAccess {
+        if wasViewingProjectChat && hasChatAccess {
             createNewChat(isLocalOnly: false, focusInput: false)
         }
     }
