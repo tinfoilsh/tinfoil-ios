@@ -747,7 +747,7 @@ struct PasskeyCompositionTests {
         #expect(unverified.verification == .unverified)
     }
 
-    @Test func currentBundleStateRemainsAuthoritativeWhenLegacyLookupFails() {
+    @Test func unverifiedLegacyLookupDisablesBundleRemovalVerification() {
         let state = currentKeyState(keyId: "current-key", credentialIds: ["AQ"])
         let inventory = PasskeyManager.passkeyBundleInventory(
             state: state,
@@ -757,10 +757,11 @@ struct PasskeyCompositionTests {
         let availability = PasskeyManager.passkeyBundleAvailability(
             state: state,
             localKeyId: "current-key",
+            localCredentialId: "AQ",
             legacyStatus: inventory.legacyStatus
         )
 
-        #expect(inventory.verification == .match)
+        #expect(inventory.verification == .unverified)
         #expect(inventory.legacyStatus == .unverified)
         #expect(availability.active)
         #expect(!availability.setupAvailable)
@@ -855,7 +856,9 @@ struct PasskeyCompositionTests {
         let availability = PasskeyManager.passkeyBundleAvailability(
             state: updatedState,
             localKeyId: "current-key",
-            legacyStatus: inventory.legacyStatus
+            localCredentialId: "AQ",
+            legacyStatus: inventory.legacyStatus,
+            legacyCredentialIds: Set(inventory.legacyCredentials.map(\.id))
         )
 
         #expect(inventory.bundles.isEmpty)
@@ -865,7 +868,7 @@ struct PasskeyCompositionTests {
         #expect(!availability.setupAvailable)
     }
 
-    @Test func registeredLegacyCredentialIsAvailableWithoutLocalIdHint() {
+    @Test func legacyCredentialWithoutLocalHintOffersDeviceSetup() {
         let state = currentKeyState(keyId: "current-key", credentialIds: [])
         let inventory = PasskeyManager.passkeyBundleInventory(
             state: state,
@@ -880,8 +883,8 @@ struct PasskeyCompositionTests {
         )
 
         #expect(inventory.legacyCredentials.map(\.id) == ["other"])
-        #expect(availability.active)
-        #expect(!availability.addDeviceAvailable)
+        #expect(!availability.active)
+        #expect(availability.addDeviceAvailable)
     }
 
     @Test func legacyLookupFailureLeavesRecoveryUnverified() {
@@ -903,11 +906,68 @@ struct PasskeyCompositionTests {
             legacyStatus: inventory.legacyStatus
         )
 
-        #expect(inventory.verification == .match)
+        #expect(inventory.verification == .unverified)
         #expect(inventory.legacyStatus == .unverified)
         #expect(inventory.legacyCredentials.map(\.id) == ["legacy"])
         #expect(!availability.active)
         #expect(!availability.setupAvailable)
+    }
+
+    @Test func otherDeviceCurrentBundleOffersLocalPasskeySetup() {
+        let state = currentKeyState(keyId: "current-key", credentialIds: ["other-device"])
+
+        let availability = PasskeyManager.passkeyBundleAvailability(
+            state: state,
+            localKeyId: "current-key",
+            localCredentialId: "this-device"
+        )
+
+        #expect(!availability.active)
+        #expect(!availability.setupAvailable)
+        #expect(availability.addDeviceAvailable)
+    }
+
+    @Test func matchingLegacyCredentialPreventsDuplicateDeviceSetup() {
+        let state = currentKeyState(keyId: "current-key", credentialIds: ["other-device"])
+
+        let availability = PasskeyManager.passkeyBundleAvailability(
+            state: state,
+            localKeyId: "current-key",
+            localCredentialId: "this-device",
+            legacyStatus: .present,
+            legacyCredentialIds: ["this-device"]
+        )
+
+        #expect(availability.active)
+        #expect(!availability.addDeviceAvailable)
+    }
+
+    @Test func externalLegacyKeyMismatchOutranksDecryptFailure() {
+        let selected = PasskeyKeyFlow.preferredExternalLegacyFailure(
+            .failure(.bundleDecryptFailed, message: "decrypt failed"),
+            over: .failure(.keyIdMismatch, message: "wrong key")
+        )
+
+        guard let selected, case .failure(let failure, let message) = selected else {
+            Issue.record("Expected a preserved external legacy failure")
+            return
+        }
+        #expect(failure == .keyIdMismatch)
+        #expect(message == "wrong key")
+    }
+
+    @Test func externalLegacyKeyMismatchIsNotReplacedByDecryptFailure() {
+        let selected = PasskeyKeyFlow.preferredExternalLegacyFailure(
+            .failure(.keyIdMismatch, message: "wrong key"),
+            over: .failure(.bundleDecryptFailed, message: "decrypt failed")
+        )
+
+        guard let selected, case .failure(let failure, let message) = selected else {
+            Issue.record("Expected the key mismatch to remain available")
+            return
+        }
+        #expect(failure == .keyIdMismatch)
+        #expect(message == "wrong key")
     }
 
     @Test func finalEnclaveBundleWithoutLegacyRecoveryNeedsSetup() {
@@ -984,7 +1044,8 @@ struct PasskeyCompositionTests {
 
         let availability = PasskeyManager.passkeyBundleAvailability(
             state: state,
-            localKeyId: "current-key"
+            localKeyId: "current-key",
+            localCredentialId: "Ag"
         )
         #expect(availability.active)
         #expect(!availability.setupAvailable)

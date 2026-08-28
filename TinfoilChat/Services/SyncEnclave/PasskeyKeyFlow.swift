@@ -331,6 +331,7 @@ enum PasskeyKeyFlow {
             return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
         }
 
+        var externalLegacyFailure: PasskeyCandidateRecoveryResult?
         if let resolved: PasskeyCandidateRecoveryResult = candidates.resolveSelectedCredential(
             credentialId: evaluated.credentialId,
             current: { candidate in
@@ -370,14 +371,31 @@ enum PasskeyKeyFlow {
                     evaluated: evaluated,
                     enclaveKeyId: state.keyId
                 )
-                guard case .legacy = result else { return nil }
-                return result
+                if case .legacy = result { return result }
+                externalLegacyFailure = preferredExternalLegacyFailure(
+                    externalLegacyFailure,
+                    over: result
+                )
+                return nil
             }
         ) {
             return resolved
         }
 
-        return .failure(.bundleDecryptFailed)
+        return externalLegacyFailure ?? .failure(.bundleDecryptFailed)
+    }
+
+    static func preferredExternalLegacyFailure(
+        _ current: PasskeyCandidateRecoveryResult?,
+        over candidate: PasskeyCandidateRecoveryResult
+    ) -> PasskeyCandidateRecoveryResult? {
+        guard case .failure(let candidateFailure, _) = candidate else { return current }
+        guard let current else { return candidate }
+        guard case .failure(let currentFailure, _) = current else { return candidate }
+        if candidateFailure == .keyIdMismatch && currentFailure != .keyIdMismatch {
+            return candidate
+        }
+        return current
     }
 
     /// Recover the user's CEK by re-authenticating their passkey and
