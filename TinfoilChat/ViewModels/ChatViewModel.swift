@@ -7312,6 +7312,21 @@ class ChatViewModel: ObservableObject {
 extension ChatViewModel {
     // MARK: - Audio Recording
 
+    enum AudioRecordingStartDecision: Equatable {
+        case start
+        case showUpgrade
+        case accountChanged
+    }
+
+    static func audioRecordingStartDecision(
+        canUseAudioInput: Bool,
+        requestedAccountId: String?,
+        currentAccountId: String?
+    ) -> AudioRecordingStartDecision {
+        guard requestedAccountId == currentAccountId else { return .accountChanged }
+        return canUseAudioInput ? .start : .showUpgrade
+    }
+
     /// Check if audio input is available (premium feature with audio model)
     var canUseAudioInput: Bool {
         hasPremiumAccess && AppConfig.shared.audioModel != nil
@@ -7319,17 +7334,38 @@ extension ChatViewModel {
 
     /// Start recording audio
     func startAudioRecording() async {
-        guard canUseAudioInput else { return }
+        guard canUseAudioInput else {
+            showRateLimitPaywall = true
+            return
+        }
+        let requestedAccountId = authManager?.localUserId
 
         audioError = nil
 
         // Check if permission was previously denied
+        var hasMicrophonePermission = true
         if !AudioRecordingService.shared.hasPermission {
-            let granted = await AudioRecordingService.shared.requestPermission()
-            if !granted {
-                showMicrophonePermissionAlert = true
-                return
-            }
+            hasMicrophonePermission = await AudioRecordingService.shared.requestPermission()
+        }
+        guard !isAccountTeardownInProgress else { return }
+
+        switch Self.audioRecordingStartDecision(
+            canUseAudioInput: canUseAudioInput,
+            requestedAccountId: requestedAccountId,
+            currentAccountId: authManager?.localUserId
+        ) {
+        case .start:
+            break
+        case .showUpgrade:
+            showRateLimitPaywall = true
+            return
+        case .accountChanged:
+            return
+        }
+
+        guard hasMicrophonePermission else {
+            showMicrophonePermissionAlert = true
+            return
         }
 
         do {
