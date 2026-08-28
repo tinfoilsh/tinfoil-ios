@@ -416,6 +416,9 @@ enum Constants {
     enum Passkey {
         static let rpId = "tinfoil.sh"
         static let rpName = "Tinfoil Chat"
+        static let prfSalt = PasskeyProtocol.tinfoilPRFSaltV1
+        static let hkdfInfo = PasskeyProtocol.tinfoilHKDFInfoV1
+        static let challengeByteCount = PasskeyProtocol.challengeByteCount
         static let prfCacheKeychainAccount = "sh.tinfoil.passkey-prf-cache"
         static let syncCheckIntervalSeconds: TimeInterval = 30
     }

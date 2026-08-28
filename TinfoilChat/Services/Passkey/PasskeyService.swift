@@ -5,8 +5,11 @@
 //  App compatibility facade for TinfoilPasskeyKit.
 //
 
+import CryptoKit
 import Foundation
 import TinfoilPasskeyKit
+
+typealias PrfPasskeyResult = PRFPasskeyResult
 
 enum PasskeyError: LocalizedError {
     case prfNotSupported
@@ -15,7 +18,6 @@ enum PasskeyError: LocalizedError {
     case authorizationFailed(Error)
     case randomGenerationFailed
     case invalidBase64url
-    case presentationAnchorUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -31,8 +33,6 @@ enum PasskeyError: LocalizedError {
             return "Failed to generate secure random bytes"
         case .invalidBase64url:
             return "Invalid base64url-encoded credential ID"
-        case .presentationAnchorUnavailable:
-            return "Passkey authorization requires an active app window"
         }
     }
 }
@@ -41,157 +41,104 @@ enum PasskeyError: LocalizedError {
 final class PasskeyService {
     static let shared = PasskeyService()
 
-    private let storage: TinfoilPasskeyKeyStorage
-    private let presentationAnchorProvider: TinfoilPasskeyPresentationAnchorProvider
-    private let keyManagerResult: Result<PasskeyKeyManager, Error>
+    private let kit: PasskeyKit
 
     private init() {
-        let storage = TinfoilPasskeyKeyStorage()
-        let presentationAnchorProvider = TinfoilPasskeyPresentationAnchorProvider()
-        self.storage = storage
-        self.presentationAnchorProvider = presentationAnchorProvider
-        do {
-            keyManagerResult = .success(try PasskeyKeyManager(
-                profile: TinfoilPasskeyProfile.current,
-                relyingPartyName: Constants.Passkey.rpName,
-                storage: storage,
-                presentationAnchorProvider: presentationAnchorProvider
-            ))
-        } catch {
-            keyManagerResult = .failure(error)
-        }
+        let stateStore = KeychainPasskeyStateStore(
+            service: Constants.Passkey.rpId,
+            account: Constants.Passkey.prfCacheKeychainAccount,
+            localCredentialIdKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId
+        )
+        kit = PasskeyKit(
+            configuration: PasskeyKitConfiguration(
+                rpId: Constants.Passkey.rpId,
+                rpName: Constants.Passkey.rpName,
+                prfSalt: Constants.Passkey.prfSalt,
+                hkdfInfo: Constants.Passkey.hkdfInfo,
+                challengeByteCount: Constants.Passkey.challengeByteCount,
+                stateStore: stateStore
+            )
+        )
     }
 
-    func createAndWrapKey(
+    func createPasskey(
         userId: String,
         userEmail: String,
-        displayName: String,
-        key: Data
-    ) async throws -> CreatedWrappedKey {
+        displayName: String
+    ) async throws -> PrfPasskeyResult {
         do {
-            try presentationAnchorProvider.requirePresentationAnchor()
-            let keyManager = try keyManager()
-            return try await keyManager.createAndWrapKey(
-                user: PasskeyUser(
-                    id: Data(userId.utf8),
+            return try await kit.createPasskey(
+                for: PasskeyUser(
+                    id: userId,
                     name: userEmail,
                     displayName: displayName
-                ),
-                key: key
+                )
             )
         } catch {
             throw Self.mapError(error)
         }
     }
 
-    func recoverKey(
-        wrappedKeys: [WrappedKey],
-        preferredCredentialId: String? = nil,
-        immediatelyAvailable: Bool = false
-    ) async throws -> RecoveredKey {
-        do {
-            try presentationAnchorProvider.requirePresentationAnchor()
-            let keyManager = try keyManager()
-            return try await keyManager.recoverKey(
-                wrappedKeys: wrappedKeys,
-                preferredCredentialId: preferredCredentialId,
-                interaction: Self.interaction(immediatelyAvailable: immediatelyAvailable)
-            )
-        } catch {
-            throw Self.mapError(error)
-        }
-    }
-
-    func wrapKeyWithPRFResult(
-        key: Data,
-        credentialId: String,
-        prfResult: PRFResult
-    ) throws -> WrappedKey {
-        do {
-            let keyManager = try keyManager()
-            return try keyManager.wrapKeyWithPRFResult(
-                keyMaterial: key,
-                credentialId: credentialId,
-                prfResult: prfResult
-            )
-        } catch {
-            throw Self.mapError(error)
-        }
-    }
-
-    func unwrapKeyWithPRFResult(
-        wrappedKey: WrappedKey,
-        prfResult: PRFResult
-    ) throws -> Data {
-        do {
-            let keyManager = try keyManager()
-            return try keyManager.unwrapKeyWithPRFResult(
-                wrappedKey: wrappedKey,
-                prfResult: prfResult
-            )
-        } catch {
-            throw Self.mapError(error)
-        }
-    }
-
-    func cachedPRFResult(for credentialIds: [String]? = nil) -> CachedPRFResult? {
-        guard let result = try? storage.loadCachedPRFResult(),
-              result.profile == TinfoilPasskeyProfile.current else {
-            return nil
-        }
-        guard let credentialIds else { return result }
-        return credentialIds.contains(result.credentialId) ? result : nil
-    }
-
-    func evaluateCredential(
+    func authenticatePasskey(
         credentialIds: [String],
-        preferredCredentialId: String? = nil,
-        immediatelyAvailable: Bool
-    ) async throws -> EvaluatedCredential {
+        silent: Bool = false
+    ) async throws -> PrfPasskeyResult {
         do {
-            try presentationAnchorProvider.requirePresentationAnchor()
-            let keyManager = try keyManager()
-            return try await keyManager.evaluateCredential(
+            return try await kit.authenticate(
                 credentialIds: credentialIds,
-                preferredCredentialId: preferredCredentialId,
-                interaction: Self.interaction(immediatelyAvailable: immediatelyAvailable)
+                mode: silent ? .immediatelyAvailable : .interactive
             )
         } catch {
             throw Self.mapError(error)
         }
+    }
+
+    func getCachedPrfResult() -> PrfPasskeyResult? {
+        kit.cachedPRFResult()
     }
 
     func clearCachedPrfResult() {
-        if case .success(let keyManager) = keyManagerResult {
-            keyManager.clearLocalState()
-        }
+        kit.clearCachedPRFResult()
     }
 
-    private func keyManager() throws -> PasskeyKeyManager {
+    nonisolated static func deriveKeyEncryptionKey(from prfOutput: SymmetricKey) -> SymmetricKey {
+        PasskeyCrypto.deriveKeyEncryptionKey(
+            from: prfOutput,
+            info: Constants.Passkey.hkdfInfo
+        )
+    }
+
+    nonisolated static func base64urlEncode(_ data: Data) -> String {
+        PasskeyCodec.base64URLEncode(data)
+    }
+
+    nonisolated static func base64urlDecode(_ string: String) throws -> Data {
         do {
-            return try keyManagerResult.get()
+            return try PasskeyCodec.base64URLDecode(string)
         } catch {
-            throw PasskeyError.authorizationFailed(error)
+            throw PasskeyError.invalidBase64url
         }
     }
 
-    nonisolated static func interaction(immediatelyAvailable: Bool) -> PasskeyInteraction {
-        immediatelyAvailable ? .immediatelyAvailable : .interactive
-    }
-
-    nonisolated static func mapError(_ error: Error) -> PasskeyError {
-        if let passkeyError = error as? PasskeyError {
-            return passkeyError
-        }
-        guard let passkeyError = error as? PasskeyKeyError else {
+    private nonisolated static func mapError(_ error: Error) -> PasskeyError {
+        guard let passkeyError = error as? PasskeyKitError else {
             return .authorizationFailed(error)
         }
         switch passkeyError {
-        case .unsupported:
+        case .prfNotSupported:
             return .prfNotSupported
-        case .cancelled:
+        case .prfOutputMissing:
+            return .prfOutputMissing
+        case .userCancelled:
             return .userCancelled
-        case .timeout, .operationInProgress, .invalidInput, .operationFailed:
+        case .authorizationFailed(let underlyingError):
+            return .authorizationFailed(underlyingError)
+        case .randomGenerationFailed:
+            return .randomGenerationFailed
+        case .invalidBase64URL:
+            return .invalidBase64url
+        case .operationInProgress, .noCredentialIDs, .noMatchingBundle,
+             .invalidChallengeLength, .userHandleTooLong:
             return .authorizationFailed(passkeyError)
         }
     }

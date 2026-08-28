@@ -597,9 +597,7 @@ class CloudSyncService: ObservableObject {
                 // forever while it waits for the out-of-band migration
                 // kick.
                 let adopted = await LegacyBlobMigration.adoptLocalKeyForMigration(
-                    keyB64: persistedB64,
-                    isCurrentAccountGeneration: { generation == self.accountGeneration }
-                )
+                    keyB64: persistedB64)
                 if adopted, generation == accountGeneration {
                     SyncHealthStore.shared.reportKeyHealthy()
                 }
