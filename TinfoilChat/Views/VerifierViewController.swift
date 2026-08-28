@@ -12,8 +12,8 @@ import TinfoilAI
 
 private enum VerificationSection: String, CaseIterable, Identifiable {
     case runtime
-    case encryption
     case code
+    case encryption
 
     var id: String { rawValue }
 
@@ -110,7 +110,7 @@ struct VerifierView: View {
                         action: {}
                     )
 
-                    if section != .code {
+                    if section != VerificationSection.allCases.last {
                         Divider()
                     }
                 }
@@ -213,21 +213,22 @@ struct VerifierView: View {
 
                 VStack(spacing: 0) {
                     if isExpanded {
-                        Divider()
+                        VStack(spacing: 0) {
+                            Divider()
 
-                        VStack(alignment: .leading, spacing: Constants.UI.VerificationCenter.drawerContentSpacing) {
-                            sectionHeader(for: section)
-                            sectionContent(for: doc, section: section)
+                            VStack(alignment: .leading, spacing: Constants.UI.VerificationCenter.drawerContentSpacing) {
+                                sectionHeader(for: section)
+                                sectionContent(for: doc, section: section)
+                            }
+                            .padding(.horizontal, Constants.UI.VerificationCenter.drawerContentHorizontalPadding)
+                            .padding(.top, Constants.UI.VerificationCenter.drawerContentSpacing)
+                            .padding(.bottom, Constants.UI.VerificationCenter.drawerContentBottomPadding)
                         }
-                        .padding(.horizontal, Constants.UI.VerificationCenter.drawerContentHorizontalPadding)
-                        .padding(.top, Constants.UI.VerificationCenter.drawerContentSpacing)
-                        .padding(.bottom, Constants.UI.VerificationCenter.drawerContentBottomPadding)
-                        .transition(.identity)
+                        .transition(.opacity)
                     }
                 }
-                .clipped()
 
-                if section != .code {
+                if section != VerificationSection.allCases.last {
                     Divider()
                 }
             }
@@ -277,10 +278,15 @@ struct VerifierView: View {
 
                 statusBadge(status)
 
-                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                Image(systemName: "chevron.down")
                     .font(.system(size: Constants.UI.VerificationCenter.drawerChevronSize, weight: .semibold))
                     .foregroundColor(.secondary)
                     .frame(width: Constants.UI.VerificationCenter.drawerChevronWidth)
+                    .rotationEffect(
+                        isExpanded
+                            ? .degrees(Constants.UI.VerificationCenter.drawerChevronExpandedRotation)
+                            : .zero
+                    )
             }
             .padding(.horizontal, Constants.UI.VerificationCenter.drawerHeaderHorizontalPadding)
             .frame(minHeight: Constants.UI.VerificationCenter.drawerHeaderMinimumHeight)
@@ -294,7 +300,11 @@ struct VerifierView: View {
     }
 
     private func toggle(_ section: VerificationSection) {
-        withAnimation(reduceMotion ? nil : .easeInOut) {
+        withAnimation(
+            reduceMotion
+                ? nil
+                : .smooth(duration: Constants.UI.VerificationCenter.drawerAnimationDuration)
+        ) {
             if expandedSections.contains(section) {
                 expandedSections.remove(section)
             } else {
