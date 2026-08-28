@@ -33,6 +33,76 @@ enum KeyMismatchResolution {
     case manualRecoveryRequired
 }
 
+enum PasskeyBundleInventoryVerification: Equatable {
+    case match
+    case mismatch
+    case unverified
+}
+
+enum LegacyPasskeyRecoveryStatus: Equatable {
+    case present
+    case absent
+    case unverified
+}
+
+struct PasskeyBundleInventory {
+    let bundles: [EnclaveKeyCurrentBundle]
+    let verification: PasskeyBundleInventoryVerification
+    let legacyCredentials: [LegacyPasskeyCredentialEntry]
+    let legacyStatus: LegacyPasskeyRecoveryStatus
+
+    func preservingBundlesAsUnverified() -> PasskeyBundleInventory {
+        PasskeyBundleInventory(
+            bundles: bundles,
+            verification: .unverified,
+            legacyCredentials: legacyCredentials,
+            legacyStatus: .unverified
+        )
+    }
+
+    func preservingLegacyCredentials(from previous: PasskeyBundleInventory) -> PasskeyBundleInventory {
+        guard legacyStatus == .unverified else { return self }
+        return PasskeyBundleInventory(
+            bundles: bundles,
+            verification: .unverified,
+            legacyCredentials: previous.legacyCredentials,
+            legacyStatus: .unverified
+        )
+    }
+}
+
+enum PasskeyBundleRemovalOutcome: Equatable {
+    case removed
+    case alreadyMissing
+}
+
+struct PasskeyBundleRemovalResult {
+    let outcome: PasskeyBundleRemovalOutcome
+    let inventory: PasskeyBundleInventory
+}
+
+enum PasskeyBundleRemovalError: Error, Equatable {
+    case missing
+    case keyMismatch
+    case unverifiable
+    case authentication
+    case server
+}
+
+enum PasskeyBundleRemovalDecision: Equatable {
+    case remove
+    case alreadyMissing
+    case reject(PasskeyBundleRemovalError)
+}
+
+struct PasskeyBundleAvailability: Equatable {
+    let active: Bool
+    let setupAvailable: Bool
+    let addDeviceAvailable: Bool
+    let keyMatches: Bool
+    let legacyStatus: LegacyPasskeyRecoveryStatus
+}
+
 // MARK: - PasskeyManager
 
 @MainActor
@@ -572,75 +642,27 @@ final class PasskeyManager: ObservableObject {
     }
 
     /// Check passkey state for users who already have keys loaded.
-    func checkPasskeyStateForExistingKey() async {
+    func checkPasskeyStateForExistingKey(preserveStateOnFailure: Bool = false) async {
         do {
             let state = try await SyncEnclaveAPI.keyCurrent()
             guard canMutateAccountKey else { return }
-            if let remoteKeyId = state.keyId, !state.bundles.isEmpty {
-                // Derive the local key id so we can tell whether this
-                // device is actually on the current key or is holding a
-                // stale CEK that a `start_fresh` elsewhere rotated away.
-                let localKeyId: String? = {
-                    guard let cek = try? EncryptionService.shared.getKeyBytesOrThrow() else {
-                        return nil
-                    }
-                    return try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
-                }()
-                let isOnCurrentKey = localKeyId == remoteKeyId
-
-                if isOnCurrentKey {
-                    // The device is genuinely on the current key, so the
-                    // user is no longer in a locked/skipped state. Drop
-                    // any persisted recovery skip (e.g. left over from a
-                    // manual unlock that bypassed the passkey flow). A
-                    // stale device keeps its skip so it stays suppressed.
-                    setDismissedRecoveryKeyId(nil)
-                    // Persist the keyId now so the periodic sync check has
-                    // a baseline. Without this, a normal app launch (with
-                    // a valid local CEK that matches the remote) would
-                    // look like a `start_fresh` rotation on the next
-                    // refresh tick and force the user through recovery.
-                    UserDefaults.standard.set(
-                        remoteKeyId,
-                        forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId
-                    )
-                }
-
-                // The bundle map is keyed by credential id. If this
-                // device's last-known credential id is among the
-                // bundles, the device has its own backup and we can
-                // light up the "passkey active" UI. Otherwise the
-                // user has bundles on *other* devices but none here
-                // yet — surface the add-this-device prompt instead.
-                let localCredentialId = UserDefaults.standard.string(
-                    forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId
-                )
-                let hasBundleForThisDevice = localCredentialId.flatMap { id in
-                    state.bundles.values.contains { $0.credentialId == id }
-                } ?? false
-
-                if hasBundleForThisDevice {
-                    passkeyActive = true
-                    passkeyAddDeviceAvailable = false
-                    passkeySetupAvailable = false
-                } else {
-                    passkeyActive = false
-                    passkeyAddDeviceAvailable = true
-                    passkeySetupAvailable = false
-                }
-                startSyncCheck()
+            let legacyLookup: LegacyPasskeyCredentialLookup = await LegacyPasskeyCredentials.lookup()
+            guard canMutateAccountKey else { return }
+            guard case .available = legacyLookup else {
                 return
             }
-            // The enclave definitively reports no registered key or no
-            // bundles at all, so any previously lit "passkey active"
-            // state is stale and must not survive the transition.
-            passkeyActive = false
+            applyPasskeyAvailability(
+                state: state,
+                localKeyId: localKeyIdHex(),
+                legacyLookup: legacyLookup
+            )
         } catch {
             guard canMutateAccountKey else { return }
-            // fall through to "setup available"
+            guard !preserveStateOnFailure else { return }
+            passkeyActive = false
+            passkeySetupAvailable = false
+            passkeyAddDeviceAvailable = false
         }
-        passkeySetupAvailable = true
-        passkeyAddDeviceAvailable = false
     }
 
     /// Re-evaluate per-device bundle state without prompting any
@@ -653,30 +675,132 @@ final class PasskeyManager: ObservableObject {
         await checkPasskeyStateForExistingKey()
     }
 
-    /// Fetch the enclave's bundle inventory for the current key. Used
-    /// by the Settings "Registered platforms" list so the view never
-    /// talks to the enclave wire directly.
-    func listPasskeyBundles() async throws -> [EnclaveKeyCurrentBundle] {
-        let state = try await SyncEnclaveAPI.keyCurrent()
-        return Array(state.bundles.values)
+    /// Fetch one enclave snapshot and verify it against the local CEK.
+    /// Used by Settings so stale inventory can remain visible without
+    /// being actionable when the current state cannot be verified.
+    func passkeyBundleInventory() async throws -> PasskeyBundleInventory {
+        let state: EnclaveKeyCurrentResponse = try await SyncEnclaveAPI.keyCurrent()
+        let localKeyId: String? = localKeyIdHex()
+        let legacyLookup: LegacyPasskeyCredentialLookup = await LegacyPasskeyCredentials.lookup()
+        return Self.passkeyBundleInventory(
+            state: state,
+            localKeyId: localKeyId,
+            legacyLookup: legacyLookup
+        )
     }
 
     /// Remove a passkey bundle from the enclave's current key, then
     /// re-evaluate the local passkey state.
-    func removePasskeyBundle(credentialId: String) async throws {
+    func removePasskeyBundle(credentialId: String) async throws -> PasskeyBundleRemovalResult {
         guard accountOperationsEnabled else { throw CancellationError() }
-        let operationTask = Task {
+        let operationTask: Task<PasskeyBundleRemovalResult, Error> = Task {
             try Task.checkCancellation()
-            let cek = try EncryptionService.shared.getKeyBytesOrThrow()
-            let keyIdHex = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
-            try await PasskeyKeyFlow.removeBundleFromCurrentKey(
-                cek: cek,
-                keyIdHex: keyIdHex,
-                credentialId: credentialId
-            )
+            let currentState: EnclaveKeyCurrentResponse
+            do {
+                currentState = try await SyncEnclaveAPI.keyCurrent()
+            } catch {
+                if error is CancellationError { throw error }
+                throw Self.passkeyBundleRemovalError(from: error)
+            }
             try Task.checkCancellation()
             guard accountOperationsEnabled else { throw CancellationError() }
-            await refreshBundleState()
+            let legacyLookup: LegacyPasskeyCredentialLookup = await LegacyPasskeyCredentials.lookup()
+            try Task.checkCancellation()
+            guard accountOperationsEnabled else { throw CancellationError() }
+
+            guard currentState.bundles.values.contains(where: { $0.credentialId == credentialId }) else {
+                let localKeyId: String? = localKeyIdHex()
+                applyPasskeyAvailability(
+                    state: currentState,
+                    localKeyId: localKeyId,
+                    legacyLookup: legacyLookup
+                )
+                let result = PasskeyBundleRemovalResult(
+                    outcome: .alreadyMissing,
+                    inventory: Self.passkeyBundleInventory(
+                        state: currentState,
+                        localKeyId: localKeyId,
+                        legacyLookup: legacyLookup
+                    )
+                )
+                await checkPasskeyStateForExistingKey(preserveStateOnFailure: true)
+                return result
+            }
+
+            guard case .available = legacyLookup else {
+                throw PasskeyBundleRemovalError.unverifiable
+            }
+
+            let cek: Data
+            let keyIdHex: String
+            do {
+                cek = try EncryptionService.shared.getKeyBytesOrThrow()
+                keyIdHex = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+            } catch {
+                throw PasskeyBundleRemovalError.unverifiable
+            }
+
+            switch Self.passkeyBundleRemovalDecision(
+                credentialId: credentialId,
+                state: currentState,
+                localKeyId: keyIdHex
+            ) {
+            case .remove:
+                break
+            case .alreadyMissing:
+                applyPasskeyAvailability(
+                    state: currentState,
+                    localKeyId: keyIdHex,
+                    legacyLookup: legacyLookup
+                )
+                let result = PasskeyBundleRemovalResult(
+                    outcome: .alreadyMissing,
+                    inventory: Self.passkeyBundleInventory(
+                        state: currentState,
+                        localKeyId: keyIdHex,
+                        legacyLookup: legacyLookup
+                    )
+                )
+                await checkPasskeyStateForExistingKey(preserveStateOnFailure: true)
+                return result
+            case .reject(let error):
+                throw error
+            }
+
+            let outcome: PasskeyBundleRemovalOutcome
+            do {
+                try await PasskeyKeyFlow.removeBundleFromCurrentKey(
+                    cek: cek,
+                    keyIdHex: keyIdHex,
+                    credentialId: credentialId
+                )
+                outcome = .removed
+            } catch {
+                if error is CancellationError { throw error }
+                let removalError = Self.passkeyBundleRemovalError(from: error)
+                guard removalError == .missing else { throw removalError }
+                outcome = .alreadyMissing
+            }
+            try Task.checkCancellation()
+            guard accountOperationsEnabled else { throw CancellationError() }
+            let updatedState = Self.removingPasskeyBundle(
+                credentialId: credentialId,
+                from: currentState
+            )
+            applyPasskeyAvailability(
+                state: updatedState,
+                localKeyId: keyIdHex,
+                legacyLookup: legacyLookup
+            )
+            let result = PasskeyBundleRemovalResult(
+                outcome: outcome,
+                inventory: Self.passkeyBundleInventory(
+                    state: updatedState,
+                    localKeyId: keyIdHex,
+                    legacyLookup: legacyLookup
+                )
+            )
+            return result
         }
         guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
             operationTask.cancel()
@@ -684,7 +808,7 @@ final class PasskeyManager: ObservableObject {
         }
         defer { accountOperationTracker.end(operationToken) }
 
-        try await operationTask.value
+        return try await operationTask.value
     }
 
     /// Create a passkey bundle for the user's existing CEK. Used by
@@ -765,6 +889,182 @@ final class PasskeyManager: ObservableObject {
         passkeyAddDeviceAvailable = false
         passkeySetupAvailable = false
         startSyncCheck()
+    }
+
+    static func passkeyBundleInventory(
+        state: EnclaveKeyCurrentResponse,
+        localKeyId: String?,
+        legacyLookup: LegacyPasskeyCredentialLookup = .available([])
+    ) -> PasskeyBundleInventory {
+        let legacyCredentials: [LegacyPasskeyCredentialEntry]
+        let legacyStatus: LegacyPasskeyRecoveryStatus
+        switch legacyLookup {
+        case .available(let entries):
+            legacyCredentials = entries
+            legacyStatus = entries.isEmpty ? .absent : .present
+        case .unverified:
+            legacyCredentials = []
+            legacyStatus = .unverified
+        }
+        let verification: PasskeyBundleInventoryVerification = {
+            guard legacyStatus != .unverified else { return .unverified }
+            if let localKeyId, let remoteKeyId = state.keyId {
+                return localKeyId == remoteKeyId ? .match : .mismatch
+            }
+            return .unverified
+        }()
+        return PasskeyBundleInventory(
+            bundles: Array(state.bundles.values),
+            verification: verification,
+            legacyCredentials: legacyCredentials,
+            legacyStatus: legacyStatus
+        )
+    }
+
+    static func passkeyBundleRemovalDecision(
+        credentialId: String,
+        state: EnclaveKeyCurrentResponse,
+        localKeyId: String?
+    ) -> PasskeyBundleRemovalDecision {
+        guard state.bundles.values.contains(where: { $0.credentialId == credentialId }) else {
+            return .alreadyMissing
+        }
+        guard let localKeyId, let remoteKeyId = state.keyId else {
+            return .reject(.unverifiable)
+        }
+        guard localKeyId == remoteKeyId else {
+            return .reject(.keyMismatch)
+        }
+        return .remove
+    }
+
+    static func passkeyBundleAvailability(
+        state: EnclaveKeyCurrentResponse,
+        localKeyId: String?,
+        localCredentialId: String?,
+        legacyStatus: LegacyPasskeyRecoveryStatus = .absent,
+        legacyCredentialIds: Set<String> = []
+    ) -> PasskeyBundleAvailability {
+        let hasMatchingLegacyCredential = legacyStatus == .present
+            && (localCredentialId.map { legacyCredentialIds.contains($0) } ?? false)
+        guard let remoteKeyId = state.keyId else {
+            return PasskeyBundleAvailability(
+                active: hasMatchingLegacyCredential,
+                setupAvailable: legacyStatus == .absent,
+                addDeviceAvailable: legacyStatus == .present && !hasMatchingLegacyCredential,
+                keyMatches: false,
+                legacyStatus: legacyStatus
+            )
+        }
+        guard let localKeyId, localKeyId == remoteKeyId else {
+            return PasskeyBundleAvailability(
+                active: false,
+                setupAvailable: false,
+                addDeviceAvailable: false,
+                keyMatches: false,
+                legacyStatus: legacyStatus
+            )
+        }
+        guard !state.bundles.isEmpty else {
+            return PasskeyBundleAvailability(
+                active: hasMatchingLegacyCredential,
+                setupAvailable: legacyStatus == .absent,
+                addDeviceAvailable: legacyStatus == .present && !hasMatchingLegacyCredential,
+                keyMatches: true,
+                legacyStatus: legacyStatus
+            )
+        }
+        let hasLocalBundle = localCredentialId.map { credentialId in
+            state.bundles.values.contains { $0.credentialId == credentialId }
+        } ?? false
+        return PasskeyBundleAvailability(
+            active: hasLocalBundle || hasMatchingLegacyCredential,
+            setupAvailable: false,
+            addDeviceAvailable: !hasLocalBundle && !hasMatchingLegacyCredential,
+            keyMatches: true,
+            legacyStatus: legacyStatus
+        )
+    }
+
+    static func removingPasskeyBundle(
+        credentialId: String,
+        from state: EnclaveKeyCurrentResponse
+    ) -> EnclaveKeyCurrentResponse {
+        EnclaveKeyCurrentResponse(
+            keyId: state.keyId,
+            etag: state.etag,
+            bundles: state.bundles.filter { $0.value.credentialId != credentialId },
+            createdVia: state.createdVia,
+            createdAt: state.createdAt,
+            hasData: state.hasData
+        )
+    }
+
+    static func passkeyBundleRemovalError(from error: Error) -> PasskeyBundleRemovalError {
+        guard let enclaveError = error as? SyncEnclaveError else { return .server }
+        if enclaveError.code == WireCodes.auth
+            || enclaveError.code == WireCodes.authActionRequired
+            || enclaveError.status == 401 {
+            return .authentication
+        }
+        if enclaveError.code == WireCodes.staleKey
+            || enclaveError.code == WireCodes.unknownKey {
+            return .keyMismatch
+        }
+        if enclaveError.code == WireCodes.notFound || enclaveError.status == 404 {
+            return .missing
+        }
+        return .server
+    }
+
+    private func localKeyIdHex() -> String? {
+        guard let cek = try? EncryptionService.shared.getKeyBytesOrThrow() else { return nil }
+        return try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+    }
+
+    private func applyPasskeyAvailability(
+        state: EnclaveKeyCurrentResponse,
+        localKeyId: String?,
+        legacyLookup: LegacyPasskeyCredentialLookup
+    ) {
+        let legacyStatus: LegacyPasskeyRecoveryStatus
+        let legacyCredentialIds: Set<String>
+        switch legacyLookup {
+        case .available(let entries):
+            legacyStatus = entries.isEmpty ? .absent : .present
+            legacyCredentialIds = Set(entries.map(\.id))
+        case .unverified:
+            legacyStatus = .unverified
+            legacyCredentialIds = []
+        }
+        let availability = Self.passkeyBundleAvailability(
+            state: state,
+            localKeyId: localKeyId,
+            localCredentialId: UserDefaults.standard.string(
+                forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId
+            ),
+            legacyStatus: legacyStatus,
+            legacyCredentialIds: legacyCredentialIds
+        )
+        passkeyActive = availability.active
+        passkeySetupAvailable = availability.setupAvailable
+        passkeyAddDeviceAvailable = availability.addDeviceAvailable
+
+        if state.keyId != nil, !state.bundles.isEmpty {
+            startSyncCheck()
+        } else {
+            syncCheckTask?.cancel()
+            syncCheckTask = nil
+        }
+        guard availability.keyMatches, let remoteKeyId = state.keyId else { return }
+        // The device is genuinely on the current key, so the user is no
+        // longer in a locked/skipped state. Persist a baseline for the
+        // periodic rotation check and clear any prior recovery skip.
+        setDismissedRecoveryKeyId(nil)
+        UserDefaults.standard.set(
+            remoteKeyId,
+            forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId
+        )
     }
 
     static func recoveryRetryContext(
