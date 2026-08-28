@@ -1132,7 +1132,7 @@ struct Message: Identifiable, Codable, Equatable {
     /// A timeline carrying block types iOS cannot model (e.g.
     /// `code_exec`) is preserved verbatim rather than rebuilt, so a
     /// webapp-origin message never loses blocks on a round-trip.
-    private func buildSyncTimeline() -> [JSONValue]? {
+    func buildSyncTimeline() -> [JSONValue]? {
         guard role == .assistant else { return timeline }
         guard let segments, !segments.isEmpty else { return timeline }
 
