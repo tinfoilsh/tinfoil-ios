@@ -76,7 +76,10 @@ struct ContentView: View {
                 }
             }
         }
-        .sheet(isPresented: $passkeyManager.showPasskeyRecoveryChoice) {
+        .sheet(
+            isPresented: $passkeyManager.showPasskeyRecoveryChoice,
+            onDismiss: { passkeyManager.recoveryChoiceDidDismiss() }
+        ) {
             PasskeyRecoveryChoiceView(
                 onTryAgain: {
                     await chatViewModel.retryPasskeyRecovery()
@@ -88,7 +91,7 @@ struct ContentView: View {
                     passkeyManager.dismissRecoveryChoice()
                 },
                 onManualKeyEntry: {
-                    passkeyManager.showPasskeyRecoveryChoice = false
+                    passkeyManager.beginManualKeyRecovery()
                     chatViewModel.cloudSyncOnboardingMode = .recovery
                     chatViewModel.showCloudSyncOnboarding = true
                 }
