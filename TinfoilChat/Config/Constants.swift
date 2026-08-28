@@ -190,6 +190,7 @@ enum Constants {
     enum API {
         static let chatCompletionsEndpoint = "/v1/chat/completions"
         static let baseURL = "https://api.tinfoil.sh"
+        static let dailyRateLimitMessage = "You've reached your daily rate limit."
         /// Read-only recovery endpoint for passkeys registered on the
         /// pre-enclave (v1) webapp. Consulted only when the enclave key
         /// registry has no usable bundle for this device.
