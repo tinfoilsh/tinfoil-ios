@@ -54,7 +54,7 @@ struct ChatSidebar: View {
     @State private var showDeleteAlert: Bool = false
 
     @State private var isTabSwitching: Bool = false
-    @State private var isFavoritesExpanded: Bool = true
+    @State private var isFavoritesExpanded: Bool = false
     @State private var isProjectsExpanded: Bool = false
     @State private var isChatsExpanded: Bool = true
     @State private var chatSearchTerm: String = ""
