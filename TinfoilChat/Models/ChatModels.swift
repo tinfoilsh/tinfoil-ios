@@ -1410,6 +1410,9 @@ struct RateLimitInfo {
     var maxRequests: Int
     var remaining: Int
     var resetsAt: String
+    var maxTokens: Int? = nil
+    var tokensUsed: Int? = nil
+    var tokensRemaining: Int? = nil
     var kind: Kind = .freeDaily
 }
 
@@ -1662,6 +1665,9 @@ class SessionTokenManager {
                         maxRequests: maxRequests,
                         remaining: remaining,
                         resetsAt: resetsAt,
+                        maxTokens: rateLimitDict["max_tokens"] as? Int,
+                        tokensUsed: rateLimitDict["tokens_used"] as? Int,
+                        tokensRemaining: rateLimitDict["tokens_remaining"] as? Int,
                         kind: .freeDaily
                     )
                 } else {

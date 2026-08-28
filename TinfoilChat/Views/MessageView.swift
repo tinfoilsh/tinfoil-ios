@@ -2087,7 +2087,7 @@ struct ErrorMessageView: View {
 
     private var headerText: String {
         if isHourlyLimit { return "Hourly Limit Reached" }
-        if isRateLimitError { return "Rate Limit Reached" }
+        if isRateLimitError { return "Daily Rate Limit Reached" }
         if isConnectionError { return "Connection Lost" }
         return "Something Went Wrong"
     }
@@ -2112,7 +2112,7 @@ struct ErrorMessageView: View {
                     .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
                     .multilineTextAlignment(.leading)
             } else if isRateLimitError {
-                Text("You've reached your daily limit of free requests. Your limit will reset tomorrow, or you can upgrade to Premium for unlimited access.")
+                Text(Constants.API.dailyRateLimitMessage)
                     .font(.subheadline)
                     .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
                     .multilineTextAlignment(.leading)

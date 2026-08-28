@@ -4782,7 +4782,7 @@ class ChatViewModel: ObservableObject {
             case 401:
                 return "Authentication error. Please sign in again."
             case 429:
-                return "You've reached your daily limit of free requests. Your limit will reset tomorrow, or you can upgrade to Premium for unlimited access."
+                return Constants.API.dailyRateLimitMessage
             case 500...599:
                 return "The service is having trouble right now. Please try again in a moment, or switch to a different model."
             default:
@@ -4798,7 +4798,7 @@ class ChatViewModel: ObservableObject {
             case 401:
                 return "Authentication error. Please sign in again."
             case 429:
-                return "You've reached your daily limit of free requests. Your limit will reset tomorrow, or you can upgrade to Premium for unlimited access."
+                return Constants.API.dailyRateLimitMessage
             case 500...599:
                 return "The service is having trouble right now. Please try again in a moment, or switch to a different model."
             default:
@@ -4812,7 +4812,7 @@ class ChatViewModel: ObservableObject {
             case 500...599:
                 return "Server error. Our team has been notified and is working on it."
             case 429:
-                return "You've reached your daily limit of free requests. Your limit will reset tomorrow, or you can upgrade to Premium for unlimited access."
+                return Constants.API.dailyRateLimitMessage
             default:
                 break
             }
