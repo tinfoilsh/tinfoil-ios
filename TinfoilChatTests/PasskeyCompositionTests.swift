@@ -128,18 +128,33 @@ struct PasskeyCompositionTests {
 
     @Test func selectedCurrentCredentialUsesCurrentUnwrapPath() {
         let candidates = PasskeyRecoveryCandidates(
-            bundles: [bundle(id: "current", wrappedByteCount: 48)],
-            legacy: [legacyEntry(id: "legacy")],
+            bundles: [
+                bundle(id: "shared", wrappedByteCount: 48),
+                bundle(id: "shared", wrappedByteCount: 80),
+            ],
+            legacy: [legacyEntry(id: "shared")],
             preferredCredentialId: nil
         )
+        var currentEnvelopeAttempted = false
+        var externalLegacyAttempted = false
 
+        #expect(candidates.credentialIds == ["shared"])
         let route: String? = candidates.resolveSelectedCredential(
-            credentialId: "current",
+            credentialId: "shared",
             current: { _ in "current" },
-            legacy: { _ in "legacy" }
+            currentEnvelope: { _ in
+                currentEnvelopeAttempted = true
+                return "current-envelope"
+            },
+            legacy: { _ in
+                externalLegacyAttempted = true
+                return "legacy"
+            }
         )
 
         #expect(route == "current")
+        #expect(!currentEnvelopeAttempted)
+        #expect(!externalLegacyAttempted)
     }
 
     @Test func selectedLegacyCredentialUsesValidatedLegacyPath() {
@@ -152,30 +167,73 @@ struct PasskeyCompositionTests {
         let route: String? = candidates.resolveSelectedCredential(
             credentialId: "legacy",
             current: { _ in "current" },
+            currentEnvelope: { _ in "current-envelope" },
             legacy: { _ in "legacy" }
         )
 
         #expect(route == "legacy")
     }
 
-    @Test func sharedCredentialFallsBackToLegacyWhenCurrentUnwrapFails() {
+    @Test func sharedCredentialUsesCurrentLegacyEnvelopeBeforeExternalLegacy() {
         let candidates = PasskeyRecoveryCandidates(
-            bundles: [bundle(id: "shared", wrappedByteCount: 48)],
+            bundles: [
+                bundle(id: "shared", wrappedByteCount: 48),
+                bundle(id: "shared", wrappedByteCount: 80),
+            ],
             legacy: [legacyEntry(id: "shared")],
             preferredCredentialId: nil
         )
         var currentAttempts = 0
+        var externalLegacyAttempted = false
 
+        #expect(candidates.credentialIds == ["shared"])
         let route: String? = candidates.resolveSelectedCredential(
             credentialId: "shared",
             current: { _ in
                 currentAttempts += 1
                 return nil
             },
-            legacy: { _ in "legacy" }
+            currentEnvelope: { _ in "current-envelope" },
+            legacy: { _ in
+                externalLegacyAttempted = true
+                return "legacy"
+            }
         )
 
         #expect(currentAttempts == 1)
+        #expect(route == "current-envelope")
+        #expect(!externalLegacyAttempted)
+    }
+
+    @Test func sharedCredentialFallsBackAfterAllCurrentRepresentationsFail() {
+        let candidates = PasskeyRecoveryCandidates(
+            bundles: [
+                bundle(id: "shared", wrappedByteCount: 48),
+                bundle(id: "shared", wrappedByteCount: 80),
+            ],
+            legacy: [legacyEntry(id: "shared")],
+            preferredCredentialId: nil
+        )
+        var attempts: [String] = []
+
+        #expect(candidates.credentialIds == ["shared"])
+        let route: String? = candidates.resolveSelectedCredential(
+            credentialId: "shared",
+            current: { _ in
+                attempts.append("current")
+                return nil
+            },
+            currentEnvelope: { _ in
+                attempts.append("current-envelope")
+                return nil
+            },
+            legacy: { _ in
+                attempts.append("legacy")
+                return "legacy"
+            }
+        )
+
+        #expect(attempts == ["current", "current-envelope", "legacy"])
         #expect(route == "legacy")
     }
 
@@ -196,6 +254,7 @@ struct PasskeyCompositionTests {
         #expect(interactive.resolveSelectedCredential(
             credentialId: "legacy",
             current: { _ in false },
+            currentEnvelope: { _ in false },
             legacy: { _ in true }
         ) == true)
     }

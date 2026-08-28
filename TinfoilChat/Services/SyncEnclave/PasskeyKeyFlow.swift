@@ -113,10 +113,14 @@ struct PasskeyRecoveryCandidates {
     func resolveSelectedCredential<Result>(
         credentialId: String,
         current recoverCurrent: (TinfoilWrappedKeyAdapter.CandidateSet.Current) -> Result?,
+        currentEnvelope recoverCurrentEnvelope: (EnclaveKeyCurrentBundle) -> Result?,
         legacy recoverLegacy: (LegacyPasskeyCredentialEntry) -> Result?
     ) -> Result? {
         for candidate in current.current where candidate.bundle.credentialId == credentialId {
             if let result = recoverCurrent(candidate) { return result }
+        }
+        for bundle in current.legacy where bundle.credentialId == credentialId {
+            if let result = recoverCurrentEnvelope(bundle) { return result }
         }
         for entry in legacy where entry.id == credentialId {
             if let result = recoverLegacy(entry) { return result }
@@ -344,6 +348,22 @@ enum PasskeyKeyFlow {
                     createdVia: state.createdVia
                 ), legacyAlternatives: [])
             },
+            currentEnvelope: { bundle in
+                guard let unwrapped = try? SyncEnclaveKeyBundle.unwrapLegacyJsonEnvelope(
+                    prfOutput: evaluated.prfResult.output,
+                    kekIvHex: bundle.kekIv,
+                    wrappedKeyHex: bundle.encryptedKeys
+                ), let keyIdHex = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: unwrapped.cek),
+                keyIdHex == state.keyId else {
+                    return nil
+                }
+                return .current(.success(
+                    cek: unwrapped.cek,
+                    keyIdHex: keyIdHex,
+                    credentialId: evaluated.credentialId,
+                    createdVia: state.createdVia
+                ), legacyAlternatives: unwrapped.legacyAlternativeKeys)
+            },
             legacy: { entry in
                 let result = recoverLegacyEntry(
                     entry,
@@ -355,23 +375,6 @@ enum PasskeyKeyFlow {
             }
         ) {
             return resolved
-        }
-
-        for bundle in candidates.current.legacy where bundle.credentialId == evaluated.credentialId {
-            guard let unwrapped = try? SyncEnclaveKeyBundle.unwrapLegacyJsonEnvelope(
-                prfOutput: evaluated.prfResult.output,
-                kekIvHex: bundle.kekIv,
-                wrappedKeyHex: bundle.encryptedKeys
-            ), let keyIdHex = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: unwrapped.cek),
-            keyIdHex == state.keyId else {
-                continue
-            }
-            return .current(.success(
-                cek: unwrapped.cek,
-                keyIdHex: keyIdHex,
-                credentialId: evaluated.credentialId,
-                createdVia: state.createdVia
-            ), legacyAlternatives: unwrapped.legacyAlternativeKeys)
         }
 
         return .failure(.bundleDecryptFailed)
