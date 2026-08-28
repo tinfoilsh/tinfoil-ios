@@ -131,7 +131,7 @@ class SettingsManager: ObservableObject {
     private init() {
         // Initialize with stored values or defaults if not present
         self.hapticFeedbackEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.hapticFeedbackEnabled) as? Bool ?? true
-        self.selectedLanguage = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.selectedLanguage) ?? "System"
+        self.selectedLanguage = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.selectedLanguage) ?? ProfileDefaults.language
         
         // Initialize personalization settings
         self.isPersonalizationEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled) as? Bool ?? ProfileDefaults.isUsingPersonalization
@@ -192,7 +192,7 @@ class SettingsManager: ObservableObject {
             UserDefaults.standard.set(true, forKey: Constants.StorageKeys.Settings.hapticFeedbackEnabled)
         }
         if UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.selectedLanguage) == nil {
-            UserDefaults.standard.set("System", forKey: Constants.StorageKeys.Settings.selectedLanguage)
+            UserDefaults.standard.set(ProfileDefaults.language, forKey: Constants.StorageKeys.Settings.selectedLanguage)
         }
         if UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled) == nil {
             UserDefaults.standard.set(
@@ -225,7 +225,7 @@ class SettingsManager: ObservableObject {
 
         // Reset in-memory state to defaults
         hapticFeedbackEnabled = true
-        selectedLanguage = "System"
+        selectedLanguage = ProfileDefaults.language
         isPersonalizationEnabled = ProfileDefaults.isUsingPersonalization
         nickname = ProfileDefaults.nickname
         profession = ProfileDefaults.profession
@@ -245,49 +245,6 @@ class SettingsManager: ObservableObject {
             ?? ProfileDefaults.piiCheckEnabled
     }
 
-    // Generate user preferences XML for system prompt.
-    // Treats `isPersonalizationEnabled` as a soft preference: when any field is
-    // populated we still inject it so the model has the user's context. This
-    // matches `ProfileManager.getPersonalizationPrompt()`.
-    func generateUserPreferencesXML() -> String {
-        let trimmedNickname = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedProfession = profession.trimmingCharacters(in: .whitespacesAndNewlines)
-        let nonEmptyTraits = selectedTraits.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let trimmedContext = additionalContext.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let hasAnyField = !trimmedNickname.isEmpty
-            || !trimmedProfession.isEmpty
-            || !nonEmptyTraits.isEmpty
-            || !trimmedContext.isEmpty
-
-        guard hasAnyField else { return "" }
-
-        var xml = "The user has provided personal preferences for this conversation. Adapt your responses according to these settings while maintaining accuracy and helpfulness.\n\n<user_preferences>"
-
-        if !trimmedNickname.isEmpty {
-            xml += "\n  <nickname>\(trimmedNickname)</nickname>"
-        }
-
-        if !trimmedProfession.isEmpty {
-            xml += "\n  <profession>\(trimmedProfession)</profession>"
-        }
-
-        if !nonEmptyTraits.isEmpty {
-            xml += "\n  <traits>"
-            for trait in nonEmptyTraits {
-                xml += "\n    <trait>\(trait)</trait>"
-            }
-            xml += "\n  </traits>"
-        }
-
-        if !trimmedContext.isEmpty {
-            xml += "\n  <additional_context>\n    \(trimmedContext)\n  </additional_context>"
-        }
-
-        xml += "\n</user_preferences>"
-        return xml
-    }
-    
     // Reset all personalization settings
     func resetPersonalization() {
         nickname = ProfileDefaults.nickname
@@ -335,7 +292,7 @@ struct SettingsView: View {
     
     // Complete list of languages based on ISO 639-1
     var languages: [String] {
-        ["System"] + [
+        [ResponseLanguageResolver.systemSelection] + [
             "Afrikaans", "Albanian", "Arabic", "Armenian", "Azerbaijani",
             "Basque", "Belarusian", "Bengali", "Bosnian", "Bulgarian",
             "Catalan", "Chinese (Simplified)", "Chinese (Traditional)", "Croatian", "Czech",
@@ -630,13 +587,12 @@ struct SettingsView: View {
     private var chatSettingsSection: some View {
         Section {
             NavigationLink(destination: LanguagePickerView(
-                selectedLanguage: $settings.selectedLanguage,
                 languages: languages
             )) {
                 HStack {
-                    Text("Default Language")
+                    Text("Response Language")
                     Spacer()
-                    Text(settings.selectedLanguage)
+                    Text(ResponseLanguageResolver.displayName(for: profileManager.language))
                         .foregroundColor(.secondary)
                 }
             }
@@ -706,7 +662,7 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                     Spacer()
-                    if profileManager.isUsingPersonalization || settings.isPersonalizationEnabled {
+                    if profileManager.isUsingPersonalization {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.caption)
                             .foregroundColor(.green)
@@ -1028,10 +984,8 @@ struct SettingsView: View {
                 await MainActor.run {
                     let profileManager = ProfileManager.shared
                     
-                    // Update language if different
-                    if !profileManager.language.isEmpty && profileManager.language != "System" {
-                        settings.selectedLanguage = profileManager.language
-                    }
+                    // Mirror the profile language for legacy settings consumers.
+                    settings.selectedLanguage = profileManager.language
                     
                     // Update custom prompt settings from single source of truth (ProfileManager)
                     settings.isUsingCustomPrompt = profileManager.isUsingCustomPrompt
@@ -1117,35 +1071,34 @@ struct SettingsView: View {
 
 // Language Picker View
 struct LanguagePickerView: View {
-    @Binding var selectedLanguage: String
     let languages: [String]
     @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        let normalizedSelection = ResponseLanguageResolver.normalizedSelection(profileManager.language)
         List(languages, id: \.self) { language in
             Button(action: {
-                selectedLanguage = language
                 profileManager.language = language
                 dismiss()
             }) {
                 HStack {
-                    Text(language)
+                    Text(ResponseLanguageResolver.displayName(for: language))
                     Spacer()
-                    if selectedLanguage == language {
+                    if normalizedSelection == language {
                         Image(systemName: "checkmark")
                             .foregroundColor(.accentColor)
                     }
                 }
             }
             .foregroundColor(.primary)
-            .accessibilityAddTraits(selectedLanguage == language ? .isSelected : [])
+            .accessibilityAddTraits(normalizedSelection == language ? .isSelected : [])
             .listRowBackground(Color.cardSurface(for: colorScheme))
         }
         .scrollContentBackground(.hidden)
         .background(Color.settingsBackground(for: colorScheme))
-        .navigationTitle("Default Language")
+        .navigationTitle("Response Language")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             let appearance = UINavigationBarAppearance()
@@ -1155,19 +1108,9 @@ struct LanguagePickerView: View {
             UINavigationBar.appearance().compactAppearance = appearance
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
 
-            // Load from ProfileManager if available
-            if !profileManager.language.isEmpty && profileManager.language != "English" {
-                selectedLanguage = profileManager.language
-            }
-            
             // Trigger sync to get latest from cloud
             Task {
                 await profileManager.syncFromCloud()
-                await MainActor.run {
-                    if !profileManager.language.isEmpty && profileManager.language != "English" {
-                        selectedLanguage = profileManager.language
-                    }
-                }
             }
         }
         .onDisappear {

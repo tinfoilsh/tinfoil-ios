@@ -9,6 +9,17 @@ import Foundation
 import Combine
 import SwiftUI
 
+enum ProfileLocalSaveError: LocalizedError {
+    case keychainWriteFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .keychainWriteFailed:
+            return "Personalization couldn't be saved securely. Please try again."
+        }
+    }
+}
+
 extension Notification.Name {
     static let profileSharedSettingsDidChange = Notification.Name("com.tinfoil.chat.profile.shared-settings-did-change")
 }
@@ -191,6 +202,19 @@ class ProfileManager: ObservableObject {
         }
     }
 
+    private func persistProfileToKeychainSynchronously(_ profile: ProfileData) throws {
+        let data = try JSONEncoder().encode(profile)
+        let helper = keychainHelper
+        let key = keychainKey
+        let service = keychainService
+        let saved = keychainQueue.sync {
+            helper.save(data, for: key, service: service)
+        }
+        guard saved else {
+            throw ProfileLocalSaveError.keychainWriteFailed
+        }
+    }
+
     private func persistBaselineToKeychain(_ profile: ProfileData) {
         guard let data = try? JSONEncoder().encode(profile) else {
             return
@@ -244,6 +268,53 @@ class ProfileManager: ObservableObject {
             clockVersion: localClockVersion
         )
     }
+
+    var personalizationDraft: PersonalizationDraft {
+        PersonalizationDraft(
+            isEnabled: isUsingPersonalization,
+            nickname: nickname,
+            profession: profession,
+            traits: traits,
+            additionalContext: additionalContext
+        )
+    }
+
+    func savePersonalization(_ draft: PersonalizationDraft) throws {
+        let changedFields = draft.changedProfileFields(comparedTo: personalizationDraft)
+        var clocks = localFieldClocks ?? lastSyncedProfile?.fieldClocks ?? [:]
+
+        if !changedFields.isEmpty {
+            let observedMax = changedFields.compactMap { clocks[$0]?.v }.max()
+            let tick = try EditClockStore.nextClock(observedMax: observedMax)
+            for field in changedFields {
+                clocks[field] = tick
+            }
+        }
+
+        var profile = createProfileData()
+        profile.isUsingPersonalization = draft.isEnabled
+        profile.nickname = draft.nickname
+        profile.profession = draft.profession
+        profile.traits = draft.traits
+        profile.additionalContext = draft.additionalContext
+        profile.fieldClocks = clocks.isEmpty ? nil : clocks
+        profile.clockVersion = lastSyncedVersion
+        try persistProfileToKeychainSynchronously(profile)
+
+        isApplyingProfile = true
+        isUsingPersonalization = draft.isEnabled
+        nickname = draft.nickname
+        profession = draft.profession
+        traits = draft.traits
+        additionalContext = draft.additionalContext
+        localFieldClocks = profile.fieldClocks
+        localClockVersion = profile.clockVersion
+        isApplyingProfile = false
+
+        if !changedFields.isEmpty {
+            markLocalProfileChanged()
+        }
+    }
     
     /// Apply profile data to published properties
     private func applyProfile(_ profile: ProfileData) {
@@ -259,9 +330,7 @@ class ProfileManager: ObservableObject {
         if let themeMode = profile.themeMode {
             self.themeMode = themeMode
         }
-        if let language = profile.language {
-            self.language = language
-        }
+        self.language = profile.language ?? ProfileDefaults.language
         if let nickname = profile.nickname {
             self.nickname = nickname
         }
@@ -274,9 +343,7 @@ class ProfileManager: ObservableObject {
         if let additionalContext = profile.additionalContext {
             self.additionalContext = additionalContext
         }
-        if let isUsingPersonalization = profile.isUsingPersonalization {
-            self.isUsingPersonalization = isUsingPersonalization
-        }
+        self.isUsingPersonalization = profile.usesPersonalization
         if let isUsingCustomPrompt = profile.isUsingCustomPrompt {
             self.isUsingCustomPrompt = isUsingCustomPrompt
         }
@@ -912,50 +979,15 @@ class ProfileManager: ObservableObject {
     /// Generate personalization prompt for chat as a `<user_preferences>` XML block.
     ///
     /// Mirrors the webapp's `useCustomSystemPrompt` so the same prompt structure
-    /// reaches the model regardless of platform. The `isUsingPersonalization`
-    /// flag is treated as a soft preference — if the user has filled in fields
-    /// we still inject them, since the most common cause of "the model doesn't
-    /// know my name" is the flag not having flipped to true (e.g. cross-device
-    /// sync, restore from cloud, edit-without-save). "Reset All" clears the
-    /// fields outright, which makes this method return `nil` naturally.
+    /// reaches the model regardless of platform.
     func getPersonalizationPrompt() -> String? {
-        let trimmedNickname = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedProfession = profession.trimmingCharacters(in: .whitespacesAndNewlines)
-        let nonEmptyTraits = traits.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let trimmedContext = additionalContext.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let hasAnyField = !trimmedNickname.isEmpty
-            || !trimmedProfession.isEmpty
-            || !nonEmptyTraits.isEmpty
-            || !trimmedContext.isEmpty
-
-        guard hasAnyField else { return nil }
-
-        var xml = "The user has provided personal preferences for this conversation. Adapt your responses according to these settings while maintaining accuracy and helpfulness.\n\n<user_preferences>"
-
-        if !trimmedNickname.isEmpty {
-            xml += "\n  <nickname>\(trimmedNickname)</nickname>"
-        }
-
-        if !trimmedProfession.isEmpty {
-            xml += "\n  <profession>\(trimmedProfession)</profession>"
-        }
-
-        if !nonEmptyTraits.isEmpty {
-            xml += "\n  <traits>"
-            for trait in nonEmptyTraits {
-                xml += "\n    <trait>\(trait)</trait>"
-            }
-            xml += "\n  </traits>"
-        }
-
-        if !trimmedContext.isEmpty {
-            xml += "\n  <additional_context>\n    \(trimmedContext)\n  </additional_context>"
-        }
-
-        xml += "\n</user_preferences>"
-
-        return xml
+        PersonalizationPromptBuilder.build(
+            isEnabled: isUsingPersonalization,
+            nickname: nickname,
+            profession: profession,
+            traits: traits,
+            additionalContext: additionalContext
+        )
     }
     
     /// Get custom system prompt if enabled

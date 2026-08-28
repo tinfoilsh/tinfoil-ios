@@ -543,16 +543,20 @@ struct ProfileData: Codable {
     var effectivePIICheckEnabled: Bool {
         piiCheckEnabled ?? ProfileDefaults.piiCheckEnabled
     }
+
+    var usesPersonalization: Bool {
+        isUsingPersonalization != false
+    }
 }
 
 enum ProfileDefaults {
     static let isDarkMode = true
-    static let language = "English"
+    static let language = ResponseLanguageResolver.systemSelection
     static let nickname = ""
     static let profession = ""
     static let traits: [String] = []
     static let additionalContext = ""
-    static let isUsingPersonalization = false
+    static let isUsingPersonalization = true
     static let isUsingCustomPrompt = false
     static let customSystemPrompt = ""
     static let customPromptPresets: [SyncedPromptPreset] = []

@@ -1649,7 +1649,7 @@ class ChatViewModel: ObservableObject {
     }
 
     /// Creates a new chat and sets it as the current chat
-    func createNewChat(language: String? = nil, modelType: ModelType? = nil, isLocalOnly: Bool? = nil, projectId: String? = nil, focusInput: Bool = true) {
+    func createNewChat(modelType: ModelType? = nil, isLocalOnly: Bool? = nil, projectId: String? = nil, focusInput: Bool = true) {
         // Allow creating new chats for all authenticated users
         guard hasChatAccess else { return }
         let targetProjectId = projectId ?? activeProject?.id
@@ -1707,7 +1707,7 @@ class ChatViewModel: ObservableObject {
         // Create new chat with temporary ID (instant, no network call)
         let newChat = Chat.create(
             modelType: modelType ?? currentModel,
-            language: language,
+            language: nil,
             userId: currentUserId,
             isLocalOnly: shouldBeLocal,
             projectId: targetProjectId
@@ -3909,32 +3909,12 @@ class ChatViewModel: ObservableObject {
                 // Replace MODEL_NAME placeholder with current model name
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: representativeModel.fullName)
                 
-                // Replace language placeholder - use ProfileManager language first, then settings preference
-                let languageToUse: String
-                if !profileManager.language.isEmpty && profileManager.language != "English" {
-                    // Use the language from ProfileManager
-                    languageToUse = profileManager.language
-                } else if settingsManager.selectedLanguage != "System" {
-                    // Use the language from settings
-                    languageToUse = settingsManager.selectedLanguage
-                } else if let chatLanguage = streamChat.language {
-                    // Fall back to chat's language if set
-                    languageToUse = chatLanguage
-                } else {
-                    // Default to English
-                    languageToUse = "English"
-                }
+                let languageToUse = ResponseLanguageResolver.resolve(
+                    profileLanguage: profileManager.language
+                )
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
                 
-                // Add personalization - use ProfileManager first, then fall back to SettingsManager.
-                // ProfileManager returns a fully-formed `<user_preferences>` block; the
-                // SettingsManager fallback already does the same.
-                var personalizationXML = ""
-                if let profilePersonalization = profileManager.getPersonalizationPrompt() {
-                    personalizationXML = profilePersonalization
-                } else {
-                    personalizationXML = settingsManager.generateUserPreferencesXML()
-                }
+                let personalizationXML = profileManager.getPersonalizationPrompt() ?? ""
                 
                 if !personalizationXML.isEmpty {
                     systemPrompt = systemPrompt.replacingOccurrences(of: "{USER_PREFERENCES}", with: personalizationXML)

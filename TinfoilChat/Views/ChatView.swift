@@ -558,8 +558,7 @@ struct ChatContainer: View {
         if timeSinceBackground > backgroundTimeThreshold && 
            !viewModel.messages.isEmpty && 
            authManager.isAuthenticated {
-            let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
-            viewModel.createNewChat(language: language)
+            viewModel.createNewChat()
             messageText = ""
         }
     }
@@ -629,8 +628,7 @@ struct ChatContainer: View {
     /// Creates a new chat if the current chat has messages
     private func createNewChat() {
         if !viewModel.messages.isEmpty {
-            let language = settings.selectedLanguage == "System" ? nil : settings.selectedLanguage
-            viewModel.createNewChat(language: language)
+            viewModel.createNewChat()
             messageText = ""
         }
     }
@@ -664,7 +662,7 @@ struct TabbedWelcomeView: View {
     let isDarkMode: Bool
     @ObservedObject var authManager: AuthManager
     let onRequestSignIn: () -> Void
-    @ObservedObject private var settings = SettingsManager.shared
+    @ObservedObject private var profileManager = ProfileManager.shared
     @State private var showPrivacySheet = false
 
     private static let privacyText = "Your messages are encrypted directly to the AI models running inside secure hardware enclaves. These are hardware-isolated environments powered by confidential computing GPUs with verifiable confidentiality and integrity guarantees. Not even Tinfoil can access your data. This applies to all chats, images, documents, and voice input. Our open-source stack lets you verify this yourself by inspecting the hardware attestation."
@@ -711,11 +709,11 @@ struct TabbedWelcomeView: View {
         }
     }
 
-    /// Gets the display name for the user - prioritizes nickname from settings, falls back to first name from auth
+    /// Gets the display name for the user - prioritizes the profile nickname, falls back to first name from auth
     private func getDisplayName(authManager: AuthManager) -> String {
-        // First, check if user has set a nickname in settings
-        if settings.isPersonalizationEnabled && !settings.nickname.isEmpty {
-            return settings.nickname
+        // First, check if the user has enabled a profile nickname.
+        if profileManager.isUsingPersonalization && !profileManager.nickname.isEmpty {
+            return profileManager.nickname
         }
 
         // Fall back to first name from auth data
