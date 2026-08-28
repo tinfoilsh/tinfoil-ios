@@ -12,8 +12,8 @@ import TinfoilAI
 
 private enum VerificationSection: String, CaseIterable, Identifiable {
     case runtime
-    case encryption
     case code
+    case encryption
 
     var id: String { rawValue }
 
@@ -110,7 +110,7 @@ struct VerifierView: View {
                         action: {}
                     )
 
-                    if section != .code {
+                    if section != VerificationSection.allCases.last {
                         Divider()
                     }
                 }
@@ -227,9 +227,8 @@ struct VerifierView: View {
                         .transition(.opacity)
                     }
                 }
-                .clipped()
 
-                if section != .code {
+                if section != VerificationSection.allCases.last {
                     Divider()
                 }
             }
