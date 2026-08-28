@@ -5832,11 +5832,11 @@ class ChatViewModel: ObservableObject {
             setupTinfoilClient()
         }
 
-        // If current model is no longer selectable, switch to first available model
+        // If current model is no longer selectable, switch to the default model
         let selectableModels = AppConfig.shared.selectableModels
         if !selectableModels.contains(where: { $0.id == currentModel.id }),
-           let firstModel = AppConfig.shared.filteredModelTypes().first {
-            changeModel(to: firstModel)
+           let defaultModel = AppConfig.shared.defaultModel {
+            changeModel(to: defaultModel)
         }
         
         
@@ -5911,8 +5911,7 @@ class ChatViewModel: ObservableObject {
         CloudKeyAuthorizationStore.shared.clearAuthorization(userId: signingOutUserId)
 
         // Reset to the default model when signing out
-        let allModels = AppConfig.shared.filteredModelTypes()
-        if let defaultModel = allModels.first {
+        if let defaultModel = AppConfig.shared.defaultModel {
             currentModel = defaultModel
             AppConfig.shared.currentModel = defaultModel
         }
