@@ -3974,6 +3974,7 @@ class ChatViewModel: ObservableObject {
                     conversationMessages: conversationMessages,
                     contextWindowTokens: modelSelection.contextWindowTokens,
                     webSearchEnabled: webSearchEnabled,
+                    piiCheckEnabled: webSearchEnabled && SettingsManager.shared.piiCheckEnabled,
                     isMultimodal: representativeModel.isMultimodal,
                     reasoningConfig: representativeModel.reasoningConfig,
                     reasoningEffort: streamReasoningEffort,

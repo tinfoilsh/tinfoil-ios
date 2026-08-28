@@ -65,7 +65,6 @@ class ProfileManager: ObservableObject {
     private var localFieldClocks: [String: EditClock]?
     private var localClockVersion: Int?
     private var codeExecutionEnabled: Bool?
-    private var piiCheckEnabled: Bool?
     private var chatFont: String?
     private var projectUploadPreference: String?
     
@@ -234,7 +233,7 @@ class ProfileManager: ObservableObject {
             thinkingEnabled: thinkingEnabled,
             webSearchAvailable: SettingsManager.shared.webSearchAvailable,
             codeExecutionEnabled: codeExecutionEnabled,
-            piiCheckEnabled: piiCheckEnabled,
+            piiCheckEnabled: SettingsManager.shared.piiCheckEnabled,
             genUIEnabled: SettingsManager.shared.genUIEnabled,
             chatFont: chatFont,
             projectUploadPreference: projectUploadPreference,
@@ -304,7 +303,7 @@ class ProfileManager: ObservableObject {
             self.codeExecutionEnabled = codeExecutionEnabled
         }
         if let piiCheckEnabled = profile.piiCheckEnabled {
-            self.piiCheckEnabled = piiCheckEnabled
+            SettingsManager.shared.piiCheckEnabled = piiCheckEnabled
         }
         if let genUIEnabled = profile.genUIEnabled {
             SettingsManager.shared.genUIEnabled = genUIEnabled
@@ -994,6 +993,7 @@ class ProfileManager: ObservableObject {
         customSystemPrompt = ProfileDefaults.customSystemPrompt
         customPromptPresets = ProfileDefaults.customPromptPresets
         favoritePromptPresetIds = ProfileDefaults.favoritePromptPresetIds
+        SettingsManager.shared.piiCheckEnabled = ProfileDefaults.piiCheckEnabled
         self.pinnedChatIds = pinnedChatIds
         isApplyingProfile = false
     }
@@ -1020,7 +1020,6 @@ class ProfileManager: ObservableObject {
         localFieldClocks = nil
         localClockVersion = nil
         codeExecutionEnabled = nil
-        piiCheckEnabled = nil
         chatFont = nil
         projectUploadPreference = nil
         // Delete on the same serial queue the persist helpers write on and

@@ -539,6 +539,10 @@ struct ProfileData: Codable {
     // clock-unaware write intervened and merge falls back to updatedAt.
     var fieldClocks: [String: EditClock]?
     var clockVersion: Int?
+
+    var effectivePIICheckEnabled: Bool {
+        piiCheckEnabled ?? ProfileDefaults.piiCheckEnabled
+    }
 }
 
 enum ProfileDefaults {
@@ -556,6 +560,7 @@ enum ProfileDefaults {
     static let reasoningEffort = ReasoningEffort.medium.rawValue
     static let thinkingEnabled = true
     static let webSearchAvailable = true
+    static let piiCheckEnabled = true
     static let genUIEnabled = true
 
     static let profile = ProfileData(
@@ -573,6 +578,7 @@ enum ProfileDefaults {
         reasoningEffort: reasoningEffort,
         thinkingEnabled: thinkingEnabled,
         webSearchAvailable: webSearchAvailable,
+        piiCheckEnabled: piiCheckEnabled,
         genUIEnabled: genUIEnabled
     )
 }

@@ -310,5 +310,8 @@ struct GenUIRetryTests {
         #expect(query.responseFormat == responseFormat)
         #expect(query.tools == nil)
         #expect(query.stream == false)
+        let data = try JSONEncoder().encode(query)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["pii_check_options"] == nil)
     }
 }

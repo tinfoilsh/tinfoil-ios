@@ -88,6 +88,15 @@ class SettingsManager: ObservableObject {
         }
     }
 
+    @Published var piiCheckEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(piiCheckEnabled, forKey: Constants.StorageKeys.Settings.piiCheckEnabled)
+            if !isApplyingSharedProfile {
+                ProfileManager.shared.sharedSettingsDidChange()
+            }
+        }
+    }
+
     // Generative UI toggle. When off, no render_* tool capabilities are sent.
     @Published var genUIEnabled: Bool {
         didSet {
@@ -159,6 +168,8 @@ class SettingsManager: ObservableObject {
             forKey: Constants.StorageKeys.Settings.webSearchEnabled
         )
 
+        self.piiCheckEnabled = Self.loadPIICheckEnabled(from: .standard)
+
         // Initialize Generative UI setting (defaults to on)
         self.genUIEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.genUIEnabled) as? Bool ?? ProfileDefaults.genUIEnabled
 
@@ -205,6 +216,7 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.webSearchEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.webSearchAvailable)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.piiCheckEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.genUIEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.reasoningEffort)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.thinkingEnabled)
@@ -222,9 +234,15 @@ class SettingsManager: ObservableObject {
         isUsingCustomPrompt = ProfileDefaults.isUsingCustomPrompt
         customSystemPrompt = ProfileDefaults.customSystemPrompt
         webSearchAvailable = ProfileDefaults.webSearchAvailable
+        piiCheckEnabled = ProfileDefaults.piiCheckEnabled
         genUIEnabled = ProfileDefaults.genUIEnabled
         isCloudSyncEnabled = false
         isLocalOnlyModeEnabled = false
+    }
+
+    static func loadPIICheckEnabled(from defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: Constants.StorageKeys.Settings.piiCheckEnabled) as? Bool
+            ?? ProfileDefaults.piiCheckEnabled
     }
 
     // Generate user preferences XML for system prompt.
@@ -580,6 +598,15 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Web Search")
                     Text("Show web search controls and allow chats to search the web.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .tint(Color.accentPrimary)
+            Toggle(isOn: $settings.piiCheckEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Automatic PII Blocking in Web Search")
+                    Text("When web search is enabled, queries containing personal information will be blocked.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

@@ -263,6 +263,49 @@ struct ChatQueryBuilderReasoningTests {
     }
 
     @Test @MainActor
+    func piiCheckCoexistsWithWebSearchAndReasoning() throws {
+        let query = ChatQueryBuilder.buildQuery(
+            modelId: "gpt-oss-120b",
+            systemPrompt: "",
+            rules: "",
+            conversationMessages: [],
+            stream: false,
+            webSearchEnabled: true,
+            piiCheckEnabled: true,
+            reasoningConfig: gptOssConfig(),
+            reasoningEffort: .high,
+            genUIEnabled: false
+        )
+
+        let data = try JSONEncoder().encode(query)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        #expect(object["web_search_options"] as? [String: Any] != nil)
+        #expect(object["pii_check_options"] as? [String: Any] != nil)
+        #expect(object["reasoning_effort"] as? String == "high")
+    }
+
+    @Test @MainActor
+    func piiCheckCoexistsWithAutoModelOptions() throws {
+        let query = ChatQueryBuilder.buildQuery(
+            modelId: "gpt-oss-120b",
+            systemPrompt: "",
+            rules: "",
+            conversationMessages: [],
+            stream: false,
+            piiCheckEnabled: true,
+            genUIEnabled: false,
+            autoCandidates: [model(id: "gpt-oss-120b", reasoningConfig: gptOssConfig())]
+        )
+
+        let data = try JSONEncoder().encode(query)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        #expect(object[AutoModel.optionsField] as? [[String: Any]] != nil)
+        #expect(object["pii_check_options"] as? [String: Any] != nil)
+    }
+
+    @Test @MainActor
     func emptyPromptDoesNotEmitSystemMessage() throws {
         let query = ChatQueryBuilder.buildQuery(
             modelId: "gpt-oss-120b",

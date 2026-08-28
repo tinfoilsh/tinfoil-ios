@@ -34,6 +34,7 @@ struct ChatQueryBuilder {
     ///     to budget how much history is included
     ///   - stream: Whether to stream the response (default: true)
     ///   - webSearchEnabled: Whether to enable web search for this query (default: false)
+    ///   - piiCheckEnabled: Whether to block web searches containing personal information (default: false)
     ///   - isMultimodal: Whether the current model supports image content parts
     ///   - reasoningConfig: Optional per-model reasoning configuration. When
     ///     present, the matching enable/disable block from
@@ -65,6 +66,7 @@ struct ChatQueryBuilder {
         contextWindowTokens: Int? = nil,
         stream: Bool = true,
         webSearchEnabled: Bool = false,
+        piiCheckEnabled: Bool = false,
         isMultimodal: Bool = false,
         reasoningConfig: ReasoningConfig? = nil,
         reasoningEffort: ReasoningEffort = .medium,
@@ -235,7 +237,7 @@ struct ChatQueryBuilder {
         let parallelToolCalls: Bool? = (tools?.isEmpty == false) ? true : nil
 
         let requestModel: String
-        let extraBody: [String: OpenAIJSON]?
+        var extraBody: [String: OpenAIJSON]
         if let autoCandidates, !autoCandidates.isEmpty {
             // Send `model: "auto"` with an ordered candidate list. Each option
             // carries its own pre-built reasoning params so the router can
@@ -259,7 +261,10 @@ struct ChatQueryBuilder {
                 reasoningConfig: reasoningConfig,
                 reasoningEffort: reasoningEffort,
                 thinkingEnabled: thinkingEnabled
-            )
+            ) ?? [:]
+        }
+        if piiCheckEnabled {
+            extraBody["pii_check_options"] = .object([:])
         }
 
         return ChatQuery(
@@ -271,7 +276,7 @@ struct ChatQueryBuilder {
             tools: tools,
             webSearchOptions: webSearchEnabled ? .init() : nil,
             stream: stream,
-            extraBody: extraBody
+            extraBody: extraBody.isEmpty ? nil : extraBody
         )
     }
 
