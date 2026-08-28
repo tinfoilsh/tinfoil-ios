@@ -30,4 +30,16 @@ struct ChatStreamStateTests {
         #expect(state.webSearchSummaries["chat-b"] == "Searching B")
         #expect(state.isStreaming(chatId: "chat-b"))
     }
+
+    @Test func generationCandidatesIncludeTasksAndActiveStreams() {
+        var state = ChatStreamState()
+        state.start(chatId: "recovered-chat")
+        state.start(chatId: "shared-chat")
+
+        let candidates = state.generationCandidateChatIds(
+            taskChatIds: ["normal-chat", "shared-chat"]
+        )
+
+        #expect(candidates == ["recovered-chat", "normal-chat", "shared-chat"])
+    }
 }

@@ -63,6 +63,10 @@ struct ChatStreamState {
     func isStreaming(chatId: String) -> Bool {
         activeChatIds.contains(chatId)
     }
+
+    func generationCandidateChatIds(taskChatIds: Set<String>) -> Set<String> {
+        activeChatIds.union(taskChatIds)
+    }
 }
 
 private struct GenUIRetryKey: Hashable {
@@ -5971,7 +5975,9 @@ class ChatViewModel: ObservableObject {
     }
 
     private func revokeProjectAccess() {
-        let projectStreamChatIds = streamTasks.keys.filter(isProjectChat)
+        let projectStreamChatIds = streamState
+            .generationCandidateChatIds(taskChatIds: Set(streamTasks.keys))
+            .filter(isProjectChat)
         let projectQueuedChatIds = messageQueues.keys.filter(isProjectChat)
         let wasViewingProjectChat = currentChat.map { isProjectChat($0.id) } ?? false
 
