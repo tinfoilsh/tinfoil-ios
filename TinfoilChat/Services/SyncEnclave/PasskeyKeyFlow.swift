@@ -79,6 +79,52 @@ enum LegacyPasskeyRecoveryResult: Sendable {
     case failure(PasskeyFlowFailure, message: String? = nil)
 }
 
+enum PasskeyCandidateRecoveryResult: Sendable {
+    case current(PasskeyFlowResult, legacyAlternatives: [String])
+    case legacy(LegacyPasskeyRecovery)
+    case failure(PasskeyFlowFailure, message: String? = nil)
+}
+
+struct PasskeyRecoveryCandidates {
+    let current: TinfoilWrappedKeyAdapter.CandidateSet
+    let legacy: [LegacyPasskeyCredentialEntry]
+    let credentialIds: [String]
+
+    init(
+        bundles: [EnclaveKeyCurrentBundle],
+        legacy: [LegacyPasskeyCredentialEntry],
+        preferredCredentialId: String?
+    ) {
+        current = TinfoilWrappedKeyAdapter.partition(
+            bundles,
+            preferredCredentialId: preferredCredentialId
+        )
+        self.legacy = legacy
+
+        var seen = Set<String>()
+        var ordered = (current.credentialIds + legacy.map(\.id)).filter { seen.insert($0).inserted }
+        if let preferredCredentialId,
+           let preferredIndex = ordered.firstIndex(of: preferredCredentialId) {
+            ordered.insert(ordered.remove(at: preferredIndex), at: 0)
+        }
+        credentialIds = ordered
+    }
+
+    func resolveSelectedCredential<Result>(
+        credentialId: String,
+        current recoverCurrent: (TinfoilWrappedKeyAdapter.CandidateSet.Current) -> Result?,
+        legacy recoverLegacy: (LegacyPasskeyCredentialEntry) -> Result?
+    ) -> Result? {
+        for candidate in current.current where candidate.bundle.credentialId == credentialId {
+            if let result = recoverCurrent(candidate) { return result }
+        }
+        for entry in legacy where entry.id == credentialId {
+            if let result = recoverLegacy(entry) { return result }
+        }
+        return nil
+    }
+}
+
 struct PasskeyUserInfo {
     let userId: String
     let userEmail: String
@@ -255,6 +301,82 @@ enum PasskeyKeyFlow {
         )
     }
 
+    static func recoverFromCurrentAndLegacy(
+        state: EnclaveKeyCurrentResponse,
+        legacyEntries: [LegacyPasskeyCredentialEntry],
+        prefer: String?,
+        immediatelyAvailable: Bool
+    ) async -> PasskeyCandidateRecoveryResult {
+        let candidates = PasskeyRecoveryCandidates(
+            bundles: state.bundles.values.sorted { $0.credentialId < $1.credentialId },
+            legacy: legacyEntries,
+            preferredCredentialId: prefer
+        )
+        guard !candidates.credentialIds.isEmpty else {
+            return .failure(.noRemoteBundle)
+        }
+
+        let evaluated: EvaluatedCredential
+        do {
+            evaluated = try await PasskeyService.shared.evaluateCredential(
+                credentialIds: candidates.credentialIds,
+                preferredCredentialId: prefer,
+                immediatelyAvailable: immediatelyAvailable
+            )
+        } catch let err {
+            return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
+        }
+
+        if let resolved: PasskeyCandidateRecoveryResult = candidates.resolveSelectedCredential(
+            credentialId: evaluated.credentialId,
+            current: { candidate in
+                guard let cek = try? PasskeyService.shared.unwrapKeyWithPRFResult(
+                    wrappedKey: candidate.wrappedKey,
+                    prfResult: evaluated.prfResult
+                ), let keyIdHex = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek),
+                keyIdHex == state.keyId else {
+                    return nil
+                }
+                return .current(.success(
+                    cek: cek,
+                    keyIdHex: keyIdHex,
+                    credentialId: evaluated.credentialId,
+                    createdVia: state.createdVia
+                ), legacyAlternatives: [])
+            },
+            legacy: { entry in
+                let result = recoverLegacyEntry(
+                    entry,
+                    evaluated: evaluated,
+                    enclaveKeyId: state.keyId
+                )
+                guard case .legacy = result else { return nil }
+                return result
+            }
+        ) {
+            return resolved
+        }
+
+        for bundle in candidates.current.legacy where bundle.credentialId == evaluated.credentialId {
+            guard let unwrapped = try? SyncEnclaveKeyBundle.unwrapLegacyJsonEnvelope(
+                prfOutput: evaluated.prfResult.output,
+                kekIvHex: bundle.kekIv,
+                wrappedKeyHex: bundle.encryptedKeys
+            ), let keyIdHex = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: unwrapped.cek),
+            keyIdHex == state.keyId else {
+                continue
+            }
+            return .current(.success(
+                cek: unwrapped.cek,
+                keyIdHex: keyIdHex,
+                credentialId: evaluated.credentialId,
+                createdVia: state.createdVia
+            ), legacyAlternatives: unwrapped.legacyAlternativeKeys)
+        }
+
+        return .failure(.bundleDecryptFailed)
+    }
+
     /// Recover the user's CEK by re-authenticating their passkey and
     /// unwrapping a candidate bundle. The caller supplies the bundles —
     /// typically from a fresh `keyCurrent()` probe. Legacy alternative
@@ -423,7 +545,21 @@ enum PasskeyKeyFlow {
         guard let entry = entries.first(where: { $0.id == evaluated.credentialId }) else {
             return .failure(.noRemoteBundle)
         }
+        switch recoverLegacyEntry(entry, evaluated: evaluated, enclaveKeyId: enclaveKeyId) {
+        case .legacy(let recovery):
+            return .success(recovery)
+        case .failure(let failure, let message):
+            return .failure(failure, message: message)
+        case .current:
+            return .failure(.bundleDecryptFailed)
+        }
+    }
 
+    private static func recoverLegacyEntry(
+        _ entry: LegacyPasskeyCredentialEntry,
+        evaluated: EvaluatedCredential,
+        enclaveKeyId: String?
+    ) -> PasskeyCandidateRecoveryResult {
         guard let ivData = Data(base64Encoded: entry.iv),
               let ciphertextData = Data(base64Encoded: entry.encryptedKeys) else {
             return .failure(.bundleDecryptFailed, message: "Legacy bundle is not valid base64")
@@ -469,7 +605,7 @@ enum PasskeyKeyFlow {
             return .failure(.bundleDecryptFailed, message: error.localizedDescription)
         }
 
-        return .success(LegacyPasskeyRecovery(
+        return .legacy(LegacyPasskeyRecovery(
             cek: cek,
             keyIdHex: keyIdHex,
             credentialId: evaluated.credentialId,

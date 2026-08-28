@@ -5,9 +5,8 @@
 //  One-way recovery fetch for passkeys registered on the pre-enclave
 //  (v1) webapp. The legacy controlplane stores a client-owned JSONB
 //  array of credential entries at /api/passkey-credentials/. iOS
-//  consults this endpoint only when the enclave key registry reports
-//  no usable bundle for this device, so the recovery flow can still
-//  find a passkey to authenticate against and unwrap the user's CEK.
+//  combines this endpoint with the enclave key registry so the recovery
+//  flow can authenticate once against every registered candidate.
 //  After unlock the recovered CEK is promoted into the enclave key
 //  registry (see PasskeyKeyFlow.recoverFromLegacyPasskey).
 //

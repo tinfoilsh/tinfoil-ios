@@ -103,6 +103,114 @@ struct PasskeyCompositionTests {
         #expect(PasskeyService.interaction(immediatelyAvailable: false) == .interactive)
     }
 
+    @Test func recoveryUnionDeduplicatesCurrentAndLegacyInPreferredOrder() {
+        let candidates = PasskeyRecoveryCandidates(
+            bundles: [
+                bundle(id: "current", wrappedByteCount: 48),
+                bundle(id: "shared", wrappedByteCount: 48),
+            ],
+            legacy: [legacyEntry(id: "legacy"), legacyEntry(id: "shared")],
+            preferredCredentialId: "legacy"
+        )
+
+        #expect(candidates.credentialIds == ["legacy", "current", "shared"])
+    }
+
+    @Test func legacyCredentialWithoutLocalHintRemainsARecoveryCandidate() {
+        let candidates = PasskeyRecoveryCandidates(
+            bundles: [],
+            legacy: [legacyEntry(id: "synced-legacy")],
+            preferredCredentialId: nil
+        )
+
+        #expect(candidates.credentialIds == ["synced-legacy"])
+    }
+
+    @Test func selectedCurrentCredentialUsesCurrentUnwrapPath() {
+        let candidates = PasskeyRecoveryCandidates(
+            bundles: [bundle(id: "current", wrappedByteCount: 48)],
+            legacy: [legacyEntry(id: "legacy")],
+            preferredCredentialId: nil
+        )
+
+        let route: String? = candidates.resolveSelectedCredential(
+            credentialId: "current",
+            current: { _ in "current" },
+            legacy: { _ in "legacy" }
+        )
+
+        #expect(route == "current")
+    }
+
+    @Test func selectedLegacyCredentialUsesValidatedLegacyPath() {
+        let candidates = PasskeyRecoveryCandidates(
+            bundles: [bundle(id: "current", wrappedByteCount: 48)],
+            legacy: [legacyEntry(id: "legacy")],
+            preferredCredentialId: nil
+        )
+
+        let route: String? = candidates.resolveSelectedCredential(
+            credentialId: "legacy",
+            current: { _ in "current" },
+            legacy: { _ in "legacy" }
+        )
+
+        #expect(route == "legacy")
+    }
+
+    @Test func sharedCredentialFallsBackToLegacyWhenCurrentUnwrapFails() {
+        let candidates = PasskeyRecoveryCandidates(
+            bundles: [bundle(id: "shared", wrappedByteCount: 48)],
+            legacy: [legacyEntry(id: "shared")],
+            preferredCredentialId: nil
+        )
+        var currentAttempts = 0
+
+        let route: String? = candidates.resolveSelectedCredential(
+            credentialId: "shared",
+            current: { _ in
+                currentAttempts += 1
+                return nil
+            },
+            legacy: { _ in "legacy" }
+        )
+
+        #expect(currentAttempts == 1)
+        #expect(route == "legacy")
+    }
+
+    @Test func freshInteractiveUnionCanAddLegacyAfterSilentFailure() {
+        let immediate = PasskeyRecoveryCandidates(
+            bundles: [bundle(id: "current", wrappedByteCount: 48)],
+            legacy: [],
+            preferredCredentialId: nil
+        )
+        let interactive = PasskeyRecoveryCandidates(
+            bundles: [bundle(id: "current", wrappedByteCount: 48)],
+            legacy: [legacyEntry(id: "legacy")],
+            preferredCredentialId: nil
+        )
+
+        #expect(immediate.credentialIds == ["current"])
+        #expect(interactive.credentialIds == ["current", "legacy"])
+        #expect(interactive.resolveSelectedCredential(
+            credentialId: "legacy",
+            current: { _ in false },
+            legacy: { _ in true }
+        ) == true)
+    }
+
+    @Test func recoveryCandidatesEvaluateWithoutCapabilityPreflight() {
+        let candidates = PasskeyRecoveryCandidates(
+            bundles: [],
+            legacy: [legacyEntry(id: "legacy")],
+            preferredCredentialId: nil
+        )
+
+        #expect(!candidates.credentialIds.isEmpty)
+        #expect(PasskeyService.interaction(immediatelyAvailable: false) == .interactive)
+    }
+
     @Test func presentationAnchorProviderUsesInjectedActiveWindow() throws {
         let window = UIWindow(frame: .zero)
         let provider = TinfoilPasskeyPresentationAnchorProvider { window }
@@ -313,6 +421,32 @@ struct PasskeyCompositionTests {
             currentGeneration: 3
         )
         #expect(!canApply)
+    }
+
+    @Test func currentRecoveryRejectsAccountOrKeyRotationDuringCeremony() {
+        let expectedAccount = PasskeyManager.LegacyRecoveryAccountSnapshot(
+            userId: "user-a",
+            generation: 3
+        )
+        let rotatedState = currentKeyState(keyId: "rotated-key", credentialIds: ["AQ"])
+        let currentState = currentKeyState(keyId: "current-key", credentialIds: ["AQ"])
+
+        #expect(!PasskeyManager.canApplyCurrentRecovery(
+            recoveredKeyId: "current-key",
+            credentialId: "AQ",
+            currentState: rotatedState,
+            expectedAccount: expectedAccount,
+            currentUserId: "user-a",
+            currentGeneration: 3
+        ))
+        #expect(!PasskeyManager.canApplyCurrentRecovery(
+            recoveredKeyId: "current-key",
+            credentialId: "AQ",
+            currentState: currentState,
+            expectedAccount: expectedAccount,
+            currentUserId: "user-b",
+            currentGeneration: 4
+        ))
     }
 
     @Test func accountSwitchWithNoEnclaveKeySkipsLegacyRegistration() {
@@ -554,6 +688,25 @@ struct PasskeyCompositionTests {
         #expect(unverified.verification == .unverified)
     }
 
+    @Test func currentBundleStateRemainsAuthoritativeWhenLegacyLookupFails() {
+        let state = currentKeyState(keyId: "current-key", credentialIds: ["AQ"])
+        let inventory = PasskeyManager.passkeyBundleInventory(
+            state: state,
+            localKeyId: "current-key",
+            legacyLookup: .unverified
+        )
+        let availability = PasskeyManager.passkeyBundleAvailability(
+            state: state,
+            localKeyId: "current-key",
+            legacyStatus: inventory.legacyStatus
+        )
+
+        #expect(inventory.verification == .match)
+        #expect(inventory.legacyStatus == .unverified)
+        #expect(availability.active)
+        #expect(!availability.setupAvailable)
+    }
+
     @Test func failedInventoryRefreshPreservesBundlesButDisablesRemoval() {
         let inventory = PasskeyManager.passkeyBundleInventory(
             state: currentKeyState(keyId: "current-key", credentialIds: ["AQ", "Ag"]),
@@ -586,13 +739,11 @@ struct PasskeyCompositionTests {
 
         let availability = PasskeyManager.passkeyBundleAvailability(
             state: state,
-            localKeyId: "old-key",
-            localCredentialId: "AQ"
+            localKeyId: "old-key"
         )
         let emptyMismatch = PasskeyManager.passkeyBundleAvailability(
             state: currentKeyState(keyId: "rotated-key", credentialIds: []),
-            localKeyId: "old-key",
-            localCredentialId: "AQ"
+            localKeyId: "old-key"
         )
 
         #expect(!availability.active)
@@ -621,8 +772,7 @@ struct PasskeyCompositionTests {
 
         let deterministicAvailability = PasskeyManager.passkeyBundleAvailability(
             state: updatedState,
-            localKeyId: "current-key",
-            localCredentialId: "AQ"
+            localKeyId: "current-key"
         )
 
         #expect(updatedState.bundles.isEmpty)
@@ -646,9 +796,7 @@ struct PasskeyCompositionTests {
         let availability = PasskeyManager.passkeyBundleAvailability(
             state: updatedState,
             localKeyId: "current-key",
-            localCredentialId: "AQ",
-            legacyStatus: inventory.legacyStatus,
-            legacyCredentialIds: Set(inventory.legacyCredentials.map(\.id))
+            legacyStatus: inventory.legacyStatus
         )
 
         #expect(inventory.bundles.isEmpty)
@@ -658,7 +806,7 @@ struct PasskeyCompositionTests {
         #expect(!availability.setupAvailable)
     }
 
-    @Test func otherLegacyCredentialDoesNotMakeCurrentDeviceActive() {
+    @Test func registeredLegacyCredentialIsAvailableWithoutLocalIdHint() {
         let state = currentKeyState(keyId: "current-key", credentialIds: [])
         let inventory = PasskeyManager.passkeyBundleInventory(
             state: state,
@@ -666,26 +814,15 @@ struct PasskeyCompositionTests {
             legacyLookup: .available([legacyEntry(id: "other")])
         )
 
-        let nonmatching = PasskeyManager.passkeyBundleAvailability(
+        let availability = PasskeyManager.passkeyBundleAvailability(
             state: state,
             localKeyId: "current-key",
-            localCredentialId: "AQ",
-            legacyStatus: inventory.legacyStatus,
-            legacyCredentialIds: Set(inventory.legacyCredentials.map(\.id))
-        )
-        let unavailableLocalId = PasskeyManager.passkeyBundleAvailability(
-            state: state,
-            localKeyId: "current-key",
-            localCredentialId: nil,
-            legacyStatus: inventory.legacyStatus,
-            legacyCredentialIds: Set(inventory.legacyCredentials.map(\.id))
+            legacyStatus: inventory.legacyStatus
         )
 
         #expect(inventory.legacyCredentials.map(\.id) == ["other"])
-        #expect(!nonmatching.active)
-        #expect(nonmatching.addDeviceAvailable)
-        #expect(!unavailableLocalId.active)
-        #expect(unavailableLocalId.addDeviceAvailable)
+        #expect(availability.active)
+        #expect(!availability.addDeviceAvailable)
     }
 
     @Test func legacyLookupFailureLeavesRecoveryUnverified() {
@@ -704,11 +841,10 @@ struct PasskeyCompositionTests {
         let availability = PasskeyManager.passkeyBundleAvailability(
             state: state,
             localKeyId: "current-key",
-            localCredentialId: "AQ",
             legacyStatus: inventory.legacyStatus
         )
 
-        #expect(inventory.verification == .unverified)
+        #expect(inventory.verification == .match)
         #expect(inventory.legacyStatus == .unverified)
         #expect(inventory.legacyCredentials.map(\.id) == ["legacy"])
         #expect(!availability.active)
@@ -728,7 +864,6 @@ struct PasskeyCompositionTests {
         let availability = PasskeyManager.passkeyBundleAvailability(
             state: state,
             localKeyId: "current-key",
-            localCredentialId: "AQ",
             legacyStatus: inventory.legacyStatus
         )
 
@@ -773,8 +908,7 @@ struct PasskeyCompositionTests {
 
         let availability = PasskeyManager.passkeyBundleAvailability(
             state: state,
-            localKeyId: "current-key",
-            localCredentialId: "AQ"
+            localKeyId: "current-key"
         )
         #expect(!availability.active)
         #expect(availability.setupAvailable)
@@ -791,8 +925,7 @@ struct PasskeyCompositionTests {
 
         let availability = PasskeyManager.passkeyBundleAvailability(
             state: state,
-            localKeyId: "current-key",
-            localCredentialId: "Ag"
+            localKeyId: "current-key"
         )
         #expect(availability.active)
         #expect(!availability.setupAvailable)
