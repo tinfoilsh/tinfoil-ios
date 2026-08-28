@@ -2,7 +2,7 @@ import Foundation
 
 enum ResponseLanguageResolver {
     static let systemSelection = "System"
-    static let systemDisplayName = "System (device language)"
+    static let systemDisplayName = "System"
 
     static func normalizedSelection(_ value: String?) -> String {
         guard let value else { return systemSelection }

@@ -551,24 +551,6 @@ struct SettingsView: View {
         Section {
             Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
                 .tint(Color.accentPrimary)
-            Toggle(isOn: $settings.webSearchAvailable) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Web Search")
-                    Text("Show web search controls and allow chats to search the web.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .tint(Color.accentPrimary)
-            Toggle(isOn: $settings.piiCheckEnabled) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Automatic PII Blocking in Web Search")
-                    Text("When web search is enabled, queries containing personal information will be blocked.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .tint(Color.accentPrimary)
             Toggle(isOn: $settings.genUIEnabled) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Generative UI")
@@ -578,6 +560,27 @@ struct SettingsView: View {
                 }
             }
             .tint(Color.accentPrimary)
+            Toggle(isOn: $settings.webSearchAvailable) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Web Search")
+                    Text("Show web search controls and allow chats to search the web.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .tint(Color.accentPrimary)
+            if settings.webSearchAvailable {
+                Toggle(isOn: $settings.piiCheckEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Automatic PII Blocking")
+                        Text("Block web search queries containing personal information.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.leading)
+                }
+                .tint(Color.accentPrimary)
+            }
         } header: {
             Text("Preferences")
         }
