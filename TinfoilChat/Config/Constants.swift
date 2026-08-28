@@ -64,6 +64,12 @@ enum Constants {
         static let actionButtonCornerRadius: CGFloat = 6
         static let iPadInputBottomPadding: CGFloat = 16
 
+        enum TextureGrid {
+            static let spacing: CGFloat = 16
+            static let lineWidth: CGFloat = 1
+            static let opacity = 0.04
+        }
+
         enum VerificationCenter {
             static let drawerCornerRadius: CGFloat = 12
             static let drawerBorderWidth: CGFloat = 1

@@ -89,7 +89,14 @@ struct ChatListView: View {
             keyboardHeight: keyboardHeight
         )
         .opacity(tableOpacity)
-        .background(Color.chatBackground(isDarkMode: isDarkMode))
+        .background {
+            ZStack {
+                Color.chatBackground(isDarkMode: isDarkMode)
+                if messages.isEmpty {
+                    GridTexture(isDarkMode: isDarkMode)
+                }
+            }
+        }
         .overlay(alignment: .bottom) {
             if !isAtBottom && !messages.isEmpty && !isKeyboardVisible {
                 Group {
