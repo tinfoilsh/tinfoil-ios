@@ -64,8 +64,11 @@ struct ChatStreamState {
         activeChatIds.contains(chatId)
     }
 
-    func generationCandidateChatIds(taskChatIds: Set<String>) -> Set<String> {
-        activeChatIds.union(taskChatIds)
+    func generationCandidateChatIds(
+        taskChatIds: Set<String>,
+        recoveryChatIds: Set<String>
+    ) -> Set<String> {
+        activeChatIds.union(taskChatIds).union(recoveryChatIds)
     }
 }
 
@@ -4973,10 +4976,19 @@ class ChatViewModel: ObservableObject {
     }
 
     private func cancelRecoveredGeneration(chatId: String) {
-        guard let chat = currentChat,
-              chat.id == chatId,
+        let chat: Chat?
+        if currentChat?.id == chatId {
+            chat = currentChat
+        } else if let location = findChatLocation(chatId) {
+            chat = self.chat(at: location)
+        } else {
+            chat = nil
+        }
+        guard let chat,
               let userId = currentUserId,
-              let envelope = activeRecoveryEnvelope(trackedBy: .shared)
+              let envelope = (chat.pendingRecoveries ?? []).first(where: {
+                  ChatRecoveryPhaseTracker.shared.isActive(turnId: $0.turnId)
+              })
         else {
             return
         }
@@ -5976,7 +5988,10 @@ class ChatViewModel: ObservableObject {
 
     private func revokeProjectAccess() {
         let projectStreamChatIds = streamState
-            .generationCandidateChatIds(taskChatIds: Set(streamTasks.keys))
+            .generationCandidateChatIds(
+                taskChatIds: Set(streamTasks.keys),
+                recoveryChatIds: activeRecoveryChatIds()
+            )
             .filter(isProjectChat)
         let projectQueuedChatIds = messageQueues.keys.filter(isProjectChat)
         let wasViewingProjectChat = currentChat.map { isProjectChat($0.id) } ?? false
@@ -5985,7 +6000,9 @@ class ChatViewModel: ObservableObject {
         projectListAccountGeneration += 1
         projectLoadGeneration += 1
         for chatId in projectStreamChatIds {
-            _ = cancelGeneration(chatId: chatId, announce: false)
+            if cancelGeneration(chatId: chatId, announce: false) == nil {
+                cancelRecoveredGeneration(chatId: chatId)
+            }
         }
         for chatId in projectQueuedChatIds {
             discardMessageQueue(chatId: chatId)
