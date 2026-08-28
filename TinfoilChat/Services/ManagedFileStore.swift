@@ -1,18 +1,27 @@
 import Foundation
+import UniformTypeIdentifiers
 
 final class ManagedStagedFile: @unchecked Sendable {
     let id: UUID
     let url: URL
     let fileName: String
+    let contentTypeIdentifier: String?
 
     private let store: ManagedFileStore
     private let lock = NSLock()
     private var isDiscarded = false
 
-    fileprivate init(id: UUID, url: URL, fileName: String, store: ManagedFileStore) {
+    fileprivate init(
+        id: UUID,
+        url: URL,
+        fileName: String,
+        contentTypeIdentifier: String?,
+        store: ManagedFileStore
+    ) {
         self.id = id
         self.url = url
         self.fileName = fileName
+        self.contentTypeIdentifier = contentTypeIdentifier
         self.store = store
     }
 
@@ -53,8 +62,14 @@ final class ManagedFileStore: @unchecked Sendable {
             .appendingPathComponent(Self.stagingDirectoryName, isDirectory: true)
     }
 
-    func stage(sourceURL: URL, fileName: String) throws -> ManagedStagedFile {
+    func stage(
+        sourceURL: URL,
+        fileName: String,
+        contentTypeIdentifier: String? = nil
+    ) throws -> ManagedStagedFile {
         let id = UUID()
+        let stagedContentTypeIdentifier = contentTypeIdentifier
+            ?? (try? sourceURL.resourceValues(forKeys: [.contentTypeKey]).contentType?.identifier)
         lock.lock()
         activeIDs.insert(id)
         lock.unlock()
@@ -75,6 +90,7 @@ final class ManagedFileStore: @unchecked Sendable {
                 id: id,
                 url: destinationURL,
                 fileName: fileName,
+                contentTypeIdentifier: stagedContentTypeIdentifier,
                 store: self
             )
             return stagedFile

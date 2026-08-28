@@ -11,7 +11,7 @@ final class ImageProcessingService {
     static let shared = ImageProcessingService()
     private init() {}
 
-    enum ProcessingError: LocalizedError {
+    enum ProcessingError: LocalizedError, Equatable {
         case imageTooLarge(Int64)
         case encodingFailed
         case invalidImageData
@@ -69,6 +69,16 @@ final class ImageProcessingService {
                 height: Int(scaled.size.height)
             )
         }.value
+    }
+
+    func processImage(at url: URL) async throws -> ProcessedImage {
+        let data = try await Task.detached(priority: .userInitiated) {
+            try BoundedFileIO.read(
+                from: url,
+                maximumBytes: Constants.Attachments.maxImageSizeBytes
+            )
+        }.value
+        return try await processImage(data: data)
     }
 
     private func scaleImage(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
