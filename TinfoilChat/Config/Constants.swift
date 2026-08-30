@@ -17,6 +17,7 @@ enum Constants {
 
     enum Clerk {
         static let publishableKey = "pk_live_Y2xlcmsudGluZm9pbC5zaCQ"
+        static let identifierNotFoundErrorCode = "form_identifier_not_found"
     }
 
     enum Security {

@@ -13,11 +13,12 @@ struct SignInView: View {
   @Environment(Clerk.self) private var clerk
   @EnvironmentObject private var authManager: AuthManager
   @Environment(\.colorScheme) private var colorScheme
+  @Binding var email: String
   @Binding var errorMessage: String?
   @Binding var isLoading: Bool
+  var onRequestSignUp: () -> Void
   var onDismiss: () -> Void
   
-  @State private var email = ""
   @State private var password = ""
   @State private var mfaCode = ""
   @State private var attemptedSubmit = false
@@ -380,8 +381,14 @@ struct SignInView: View {
       }
     } catch {
       await MainActor.run {
-        errorMessage = "Sign-in failed: \(error.localizedDescription)"
         isLoading = false
+        if let clerkError = error as? ClerkAPIError,
+           clerkError.code == Constants.Clerk.identifierNotFoundErrorCode {
+          errorMessage = nil
+          onRequestSignUp()
+        } else {
+          errorMessage = "Sign-in failed: \(error.localizedDescription)"
+        }
       }
     }
   }
