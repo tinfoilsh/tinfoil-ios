@@ -6076,6 +6076,7 @@ class ChatViewModel: ObservableObject {
         loadedCloudRootSummaryIds = []
 
         // Reset passkey state
+        passkeySetupFailure = nil
         await passkeyManager.reset()
 
         // Clear cloud chats and create a new empty one with the free model.

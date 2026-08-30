@@ -190,6 +190,7 @@ struct PasskeyRecoveryChoiceView: View {
     private func handleStartFresh() {
         isLoading = true
         loadingAction = .startFresh
+        failurePresentation = nil
         Task {
             let result = await onStartFresh()
             await MainActor.run {

@@ -728,7 +728,7 @@ enum PasskeyKeyFlow {
         return .userCancelled
     }
 
-    private static func failureFromEnclaveError(_ err: SyncEnclaveError) -> PasskeyFlowFailure {
+    static func failureFromEnclaveError(_ err: SyncEnclaveError) -> PasskeyFlowFailure {
         if err.code == WireCodes.existingDataUnderOtherKey || err.status == 409 {
             return .remoteKeyExists
         }

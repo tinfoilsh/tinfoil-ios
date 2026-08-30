@@ -1100,6 +1100,14 @@ struct PasskeyCompositionTests {
         #expect(timeout.message.contains("try again"))
     }
 
+    @Test func passkeySetupPreservesEnclaveFailureCategories() {
+        let network = SyncEnclaveError(message: "offline", code: WireCodes.network)
+        let authentication = SyncEnclaveError(message: "sign in", status: 401)
+
+        #expect(PasskeyKeyFlow.failureFromEnclaveError(network) == .enclaveUnavailable)
+        #expect(PasskeyKeyFlow.failureFromEnclaveError(authentication) == .registerFailed)
+    }
+
     @Test func sharedHexParserRejectsMalformedInputAtBothBoundaries() {
         #expect(throws: SyncEnclaveError.self) { try hexToData("") }
         #expect(throws: SyncEnclaveError.self) { try hexToData("0") }

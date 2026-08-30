@@ -43,6 +43,7 @@ struct CloudSyncSettingsView: View {
     @State private var isEnablingCloudSync = false
     @State private var cloudSyncSetupErrorTitle = "Couldn't Enable Cloud Sync"
     @State private var cloudSyncSetupError: String?
+    @State private var cloudSyncSetupOffersManualSetup = false
     @State private var passkeyInventoryState = PasskeyBundleInventory(
         bundles: [],
         verification: .unverified,
@@ -264,9 +265,19 @@ struct CloudSyncSettingsView: View {
                 if !$0 {
                     cloudSyncSetupErrorTitle = "Couldn't Enable Cloud Sync"
                     cloudSyncSetupError = nil
+                    cloudSyncSetupOffersManualSetup = false
                 }
             }
         )) {
+            if cloudSyncSetupOffersManualSetup {
+                Button("Set Up Manually") {
+                    cloudSyncSetupOffersManualSetup = false
+                    cloudSyncSetupError = nil
+                    viewModel.cloudSyncOnboardingMode = .setup
+                    viewModel.showCloudSyncOnboarding = true
+                    onRequestCloseSettings()
+                }
+            }
             Button("OK", role: .cancel) {}
         } message: {
             Text(cloudSyncSetupError ?? "Please try again.")
@@ -282,6 +293,7 @@ struct CloudSyncSettingsView: View {
         isEnablingCloudSync = true
         cloudSyncSetupErrorTitle = "Couldn't Enable Cloud Sync"
         cloudSyncSetupError = nil
+        cloudSyncSetupOffersManualSetup = false
         defer { isEnablingCloudSync = false }
 
         await handlePasskeyRecoveryResult(await viewModel.retryPasskeySetup())
@@ -309,9 +321,7 @@ struct CloudSyncSettingsView: View {
         case .some(.temporarilyUnavailable):
             cloudSyncSetupError = "Passkey recovery is temporarily unavailable. Check your connection and try again."
         case .some(.setupFailed(let failure)):
-            let presentation = PasskeySetupFailurePresentation(failure)
-            cloudSyncSetupErrorTitle = presentation.title
-            cloudSyncSetupError = presentation.message
+            showPasskeySetupFailure(failure, offersManualSetup: true)
         case .some(.recoveryFailed):
             if passkeyManager.showPasskeyRecoveryChoice {
                 onRequestCloseSettings()
@@ -484,9 +494,17 @@ struct CloudSyncSettingsView: View {
 
     private func showPasskeySetupFailureIfNeeded(_ result: PasskeyBackupResult) {
         guard case .failure(let failure) = result else { return }
+        showPasskeySetupFailure(failure)
+    }
+
+    private func showPasskeySetupFailure(
+        _ failure: PasskeyFlowFailure,
+        offersManualSetup: Bool = false
+    ) {
         let presentation = PasskeySetupFailurePresentation(failure)
         cloudSyncSetupErrorTitle = presentation.title
         cloudSyncSetupError = presentation.message
+        cloudSyncSetupOffersManualSetup = offersManualSetup
     }
 
     private func passkeyActionButton(

@@ -902,8 +902,10 @@ final class PasskeyManager: ObservableObject {
             case .failure(let failure, _):
                 return .failure(failure)
             }
+        } catch let error as SyncEnclaveError {
+            // Leave state unchanged while preserving the service failure category.
+            return .failure(PasskeyKeyFlow.failureFromEnclaveError(error))
         } catch {
-            // Non-fatal — leave state unchanged.
             return .failure(.enclaveUnavailable)
         }
     }
